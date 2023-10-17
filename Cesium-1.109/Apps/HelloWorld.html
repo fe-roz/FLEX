@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="description" content="">
+  <meta name="author" content="">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>FLEX</title>
+<style>
+      @import url(https://sandcastle.cesium.com/templates/bucket.css);
+
+      #toolbar {
+        background: rgba(42, 42, 42, 0.8);
+        padding: 4px;
+        border-radius: 4px;
+      }
+
+      #toolbar input {
+        vertical-align: middle;
+        padding-top: 2px;
+        padding-bottom: 2px;
+      }
+
+      #toolbar table tr {
+        transform: translateY(0);
+        transition: transform 0.4s ease-out;
+      }
+
+      #toolbar table tr.up {
+        transform: translateY(33px);
+        transition: none;
+      }
+
+      #toolbar table tr.down {
+        transform: translateY(-33px);
+        transition: none;
+      }
+    </style>
+  <div class="potree_container" style="position: absolute;  width: 100%; height: 100%; left: 0px; top: 0px; ">
+    
+      <div id="cesiumContainer" class="fullSize">
+        <div id="potree_render_area"style="pointer-events: none"></div>
+      </div>
+      <div id="loadingOverlay"><h1>Loading...</h1></div>
+      <div id="toolbar">
+        <table>
+          <thead >
+            <tr">
+              <td><input type="checkbox" data-bind="checked: showlidar"></td>
+              <!-- <td>
+                <span data-bind="text: name, visible: !$parent.isSelectableLayer($data)"></span>
+                <select data-bind="visible: $parent.isSelectableLayer($data), options: $parent.baseLayers, optionsText: 'name', value: $parent.selectedLayer"></select>
+              </td> -->
+              <!-- <td>
+                <input type="range" min="0" max="1" step="0.01" data-bind="value: lidaralpha, valueUpdate: 'input'">
+              </td> -->
+            </tr>
+          </thead>
+          <tbody data-bind="foreach: layers">
+            <tr data-bind="css: { up: $parent.upLayer === $data, down: $parent.downLayer === $data }">
+              <td><input type="checkbox" data-bind="checked: show"></td>
+              <td>
+                <span data-bind="text: name, visible: !$parent.isSelectableLayer($data)"></span>
+                <select data-bind="visible: $parent.isSelectableLayer($data), options: $parent.baseLayers, optionsText: 'name', value: $parent.selectedLayer"></select>
+              </td>
+              <td>
+                <input type="range" min="0" max="1" step="0.01" data-bind="value: alpha, valueUpdate: 'input'">
+              </td>
+              <td>
+                <button type="button" class="cesium-button" data-bind="click: function() { $parent.raise($data, $index()); }, visible: $parent.canRaise($index())">
+                  ▲
+                </button>
+              </td>
+              <td>
+                <button type="button" class="cesium-button" data-bind="click: function() { $parent.lower($data, $index()); }, visible: $parent.canLower($index())">
+                  ▼
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    
+    <!-- <div id="potree_sidebar_container"> </div> -->
+  </div>
+
+  <link rel= "stylesheet" type="text/css" href="../Build/CesiumUnminified/Widgets/widgets.css";>
+  <link rel="stylesheet" type="text/css" href="../PotreeCopied/build/potree/potree.css">
+  <link rel="stylesheet" type="text/css" href="../PotreeCopied/libs/jquery-ui/jquery-ui.min.css">
+  <link rel="stylesheet" type="text/css" href="../PotreeCopied/libs/openlayers3/ol.css">
+  <link rel="stylesheet" type="text/css" href="../PotreeCopied/libs/spectrum/spectrum.css">
+  <link rel="stylesheet" type="text/css" href="../PotreeCopied/libs/jstree/themes/mixed/style.css">
+  <link rel="stylesheet" type="text/css" href="../PotreeCopied/libs/Cesium/Widgets/CesiumWidget/CesiumWidget.css">
+</head>
+
+<body>
+  <script src="../PotreeCopied/libs/jquery/jquery-3.1.1.min.js"></script>
+  <script src="../PotreeCopied/libs/spectrum/spectrum.js"></script>
+  <script src="../PotreeCopied/libs/jquery-ui/jquery-ui.min.js"></script>
+  <script src="../PotreeCopied/libs/other/BinaryHeap.js"></script>
+  <script src="../PotreeCopied/libs/tween/tween.min.js"></script>
+  <script src="../PotreeCopied/libs/d3/d3.js"></script>
+  <script src="../PotreeCopied/libs/proj4/proj4.js"></script>
+  <script src="../PotreeCopied/libs/openlayers3/ol.js"></script>
+  <script src="../PotreeCopied/libs/i18next/i18next.js"></script>
+  <script src="../PotreeCopied/libs/jstree/jstree.js"></script>
+  <script src="../PotreeCopied/build/potree/potree.js"></script>
+  <script src="../PotreeCopied/libs/plasio/js/laslaz.js"></script>
+
+  <script src="../Build/CesiumUnminified/Cesium.js"></script>
+  
+  <!-- INCLUDE ADDITIONAL DEPENDENCIES HERE -->
+  <!-- INCLUDE SETTINGS HERE -->
+
+<script type="module">
+
+  import * as THREE from "../PotreeCopied/libs/three.js/build/three.module.js";
+
+  Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1ZjFhZjk2OC0yNWVmLTQzMzctODk3YS1iNjBmNjk0YmQ3NzkiLCJpZCI6MTM2MTQzLCJpYXQiOjE2ODI3ODg2OTV9.JXvaWhO-vNf0VEoEvphJM25B7pFgnEQUSP7SL8unubY';
+
+  window.cesiumViewer = new Cesium.Viewer('cesiumContainer', {
+  useDefaultRenderLoop: false,
+  terrainProvider: await Cesium.createWorldTerrainAsync(), 
+  animation: false,
+  baseLayerPicker: false,
+  timeline: false,
+  navigationHelpButton: false,
+  terrainShadows: Cesium.ShadowMode.DISABLED,
+
+  });
+  cesiumViewer.camera.frustum.fov = (90*Cesium.Math.PI)/180;
+
+  let cp = new Cesium.Cartesian3(-2751647.143460672, -4406428.46069775, 3894856.1902495637);
+  cesiumViewer.camera.setView({
+    destination : cp,
+    orientation: {
+      heading : 10, 
+      pitch : -Cesium.Math.PI_OVER_TWO * 0.5, 
+      roll : 0.0 
+    }
+  });
+
+  window.potreeViewer = new Potree.Viewer(document.getElementById("potree_render_area"), {
+    useDefaultRenderLoop: false
+  });
+  potreeViewer.setEDLEnabled(true);
+  potreeViewer.setFOV(60);
+  potreeViewer.setPointBudget(10_000_000);
+  // potreeViewer.setMinNodeSize(50);
+  potreeViewer.loadSettingsFromURL();
+  potreeViewer.setBackground(null);
+  potreeViewer.useHQ = false;
+
+  potreeViewer.setDescription(`
+    Potree is active`);
+
+  // potreeViewer.loadGUI(() => {
+  //   potreeViewer.setLanguage('en');
+  //   $("#menu_appearance").next().show();
+  //   $("#menu_tools").next().show();
+  //   $("#menu_scene").next().show();
+  //   potreeViewer.toggleSidebar();
+  // });
+  
+  // Potree.loadPointCloud("https://s3-us-west-2.amazonaws.com/usgs-lidar-public/ARRA-CA_CentralCoast-Z3_2010/ept.json", "SCM", function(e){
+  //   let potreeScene = potreeViewer.scene;
+    
+  //   potreeScene.addPointCloud(e.pointcloud);
+    
+  //   // e.pointcloud.position.set(0, 0, 0);
+  //   // e.pointcloud.rotation.set(0, 0, 0);
+
+  //   e.pointcloud.position.set(0, 0, -32);
+  //   // e.pointcloud.rotation.set(0, 0, 0);
+
+  //   let material = e.pointcloud.material;
+  //   material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
+  //   material.size = 0.7;
+    
+  //   material.shape = Potree.PointShape.CIRCLE;
+  //   material.activeAttributeName = "elevation";
+    
+  //   // let pointcloudProjection = "+proj=utm +zone=33 +ellps=WGS84 +datum=WGS84 +units=m +no_defs";
+  //   let pointcloudProjection = e.pointcloud.projection;
+  //   let mapProjection = proj4.defs("WGS84");
+
+  //   window.toMap = proj4(pointcloudProjection, mapProjection);
+  //   window.toScene = proj4(mapProjection, pointcloudProjection);
+      
+  //   {
+  //     let bb = potreeViewer.getBoundingBox();
+
+  //     let minWGS84 = proj4(pointcloudProjection, mapProjection, bb.min.toArray());
+  //     let maxWGS84 = proj4(pointcloudProjection, mapProjection, bb.max.toArray());
+  //   }
+
+  //   }
+  // );
+
+  
+
+  Cesium.Math.setRandomNumberSeed(0);
+  const promise = Cesium.GeoJsonDataSource.load(
+    "http://localhost:8080/https://usgs.entwine.io/boundaries/resources.geojson"
+  );
+  promise
+    .then(function (dataSource) {
+      cesiumViewer.dataSources.add(dataSource);
+
+      //Get the array of entities
+      const entities = dataSource.entities.values;
+
+      const colorHash = {};
+      for (let i = 0; i < entities.length; i++) {
+        //For each entity, create a random color based on the state name.
+        //Some states have multiple entities, so we store the color in a
+        //hash so that we use the same color for the entire state.
+        const entity = entities[i];
+        const name = entity.name;
+        let color = colorHash[name];
+        if (!color) {
+          color = Cesium.Color.fromRandom({
+            alpha: 0.5,
+          });
+          colorHash[name] = color;
+        }
+
+        //Set the polygon material to our random color.
+        entity.polygon.material = color;
+        //Remove the outlines.
+        entity.polygon.outline = false;
+        entity.polygon.extrudedHeight = 1000;
+        dataSource.show = false;
+      }
+    })
+    .catch(function (error) {
+      //Display any errrors encountered while loading.
+      window.alert(error);
+    });
+
+  //   const promise2 = Cesium.GeoJsonDataSource.load(
+  //   "http://localhost:8081/Apps/ct.geojson"
+  // );
+  // promise2
+  //   .then(function (dataSource) {
+  //     cesiumViewer.dataSources.add(dataSource);
+
+  //     //Get the array of entities
+      
+  //     dataSource.show = true;
+      
+  //   })
+  //   .catch(function (error) {
+  //     //Display any errrors encountered while loading.
+  //     window.alert(error);
+  //   });
+const scene = cesiumViewer.scene;
+scene.screenSpaceCameraController.enableCollisionDetection = false;
+const canvas = cesiumViewer.canvas;
+canvas.setAttribute("tabindex", "0"); // needed to put focus on the canvas
+canvas.onclick = function () {
+  canvas.focus();
+};
+
+
+const ellipsoid = scene.globe.ellipsoid;
+scene.globe.translucency.enabled = true 
+scene.globe.translucency.frontFaceAlphaByDistance = new Cesium.NearFarScalar(
+  400.0,
+  0.0,
+  800.0,
+  1.0
+);
+scene.globe.translucency.frontFaceAlphaByDistance.nearValue = 0.75;
+scene.globe.translucency.frontFaceAlphaByDistance.farValue = 1;
+const imageryLayers = cesiumViewer.imageryLayers;
+
+const viewModel = {
+  showlidar  : false,
+  layers: [],
+  baseLayers: [],
+  upLayer: null,
+  downLayer: null,
+  selectedLayer: null,
+  isSelectableLayer: function (layer) {
+    return this.baseLayers.indexOf(layer) >= 0;
+  },
+  raise: function (layer, index) {
+    imageryLayers.raise(layer);
+    viewModel.upLayer = layer;
+    var v = (index - 1);
+    if (v < 0){
+      v = 0;
+    }
+    viewModel.downLayer = viewModel.layers[v];
+    updateLayerList();
+    window.setTimeout(function () {
+      viewModel.upLayer = viewModel.downLayer = null;
+    }, 10);
+  },
+  lower: function (layer, index) {
+    imageryLayers.lower(layer);
+    var v = (viewModel.layers.length - 1);
+    if ((viewModel.layers.length - 1) > (index + 1)){
+      v = (index + 1);
+    }
+    viewModel.upLayer =
+      viewModel.layers[v];
+    viewModel.downLayer = layer;
+    updateLayerList();
+    window.setTimeout(function () {
+      viewModel.upLayer = viewModel.downLayer = null;
+    }, 10);
+  },
+  canRaise: function (layerIndex) {
+    return layerIndex > 0;
+  },
+  canLower: function (layerIndex) {
+    return layerIndex >= 0 && layerIndex < imageryLayers.length - 1;
+  },
+};
+const baseLayers = viewModel.baseLayers;
+
+Cesium.knockout.track(viewModel);
+function setupLayers() {
+  addBaseLayerOption(
+    "Bing Maps Aerial",
+    Cesium.createWorldImageryAsync()
+  );
+  addBaseLayerOption(
+    "Bing Maps Road",
+    Cesium.createWorldImageryAsync({
+      style: Cesium.IonWorldImageryStyle.ROAD,
+    })
+  );
+  addBaseLayerOption(
+    "ArcGIS World Street Maps",
+    Cesium.ArcGisMapServerImageryProvider.fromUrl(
+      "https://services.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer"
+    )
+  );
+  addBaseLayerOption(
+    "OpenStreetMaps",
+    new Cesium.OpenStreetMapImageryProvider()
+  );
+  addBaseLayerOption(
+    "Stamen Maps",
+    new Cesium.OpenStreetMapImageryProvider({
+      url: "https://stamen-tiles.a.ssl.fastly.net/watercolor/",
+      fileExtension: "jpg",
+      credit:
+        "Map tiles by Stamen Design, under CC BY 3.0. Data by OpenStreetMap, under CC BY SA.",
+    })
+  );
+  addBaseLayerOption(
+    "Natural Earth II (local)",
+    Cesium.TileMapServiceImageryProvider.fromUrl(
+      Cesium.buildModuleUrl("Assets/Textures/NaturalEarthII")
+    )
+  );
+  addBaseLayerOption(
+    "USGS Shaded Relief (via WMTS)",
+    new Cesium.WebMapTileServiceImageryProvider({
+      url:
+        "https://basemap.nationalmap.gov/arcgis/rest/services/USGSShadedReliefOnly/MapServer/WMTS",
+      layer: "USGSShadedReliefOnly",
+      style: "default",
+      format: "image/jpeg",
+      tileMatrixSetID: "default028mm",
+      maximumLevel: 19,
+      credit: "U. S. Geological Survey",
+    })
+  );
+  addLayerOption(
+    "Caltopo - Slope Angle",
+    new Cesium.UrlTemplateImageryProvider({
+      url: Cesium.buildModuleUrl('http://localhost:8080/https://caltopo.com/tile/sg') + '/{z}/{x}/{y}.png',
+      tilingScheme : new Cesium.WebMercatorTilingScheme(),
+      maximumLevel : 18
+    }),
+    1.0,
+    false
+  );
+  // addLayerOption(
+  //   "Geology - Giant Forest",
+  //   new UrlTemplateImageryProvider({
+  //     url: buildModuleUrl('https://mapwarper.net/maps/tile/66994') + '/{z}/{x}/{y}.png',
+  //     tilingScheme : new WebMercatorTilingScheme(),
+  //     maximumLevel : 18
+  //   }),
+  //   1.0,
+  //   false
+  // );
+  // addLayerOption(
+  //   "Geology - Tehipite Dome",
+  //   new UrlTemplateImageryProvider({
+  //     url: buildModuleUrl('https://mapwarper.net/maps/tile/66992') + '/{z}/{x}/{y}.png',
+  //     tilingScheme : new WebMercatorTilingScheme(),
+  //     maximumLevel : 18
+  //   }),
+  //   1.0,
+  //   false
+  // );
+
+
+  addLayerOption(
+    "NGMDB Mosaic",
+    new Cesium.UrlTemplateImageryProvider({
+    url: "http://localhost:8080/https://ngmdb.usgs.gov/arcgis/rest/services/mapview/ngmdbMosaic/ImageServer/exportImage?f=image&bbox={westProjected}%2C{southProjected}%2C{eastProjected}%2C{northProjected}&format=jpgpng&mosaicRule=%7B%22ascending%22%3Atrue%7D",
+    maximumLevel: 15, 
+    }),
+    1.0,
+    false
+  );
+
+  addLayerOption(
+    "Tile Coordinates",
+    new Cesium.TileCoordinatesImageryProvider(),
+    1.0,
+    false
+  );
+}
+async function addBaseLayerOption(name, imageryProviderPromise) {
+  try {
+    const imageryProvider = await Promise.resolve(
+      imageryProviderPromise
+    );
+
+    const layer = new Cesium.ImageryLayer(imageryProvider);
+    layer.name = name;
+    baseLayers.push(layer);
+    updateLayerList();
+  } catch (error) {
+    console.error(
+      `There was an error while creating ${name}. ${error}`
+    );
+  }
+}
+async function addLayerOption(
+  name,
+  imageryProviderPromise,
+  alpha,
+  show
+) {
+  try {
+    const imageryProvider = await Promise.resolve(
+      imageryProviderPromise
+    );
+    // var imageryLayer = viewer.scene.imageryLayers.addImageryProvider(imageryProvider).alpha = 0.9;
+    const layer = imageryLayers.addImageryProvider(imageryProvider);
+    layer.alpha = Cesium.defaultValue(alpha, 0.5);
+    layer.show = Cesium.defaultValue(show, true);
+    layer.name = name;
+    Cesium.knockout.track(layer, ["alpha", "show", "name"]);
+    updateLayerList();
+  } catch (error) {
+    console.error(
+      `There was an error while creating ${name}. ${error}`
+    );
+  }
+}
+
+
+function updateLayerList() {
+  const numLayers = imageryLayers.length;
+  viewModel.layers.splice(0, viewModel.layers.length);
+  for (let i = numLayers - 1; i >= 0; --i) {
+    viewModel.layers.push(imageryLayers.get(i));
+  }
+  // viewModel.showlidar.push();  
+  // console.log(cesiumViewer.dataSources);
+}
+
+setupLayers();
+
+window.addPC = function(url){
+
+  Potree.loadPointCloud(url, "test", function(e){
+    let potreeScene = potreeViewer.scene;
+    
+    potreeScene.addPointCloud(e.pointcloud);
+    
+    // e.pointcloud.position.set(0, 0, 0);
+    // e.pointcloud.rotation.set(0, 0, 0);
+
+    e.pointcloud.position.set(0, 0, -32);
+    // e.pointcloud.rotation.set(0, 0, 0);
+
+    let material = e.pointcloud.material;
+    material.pointSizeType = Potree.PointSizeType.FIXED;
+    material.size = 3.0;
+    
+    material.shape = Potree.PointShape.CIRCLE;
+    material.activeAttributeName = "elevation";
+    
+    // let pointcloudProjection = "+proj=utm +zone=33 +ellps=WGS84 +datum=WGS84 +units=m +no_defs";
+    let pointcloudProjection = e.pointcloud.projection;
+    let mapProjection = proj4.defs("WGS84");
+
+    window.toMap = proj4(pointcloudProjection, mapProjection);
+    window.toScene = proj4(mapProjection, pointcloudProjection);
+      
+    }
+  );
+
+}
+
+//Bind the viewModel to the DOM elements of the UI that call for it.
+const toolbar = document.getElementById("toolbar");
+Cesium.knockout.applyBindings(viewModel, toolbar);
+
+Cesium.knockout
+  .getObservable(viewModel, "selectedLayer")
+  .subscribe(function (baseLayer) {
+    // Handle changes to the drop-down base layer selector.
+    let activeLayerIndex = 0;
+    const numLayers = viewModel.layers.length;
+    for (let i = 0; i < numLayers; ++i) {
+      if (viewModel.isSelectableLayer(viewModel.layers[i])) {
+        activeLayerIndex = i;
+        break;
+      }
+    }
+    const activeLayer = viewModel.layers[activeLayerIndex];
+    const show = activeLayer.show;
+    const alpha = activeLayer.alpha;
+    imageryLayers.remove(activeLayer, false);
+    imageryLayers.add(baseLayer, numLayers - activeLayerIndex - 1);
+    baseLayer.show = show;
+    baseLayer.alpha = alpha;
+    updateLayerList();
+  });
+
+Cesium.knockout.getObservable(viewModel, "showlidar").subscribe(
+  function (newValue) {
+    cesiumViewer.dataSources._dataSources[0].show = newValue;
+    console.log(cesiumViewer.dataSources);
+  }
+);
+
+// disable the default event handlers
+scene.screenSpaceCameraController.enableRotate = false;
+scene.screenSpaceCameraController.enableTranslate = true;
+scene.screenSpaceCameraController.enableZoom = true;
+scene.screenSpaceCameraController.enableTilt = true;
+scene.screenSpaceCameraController.enableLook = true;
+
+let startMousePosition;
+let moveRate = 100;
+let moverRateMultiplyer = 1;
+let mousePosition;
+let lastMousePosition;
+const flags = {
+  showLidar: false,
+  looking: false,
+  moveForward: false,
+  moveBackward: false,
+  moveUp: false,
+  moveDown: false,
+  moveLeft: false,
+  moveRight: false,
+  Fly: false,
+  Speed: false,
+  faster: false,
+  selecting: false,
+  load: false,
+};
+
+const handler = new Cesium.ScreenSpaceEventHandler(canvas);
+
+handler.setInputAction(function (movement) {
+  flags.looking = true;
+  mousePosition = startMousePosition = Cesium.Cartesian3.clone(
+    movement.position
+  );
+}, Cesium.ScreenSpaceEventType.LEFT_DOWN);
+
+handler.setInputAction(function (movement) {
+  mousePosition = movement.endPosition;
+}, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+handler.setInputAction(function (position) {
+  flags.looking = false;
+}, Cesium.ScreenSpaceEventType.LEFT_UP);
+
+// Allow for speed adjustment when flying
+window.addEventListener('wheel', function(event)
+{
+ if (event.deltaY < 0)
+ {
+  moverRateMultiplyer*=1.15;
+ }
+ else if (event.deltaY > 0)
+ {
+  moverRateMultiplyer/=1.15;
+ }
+});
+
+
+const entity = cesiumViewer.entities.add({
+  label: {
+    show: false,
+    showBackground: false,
+    font: "14px monospace",
+    horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
+    verticalOrigin: Cesium.VerticalOrigin.TOP,
+    pixelOffset: new Cesium.Cartesian2(15, 0),
+    disableDepthTestDistance: 1.2742018*10**7, // Diameter of Earth
+  },
+});
+const cart = new Cesium.Cartesian3(1,1,1);
+// Mouse over the globe to see the cartographic position
+handler.setInputAction(function (movement) {
+  mousePosition = movement.endPosition;
+  if (flags.selecting){
+    scene.pickTranslucentDepth = true;
+    scene.pickPosition(
+      movement.endPosition, cart
+    );
+    if (cart) {
+      const cartographic = Cesium.Cartographic.fromCartesian(
+        cart
+      );
+      const longitudeString = Cesium.Math.toDegrees(
+        cartographic.longitude
+      ).toFixed(5);
+      const latitudeString = Cesium.Math.toDegrees(
+        cartographic.latitude
+      ).toFixed(5);
+
+      entity.position = cart;
+      entity.label.show = true;
+      entity.label.text =
+        `Lon: ${`   ${longitudeString}`.slice(-7)}\u00B0` +
+        `\nLat: ${`   ${latitudeString}`.slice(-7)}\u00B0`;
+    } else {
+      entity.label.show = false;
+    }
+  }
+  else {
+      entity.label.show = false;
+  }
+  
+}, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+function getFlagForKeyCode(keyCode) {
+  switch (keyCode) {
+    case "R".charCodeAt(0):
+      return "removePC";
+    case "L".charCodeAt(0):
+      return "showlidar";
+    case "W".charCodeAt(0):
+      return "moveForward";
+    case "S".charCodeAt(0):
+      return "moveBackward";
+    case "Q".charCodeAt(0):
+      return "moveUp";
+    case "E".charCodeAt(0):
+      return "moveDown";
+    case "D".charCodeAt(0):
+      return "moveRight";
+    case "A".charCodeAt(0):
+      return "moveLeft";
+    case "F".charCodeAt(0):
+      return "Fly";
+    case "1".charCodeAt(0):
+      return "selecting";
+    // case "2".charCodeAt(0):
+    //   return "load";
+    default:
+      return undefined;
+  }
+}
+
+document.addEventListener(
+  "keydown",
+  function (e) {
+    const flagName = getFlagForKeyCode(e.keyCode);
+    if (typeof flagName !== "undefined") {
+      // if (flagName == "load"){
+      //   loadJSON();
+      // }
+      if (flagName == "Fly"){
+        flags[flagName] = !flags[flagName];
+        moverRateMultiplyer=1;
+      }else{
+        flags[flagName] = true;
+      }
+      
+    }
+  },
+  false
+);
+
+
+document.addEventListener(
+  "keyup",
+  function (e) {
+    const flagName = getFlagForKeyCode(e.keyCode);
+    if ((typeof flagName !== "undefined")&&(flagName !== "Fly")&&(flagName !== "showlidar")&&(flagName !== "removePC")) {
+      flags[flagName] = false;
+    }
+  },
+  false
+);
+
+cesiumViewer.clock.onTick.addEventListener(function (clock) {
+  const camera = cesiumViewer.camera;
+  // camera.frustum.fov = (Math.PI/2);
+
+  if (flags.removePC){
+    while (potreeViewer.scene.pointclouds.length > 0) { 
+      potreeViewer.scene.scenePointCloud.children.splice(potreeViewer.scene.scenePointCloud.children.indexOf(potreeViewer.scene.pointclouds[0]), 1,); 
+      potreeViewer.scene.pointclouds.splice(0, 1); }
+    console.log("Removed Point Clouds");
+    flags.removePC = false;
+  }
+  if (flags.showlidar){
+    viewModel.showlidar = !viewModel.showlidar;
+    flags.showlidar = false;
+  }
+
+  if ((flags.looking)&& (flags.Fly)) {
+    // const width = canvas.clientWidth;
+    // const height = canvas.clientHeight;
+
+    const lookFactor = 0.0018;
+
+    // Coordinate (0.0, 0.0) will be where the mouse was clicked.
+
+    
+    const y = -(mousePosition.y - startMousePosition.y);
+    if (mousePosition.x != startMousePosition.x){
+      const x = (mousePosition.x - startMousePosition.x);
+      startMousePosition.x = mousePosition.x;
+      camera.lookRight(x * lookFactor);
+    }
+    if (mousePosition.y != startMousePosition.y){
+      const y = (mousePosition.y - startMousePosition.y);
+      startMousePosition.y = mousePosition.y;
+      camera.lookUp(-y * lookFactor);
+    }
+    
+    camera.setView({
+      orientation:{
+        heading: camera.heading,
+        pitch: camera.pitch,
+        roll: 0.0,
+      },
+    });
+  }
+
+
+  if (flags.Fly) {
+    // Change movement speed based on the distance of the camera to the surface of the ellipsoid.
+    const cameraHeight = ellipsoid.cartesianToCartographic(
+      camera.position
+    ).height;
+    // console.log(cameraHeight);
+    // sampleTerrain(viewer.terrainProvider, 5, [camera.positionCartographic])
+    // .then(function(samples) {
+    //   moveRate = ((cameraHeight-samples[0].height)/200.0);
+      moveRate = ((cameraHeight+1000)/200.0);
+      if (moveRate <0){
+        moveRate = -moveRate;
+      }
+      if (moveRate <0.5){ // make sure we can go underground
+        moveRate = 0.5;
+      }
+
+      if (moveRate > 6000){ // setting some limits
+          moveRate = 6000;
+      }
+
+      if (moverRateMultiplyer > 16){
+        moverRateMultiplyer = 16;
+      }
+      if (moverRateMultiplyer < 0.01){
+        moverRateMultiplyer = 0.01;
+      }
+
+      moveRate = moveRate*moverRateMultiplyer;
+
+      
+    // });
+    scene.screenSpaceCameraController.enableZoom = false;
+    scene.screenSpaceCameraController.enableRotate = false;
+    if (flags.moveForward) {
+      camera.moveForward(moveRate);
+    }
+    if (flags.moveBackward) {
+      camera.moveBackward(moveRate);
+    }
+    if (flags.moveUp) {
+      camera.moveUp(moveRate*0.75);
+    }
+    if (flags.moveDown) {
+      camera.moveDown(moveRate*0.75);
+    }
+    if (flags.moveLeft) {
+      camera.moveLeft(moveRate*0.75);
+    }
+    if (flags.moveRight) {
+      camera.moveRight(moveRate*0.75);
+    }
+  }else{
+    scene.screenSpaceCameraController.enableZoom = true;
+    scene.screenSpaceCameraController.enableRotate = true;
+  }
+});
+
+  function loop(timestamp){
+    requestAnimationFrame(loop);
+
+    // console.log(timestamp);
+
+    // potreeViewer.update(potreeViewer.clock.getDelta(), timestamp);
+
+    cesiumViewer.resize();
+    // potreeViewer.resize();
+
+    cesiumViewer.render();
+
+    if(window.toScene !== undefined){
+      // do fun proj4 stuff with camera settings
+      // cesiumViewer.camera.up = new Cesium.Cartesian3(0,0,1);
+      // cesiumViewer.camera.up = Cesium.Cartesian3.clone(Cesium.Cartesian3.UNIT_Y);
+
+      // let cCamPos = cesiumViewer.camera.positionCartographic;
+      let cCamPosCart = ellipsoid.cartesianToCartographic(cesiumViewer.camera.position);
+
+      let cCamLong = cCamPosCart.longitude * (180 / Math.PI);
+      let cCamLat = cCamPosCart.latitude * (180 / Math.PI);
+      let cCamHeight = cCamPosCart.height;
+      console.log(cCamLat+','+cCamLong);
+
+      let cCamCenterObject = new Cesium.Cartesian3;
+      let cCamDir = cesiumViewer.camera.direction;
+      Cesium.Cartesian3.multiplyByScalar(cCamDir, 10, cCamDir);
+      Cesium.Cartesian3.add(cesiumViewer.camera.position, cCamDir, cCamCenterObject);
+      
+
+      let cCamCenterObjectPosCart = ellipsoid.cartesianToCartographic(cCamCenterObject);
+
+      let cCamCenterObjectLong = cCamCenterObjectPosCart.longitude * (180 / Math.PI);
+      let cCamCenterObjectLat = cCamCenterObjectPosCart.latitude * (180 / Math.PI);
+      let cCamCenterObjectHeight = cCamCenterObjectPosCart.height;
+
+      // console.log(cCamPosCart.height);
+      // console.log(cCamCenterObjectPosCart.height);
+      
+      let pCamPos = toScene.forward([cCamLong, cCamLat, cCamHeight]);
+
+      let pCamCenterObjectPos = toScene.forward([cCamCenterObjectLong, cCamCenterObjectLat, cCamCenterObjectHeight]);
+
+      potreeViewer.scene.view.setView(
+        [pCamPos[0],pCamPos[1],pCamPos[2]],
+        [pCamCenterObjectPos[0],pCamCenterObjectPos[1],pCamCenterObjectPos[2]],
+      );
+      potreeViewer.scene.view.pitch = cesiumViewer.camera.pitch;
+      // console.log(potreeViewer.scene.view.position.z, cCamHeight);
+      // potreeViewer.scene.view.position.set(pCamPos[0],pCamPos[1],pCamPos[2]);
+      // potreeViewer.scene.view.lookAt(pCamCenterObjectPos[0],pCamCenterObjectPos[1],pCamCenterObjectPos[2]);
+
+      let fov = cesiumViewer.camera.frustum.fov;
+      let fovy = cesiumViewer.camera.frustum.fovy;
+      
+      let aspect = cesiumViewer.camera.frustum.aspectRatio;
+      // potreeViewer.camera.frustum.aspect = aspect;
+
+      // console.log(cesiumViewer.camera.up);
+      
+      if(aspect < 1){
+        let pfovy =  (180 * fov)/Math.PI;
+        potreeViewer.setFOV(pfovy);
+        // let fovyp = Math.PI * (potreeViewer.scene.getActiveCamera().fov / 180);
+        // cesiumViewer.camera.frustum.fov = fovyp;
+      }else{
+        let pfovy = (180 * fovy)/Math.PI;
+        potreeViewer.setFOV(pfovy);
+        // let fovyp = Math.PI * (potreeViewer.scene.getActiveCamera().fov / 180);
+        // let fovxp = Math.atan(Math.tan(0.5 * fovyp) * aspect) * 2
+        // cesiumViewer.camera.frustum.fov = fovxp;
+      }
+      // console.log(potreeViewer.scene.cameraP.fov);
+        // console.log("Cesium FOV: ", fov, "|Potree FOV: ", fovy);
+
+    }
+
+    potreeViewer.render();
+  }
+  requestAnimationFrame(loop);
+
+  </script>
+</body>
+</html>
