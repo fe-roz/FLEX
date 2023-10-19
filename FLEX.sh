@@ -11,14 +11,12 @@ cleanup() {
 }
 trap cleanup SIGINT
 
-# Check if directory 'a' exists and run 'node server.js' in it
 if [ -d "cors-anywhere-master" ]; then
   (cd cors-anywhere-master/cors-anywhere-master && node server.js) &
 else
   echo "Directory 'cors-anywhere-master' does not exist."
 fi
 
-# Check if directory 'b' exists and run 'npm run start' in it
 if [ -d "Cesium-1.109" ]; then
   (cd Cesium-1.109 && npm run start) &
 else
