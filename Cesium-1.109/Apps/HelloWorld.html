@@ -79,6 +79,19 @@
             </tr>
           </tbody>
         </table>
+
+
+        <div style="display:none;" id="coord_container">
+          <span>LatLon: </span>
+          <span id="coord_display"></span>
+          <button display:inline;  onclick="copyCoords()">
+            <!-- funny way of rendering a "copy" button from just unicode -->
+            <span style="font-size: .875em; margin-right: .125em; position: relative; top: -.25em; left: -.125em">
+              📄<span style="position: absolute; top: .25em; left: .25em">📄</span>
+            </span>
+          </button>
+         <div id="elev_display"></div>
+        </div>
       </div>
     
     <!-- <div id="potree_sidebar_container"> </div> -->
@@ -91,6 +104,19 @@
   <link rel="stylesheet" type="text/css" href="../PotreeCopied/libs/spectrum/spectrum.css">
   <link rel="stylesheet" type="text/css" href="../PotreeCopied/libs/jstree/themes/mixed/style.css">
   <link rel="stylesheet" type="text/css" href="../PotreeCopied/libs/Cesium/Widgets/CesiumWidget/CesiumWidget.css">
+
+<script>
+    function copyCoords() {
+      // function for copying the displayed camera coordinates to clipboard
+    var copyText = document.getElementById("coord_display").innerText;
+    navigator.clipboard.writeText(copyText);
+      }
+   function show_coord_container(){ 
+        coord_container = document.getElementById("coord_container");
+        coord_container.style = "display:block;"
+                  }
+</script>
+
 </head>
 
 <body>
@@ -116,7 +142,7 @@
 
   import * as THREE from "../PotreeCopied/libs/three.js/build/three.module.js";
 
-  Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1ZjFhZjk2OC0yNWVmLTQzMzctODk3YS1iNjBmNjk0YmQ3NzkiLCJpZCI6MTM2MTQzLCJpYXQiOjE2ODI3ODg2OTV9.JXvaWhO-vNf0VEoEvphJM25B7pFgnEQUSP7SL8unubY';
+  Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiIyZWU1NDZjOS0xNjZiLTQ2NjItOTQzNy03YjZkNjMxMjI1MjciLCJpZCI6MTcyMzkyLCJpYXQiOjE2OTc1NjgxNzh9.HXqXwRcyId-QSdHIMxdsW8ibXDLI_h8r9E6xijuyWhA';
 
   window.cesiumViewer = new Cesium.Viewer('cesiumContainer', {
   useDefaultRenderLoop: false,
@@ -819,6 +845,7 @@ cesiumViewer.clock.onTick.addEventListener(function (clock) {
     // potreeViewer.resize();
 
     cesiumViewer.render();
+    var latlon_labeled = false;
 
     if(window.toScene !== undefined){
       // do fun proj4 stuff with camera settings
@@ -826,12 +853,23 @@ cesiumViewer.clock.onTick.addEventListener(function (clock) {
       // cesiumViewer.camera.up = Cesium.Cartesian3.clone(Cesium.Cartesian3.UNIT_Y);
 
       // let cCamPos = cesiumViewer.camera.positionCartographic;
+
+
+      // first time through, start displaying coordinates
+      if(!latlon_labeled){
+        latlon_labeled = true;
+        show_coord_container();
+          }
+
+
       let cCamPosCart = ellipsoid.cartesianToCartographic(cesiumViewer.camera.position);
 
       let cCamLong = cCamPosCart.longitude * (180 / Math.PI);
       let cCamLat = cCamPosCart.latitude * (180 / Math.PI);
       let cCamHeight = cCamPosCart.height;
-      console.log(cCamLat+','+cCamLong);
+      let coords = cCamLat.toFixed(5) + ", " + cCamLong.toFixed(5);
+      document.getElementById("coord_display").innerText= coords;
+      document.getElementById("elev_display").innerText = "Height: " + cCamHeight.toFixed(0)
 
       let cCamCenterObject = new Cesium.Cartesian3;
       let cCamDir = cesiumViewer.camera.direction;
