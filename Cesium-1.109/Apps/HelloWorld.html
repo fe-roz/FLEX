@@ -142,7 +142,7 @@
 
   import * as THREE from "../PotreeCopied/libs/three.js/build/three.module.js";
 
-  Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiIyZWU1NDZjOS0xNjZiLTQ2NjItOTQzNy03YjZkNjMxMjI1MjciLCJpZCI6MTcyMzkyLCJpYXQiOjE2OTc1NjgxNzh9.HXqXwRcyId-QSdHIMxdsW8ibXDLI_h8r9E6xijuyWhA';
+  Cesium.Ion.defaultAccessToken = 'Paste your token here (and help me make this run on a separate file local to each person)';
 
   window.cesiumViewer = new Cesium.Viewer('cesiumContainer', {
   useDefaultRenderLoop: false,
@@ -156,74 +156,58 @@
   });
   cesiumViewer.camera.frustum.fov = (90*Cesium.Math.PI)/180;
 
-  let cp = new Cesium.Cartesian3(-2751647.143460672, -4406428.46069775, 3894856.1902495637);
-  cesiumViewer.camera.setView({
-    destination : cp,
-    orientation: {
-      heading : 10, 
-      pitch : -Cesium.Math.PI_OVER_TWO * 0.5, 
-      roll : 0.0 
-    }
-  });
+
+const flags = {
+  showLidar: false,
+  looking: false,
+  moveForward: false,
+  moveBackward: false,
+  moveUp: false,
+  moveDown: false,
+  moveLeft: false,
+  moveRight: false,
+  Fly: false,
+  Speed: false,
+  faster: false,
+  toggleOther: true,
+  toggleGround: true,
+  toggleVegetation: true,
+  toggleLowNoise: true,
+  load: false,
+};
+
+var ClassificationScheme = {
+    0:       { visible: flags.toggleOther, name: 'never classified'  , color: [0.5,  0.5,  0.5,  1.0] },
+    1:       { visible: flags.toggleOther, name: 'unclassified'      , color: [0.5,  0.5,  0.5,  1.0] },
+    2:       { visible: flags.toggleGround, name: 'ground'            , color: [0.63, 0.32, 0.18, 1.0] },
+    3:       { visible: flags.toggleVegetation, name: 'low vegetation'    , color: [0.0,  1.0,  0.0,  1.0] },
+    4:       { visible: flags.toggleVegetation, name: 'medium vegetation' , color: [0.0,  0.8,  0.0,  1.0] },
+    5:       { visible: flags.toggleVegetation, name: 'high vegetation'   , color: [0.0,  0.6,  0.0,  1.0] },
+    6:       { visible: flags.toggleVegetation, name: 'building'          , color: [1.0,  0.66, 0.0,  1.0] },
+    7:       { visible: flags.toggleLowNoise, name: 'low point(noise)'  , color: [1.0,  1.0,  1.0,  1.0] },
+    8:       { visible: flags.toggleOther, name: 'key-point'         , color: [1.0,  0.0,  0.0,  1.0] },
+    9:       { visible: flags.toggleOther, name: 'water'             , color: [0.0,  0.0,  1.0,  1.0] },
+    12:      { visible: flags.toggleOther, name: 'overlap'           , color: [1.0,  1.0,  0.0,  1.0] },
+    DEFAULT: { visible: flags.toggleOther, name: 'default'           , color: [0.4,  0.4,  0.4,  0.5] },
+};
+console.log(ClassificationScheme);
 
   window.potreeViewer = new Potree.Viewer(document.getElementById("potree_render_area"), {
     useDefaultRenderLoop: false
   });
   potreeViewer.setEDLEnabled(true);
+  potreeViewer.setEDLRadius(2.0);
+  potreeViewer.setEDLStrength(0.4);
   potreeViewer.setFOV(60);
   potreeViewer.setPointBudget(10_000_000);
+  potreeViewer.classifications = ClassificationScheme;
   // potreeViewer.setMinNodeSize(50);
   potreeViewer.loadSettingsFromURL();
   potreeViewer.setBackground(null);
   potreeViewer.useHQ = false;
-
+  // potreeViewer.setLengthUnit('m');
   potreeViewer.setDescription(`
     Potree is active`);
-
-  // potreeViewer.loadGUI(() => {
-  //   potreeViewer.setLanguage('en');
-  //   $("#menu_appearance").next().show();
-  //   $("#menu_tools").next().show();
-  //   $("#menu_scene").next().show();
-  //   potreeViewer.toggleSidebar();
-  // });
-  
-  // Potree.loadPointCloud("https://s3-us-west-2.amazonaws.com/usgs-lidar-public/ARRA-CA_CentralCoast-Z3_2010/ept.json", "SCM", function(e){
-  //   let potreeScene = potreeViewer.scene;
-    
-  //   potreeScene.addPointCloud(e.pointcloud);
-    
-  //   // e.pointcloud.position.set(0, 0, 0);
-  //   // e.pointcloud.rotation.set(0, 0, 0);
-
-  //   e.pointcloud.position.set(0, 0, -32);
-  //   // e.pointcloud.rotation.set(0, 0, 0);
-
-  //   let material = e.pointcloud.material;
-  //   material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
-  //   material.size = 0.7;
-    
-  //   material.shape = Potree.PointShape.CIRCLE;
-  //   material.activeAttributeName = "elevation";
-    
-  //   // let pointcloudProjection = "+proj=utm +zone=33 +ellps=WGS84 +datum=WGS84 +units=m +no_defs";
-  //   let pointcloudProjection = e.pointcloud.projection;
-  //   let mapProjection = proj4.defs("WGS84");
-
-  //   window.toMap = proj4(pointcloudProjection, mapProjection);
-  //   window.toScene = proj4(mapProjection, pointcloudProjection);
-      
-  //   {
-  //     let bb = potreeViewer.getBoundingBox();
-
-  //     let minWGS84 = proj4(pointcloudProjection, mapProjection, bb.min.toArray());
-  //     let maxWGS84 = proj4(pointcloudProjection, mapProjection, bb.max.toArray());
-  //   }
-
-  //   }
-  // );
-
-  
 
   Cesium.Math.setRandomNumberSeed(0);
   const promise = Cesium.GeoJsonDataSource.load(
@@ -264,22 +248,6 @@
       window.alert(error);
     });
 
-  //   const promise2 = Cesium.GeoJsonDataSource.load(
-  //   "http://localhost:8081/Apps/ct.geojson"
-  // );
-  // promise2
-  //   .then(function (dataSource) {
-  //     cesiumViewer.dataSources.add(dataSource);
-
-  //     //Get the array of entities
-      
-  //     dataSource.show = true;
-      
-  //   })
-  //   .catch(function (error) {
-  //     //Display any errrors encountered while loading.
-  //     window.alert(error);
-  //   });
 const scene = cesiumViewer.scene;
 scene.screenSpaceCameraController.enableCollisionDetection = false;
 const canvas = cesiumViewer.canvas;
@@ -294,10 +262,10 @@ scene.globe.translucency.enabled = true
 scene.globe.translucency.frontFaceAlphaByDistance = new Cesium.NearFarScalar(
   400.0,
   0.0,
-  800.0,
+  1000.0,
   1.0
 );
-scene.globe.translucency.frontFaceAlphaByDistance.nearValue = 0.75;
+scene.globe.translucency.frontFaceAlphaByDistance.nearValue = 0.7;
 scene.globe.translucency.frontFaceAlphaByDistance.farValue = 1;
 const imageryLayers = cesiumViewer.imageryLayers;
 
@@ -505,27 +473,44 @@ window.addPC = function(url){
     let potreeScene = potreeViewer.scene;
     
     potreeScene.addPointCloud(e.pointcloud);
-    
-    // e.pointcloud.position.set(0, 0, 0);
-    // e.pointcloud.rotation.set(0, 0, 0);
-
-    e.pointcloud.position.set(0, 0, -32);
-    // e.pointcloud.rotation.set(0, 0, 0);
-
-    let material = e.pointcloud.material;
-    material.pointSizeType = Potree.PointSizeType.FIXED;
-    material.size = 3.0;
-    
-    material.shape = Potree.PointShape.CIRCLE;
-    material.activeAttributeName = "elevation";
-    
-    // let pointcloudProjection = "+proj=utm +zone=33 +ellps=WGS84 +datum=WGS84 +units=m +no_defs";
     let pointcloudProjection = e.pointcloud.projection;
     let mapProjection = proj4.defs("WGS84");
+    // console.log(e.pointcloud.projection);
 
     window.toMap = proj4(pointcloudProjection, mapProjection);
     window.toScene = proj4(mapProjection, pointcloudProjection);
-      
+
+    e.pointcloud.matrixAutoUpdate = false;
+    // e.pointcloud.matrix.set(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, Zshift, 1);
+    var pcx = ((e.pointcloud.boundingBox.max.x + e.pointcloud.boundingBox.min.x)/2);
+    var pcy = ((e.pointcloud.boundingBox.max.y + e.pointcloud.boundingBox.min.y)/2);
+    var pcz = ((e.pointcloud.boundingBox.max.z + e.pointcloud.boundingBox.min.z)/2);
+    var pcCenterC = toMap.forward([pcx,pcy,pcz]);
+    var pcZscale = 1/(Math.cos((pcCenterC[1]*Math.PI)/180));
+    // console.log(pcZscale);
+    e.pointcloud.matrix.set(1, 0, 0, 0,
+                            0, 1, 0, 0,
+                            0, 0, pcZscale, -32*pcZscale,
+                            0, 0, 0, 1);
+
+    let material = e.pointcloud.material;
+    
+    material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
+    material.size = 0.29;
+    material.weightRGB = 0;
+    material.weightIntensity = 1;
+    material.weightClassification = 1;
+    material.intensityRange = [0,65536];
+    material.intensityGamma = 3.02;
+    material.intensityContrast = 0.71;
+    material.intensityBrightness = 0.35;
+
+    material.shape = Potree.PointShape.CIRCLE;
+    material.activeAttributeName = "composite";
+    // console.dir(e.pointcloud.material.classification);
+    
+    // let pointcloudProjection = "+proj=utm +zone=33 +ellps=WGS84 +datum=WGS84 +units=m +no_defs";
+
     }
   );
 
@@ -560,7 +545,7 @@ Cesium.knockout
 Cesium.knockout.getObservable(viewModel, "showlidar").subscribe(
   function (newValue) {
     cesiumViewer.dataSources._dataSources[0].show = newValue;
-    console.log(cesiumViewer.dataSources);
+    // console.log(cesiumViewer.dataSources);
   }
 );
 
@@ -576,21 +561,7 @@ let moveRate = 100;
 let moverRateMultiplyer = 1;
 let mousePosition;
 let lastMousePosition;
-const flags = {
-  showLidar: false,
-  looking: false,
-  moveForward: false,
-  moveBackward: false,
-  moveUp: false,
-  moveDown: false,
-  moveLeft: false,
-  moveRight: false,
-  Fly: false,
-  Speed: false,
-  faster: false,
-  selecting: false,
-  load: false,
-};
+
 
 const handler = new Cesium.ScreenSpaceEventHandler(canvas);
 
@@ -623,51 +594,51 @@ window.addEventListener('wheel', function(event)
 });
 
 
-const entity = cesiumViewer.entities.add({
-  label: {
-    show: false,
-    showBackground: false,
-    font: "14px monospace",
-    horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
-    verticalOrigin: Cesium.VerticalOrigin.TOP,
-    pixelOffset: new Cesium.Cartesian2(15, 0),
-    disableDepthTestDistance: 1.2742018*10**7, // Diameter of Earth
-  },
-});
-const cart = new Cesium.Cartesian3(1,1,1);
-// Mouse over the globe to see the cartographic position
-handler.setInputAction(function (movement) {
-  mousePosition = movement.endPosition;
-  if (flags.selecting){
-    scene.pickTranslucentDepth = true;
-    scene.pickPosition(
-      movement.endPosition, cart
-    );
-    if (cart) {
-      const cartographic = Cesium.Cartographic.fromCartesian(
-        cart
-      );
-      const longitudeString = Cesium.Math.toDegrees(
-        cartographic.longitude
-      ).toFixed(5);
-      const latitudeString = Cesium.Math.toDegrees(
-        cartographic.latitude
-      ).toFixed(5);
+// const entity = cesiumViewer.entities.add({
+//   label: {
+//     show: false,
+//     showBackground: false,
+//     font: "14px monospace",
+//     horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
+//     verticalOrigin: Cesium.VerticalOrigin.TOP,
+//     pixelOffset: new Cesium.Cartesian2(15, 0),
+//     disableDepthTestDistance: 1.2742018*10**7, // Diameter of Earth
+//   },
+// });
+// const cart = new Cesium.Cartesian3(1,1,1);
+// // Mouse over the globe to see the cartographic position
+// handler.setInputAction(function (movement) {
+//   mousePosition = movement.endPosition;
+//   if (flags.selecting){
+//     scene.pickTranslucentDepth = true;
+//     scene.pickPosition(
+//       movement.endPosition, cart
+//     );
+//     if (cart) {
+//       const cartographic = Cesium.Cartographic.fromCartesian(
+//         cart
+//       );
+//       const longitudeString = Cesium.Math.toDegrees(
+//         cartographic.longitude
+//       ).toFixed(5);
+//       const latitudeString = Cesium.Math.toDegrees(
+//         cartographic.latitude
+//       ).toFixed(5);
 
-      entity.position = cart;
-      entity.label.show = true;
-      entity.label.text =
-        `Lon: ${`   ${longitudeString}`.slice(-7)}\u00B0` +
-        `\nLat: ${`   ${latitudeString}`.slice(-7)}\u00B0`;
-    } else {
-      entity.label.show = false;
-    }
-  }
-  else {
-      entity.label.show = false;
-  }
+//       entity.position = cart;
+//       entity.label.show = true;
+//       entity.label.text =
+//         `Lon: ${`   ${longitudeString}`.slice(-7)}\u00B0` +
+//         `\nLat: ${`   ${latitudeString}`.slice(-7)}\u00B0`;
+//     } else {
+//       entity.label.show = false;
+//     }
+//   }
+//   else {
+//       entity.label.show = false;
+//   }
   
-}, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+// }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 function getFlagForKeyCode(keyCode) {
   switch (keyCode) {
     case "R".charCodeAt(0):
@@ -678,9 +649,9 @@ function getFlagForKeyCode(keyCode) {
       return "moveForward";
     case "S".charCodeAt(0):
       return "moveBackward";
-    case "Q".charCodeAt(0):
-      return "moveUp";
     case "E".charCodeAt(0):
+      return "moveUp";
+    case "Q".charCodeAt(0):
       return "moveDown";
     case "D".charCodeAt(0):
       return "moveRight";
@@ -689,7 +660,13 @@ function getFlagForKeyCode(keyCode) {
     case "F".charCodeAt(0):
       return "Fly";
     case "1".charCodeAt(0):
-      return "selecting";
+      return "toggleOther";
+    case "2".charCodeAt(0):
+      return "toggleGround";
+    case "3".charCodeAt(0):
+      return "toggleVeg";
+    case "4".charCodeAt(0):
+      return "toggleLowNoise";
     // case "2".charCodeAt(0):
     //   return "load";
     default:
@@ -702,12 +679,29 @@ document.addEventListener(
   function (e) {
     const flagName = getFlagForKeyCode(e.keyCode);
     if (typeof flagName !== "undefined") {
-      // if (flagName == "load"){
-      //   loadJSON();
-      // }
-      if (flagName == "Fly"){
+      if (flagName == "Fly" ){ // Toggle Flags
         flags[flagName] = !flags[flagName];
         moverRateMultiplyer=1;
+      }else if (flagName == "toggleOther"){
+        flags[flagName] = !flags[flagName];
+        potreeViewer.setClassificationVisibility(0,flags[flagName]);
+        potreeViewer.setClassificationVisibility(1,flags[flagName]);
+        potreeViewer.setClassificationVisibility(8,flags[flagName]);
+        potreeViewer.setClassificationVisibility(9,flags[flagName]);
+        potreeViewer.setClassificationVisibility(12,flags[flagName]);
+        potreeViewer.setClassificationVisibility("DEFAULT",flags[flagName]);
+      }else if (flagName == "toggleGround"){
+        flags[flagName] = !flags[flagName];
+        potreeViewer.setClassificationVisibility(2,flags[flagName]);
+      }else if (flagName == "toggleVeg"){
+        flags[flagName] = !flags[flagName];
+        potreeViewer.setClassificationVisibility(3,flags[flagName]);
+        potreeViewer.setClassificationVisibility(4,flags[flagName]);
+        potreeViewer.setClassificationVisibility(5,flags[flagName]);
+        potreeViewer.setClassificationVisibility(6,flags[flagName]);
+      }else if (flagName == "toggleLowNoise"){ 
+        flags[flagName] = !flags[flagName];
+        potreeViewer.setClassificationVisibility(7,flags[flagName]);
       }else{
         flags[flagName] = true;
       }
@@ -722,7 +716,7 @@ document.addEventListener(
   "keyup",
   function (e) {
     const flagName = getFlagForKeyCode(e.keyCode);
-    if ((typeof flagName !== "undefined")&&(flagName !== "Fly")&&(flagName !== "showlidar")&&(flagName !== "removePC")) {
+    if ((typeof flagName !== "undefined")&&(flagName !== "Fly")&&(flagName !== "showlidar")&&(flagName !== "removePC")&&(flagName !== "toggleOther")&&(flagName !== "toggleGround")&&(flagName !== "toggleVeg")&&(flagName !== "toggleLowNoise")) {
       flags[flagName] = false;
     }
   },
@@ -868,12 +862,12 @@ cesiumViewer.clock.onTick.addEventListener(function (clock) {
       let cCamLat = cCamPosCart.latitude * (180 / Math.PI);
       let cCamHeight = cCamPosCart.height;
       let coords = cCamLat.toFixed(5) + ", " + cCamLong.toFixed(5);
-      document.getElementById("coord_display").innerText= coords;
-      document.getElementById("elev_display").innerText = "Height: " + cCamHeight.toFixed(0)
+      document.getElementById("coord_display").innerText = coords;
+      document.getElementById("elev_display").innerText = "Height: " + cCamHeight.toFixed(0);
 
       let cCamCenterObject = new Cesium.Cartesian3;
       let cCamDir = cesiumViewer.camera.direction;
-      Cesium.Cartesian3.multiplyByScalar(cCamDir, 10, cCamDir);
+      Cesium.Cartesian3.multiplyByScalar(cCamDir, 1000, cCamDir);
       Cesium.Cartesian3.add(cesiumViewer.camera.position, cCamDir, cCamCenterObject);
       
 
@@ -886,7 +880,8 @@ cesiumViewer.clock.onTick.addEventListener(function (clock) {
       // console.log(cCamPosCart.height);
       // console.log(cCamCenterObjectPosCart.height);
       
-      let pCamPos = toScene.forward([cCamLong, cCamLat, cCamHeight]);
+      let cCamHeightCorrected = cCamHeight/Math.cos(cCamPosCart.latitude);
+      let pCamPos = toScene.forward([cCamLong, cCamLat, cCamHeightCorrected]);
 
       let pCamCenterObjectPos = toScene.forward([cCamCenterObjectLong, cCamCenterObjectLat, cCamCenterObjectHeight]);
 
@@ -895,6 +890,8 @@ cesiumViewer.clock.onTick.addEventListener(function (clock) {
         [pCamCenterObjectPos[0],pCamCenterObjectPos[1],pCamCenterObjectPos[2]],
       );
       potreeViewer.scene.view.pitch = cesiumViewer.camera.pitch;
+      // potreeViewer.scene.view.nearValue = 0.1;
+      // potreeViewer.scene.view.farValue = 100;
       // console.log(potreeViewer.scene.view.position.z, cCamHeight);
       // potreeViewer.scene.view.position.set(pCamPos[0],pCamPos[1],pCamPos[2]);
       // potreeViewer.scene.view.lookAt(pCamCenterObjectPos[0],pCamCenterObjectPos[1],pCamCenterObjectPos[2]);
