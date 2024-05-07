@@ -34,7 +34,7 @@ npm install http-proxy
 
 The cors-anywhere-master folder is a tool to run a local server and bypass some CORS restrictions on Chrome and facilitate the use of some types of map data. This might need some installing as well. This is certainly not the best way to do this but it works for now. 
 
-You also need to change the Cesium access token to one of your own - navigate to FLEX\Cesium-1.109\Apps\HelloWorld.html and replace the token on line 119 after Cesium.Ion.defaultAccessToken with your own that you can get from https://cesium.com/. I'd like to untie this from Cesium ION at some point but for now this is the only way I have to get the terrain data. I have removed mine from the code I uploaded because I believe it is only meant for personal use. 
+You also need to change the Cesium access token to one of your own - navigate to FLEX\Cesium-1.109\Tokens.JS and add a Cesium.Ion.defaultAccessToken that you can get from https://cesium.com/. I'd like to untie this from Cesium ION at some point but for now this is the only way I have to get the terrain data. I have removed mine from the code I uploaded because I believe it is only meant for personal use. Also Add your Google Maps API key if you want the Google Maps Model to work.
 
 --- 
 ## Starting the tool

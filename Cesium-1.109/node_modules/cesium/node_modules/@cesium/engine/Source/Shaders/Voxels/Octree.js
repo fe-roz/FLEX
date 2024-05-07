@@ -80,8 +80,13 @@ int getOctreeParentIndex(in int octreeIndex) {\n\
 */\n\
 vec3 getTileUv(in vec3 shapePosition, in ivec4 octreeCoords) {\n\
 	// PERFORMANCE_IDEA: use bit-shifting (only in WebGL2)\n\
-    float dimAtLevel = pow(2.0, float(octreeCoords.w));\n\
+    float dimAtLevel = exp2(float(octreeCoords.w));\n\
     return shapePosition * dimAtLevel - vec3(octreeCoords.xyz);\n\
+}\n\
+\n\
+vec3 getClampedTileUv(in vec3 shapePosition, in ivec4 octreeCoords) {\n\
+    vec3 tileUv = getTileUv(shapePosition, octreeCoords);\n\
+    return clamp(tileUv, vec3(0.0), vec3(1.0));\n\
 }\n\
 \n\
 void getOctreeLeafSampleData(in OctreeNodeData data, in ivec4 octreeCoords, out SampleData sampleData) {\n\
@@ -122,7 +127,7 @@ void getOctreeLeafSampleDatas(in OctreeNodeData data, in ivec4 octreeCoords, out
 #endif\n\
 \n\
 OctreeNodeData traverseOctreeDownwards(in vec3 shapePosition, inout TraversalData traversalData) {\n\
-    float sizeAtLevel = 1.0 / pow(2.0, float(traversalData.octreeCoords.w));\n\
+    float sizeAtLevel = exp2(-1.0 * float(traversalData.octreeCoords.w));\n\
     vec3 start = vec3(traversalData.octreeCoords.xyz) * sizeAtLevel;\n\
     vec3 end = start + vec3(sizeAtLevel);\n\
     OctreeNodeData childData;\n\
@@ -168,11 +173,11 @@ void traverseOctreeFromBeginning(in vec3 shapePosition, out TraversalData traver
 \n\
     #if (SAMPLE_COUNT == 1)\n\
         getOctreeLeafSampleData(nodeData, traversalData.octreeCoords, sampleDatas[0]);\n\
-        sampleDatas[0].tileUv = getTileUv(shapePosition, sampleDatas[0].tileCoords);\n\
+        sampleDatas[0].tileUv = getClampedTileUv(shapePosition, sampleDatas[0].tileCoords);\n\
     #else\n\
         getOctreeLeafSampleDatas(nodeData, traversalData.octreeCoords, sampleDatas);\n\
-        sampleDatas[0].tileUv = getTileUv(shapePosition, sampleDatas[0].tileCoords);\n\
-        sampleDatas[1].tileUv = getTileUv(shapePosition, sampleDatas[1].tileCoords);\n\
+        sampleDatas[0].tileUv = getClampedTileUv(shapePosition, sampleDatas[0].tileCoords);\n\
+        sampleDatas[1].tileUv = getClampedTileUv(shapePosition, sampleDatas[1].tileCoords);\n\
     #endif\n\
 }\n\
 \n\
@@ -190,7 +195,7 @@ bool insideTile(in vec3 shapePosition, in ivec4 octreeCoords) {\n\
 void traverseOctreeFromExisting(in vec3 shapePosition, inout TraversalData traversalData, inout SampleData sampleDatas[SAMPLE_COUNT]) {\n\
     if (insideTile(shapePosition, traversalData.octreeCoords)) {\n\
         for (int i = 0; i < SAMPLE_COUNT; i++) {\n\
-            sampleDatas[0].tileUv = getTileUv(shapePosition, sampleDatas[0].tileCoords);\n\
+            sampleDatas[0].tileUv = getClampedTileUv(shapePosition, sampleDatas[0].tileCoords);\n\
         }\n\
         return;\n\
     }\n\
@@ -212,11 +217,11 @@ void traverseOctreeFromExisting(in vec3 shapePosition, inout TraversalData trave
 \n\
     #if (SAMPLE_COUNT == 1)\n\
         getOctreeLeafSampleData(nodeData, traversalData.octreeCoords, sampleDatas[0]);\n\
-        sampleDatas[0].tileUv = getTileUv(shapePosition, sampleDatas[0].tileCoords);\n\
+        sampleDatas[0].tileUv = getClampedTileUv(shapePosition, sampleDatas[0].tileCoords);\n\
     #else\n\
         getOctreeLeafSampleDatas(nodeData, traversalData.octreeCoords, sampleDatas);\n\
-        sampleDatas[0].tileUv = getTileUv(shapePosition, sampleDatas[0].tileCoords);\n\
-        sampleDatas[1].tileUv = getTileUv(shapePosition, sampleDatas[1].tileCoords);\n\
+        sampleDatas[0].tileUv = getClampedTileUv(shapePosition, sampleDatas[0].tileCoords);\n\
+        sampleDatas[1].tileUv = getClampedTileUv(shapePosition, sampleDatas[1].tileCoords);\n\
     #endif\n\
 }\n\
 ";

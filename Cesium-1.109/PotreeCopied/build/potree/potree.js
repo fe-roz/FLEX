@@ -58216,7 +58216,7 @@ float getPointSize(){
 			pointSize = (worldSpaceSize / uOrthoWidth) * uScreenWidth;
 		} else {
 			float worldSpaceSize = 1.0 * size * r / getPointSizeAttenuation();
-			pointSize = size * projFactor;
+			pointSize = worldSpaceSize * projFactor;
 		}
 	#endif
 
@@ -59038,7 +59038,7 @@ void main() {
 			8:       { visible: true, name: 'key-point'         , color: [1.0,  0.0,  0.0,  1.0] },
 			9:       { visible: true, name: 'water'             , color: [0.0,  0.0,  1.0,  1.0] },
 			12:      { visible: true, name: 'overlap'           , color: [1.0,  1.0,  0.0,  1.0] },
-			DEFAULT: { visible: true, name: 'default'           , color: [0.4,  0.4,  0.4,  0.5] },
+			DEFAULT: { visible: true, name: 'default'           , color: [0.3,  0.6,  0.6,  0.5] },
 		}
 	};
 
@@ -59178,10 +59178,10 @@ void main() {
 				// rgbGamma:			{ type: "f", value: 1 },
 				// rgbContrast:		{ type: "f", value: 0 },
 				// rgbBrightness:		{ type: "f", value: 0 },
-				wRGB:				{ type: "f", value: 0 },
-				wIntensity:			{ type: "f", value: 1 },
+				wRGB:				{ type: "f", value: 1 },
+				wIntensity:			{ type: "f", value: 0 },
 				wElevation:			{ type: "f", value: 0 },
-				wClassification:	{ type: "f", value: 1 },
+				wClassification:	{ type: "f", value: 0 },
 				wReturnNumber:		{ type: "f", value: 0 },
 				wSourceID:			{ type: "f", value: 0 },
 				useOrthographicCamera: { type: "b", value: false },
@@ -70208,7 +70208,7 @@ void main() {
 		constructor(viewer){
 			this.viewer = viewer;
 
-			this.visible = true;
+			this.visible = false;
 			this.dom = this.createElement();
 
 			viewer.addEventListener("update", () => {

@@ -53,7 +53,9 @@
   "dependencies": {
     "@cesium/engine": "^4.0.0",
     "@cesium/widgets": "^4.0.0",
-    "cesium": "^1.110.0"
+    "bootstrap": "^5.3.3",
+    "cesium": "^1.116.0",
+    "http-proxy": "^1.18.1"
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "^3.342.0",

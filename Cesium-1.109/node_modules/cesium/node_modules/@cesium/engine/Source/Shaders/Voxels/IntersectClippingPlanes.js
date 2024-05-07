@@ -1,6 +1,6 @@
 //This file is automatically rebuilt by the Cesium build process.
 export default "// See IntersectionUtils.glsl for the definitions of Ray, Intersections, INF_HIT,\n\
-// NO_HIT, setIntersectionPair\n\
+// NO_HIT, setShapeIntersection\n\
 \n\
 /* Clipping plane defines (set in Scene/VoxelRenderResources.js)\n\
 #define CLIPPING_PLANES_UNION\n\

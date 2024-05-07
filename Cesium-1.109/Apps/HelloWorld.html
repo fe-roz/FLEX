@@ -5,6 +5,17 @@
   <meta name="description" content="">
   <meta name="author" content="">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+
+  <!-- Bootstrap CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.0.0/dist/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
+
+   <!-- Optional JavaScript -->
+    <!-- jQuery first, then Popper.js, then Bootstrap JS -->
+    <script src="https://code.jquery.com/jquery-3.2.1.slim.min.js" integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.12.9/dist/umd/popper.min.js" integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.0.0/dist/js/bootstrap.min.js" integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl" crossorigin="anonymous"></script>
+
+
   <title>FLEX</title>
 <style>
       @import url(https://sandcastle.cesium.com/templates/bucket.css);
@@ -36,49 +47,112 @@
         transition: none;
       }
     </style>
+
   <div class="potree_container" style="position: absolute;  width: 100%; height: 100%; left: 0px; top: 0px; ">
     
       <div id="cesiumContainer" class="fullSize">
         <div id="potree_render_area"style="pointer-events: none"></div>
       </div>
       <div id="loadingOverlay"><h1>Loading...</h1></div>
-      <div id="toolbar">
-        <table>
-          <thead >
-            <tr">
-              <td><input type="checkbox" data-bind="checked: showlidar"></td>
-              <!-- <td>
-                <span data-bind="text: name, visible: !$parent.isSelectableLayer($data)"></span>
-                <select data-bind="visible: $parent.isSelectableLayer($data), options: $parent.baseLayers, optionsText: 'name', value: $parent.selectedLayer"></select>
-              </td> -->
-              <!-- <td>
-                <input type="range" min="0" max="1" step="0.01" data-bind="value: lidaralpha, valueUpdate: 'input'">
-              </td> -->
-            </tr>
-          </thead>
-          <tbody data-bind="foreach: layers">
-            <tr data-bind="css: { up: $parent.upLayer === $data, down: $parent.downLayer === $data }">
-              <td><input type="checkbox" data-bind="checked: show"></td>
-              <td>
-                <span data-bind="text: name, visible: !$parent.isSelectableLayer($data)"></span>
-                <select data-bind="visible: $parent.isSelectableLayer($data), options: $parent.baseLayers, optionsText: 'name', value: $parent.selectedLayer"></select>
-              </td>
-              <td>
-                <input type="range" min="0" max="1" step="0.01" data-bind="value: alpha, valueUpdate: 'input'">
-              </td>
-              <td>
-                <button type="button" class="cesium-button" data-bind="click: function() { $parent.raise($data, $index()); }, visible: $parent.canRaise($index())">
-                  ▲
-                </button>
-              </td>
-              <td>
-                <button type="button" class="cesium-button" data-bind="click: function() { $parent.lower($data, $index()); }, visible: $parent.canLower($index())">
-                  ▼
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <div id="toolbar" style="z-index: 10; ">
+        <p>
+          <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#layersCollapsible" aria-expanded="false" aria-controls="layersCollapsible">
+            Layers
+          </button>
+          <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#pointCloudCollapsible" aria-expanded="false" aria-controls="pointCloudCollapsible">
+            Point Cloud
+          </button>
+          <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#controlsCollapsible" aria-expanded="false" aria-controls="controlsCollapsible">
+            Controls
+          </button>
+         <!--  <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#potree_sidebar_container" aria-expanded="false" aria-controls="potree_sidebar_container">
+            Potree Controls
+          </button> -->
+        </p>
+        <div class="collapse" id="controlsCollapsible">
+          <h2>Key Controls Cheatsheet:</h2>
+          <p>
+            Movement: <br>
+            [F] - Toggle Fly mode<br>
+            [W] - Forwards (Fly mode)<br>
+            [A] - Left (Fly mode)<br>
+            [S] - Backwards (Fly mode)<br>
+            [D] - Right (Fly mode)<br>
+            [Q] - Down (Fly mode)<br>
+            [E] - Up (Fly mode)<br>
+            [Scrollwheel] - Flight speed (Fly mode)<br>
+            <br>
+            Controls: <br>
+            [L] - Toggle viewable LiDAR Datasets<br>
+            [H] - Hide/Show Cesium Earth model (does not control Google model)<br>
+            <br>
+            Labeling: <br>
+            [Z] - Create point of Small interest (does not prompt for name)<br>
+            [X] - Create point of Medium interest (prompts for name)<br>
+            [C] - Create point of Large interest (prompts for name)<br>
+            [K] - Download KMZ file with all labeled points<br>
+            <br>
+            Point Cloud (depends on classification): <br>
+            [1] - Toggle Other Classifications<br>
+            [2] - Toggle Ground<br>
+            [3] - Toggle Vegetation<br>
+            [4] - Toggle Low Noise<br>
+            [5] - Toggle All Points<br>
+          </p>
+        </div>
+        <div class="collapse" id="layersCollapsible">
+         <table >
+            <tbody>
+              <tr>
+                <td><input type="checkbox" data-bind="checked: showlidar"></td>
+                <td><span>Show Lidar Datasets</span></td>
+                <!-- <td>
+                  <span data-bind="text: name, visible: !$parent.isSelectableLayer($data)"></span>
+                  <select data-bind="visible: $parent.isSelectableLayer($data), options: $parent.baseLayers, optionsText: 'name', value: $parent.selectedLayer"></select>
+                </td> -->
+                <!-- <td>
+                  <input type="range" min="0" max="1" step="0.01" data-bind="value: lidaralpha, valueUpdate: 'input'">
+                </td> -->
+              </tr>
+              <tr>
+                <td><input type="checkbox" data-bind="checked: googleMapsOn"></td>
+                <td><span>Google Maps Model</span></td>
+              </tr>
+            </tbody>
+            <tbody data-bind="foreach: layers">
+              <tr data-bind="css: { up: $parent.upLayer === $data, down: $parent.downLayer === $data }">
+                <td><input type="checkbox" data-bind="checked: show"></td>
+                <td>
+                  <span data-bind="text: name, visible: !$parent.isSelectableLayer($data)"></span>
+                  <select data-bind="visible: $parent.isSelectableLayer($data), options: $parent.baseLayers, optionsText: 'name', value: $parent.selectedLayer"></select>
+                </td>
+                <td>
+                  <input type="range" min="0" max="1" step="0.01" data-bind="value: alpha, valueUpdate: 'input'">
+                </td>
+                <td>
+                  <button type="button" class="cesium-button" data-bind="click: function() { $parent.raise($data, $index()); }, visible: $parent.canRaise($index())">
+                    ▲
+                  </button>
+                </td>
+                <td>
+                  <button type="button" class="cesium-button" data-bind="click: function() { $parent.lower($data, $index()); }, visible: $parent.canLower($index())">
+                    ▼
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        
+        <div class="collapse" id="pointCloudCollapsible">
+          <td><input type="checkbox" data-bind="checked: usgsRef"></td>
+          <td><span>USGS Reference Fix</span></td>
+          <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#pointCloudCollapsible" aria-expanded="false" onclick="addEPT()">
+            Add EPT link manually
+          </button>
+        </div>
+        <!-- <div class="collapse" id="potree_sidebar_container"> </div> -->
+        
 
 
         <div style="display:none;" id="coord_container">
@@ -93,8 +167,6 @@
          <div id="elev_display"></div>
         </div>
       </div>
-    
-    <!-- <div id="potree_sidebar_container"> </div> -->
   </div>
 
   <link rel= "stylesheet" type="text/css" href="../Build/CesiumUnminified/Widgets/widgets.css";>
@@ -106,15 +178,30 @@
   <link rel="stylesheet" type="text/css" href="../PotreeCopied/libs/Cesium/Widgets/CesiumWidget/CesiumWidget.css">
 
 <script>
-    function copyCoords() {
-      // function for copying the displayed camera coordinates to clipboard
+  function copyCoords() {
+    // function for copying the displayed camera coordinates to clipboard
     var copyText = document.getElementById("coord_display").innerText;
     navigator.clipboard.writeText(copyText);
-      }
-   function show_coord_container(){ 
-        coord_container = document.getElementById("coord_container");
-        coord_container.style = "display:block;"
-                  }
+  }
+
+  function show_coord_container(){ 
+    coord_container = document.getElementById("coord_container");
+    coord_container.style = "display:block;"
+  }
+
+  function addEPT(){ 
+   var link = prompt("EPT link", "example/link/ept.json");
+   var fullLink = "http://localhost:8080/".concat(link);
+     try {
+      window.addPC(fullLink);
+    } catch (error) {
+      console.error(
+        `There was an error while adding ${fullLink}. ${error}`
+      );
+    }
+  }
+
+
 </script>
 
 </head>
@@ -142,7 +229,7 @@
 
   import * as THREE from "../PotreeCopied/libs/three.js/build/three.module.js";
 
-  Cesium.Ion.defaultAccessToken = 'Paste your token here (and help me make this run on a separate file local to each person)';
+  import "../Tokens.js";
 
   window.cesiumViewer = new Cesium.Viewer('cesiumContainer', {
   useDefaultRenderLoop: false,
@@ -152,13 +239,65 @@
   timeline: false,
   navigationHelpButton: false,
   terrainShadows: Cesium.ShadowMode.DISABLED,
+  // clampToGround : true,
 
   });
   cesiumViewer.camera.frustum.fov = (90*Cesium.Math.PI)/180;
 
 
+  // Add fog at the distance so we don't see the other side of the world?
+  // Make a way to toggle this map.
+
+  
+  try {
+    const tileset = await Cesium.createGooglePhotorealistic3DTileset();
+    cesiumViewer.scene.primitives.add(tileset);
+    cesiumViewer.scene.primitives._primitives[0].show = false;
+  } catch (error) {
+    console.log(`Error creating tileset: ${error}`);
+  }
+
+
+ // CODE THAT WILL HELP ADD WAYPOINTS
+
+//   cesiumViewer.infoBox.frame.setAttribute('sandbox', 'allow-same-origin allow-popups allow-forms allow-scripts allow-top-navigation');
+
+//   cesiumViewer.selectedEntity = entity;
+
+//   var entity = cesiumViewer.entities.add({
+//     name : 'Point',
+//     position : Cesium.Cartesian3.fromDegrees(-100, 50),
+//     point : {
+//           pixelSize : 10,
+//           color : Cesium.Color.RED
+//       }
+//   });
+
+//   cesiumViewer.infoBox.frame.addEventListener('load', function() {
+//       cesiumViewer.infoBox.frame.contentDocument.body.addEventListener('click', function(e) {
+//       if (e.target && e.target.className === 'click-test-button') {
+//           var LatValue = cesiumViewer.infoBox.frame.contentDocument.getElementsByName("Latitude")[0].value;
+//           var LongValue = cesiumViewer.infoBox.frame.contentDocument.getElementsByName("Longitude")[0].value;
+//           alert(LatValue + "\n" + LongValue);
+//           }
+//       }, false);
+//   }, false);
+
+//   function getValues(event) {
+//       var LatValue = document.getElementsByName('Latitude')[0].value;
+//       var LongValue = document.getElementsByName('Longitude')[0].value;
+//       alert(LatValue + "\n" + LongValue);
+      
+//   }
+
+// entity.description = '\
+//     Name: <input type="text" name="Name" id="Name" value="Name"><br>\
+//     Latitude: <input type="text" name="Latitude" id="Latitude" value="50"><br>\
+//     Longitude: <input type="text" name="Longitude" id="Longitude" value="50"><br>\
+//     <div style="padding:15px"><button class="click-test-button">\
+//     Click here</button></div>';
+
 const flags = {
-  showLidar: false,
   looking: false,
   moveForward: false,
   moveBackward: false,
@@ -173,8 +312,16 @@ const flags = {
   toggleGround: true,
   toggleVegetation: true,
   toggleLowNoise: true,
-  load: false,
+  toggleAll: true,
+  point: false,
+  downloadPoints: false,
+  hideCesium: false,
+  displayCave: false,
+  displayPC: false,
+
 };
+
+var pointCounter = 0;
 
 var ClassificationScheme = {
     0:       { visible: flags.toggleOther, name: 'never classified'  , color: [0.5,  0.5,  0.5,  1.0] },
@@ -190,16 +337,16 @@ var ClassificationScheme = {
     12:      { visible: flags.toggleOther, name: 'overlap'           , color: [1.0,  1.0,  0.0,  1.0] },
     DEFAULT: { visible: flags.toggleOther, name: 'default'           , color: [0.4,  0.4,  0.4,  0.5] },
 };
-console.log(ClassificationScheme);
+// console.log(ClassificationScheme);
 
   window.potreeViewer = new Potree.Viewer(document.getElementById("potree_render_area"), {
     useDefaultRenderLoop: false
   });
   potreeViewer.setEDLEnabled(true);
-  potreeViewer.setEDLRadius(2.0);
-  potreeViewer.setEDLStrength(0.4);
+  potreeViewer.setEDLRadius(1.0); //2.0
+  potreeViewer.setEDLStrength(0.2);
   potreeViewer.setFOV(60);
-  potreeViewer.setPointBudget(10_000_000);
+  potreeViewer.setPointBudget(20_000_000);
   potreeViewer.classifications = ClassificationScheme;
   // potreeViewer.setMinNodeSize(50);
   potreeViewer.loadSettingsFromURL();
@@ -208,6 +355,70 @@ console.log(ClassificationScheme);
   // potreeViewer.setLengthUnit('m');
   potreeViewer.setDescription(`
     Potree is active`);
+
+  
+  // cesiumViewer.dataSources.add(Cesium.GeoJsonDataSource.load('http://localhost:8080/https://feroz.us/routes.geojson'));
+  if (flags.displayCave){
+    const promise2 = Cesium.GeoJsonDataSource.load(
+        "http://localhost:8080/https://feroz.us/Whig-All.geojson"
+      // );
+        // "http://localhost:8080/https://feroz.us/M3.geojson"
+      );
+      promise2
+        .then(function (dataSource) {
+          cesiumViewer.dataSources.add(dataSource);
+          // const entities = dataSource.entities.values;
+          // for (let i = 0; i < entities.length; i++) {
+          //   //For each entity, create a random color based on the state name.
+          //   //Some states have multiple entities, so we store the color in a
+          //   //hash so that we use the same color for the entire state.
+          //   const entity = entities[i];
+          //   const colorp = Cesium.Color.AQUA;
+          //   Cesium.Color.fromAlpha(colorp, 0.5, colorp);
+          //   entity.polygon.material = colorp;
+          //   entity.polygon.outline = false;
+          // }
+
+        })
+        .catch(function (error) {
+          //Display any errrors encountered while loading.
+          window.alert(error);
+        });
+  };
+
+  // const displayAPC = 0;
+  // if (displayAPC == 1){
+  //   const promise3 = Cesium.GeoJsonDataSource.load(
+  //       "http://localhost:8080/https://feroz.us/APC.geojson"
+  //     );
+  //     promise3
+  //       .then(function (dataSource) {
+  //         cesiumViewer.dataSources.add(dataSource);
+  //         // const entities = dataSource.entities.values;
+  //         // for (let i = 0; i < entities.length; i++) {
+  //         //   //For each entity, create a random color based on the state name.
+  //         //   //Some states have multiple entities, so we store the color in a
+  //         //   //hash so that we use the same color for the entire state.
+  //         //   const entity = entities[i];
+  //         //   const colorp = Cesium.Color.AQUA;
+  //         //   Cesium.Color.fromAlpha(colorp, 0.5, colorp);
+  //         //   entity.polygon.material = colorp;
+  //         //   entity.polygon.outline = false;
+  //         // }
+
+  //       })
+  //       .catch(function (error) {
+  //         //Display any errrors encountered while loading.
+  //         window.alert(error);
+  //       });
+  // };
+
+  // cesiumViewer.dataSources.add(
+  //   Cesium.KmlDataSource.load(
+  //     "http://localhost:8080/https://feroz.us/Escalante.kml",
+  //     // options: {clampToGround : true},
+  //   )
+  // );
 
   Cesium.Math.setRandomNumberSeed(0);
   const promise = Cesium.GeoJsonDataSource.load(
@@ -248,6 +459,24 @@ console.log(ClassificationScheme);
       window.alert(error);
     });
 
+
+
+  //   const promise2 = Cesium.GeoJsonDataSource.load(
+  //   "http://localhost:8080/https://feroz.us/RWUTS.geojson"
+  // );
+  // promise2
+  //   .then(function (dataSource) {
+  //     cesiumViewer.dataSources.add(dataSource);
+
+  //     //Get the array of entities
+      
+  //     dataSource.show = true;
+      
+  //   })
+  //   .catch(function (error) {
+  //     //Display any errrors encountered while loading.
+  //     window.alert(error);
+  //   });
 const scene = cesiumViewer.scene;
 scene.screenSpaceCameraController.enableCollisionDetection = false;
 const canvas = cesiumViewer.canvas;
@@ -271,6 +500,8 @@ const imageryLayers = cesiumViewer.imageryLayers;
 
 const viewModel = {
   showlidar  : false,
+  googleMapsOn  : false,
+  usgsRef : true,
   layers: [],
   baseLayers: [],
   upLayer: null,
@@ -366,7 +597,7 @@ function setupLayers() {
     })
   );
   addLayerOption(
-    "Caltopo - Slope Angle",
+    "Slope Angle",
     new Cesium.UrlTemplateImageryProvider({
       url: Cesium.buildModuleUrl('http://localhost:8080/https://caltopo.com/tile/sg') + '/{z}/{x}/{y}.png',
       tilingScheme : new Cesium.WebMercatorTilingScheme(),
@@ -375,32 +606,48 @@ function setupLayers() {
     1.0,
     false
   );
-  // addLayerOption(
-  //   "Geology - Giant Forest",
-  //   new UrlTemplateImageryProvider({
-  //     url: buildModuleUrl('https://mapwarper.net/maps/tile/66994') + '/{z}/{x}/{y}.png',
-  //     tilingScheme : new WebMercatorTilingScheme(),
-  //     maximumLevel : 18
-  //   }),
-  //   1.0,
-  //   false
-  // );
-  // addLayerOption(
-  //   "Geology - Tehipite Dome",
-  //   new UrlTemplateImageryProvider({
-  //     url: buildModuleUrl('https://mapwarper.net/maps/tile/66992') + '/{z}/{x}/{y}.png',
-  //     tilingScheme : new WebMercatorTilingScheme(),
-  //     maximumLevel : 18
-  //   }),
-  //   1.0,
-  //   false
-  // );
+
+// addLayerOption(
+//     "OpenTopo-Clickable-ish",
+//     new Cesium.WebMapServiceImageryProvider({
+//     url : 'https://portal.opentopography.org/geoserver/OPENTOPO/wms?',
+//     layers : 'OPENTOPO:datasets_view',
+//     maximumLevel : 18,
+//   }),
+//   1.0,
+//   false
+// );
+
+addLayerOption(
+    "OpenTopo datasets",
+    new Cesium.UrlTemplateImageryProvider({
+    url : 'https://portal.opentopography.org/geoserver/OPENTOPO/wms?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&FORMAT=image%2Fpng&TRANSPARENT=true&STYLES&LAYERS=OPENTOPO%3Adatasets_view&CQL_FILTER=is_global%20%3D%20false&SRS=EPSG%3A4326&WIDTH=256&HEIGHT=256&BBOX={westProjected}%2C{southProjected}%2C{eastProjected}%2C{northProjected}',
+    tilingScheme : new Cesium.GeographicTilingScheme(),
+    enablePickFeatures : false,
+    pickFeaturesUrl : 'https://portal.opentopography.org/geoserver/OPENTOPO/wms?0=C&1=Q&2=L&3=_&4=F&5=I&6=L&7=T&8=E&9=R&10=%20&11=%3D&12=%20&13=i&14=s&15=_&16=g&17=l&18=o&19=b&20=a&21=l&22=%20&23=%3D&24=%20&25=f&26=a&27=l&28=s&29=e&service=WMS&version=1.1.1&request=GetFeatureInfo&layers=OPENTOPO%3Adatasets_view&BBOX={westProjected}%2C{southProjected}%2C{eastProjected}%2C{northProjected}&width=256&height=256&srs=EPSG%3A4326&query_layers=OPENTOPO%3Adatasets_view&info_format=application%2Fjson&x={i}&y={j}',
+    //https://portal.opentopography.org/geoserver/OPENTOPO/wms?0=C&1=Q&2=L&3=_&4=F&5=I&6=L&7=T&8=E&9=R&10=%20&11=%3D&12=%20&13=i&14=s&15=_&16=g&17=l&18=o&19=b&20=a&21=l&22=%20&23=%3D&24=%20&25=f&26=a&27=l&28=s&29=e&service=WMS&version=1.1.1&request=GetFeatureInfo&layers=OPENTOPO%3Adatasets_view&bbox=-116.71875000000001%2C36.5625%2C-115.31250000000001%2C37.96875&width=256&height=256&srs=EPSG%3A4326&query_layers=OPENTOPO%3Adatasets_view&info_format=application%2Fjson&x=20&y=215
+    maximumLevel : 18,
+  }),
+  1.0,
+  false
+);
 
 
   addLayerOption(
     "NGMDB Mosaic",
     new Cesium.UrlTemplateImageryProvider({
     url: "http://localhost:8080/https://ngmdb.usgs.gov/arcgis/rest/services/mapview/ngmdbMosaic/ImageServer/exportImage?f=image&bbox={westProjected}%2C{southProjected}%2C{eastProjected}%2C{northProjected}&format=jpgpng&mosaicRule=%7B%22ascending%22%3Atrue%7D",
+    maximumLevel: 15, 
+    }),
+    1.0,
+    false
+  );
+
+  // https://mapservices.weather.noaa.gov/raster/rest/services/snow/NOHRSC_Snow_Analysis/MapServer/export?bbox=-13544942.404164584%2C4787689.669480136%2C-13454899.584844613%2C4854113.44705998&bboxSR=102100&imageSR=102100&size=1767%2C1303&dpi=144&format=png32&transparent=true&layers=show%3A3&f=image
+  addLayerOption(
+    "Snow Depth",
+    new Cesium.UrlTemplateImageryProvider({
+    url: "https://mapservices.weather.noaa.gov/raster/rest/services/snow/NOHRSC_Snow_Analysis/MapServer/export?bbox={westProjected}%2C{southProjected}%2C{eastProjected}%2C{northProjected}&bboxSR=102100&imageSR=102100&format=png32&transparent=true&layers=show%3A3&f=image",
     maximumLevel: 15, 
     }),
     1.0,
@@ -471,9 +718,15 @@ window.addPC = function(url){
 
   Potree.loadPointCloud(url, "test", function(e){
     let potreeScene = potreeViewer.scene;
-    
+    let pointcloudProjection = proj4.defs("EPSG:3857");
     potreeScene.addPointCloud(e.pointcloud);
-    let pointcloudProjection = e.pointcloud.projection;
+    console.log(e.pointcloud);
+    if (e.pointcloud.projection !== null){
+      pointcloudProjection = e.pointcloud.projection;
+    } else{
+      console.log("Assuming PC Projection is EPSG:3857");
+    }
+    
     let mapProjection = proj4.defs("WGS84");
     // console.log(e.pointcloud.projection);
 
@@ -488,15 +741,23 @@ window.addPC = function(url){
     var pcCenterC = toMap.forward([pcx,pcy,pcz]);
     var pcZscale = 1/(Math.cos((pcCenterC[1]*Math.PI)/180));
     // console.log(pcZscale);
-    e.pointcloud.matrix.set(1, 0, 0, 0,
+    if (viewModel.usgsRef){
+      e.pointcloud.matrix.set(1, 0, 0, 0,
                             0, 1, 0, 0,
-                            0, 0, pcZscale, -32*pcZscale,
+                            0, 0, pcZscale, -32*pcZscale, //0, 0, pcZscale, -32*pcZscale,
                             0, 0, 0, 1);
+} else {
+  e.pointcloud.matrix.set(1, 0, 0, 0,
+                            0, 1, 0, 0,
+                            0, 0, 1, -32*0.766, //0, 0, pcZscale, -32*pcZscale,
+                            0, 0, 0, 1);
+}
+    
 
     let material = e.pointcloud.material;
     
     material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
-    material.size = 0.29;
+    material.size = 0.27;
     material.weightRGB = 0;
     material.weightIntensity = 1;
     material.weightClassification = 1;
@@ -506,15 +767,157 @@ window.addPC = function(url){
     material.intensityBrightness = 0.35;
 
     material.shape = Potree.PointShape.CIRCLE;
-    material.activeAttributeName = "composite";
+    material.activeAttributeName = "composite"; // composite
     // console.dir(e.pointcloud.material.classification);
     
     // let pointcloudProjection = "+proj=utm +zone=33 +ellps=WGS84 +datum=WGS84 +units=m +no_defs";
+    {
+      // proj4.defs("pointcloud", e.pointcloud.projection);
+      // proj4.defs("WGS84", "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs");
+      // let toScene2 = proj4("WGS84", "pointcloud");
+      
+      let featureToScene2Node = (feature, color) => {
+        let geometry = feature.geometry;
+        
+        var color = color ? color : new THREE.Color(1, 1, 1);
+        
+        if(feature.geometry.type === "Point"){
+          let sg = new THREE.SphereGeometry(1, 18, 18);
+          let sm = new THREE.MeshNormalMaterial();
+          let s = new THREE.Mesh(sg, sm);
+          
+          let [long, lat] = geometry.coordinates;
+          let pos = toScene.forward([long, lat]);
+          
+          s.position.set(...pos, 20);
+          
+          s.scale.set(10, 10, 10);
+          
+          return s;
+        }else if(geometry.type === "LineString"){
+          let coordinates = [];
+          
+          let min = new THREE.Vector3(Infinity, Infinity, Infinity);
+          for(let i = 0; i < geometry.coordinates.length; i++){
+            let [long, lat] = geometry.coordinates[i];
+            let pos = toScene.forward([long, lat]);
+            
+            min.x = Math.min(min.x, pos[0]);
+            min.y = Math.min(min.y, pos[1]);
+            min.z = Math.min(min.z, 20);
+            
+            coordinates.push(...pos, 20);
+            if(i > 0 && i < geometry.coordinates.length - 1){
+              coordinates.push(...pos, 20);
+            }
+          }
+          
+          for(let i = 0; i < coordinates.length; i += 3){
+            coordinates[i+0] -= min.x;
+            coordinates[i+1] -= min.y;
+            coordinates[i+2] -= min.z;
+          }
+          
+          let positions = new Float32Array(coordinates);
+          
+          let lineGeometry = new THREE.BufferGeometry();
+          lineGeometry.addAttribute("position", new THREE.BufferAttribute(positions, 3));
+          
+          let material = new THREE.LineBasicMaterial( { color: color} );
+          let line = new THREE.LineSegments(lineGeometry, material);
+          line.position.copy(min);
+          
+          return line;
+        }else if(geometry.type === "Polygon"){
+          for(let pc of geometry.coordinates){
+            let coordinates = [];
+            
+            let min = new THREE.Vector3(Infinity, Infinity, Infinity);
+            for(let i = 0; i < pc.length; i++){
+              let [long, lat] = pc[i];
+              let pos = toScene.forward([long, lat]);
+              
+              min.x = Math.min(min.x, pos[0]);
+              min.y = Math.min(min.y, pos[1]);
+              min.z = Math.min(min.z, 20);
+              
+              coordinates.push(...pos, 20);
+              if(i > 0 && i < pc.length - 1){
+                coordinates.push(...pos, 20);
+              }
+            }
+            
+            for(let i = 0; i < coordinates.length; i += 3){
+              coordinates[i+0] -= min.x;
+              coordinates[i+1] -= min.y;
+              coordinates[i+2] -= min.z;
+            }
+            
+            let positions = new Float32Array(coordinates);
+            
+            let lineGeometry = new THREE.BufferGeometry();
+            lineGeometry.addAttribute("position", new THREE.BufferAttribute(positions, 3));
+            
+            let material = new THREE.LineBasicMaterial( { color: color} );
+            let line = new THREE.LineSegments(lineGeometry, material);
+            line.position.copy(min);
+            
+            return line;
+          }
+        }else{
+          console.log("unhandled feature: ", feature);
+        }
+      };
 
+      let shapeNode = new THREE.Object3D();
+      potreeViewer.scene.scene.add(shapeNode);
+      
+      // Potree.Utils.loadShapefileFeatures("http://localhost:8080/https://feroz.us/Marbles-attempt-1.shp", features => {
+      //   for(let feature of features){
+      //     let node = featureToSceneNode(feature, 0x00ff00);
+      //     shapeNode.add(node);
+      //   }
+      // });
+      
+
+      // viewer.onGUILoaded(() => {
+      //   // Add entry to object list in sidebar
+      //   let tree = $(`#jstree_scene`);
+      //   let parentNode = "other";
+      //   let nodeID = tree.jstree('create_node', parentNode, { 
+      //       "text": "shapefile", 
+      //       "icon": `${Potree.resourcePath}/icons/triangle.svg`,
+      //       "object": shapeNode
+      //     }, 
+      //     "last", false, false);
+      //   tree.jstree(shapeNode.visible ? "check_node" : "uncheck_node", nodeID);
+      // });
+      
+    }
     }
   );
 
 }
+if (flags.displayPC){
+  // window.addPC("http://localhost:8083/MARBLES/ept.json");
+  //https://ot-process2.sdsc.edu/appEntwineEPTService1710109846278868656237/pc1710109735500
+  // window.addPC("https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/entwine/geoid18/9262/ept.json"); // NorCal Kangaroo Mtn, Skorp?
+  window.addPC("http://localhost:8080/https://ot-process2.sdsc.edu/appEntwineEPTService1714692934285-1026035806/pc1714692403090/ept.json"); // LS Bluffs North of the Marbles
+  // window.addPC("http://localhost:8080/https://ot-process2.sdsc.edu/appEntwineEPTService1710112615372926451108/pc1710112504574/ept.json");
+  // window.addPC("http://localhost:8080/https://ot-process2.sdsc.edu/appEntwineEPTService1710113099587-473228176/pc1710112958845/ept.json");
+  // window.addPC("http://localhost:8080/https://ot-process2.sdsc.edu/appEntwineEPTService1710109846278868656237/pc1710109735500/ept.json");
+
+
+  //https://ot-process2.sdsc.edu/appEntwineEPTService1710113099587-473228176/pc1710112958845
+  //https://ot-process2.sdsc.edu/appEntwineEPTService1710112615372926451108/pc1710112504574
+
+  // window.addPC("http://localhost:8083/PC/ept.json");
+  // window.addPC("https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/entwine/geoid18/9782/ept.json");
+  // window.addPC("http://localhost:8083/T2/ept.json");
+}
+
+
+
 
 //Bind the viewModel to the DOM elements of the UI that call for it.
 const toolbar = document.getElementById("toolbar");
@@ -548,6 +951,12 @@ Cesium.knockout.getObservable(viewModel, "showlidar").subscribe(
     // console.log(cesiumViewer.dataSources);
   }
 );
+Cesium.knockout.getObservable(viewModel, "googleMapsOn").subscribe(
+  function (newValue) {
+    cesiumViewer.scene.primitives._primitives[0].show = newValue;
+    // cesiumViewer.scene.fog.enabled = newValue;
+  }
+);
 
 // disable the default event handlers
 scene.screenSpaceCameraController.enableRotate = false;
@@ -579,6 +988,22 @@ handler.setInputAction(function (movement) {
 handler.setInputAction(function (position) {
   flags.looking = false;
 }, Cesium.ScreenSpaceEventType.LEFT_UP);
+
+// handler.setInputAction(function (movement) {
+//   if (flags.looking != true){
+//     console.log(event);
+//   } else {
+//     console.log(event);
+//     if (event.deltaY < 0)
+//    {
+//     moverRateMultiplyer*=1.15;
+//    }
+//    else if (event.deltaY > 0)
+//    {
+//     moverRateMultiplyer/=1.15;
+//    }
+//   }
+//   }, Cesium.ScreenSpaceEventType.PINCH_MOVE);
 
 // Allow for speed adjustment when flying
 window.addEventListener('wheel', function(event)
@@ -659,6 +1084,8 @@ function getFlagForKeyCode(keyCode) {
       return "moveLeft";
     case "F".charCodeAt(0):
       return "Fly";
+    case "T".charCodeAt(0):
+      return "TouchFly";
     case "1".charCodeAt(0):
       return "toggleOther";
     case "2".charCodeAt(0):
@@ -667,12 +1094,121 @@ function getFlagForKeyCode(keyCode) {
       return "toggleVeg";
     case "4".charCodeAt(0):
       return "toggleLowNoise";
-    // case "2".charCodeAt(0):
-    //   return "load";
+    case "5".charCodeAt(0):
+      return "toggleAll";
+    case "Z".charCodeAt(0):
+      return "pointS";
+    case "X".charCodeAt(0):
+      return "pointM";
+    case "C".charCodeAt(0):
+      return "pointL";
+    case "K".charCodeAt(0):
+      return "downloadPoints";
+    case "H".charCodeAt(0):
+      return "hideCesium";
+    case "P".charCodeAt(0):
+      return "displayPC";
+    case "O".charCodeAt(0):
+      return "displayCave";
     default:
       return undefined;
   }
 }
+
+// array to store left side pointers
+var pointersLeft = [];
+
+// array to store right side pointers
+var pointersRight = [];
+
+var touchFlyDirection = Cesium.Cartesian3.clone(cesiumViewer.camera.direction);
+
+function addPointer(e) { 
+  // console.log(e);
+  const width = canvas.clientWidth;
+  let pointer = {
+    ID: e.pointerId,
+    startX: e.clientX,
+    currentX: e.clientX,
+    startY: e.clientY,
+    currentY: e.clientY
+  };
+  if (e.clientX >= (width*0.5)){
+    pointersRight.push(pointer);
+  } else {
+    pointersLeft.push(pointer);
+  }
+} 
+
+// Change below to work with nested arrays from above
+// function removePointer(e) { 
+//   const index = pointersRight.indexOf(e.pointerId);
+//   if (index > -1) { // only splice array when item is found
+//     pointersRight.splice(index, 1);
+//   } else {
+//     const indexL = pointersLeft.indexOf(e.pointerId);
+//     if (index > -1) { // only splice array when item is found
+//       pointersLeft.splice(index, 1);
+//     } else {
+//       // console.log("did not find pointer to remove");
+//     }
+//   } 
+// }
+
+function runTouchFly (e) {
+  const width = canvas.clientWidth;
+  if (e.clientX >= (width*0.5)){
+    let index = pointersRight.findIndex((element) => element.ID == e.pointerId);
+    pointersRight[index].currentX = e.clientX;
+    pointersRight[index].currentY = e.clientY;
+    console.log(pointersRight[index]);
+  } else {
+    let index = pointersLeft.findIndex((element) => element.ID == e.pointerId);
+    pointersLeft[index].currentX = e.clientX;
+    pointersLeft[index].currentY = e.clientY;
+  }
+  //Check if moved point is on left or right 
+  // 
+  // if right: 
+  //   if one: look around
+  //     if two: look around + use some attribute to change speed
+
+
+
+  // if left:
+  //   count how many points we have:
+  //   if one: 
+  //     translate camera by distance along moving plane
+  //   if two: tilt moving plane relative to frustum
+
+}
+
+function initializeTouchFlyPointers() {
+
+  document.addEventListener("pointerdown", function (e) {addPointer(e)}, true); 
+  document.addEventListener("pointerup", function (e) {removePointer(e)}, true); 
+  document.addEventListener("pointercancel", function (e) {removePointer(e)}, true);
+  document.addEventListener("pointermove", function (e) {runTouchFly(e)}, false);
+
+  // disable usual cesium navigation
+  // cesiumViewer.scene.screenSpaceCameraController.enableRotate = false;
+  // cesiumViewer.scene.screenSpaceCameraController.enableTranslate = false;
+  // cesiumViewer.scene.screenSpaceCameraController.enableZoom = false;
+  // cesiumViewer.scene.screenSpaceCameraController.enableTilt = false;
+  // cesiumViewer.scene.screenSpaceCameraController.enableLook = false;
+
+  // update the camera direction (unsure if needed)
+  touchFlyDirection = Cesium.Cartesian3.clone(cesiumViewer.camera.direction);
+
+
+}
+// function removeTouchFlyPointers() {
+//   document.removeEventListener("pointerdown", addPointer, true); 
+//   document.removeEventListener("pointerup", removePointer, true); 
+//   document.removeEventListener("pointercancel", removePointer, true);
+//   document.removeEventListener("pointermove", function (e) {runTouchFly(e)}, false);
+// }
+
 
 document.addEventListener(
   "keydown",
@@ -682,6 +1218,25 @@ document.addEventListener(
       if (flagName == "Fly" ){ // Toggle Flags
         flags[flagName] = !flags[flagName];
         moverRateMultiplyer=1;
+      }else if (flagName == "TouchFly" ){ // Toggle Flags
+        flags[flagName] = !flags[flagName];
+        if (flags[flagName]){
+          initializeTouchFlyPointers();
+          console.log("initialized TouchFly");
+        }else {
+          // removeTouchFlyPointers();
+          // console.log("removed TouchFly");
+        }
+        moverRateMultiplyer=1;
+      }else if (flagName == "hideCesium" ){ // Toggle Flags
+        flags[flagName] = !flags[flagName];
+        cesiumViewer.scene.globe.show = !flags[flagName];
+        cesiumViewer.scene.skyAtmosphere.show = !flags[flagName];
+        // cesiumViewer.scene.skyBox.show = !flags[flagName];
+      }else if (flagName == "displayPC" ){ // Toggle Flags
+        flags[flagName] = !flags[flagName];
+      }else if (flagName == "displayCave" ){ // Toggle Flags
+        flags[flagName] = !flags[flagName];
       }else if (flagName == "toggleOther"){
         flags[flagName] = !flags[flagName];
         potreeViewer.setClassificationVisibility(0,flags[flagName]);
@@ -702,6 +1257,71 @@ document.addEventListener(
       }else if (flagName == "toggleLowNoise"){ 
         flags[flagName] = !flags[flagName];
         potreeViewer.setClassificationVisibility(7,flags[flagName]);
+      }else if (flagName == "toggleAll"){
+        flags[flagName] = !flags[flagName];
+        // if toggleall is turning off: turn off all toggles that are on
+        potreeViewer.setClassificationVisibility(0,flags[flagName]);
+        potreeViewer.setClassificationVisibility(1,flags[flagName]);
+        potreeViewer.setClassificationVisibility(8,flags[flagName]);
+        potreeViewer.setClassificationVisibility(9,flags[flagName]);
+        potreeViewer.setClassificationVisibility(12,flags[flagName]);
+        potreeViewer.setClassificationVisibility("DEFAULT",flags[flagName]);
+        potreeViewer.setClassificationVisibility(2,flags[flagName]);
+        potreeViewer.setClassificationVisibility(3,flags[flagName]);
+        potreeViewer.setClassificationVisibility(4,flags[flagName]);
+        potreeViewer.setClassificationVisibility(5,flags[flagName]);
+        potreeViewer.setClassificationVisibility(6,flags[flagName]);
+        potreeViewer.setClassificationVisibility(7,flags[flagName]);
+      }else if (flagName == "pointS"){ // add entity point where camera is currently 
+        pointCounter +=1;
+        let preview = "Point of Small interest ".concat(pointCounter.toString());
+        let labelName = preview;
+        // let labelName = prompt("Name", preview);
+        console.log("Added point of Small interest: S".concat(pointCounter.toString()));
+        cesiumViewer.entities.add({
+          label: {
+            scale: 0.75,
+            text: "S".concat(labelName),
+          },
+          position: cesiumViewer.camera.position,
+          point: {},
+        });
+      }else if (flagName == "pointM"){ // add entity point where camera is currently 
+        pointCounter +=1;
+        let preview = "Point of Medium interest ".concat(pointCounter.toString());
+        let labelName = prompt("Name", preview);
+        console.log("Added point of Medium interest: M".concat(pointCounter.toString()));
+        cesiumViewer.entities.add({
+          label: {
+            scale: 1,
+            text: "M".concat(labelName),
+          },
+          position: cesiumViewer.camera.position,
+          point: {},
+        });
+      }else if (flagName == "pointL"){ // add entity point where camera is currently 
+        pointCounter +=1;
+        let preview = "Point of Large interest ".concat(pointCounter.toString());
+        let labelName = prompt("Name", preview);
+        console.log("Added point of Large interest: L".concat(pointCounter.toString()));
+        cesiumViewer.entities.add({
+          label: {
+            scale: 1.5,
+            text: "L".concat(labelName),
+          },
+          position: cesiumViewer.camera.position,
+          point: {},
+        });
+      }else if (flagName == "downloadPoints"){ // download all points added
+        Cesium.exportKml({
+          entities: cesiumViewer.entities,
+          kmz: true,
+          // modelCallback: modelCallback,
+        }).then(function (result) {
+            downloadBlob("TestExport.kmz", result.kmz);
+          })
+          .catch(console.error);
+        // flags[flagName] = !flags[flagName];
       }else{
         flags[flagName] = true;
       }
@@ -711,12 +1331,24 @@ document.addEventListener(
   false
 );
 
+function downloadBlob(filename, blob) {
+  if (window.navigator.msSaveOrOpenBlob) {
+    window.navigator.msSaveBlob(blob, filename);
+  } else {
+    const elem = window.document.createElement("a");
+    elem.href = window.URL.createObjectURL(blob);
+    elem.download = filename;
+    document.body.appendChild(elem);
+    elem.click();
+    document.body.removeChild(elem);
+  }
+}
 
 document.addEventListener(
   "keyup",
   function (e) {
     const flagName = getFlagForKeyCode(e.keyCode);
-    if ((typeof flagName !== "undefined")&&(flagName !== "Fly")&&(flagName !== "showlidar")&&(flagName !== "removePC")&&(flagName !== "toggleOther")&&(flagName !== "toggleGround")&&(flagName !== "toggleVeg")&&(flagName !== "toggleLowNoise")) {
+    if ((typeof flagName !== "undefined")&&(flagName !== "Fly")&&(flagName !== "TouchFly")&&(flagName !== "hideCesium")&&(flagName !== "showlidar")&&(flagName !== "removePC")&&(flagName !== "toggleOther")&&(flagName !== "toggleGround")&&(flagName !== "toggleVeg")&&(flagName !== "toggleLowNoise")&&(flagName !== "toggleAll")&&(flagName !== "displayPC")&&(flagName !== "displayCave")) {
       flags[flagName] = false;
     }
   },
@@ -739,7 +1371,7 @@ cesiumViewer.clock.onTick.addEventListener(function (clock) {
     flags.showlidar = false;
   }
 
-  if ((flags.looking)&& (flags.Fly)) {
+  if ((flags.looking) && (flags.Fly)) {
     // const width = canvas.clientWidth;
     // const height = canvas.clientHeight;
 
@@ -752,6 +1384,7 @@ cesiumViewer.clock.onTick.addEventListener(function (clock) {
     if (mousePosition.x != startMousePosition.x){
       const x = (mousePosition.x - startMousePosition.x);
       startMousePosition.x = mousePosition.x;
+      // console.log(startMousePosition.x, mousePosition.x);
       camera.lookRight(x * lookFactor);
     }
     if (mousePosition.y != startMousePosition.y){
@@ -768,6 +1401,80 @@ cesiumViewer.clock.onTick.addEventListener(function (clock) {
       },
     });
   }
+
+  if ((flags.looking) && (flags.TouchFly)) {
+    // figure out which pointer is controlling the tilt
+    // always right array [0]? lets start with that
+
+    if (pointersRight.length > 0){
+      const lookFactor = 0.0018;
+      let controlPointer = pointersRight[0];
+    // Coordinate (0.0, 0.0) will be where the mouse was clicked.
+
+    
+    const y = -(controlPointer.startY - controlPointer.currentY);
+    if (controlPointer.currentX != controlPointer.startX){
+      const x = (controlPointer.currentX - controlPointer.startX);
+      pointersRight[0].startX = controlPointer.currentX;
+      camera.lookRight(x * lookFactor);
+    }
+    if (controlPointer.currentY != controlPointer.startY){
+      const y = (controlPointer.currentY != controlPointer.startY);
+      pointersRight[0].startY = controlPointer.currentY;
+      camera.lookUp(-y * lookFactor);
+
+    }
+    
+    camera.setView({
+      orientation:{
+        heading: camera.heading,
+        pitch: camera.pitch,
+        roll: 0.0,
+      },
+    }); 
+    }
+
+    
+  }
+
+  // if (flags.TouchFly) {
+  //   // Change movement speed based on the distance of the camera to the surface of the ellipsoid.
+  //   const cameraHeight = ellipsoid.cartesianToCartographic(
+  //     camera.position
+  //   ).height;
+  //   // console.log(cameraHeight);
+  //   // sampleTerrain(viewer.terrainProvider, 5, [camera.positionCartographic])
+  //   // .then(function(samples) {
+  //   //   moveRate = ((cameraHeight-samples[0].height)/200.0);
+  //     moveRate = ((cameraHeight+1000)/200.0);
+  //     if (moveRate <0){
+  //       moveRate = -moveRate;
+  //     }
+  //     if (moveRate <0.5){ // make sure we can go underground
+  //       moveRate = 0.5;
+  //     }
+
+  //     if (moveRate > 6000){ // setting some limits
+  //         moveRate = 6000;
+  //     }
+
+  //     if (moverRateMultiplyer > 16){
+  //       moverRateMultiplyer = 16;
+  //     }
+  //     if (moverRateMultiplyer < 0.01){
+  //       moverRateMultiplyer = 0.01;
+  //     }
+
+  //     moveRate = moveRate*moverRateMultiplyer;
+
+  //   scene.screenSpaceCameraController.enableZoom = false;
+  //   scene.screenSpaceCameraController.enableRotate = false;
+  //   if (flags.touchFlying) {
+  //     camera.move(touchFlyDirection, moveRate);
+  //   }else{
+  //   scene.screenSpaceCameraController.enableZoom = true;
+  //   scene.screenSpaceCameraController.enableRotate = true;
+  // }
 
 
   if (flags.Fly) {
@@ -800,8 +1507,6 @@ cesiumViewer.clock.onTick.addEventListener(function (clock) {
 
       moveRate = moveRate*moverRateMultiplyer;
 
-      
-    // });
     scene.screenSpaceCameraController.enableZoom = false;
     scene.screenSpaceCameraController.enableRotate = false;
     if (flags.moveForward) {
@@ -880,7 +1585,10 @@ cesiumViewer.clock.onTick.addEventListener(function (clock) {
       // console.log(cCamPosCart.height);
       // console.log(cCamCenterObjectPosCart.height);
       
-      let cCamHeightCorrected = cCamHeight/Math.cos(cCamPosCart.latitude);
+      let cCamHeightCorrected = cCamHeight;
+      if (viewModel.usgsRef){
+      cCamHeightCorrected = cCamHeight/Math.cos(cCamPosCart.latitude);
+} 
       let pCamPos = toScene.forward([cCamLong, cCamLat, cCamHeightCorrected]);
 
       let pCamCenterObjectPos = toScene.forward([cCamCenterObjectLong, cCamCenterObjectLat, cCamCenterObjectHeight]);
