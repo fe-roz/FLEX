@@ -607,6 +607,18 @@ function setupLayers() {
     false
   );
 
+  addLayerOption(
+    "US Karst Map",
+    new Cesium.UrlTemplateImageryProvider({
+      url: Cesium.buildModuleUrl('https://tiles.arcgis.com/tiles/hoKRg7d6zCP8hwp2/arcgis/rest/services/Carbonate_Karst/MapServer/tile') + '/{z}/{y}/{x}?blankTile=false',
+      tilingScheme : new Cesium.WebMercatorTilingScheme(),
+      maximumLevel : 18
+    }),
+    1.0,
+    false
+  );
+  
+
 // addLayerOption(
 //     "OpenTopo-Clickable-ish",
 //     new Cesium.WebMapServiceImageryProvider({
