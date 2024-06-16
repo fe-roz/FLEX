@@ -90,7 +90,9 @@
             [Z] - Create point of Small interest (does not prompt for name)<br>
             [X] - Create point of Medium interest (prompts for name)<br>
             [C] - Create point of Large interest (prompts for name)<br>
-            [K] - Download KMZ file with all labeled points<br>
+            [V] - Start or end a route (prompts for name)<br>
+            [B] - Add point along a route, if started<br>
+            [K] - Download KMZ file with all labeled points and routes<br>
             <br>
             Point Cloud (depends on classification): <br>
             [1] - Toggle Other Classifications<br>
@@ -98,6 +100,7 @@
             [3] - Toggle Vegetation<br>
             [4] - Toggle Low Noise<br>
             [5] - Toggle All Points<br>
+            [R] - Remove All Ppont Clouds<br>
           </p>
         </div>
         <div class="collapse" id="layersCollapsible">
@@ -322,6 +325,9 @@ const flags = {
 };
 
 var pointCounter = 0;
+var creatingRoute = "";
+var routePoints = [];
+var currentEntity = new Cesium.Entity();
 
 var ClassificationScheme = {
     0:       { visible: flags.toggleOther, name: 'never classified'  , color: [0.5,  0.5,  0.5,  1.0] },
@@ -1114,6 +1120,10 @@ function getFlagForKeyCode(keyCode) {
       return "pointM";
     case "C".charCodeAt(0):
       return "pointL";
+    case "V".charCodeAt(0):
+      return "route";
+    case "B".charCodeAt(0):
+      return "routePoint";
     case "K".charCodeAt(0):
       return "downloadPoints";
     case "H".charCodeAt(0):
@@ -1284,7 +1294,7 @@ document.addEventListener(
         potreeViewer.setClassificationVisibility(5,flags[flagName]);
         potreeViewer.setClassificationVisibility(6,flags[flagName]);
         potreeViewer.setClassificationVisibility(7,flags[flagName]);
-      }else if (flagName == "pointS"){ // add entity point where camera is currently 
+      }else if (flagName == "pointS"){ // add entity point where camera is currently located
         pointCounter +=1;
         let preview = "Point of Small interest ".concat(pointCounter.toString());
         let labelName = preview;
@@ -1298,7 +1308,7 @@ document.addEventListener(
           position: cesiumViewer.camera.position,
           point: {},
         });
-      }else if (flagName == "pointM"){ // add entity point where camera is currently 
+      }else if (flagName == "pointM"){ // add entity point where camera is currently located
         pointCounter +=1;
         let preview = "Point of Medium interest ".concat(pointCounter.toString());
         let labelName = prompt("Name", preview);
@@ -1311,7 +1321,7 @@ document.addEventListener(
           position: cesiumViewer.camera.position,
           point: {},
         });
-      }else if (flagName == "pointL"){ // add entity point where camera is currently 
+      }else if (flagName == "pointL"){ // add entity point where camera is currently located
         pointCounter +=1;
         let preview = "Point of Large interest ".concat(pointCounter.toString());
         let labelName = prompt("Name", preview);
@@ -1324,6 +1334,43 @@ document.addEventListener(
           position: cesiumViewer.camera.position,
           point: {},
         });
+      }else if (flagName == "route"){ // startor stop recording route. If starting, add route point where camera is currently located.
+        if (creatingRoute == ""){
+          let preview = "Route ";
+          let labelName = prompt("Press B to add route points, press V again to finish route. Name:", preview);
+          console.log("Started creating Route");
+          routePoints.push(cesiumViewer.camera.position.clone());
+          creatingRoute = labelName;
+        }else{
+          routePoints = [];
+          console.log("Finished creating route");
+          creatingRoute = "";
+        }
+        
+      }else if (flagName == "routePoint"){ // Adds point to route
+        if (creatingRoute == ""){
+          console.log("Start route to add points");
+        }else{
+          routePoints.push(cesiumViewer.camera.position.clone());
+          console.log("Added point to route");
+          cesiumViewer.entities.remove(currentEntity);
+          currentEntity = cesiumViewer.entities.add({
+            label: {
+              scale: 1.5,
+              text: creatingRoute,
+              show: true,
+            },
+            name: creatingRoute,
+            polyline: {
+              positions: routePoints,
+              width: 2,
+              arcType: Cesium.ArcType.NONE,
+              material: Cesium.Color.RED,
+              clampToGround: false,
+            },
+          });
+          console.log(cesiumViewer.entities);
+        }
       }else if (flagName == "downloadPoints"){ // download all points added
         Cesium.exportKml({
           entities: cesiumViewer.entities,
