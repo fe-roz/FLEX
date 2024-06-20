@@ -62,6 +62,9 @@
           <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#pointCloudCollapsible" aria-expanded="false" aria-controls="pointCloudCollapsible">
             Point Cloud
           </button>
+          <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#dataCollapsible" aria-expanded="false" aria-controls="dataCollapsible">
+            Data
+          </button>
           <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#controlsCollapsible" aria-expanded="false" aria-controls="controlsCollapsible">
             Controls
           </button>
@@ -154,6 +157,11 @@
             Add EPT link manually
           </button>
         </div>
+        <div class="collapse" id="dataCollapsible">
+          <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#dataCollapsible" aria-expanded="false" onclick="addKMZ()">
+            Add KMZ file
+          </button>
+        </div>
         <!-- <div class="collapse" id="potree_sidebar_container"> </div> -->
         
 
@@ -202,6 +210,27 @@
         `There was an error while adding ${fullLink}. ${error}`
       );
     }
+  }
+
+  function addKMZ(){ 
+    var input = document.createElement('input');
+    input.type = 'file';
+
+    input.onchange = e => { 
+       var file = e.target.files[0]; 
+       cesiumViewer.dataSources.add(Cesium.KmlDataSource.load(file));
+    }
+
+    input.click();
+   // var link = prompt("KMZ File link", "example/link/file.kmz");
+   // var fullLink = "http://localhost:8080/".concat(link);
+   //   try {
+   //    window.addPC(fullLink);
+   //  } catch (error) {
+   //    console.error(
+   //      `There was an error while adding ${fullLink}. ${error}`
+   //    );
+   //  }
   }
 
 
@@ -319,7 +348,7 @@ const flags = {
   point: false,
   downloadPoints: false,
   hideCesium: false,
-  displayCave: false,
+  displayCave: true,
   displayPC: false,
 
 };
@@ -366,7 +395,8 @@ var ClassificationScheme = {
   // cesiumViewer.dataSources.add(Cesium.GeoJsonDataSource.load('http://localhost:8080/https://feroz.us/routes.geojson'));
   if (flags.displayCave){
     const promise2 = Cesium.GeoJsonDataSource.load(
-        "http://localhost:8080/https://feroz.us/Whig-All.geojson"
+      "./llb6.json"
+        // "http://localhost:8080/https://feroz.us/Whig-All.geojson"
       // );
         // "http://localhost:8080/https://feroz.us/M3.geojson"
       );
@@ -1549,8 +1579,8 @@ cesiumViewer.clock.onTick.addEventListener(function (clock) {
       if (moveRate <0){
         moveRate = -moveRate;
       }
-      if (moveRate <0.5){ // make sure we can go underground
-        moveRate = 0.5;
+      if (moveRate <0.2){ // make sure we can go underground
+        moveRate = 0.2;
       }
 
       if (moveRate > 6000){ // setting some limits
