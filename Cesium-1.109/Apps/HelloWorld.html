@@ -348,7 +348,7 @@ const flags = {
   point: false,
   downloadPoints: false,
   hideCesium: false,
-  displayCave: true,
+  displayCave: false,
   displayPC: false,
 
 };
@@ -396,30 +396,92 @@ var ClassificationScheme = {
   if (flags.displayCave){
     const promise2 = Cesium.GeoJsonDataSource.load(
       "./llb6.json"
-        // "http://localhost:8080/https://feroz.us/Whig-All.geojson"
-      // );
-        // "http://localhost:8080/https://feroz.us/M3.geojson"
       );
       promise2
         .then(function (dataSource) {
           cesiumViewer.dataSources.add(dataSource);
-          // const entities = dataSource.entities.values;
-          // for (let i = 0; i < entities.length; i++) {
-          //   //For each entity, create a random color based on the state name.
-          //   //Some states have multiple entities, so we store the color in a
-          //   //hash so that we use the same color for the entire state.
-          //   const entity = entities[i];
-          //   const colorp = Cesium.Color.AQUA;
-          //   Cesium.Color.fromAlpha(colorp, 0.5, colorp);
-          //   entity.polygon.material = colorp;
-          //   entity.polygon.outline = false;
-          // }
+          // console.log(dataSource);
+
+          // var entities = dataSource.entities.values;
+          // // console.log(dataSource);
+          //   let maxEl;
+          //   let minEl;
+          //   for (var i = 0; i < entities.length; i++) { //get max and min elevation
+          //     var entity = entities[i];
+          //     var elevation = entity.properties.ELEVATION._value;
+          //     if (i == 0){
+          //       maxEl = elevation;
+          //       minEl = elevation;
+          //     }else{
+          //       if (elevation < minEl){
+          //         minEl = elevation;
+          //       }else if (elevation > maxEl){
+          //         maxEl = elevation;
+          //       }
+          //     }
+          //   }
+          //   // console.log(minEl,maxEl);
+          //   var colorBottom = [0,0.1,1,1];
+          //   var colorTop = [1,0.1,0,1];
+          //   for (var i = 0; i < entities.length; i++) {
+          //     var entity = entities[i];
+          //     var elevation = entity.properties.ELEVATION._value;
+          //     var ep = (elevation-minEl)/(maxEl-minEl);
+          //     var color = [1,0,0,1];
+          //     // for (var i = 0; i < 3; i++) {
+          //     //   color[i] = (ep*colorTop[i] + (1-ep)*colorBottom[i]);
+          //     // }
+          //     entity.polyline.material.color = Cesium.Color.RED;
+          //     // console.log(entity);
+          //   }
 
         })
         .catch(function (error) {
           //Display any errrors encountered while loading.
           window.alert(error);
         });
+
+// var promise = Cesium.IonResource.fromAssetId(96794)
+//   .then(function (resource) {
+//     return Cesium.GeoJsonDataSource.load(resource);
+//   })
+//   .then(function (dataSource) {
+//     viewer.dataSources.add(dataSource);
+//     var entities = dataSource.entities.values;
+
+//       var colorHash = {};
+//       for (var i = 0; i < entities.length; i++) {
+//         //For each entity, create a random color based on the state name.
+//         //Some states have multiple entities, so we store the color in a
+//         //hash so that we use the same color for the entire state.
+//         var entity = entities[i];
+//         var name = entity.name;
+//         var color = colorHash[name];
+//         colorHash['Paz'] = Cesium.Color.BLUE;
+//         colorHash['Cara Sucia - San Pedro'] = Cesium.Color.RED;
+//         colorHash['Sirama'] = Cesium.Color.BLUE;
+//         colorHash['Goascorán'] = Cesium.Color.RED;
+//         colorHash['Lempa Alta'] = Cesium.Color.GREEN;
+//         colorHash['Grande de Sonsonate'] = Cesium.Color.YELLOW;
+//         colorHash['Grande de San Miguel'] = Cesium.Color.GREEN;
+//         colorHash['Lempa Media'] = Cesium.Color.YELLOW;
+//         colorHash['Mandinga -  Comalapa'] = Cesium.Color.BLUE;
+//         colorHash['Jíboa'] = Cesium.Color.RED;
+//         colorHash['Bahía de Jiquilisco'] = Cesium.Color.BLUE;
+//         colorHash['Estero de Jaltepeque'] = Cesium.Color.GREEN;
+//         colorHash['Lempa Baja'] = Cesium.Color.YELLOW;
+//         colorHash['Lempa Media'] = Cesium.Color.BLACK; //color doesnt change
+//         entity.polygon.material = color;
+//       }
+    
+//   })
+//   .then(function (dataSource) {
+//     return viewer.zoomTo(dataSource);
+//   })
+//   .otherwise(function (error) {
+//     console.log(error);
+//   });
+
   };
 
   // const displayAPC = 0;
@@ -653,7 +715,6 @@ function setupLayers() {
     1.0,
     false
   );
-  
 
 // addLayerOption(
 //     "OpenTopo-Clickable-ish",
@@ -947,10 +1008,10 @@ window.addPC = function(url){
 
 }
 if (flags.displayPC){
-  // window.addPC("http://localhost:8083/MARBLES/ept.json");
+  window.addPC("http://localhost:8083/GRN3/ept.json");
   //https://ot-process2.sdsc.edu/appEntwineEPTService1710109846278868656237/pc1710109735500
   // window.addPC("https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/entwine/geoid18/9262/ept.json"); // NorCal Kangaroo Mtn, Skorp?
-  window.addPC("http://localhost:8080/https://ot-process2.sdsc.edu/appEntwineEPTService1714692934285-1026035806/pc1714692403090/ept.json"); // LS Bluffs North of the Marbles
+  // window.addPC("http://localhost:8080/https://ot-process2.sdsc.edu/appEntwineEPTService1714692934285-1026035806/pc1714692403090/ept.json"); // LS Bluffs North of the Marbles
   // window.addPC("http://localhost:8080/https://ot-process2.sdsc.edu/appEntwineEPTService1710112615372926451108/pc1710112504574/ept.json");
   // window.addPC("http://localhost:8080/https://ot-process2.sdsc.edu/appEntwineEPTService1710113099587-473228176/pc1710112958845/ept.json");
   // window.addPC("http://localhost:8080/https://ot-process2.sdsc.edu/appEntwineEPTService1710109846278868656237/pc1710109735500/ept.json");
