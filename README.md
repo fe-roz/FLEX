@@ -5,6 +5,10 @@ This is the first draft of the LIDAR visualizer tool based on CesiumJS and Potre
 This whole repository needs to be organized and credits and licenses need to be updated. 
 
 ---
+2024 National Speleological Society Convention presentation about the project:
+https://docs.google.com/presentation/d/1ijDiJJ1g6IRt8oCFVmPTKpNqkT0I9oWBMN1QG8OYKQc/edit?usp=sharing
+
+---
 https://feroz.us/FLEX-demo.mp4
 
 ---
