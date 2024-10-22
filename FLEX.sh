@@ -22,15 +22,6 @@ cleanup() {
 }
 trap cleanup SIGINT
 
-# Install dependencies for cors-anywhere
-if [ -d "cors-anywhere-master" ]; then
-  echo "Installing dependencies for cors-anywhere..."
-  (cd cors-anywhere-master/cors-anywhere-master && npm install)
-else
-  echo "Directory 'cors-anywhere-master' does not exist."
-  exit 1
-fi
-
 # Install dependencies for potree
 if [ -d "PotreeCopied" ]; then
   echo "Installing dependencies for potree..."
@@ -40,25 +31,12 @@ else
   exit 1
 fi
 
-# Run cors-anywhere
-if [ -d "cors-anywhere-master" ]; then
-  (cd cors-anywhere-master/cors-anywhere-master && node server.js) &
+# Check if running in X11 or Wayland session
+if [ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+    open http://localhost:8081/HelloWorld.html &
 else
-  echo "Directory 'cors-anywhere-master' does not exist."
+    echo "Not running in X11 or Wayland session. Please open http://localhost:8081/HelloWorld.html manually."
 fi
 
 # Run Cesium
-node server.js &
-
-# Check if running in X11 or Wayland session
-if [ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ]; then
-    open http://localhost:8081/Apps/HelloWorld.html &
-else
-    echo "Not running in X11 or Wayland session. Please open http://localhost:8081/Apps/HelloWorld.html manually."
-fi
-
-# Wait for the Enter key to be pressed
-read -p "Press Enter to exit..."
-
-# Clean up and exit
-#cleanup
+node server.js
