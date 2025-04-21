@@ -33,9 +33,9 @@ fi
 
 # Check if running in X11 or Wayland session
 if [ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ]; then
-    open http://localhost:8081/FLEX.html &
+    open http://localhost:8081/index.html &
 else
-    echo "Not running in X11 or Wayland session. Please open http://localhost:8081/FLEX.html manually."
+    echo "Not running in X11 or Wayland session. Please open http://localhost:8081/index.html manually."
 fi
 
 # Run Cesium

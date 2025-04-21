@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="description" content="">
+  <meta name="author" content="">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+
+  <!-- Bootstrap CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.0.0/dist/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
+
+   <!-- Optional JavaScript -->
+    <!-- jQuery first, then Popper.js, then Bootstrap JS -->
+    <script src="https://code.jquery.com/jquery-3.2.1.slim.min.js" integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.12.9/dist/umd/popper.min.js" integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.0.0/dist/js/bootstrap.min.js" integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl" crossorigin="anonymous"></script>
+    <script src="settings.js"></script>
+    <script src="proxy-url-generator.js"></script>
+
+
+  <title>FLEX</title>
+<style>
+      @import url(https://sandcastle.cesium.com/templates/bucket.css);
+
+      #toolbar {
+        background: rgba(42, 42, 42, 0.8);
+        padding: 4px;
+        border-radius: 4px;
+      }
+
+      #toolbar input {
+        vertical-align: middle;
+        padding-top: 2px;
+        padding-bottom: 2px;
+      }
+
+      #toolbar table tr {
+        transform: translateY(0);
+        transition: transform 0.4s ease-out;
+      }
+
+      #toolbar table tr.up {
+        transform: translateY(33px);
+        transition: none;
+      }
+
+      #toolbar table tr.down {
+        transform: translateY(-33px);
+        transition: none;
+      }
+    </style>
+
+  <div class="potree_container" style="position: absolute;  width: 100%; height: 100%; left: 0px; top: 0px; ">
+    
+      <div id="cesiumContainer" class="fullSize">
+        <div id="potree_render_area"style="pointer-events: none"></div>
+      </div>
+      <div id="loadingOverlay"><h1>Loading...</h1></div>
+      <div id="toolbar" style="z-index: 10; ">
+        <p>
+          <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#layersCollapsible" aria-expanded="false" aria-controls="layersCollapsible">
+            Layers
+          </button>
+          <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#pointCloudCollapsible" aria-expanded="false" aria-controls="pointCloudCollapsible">
+            Point Cloud
+          </button>
+          <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#dataCollapsible" aria-expanded="false" aria-controls="dataCollapsible">
+            Data
+          </button>
+          <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#controlsCollapsible" aria-expanded="false" aria-controls="controlsCollapsible">
+            Controls
+          </button>
+         <!--  <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#potree_sidebar_container" aria-expanded="false" aria-controls="potree_sidebar_container">
+            Potree Controls
+          </button> -->
+        </p>
+        <div class="collapse" id="controlsCollapsible">
+          <h2>Key Controls Cheatsheet:</h2>
+          <p>
+            Movement: <br>
+            [F] - Toggle Fly mode<br>
+            [W] - Forwards (Fly mode)<br>
+            [A] - Left (Fly mode)<br>
+            [S] - Backwards (Fly mode)<br>
+            [D] - Right (Fly mode)<br>
+            [Q] - Down (Fly mode)<br>
+            [E] - Up (Fly mode)<br>
+            [Scrollwheel] - Flight speed (Fly mode)<br>
+            <br>
+            Controls: <br>
+            [L] - Toggle viewable LiDAR Datasets<br>
+            [H] - Hide/Show Cesium Earth model (does not control Google model)<br>
+            <br>
+            Labeling: <br>
+            [Z] - Create point of Small interest (does not prompt for name)<br>
+            [X] - Create point of Medium interest (prompts for name)<br>
+            [C] - Create point of Large interest (prompts for name)<br>
+            [V] - Start or end a route (prompts for name)<br>
+            [B] - Add point along a route, if started<br>
+            [K] - Download KMZ file with all labeled points and routes<br>
+            <br>
+            Point Cloud (depends on classification): <br>
+            [1] - Toggle Other Classifications<br>
+            [2] - Toggle Ground<br>
+            [3] - Toggle Vegetation<br>
+            [4] - Toggle Low Noise<br>
+            [5] - Toggle All Points<br>
+            [R] - Remove All Ppont Clouds<br>
+          </p>
+        </div>
+        <div class="collapse" id="layersCollapsible">
+         <table >
+            <tbody>
+              <tr>
+                <td><input type="checkbox" data-bind="checked: showlidar"></td>
+                <td><span>Show Lidar Datasets</span></td>
+                <!-- <td>
+                  <span data-bind="text: name, visible: !$parent.isSelectableLayer($data)"></span>
+                  <select data-bind="visible: $parent.isSelectableLayer($data), options: $parent.baseLayers, optionsText: 'name', value: $parent.selectedLayer"></select>
+                </td> -->
+                <!-- <td>
+                  <input type="range" min="0" max="1" step="0.01" data-bind="value: lidaralpha, valueUpdate: 'input'">
+                </td> -->
+              </tr>
+              <tr>
+                <td><input type="checkbox" data-bind="checked: googleMapsOn"></td>
+                <td><span>Google Maps Model</span></td>
+              </tr>
+            </tbody>
+            <tbody data-bind="foreach: layers">
+              <tr data-bind="css: { up: $parent.upLayer === $data, down: $parent.downLayer === $data }">
+                <td><input type="checkbox" data-bind="checked: show"></td>
+                <td>
+                  <span data-bind="text: name, visible: !$parent.isSelectableLayer($data)"></span>
+                  <select data-bind="visible: $parent.isSelectableLayer($data), options: $parent.baseLayers, optionsText: 'name', value: $parent.selectedLayer"></select>
+                </td>
+                <td>
+                  <input type="range" min="0" max="1" step="0.01" data-bind="value: alpha, valueUpdate: 'input'">
+                </td>
+                <td>
+                  <button type="button" class="cesium-button" data-bind="click: function() { $parent.raise($data, $index()); }, visible: $parent.canRaise($index())">
+                    ▲
+                  </button>
+                </td>
+                <td>
+                  <button type="button" class="cesium-button" data-bind="click: function() { $parent.lower($data, $index()); }, visible: $parent.canLower($index())">
+                    ▼
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        
+        <div class="collapse" id="pointCloudCollapsible">
+          <td><input type="checkbox" data-bind="checked: usgsRef"></td>
+          <td><span>USGS Reference Fix</span></td>
+          <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#pointCloudCollapsible" aria-expanded="false" onclick="addEPT()">
+            Add EPT link manually
+          </button>
+        </div>
+        <div class="collapse" id="dataCollapsible">
+          <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#dataCollapsible" aria-expanded="false" onclick="addKMZ()">
+            Add KMZ file
+          </button>
+        </div>
+        <!-- <div class="collapse" id="potree_sidebar_container"> </div> -->
+        
+
+
+        <div style="display:block;" id="coord_container">
+          <span>Coordinates: </span>
+          <span id="coord_display"></span>
+          <button display:inline;  onclick="copyCoords()">
+            <!-- funny way of rendering a "copy" button from just unicode -->
+            <span style="font-size: .875em; margin-right: .125em; position: relative; top: -.25em; left: -.125em">
+              📄<span style="position: absolute; top: .25em; left: .25em">📄</span>
+            </span>
+          </button>
+         <div id="elev_display"></div>
+        </div>
+      </div>
+  </div>
+
+  <link rel= "stylesheet" type="text/css" href="PotreeCopied/libs/Cesium/Widgets/widgets.css";>
+  <link rel="stylesheet" type="text/css" href="PotreeCopied/build/potree/potree.css">
+  <link rel="stylesheet" type="text/css" href="PotreeCopied/libs/jquery-ui/jquery-ui.min.css">
+  <link rel="stylesheet" type="text/css" href="PotreeCopied/libs/openlayers3/ol.css">
+  <link rel="stylesheet" type="text/css" href="PotreeCopied/libs/spectrum/spectrum.css">
+  <link rel="stylesheet" type="text/css" href="PotreeCopied/libs/jstree/themes/mixed/style.css">
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.122/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <script>      
+    function copyCoords() {
+        // function for copying the displayed camera coordinates to clipboard
+        var copyText = document.getElementById("coord_display").innerText;
+        navigator.clipboard.writeText(copyText);
+        }
+    
+        function addEPT(){ 
+        var link = prompt("EPT link", "example/link/ept.json");
+        var fullLink = ProxyUrlGenerator.generateProxyUrl(link);
+        try {
+            window.addPC(fullLink);
+        } catch (error) {
+            console.error(
+            `There was an error while adding ${fullLink}. ${error}`
+            );
+        }
+        }
+    
+        function addKMZ(){ 
+        var input = document.createElement('input');
+        input.type = 'file';
+    
+        input.onchange = e => { 
+            var file = e.target.files[0]; 
+            cesiumViewer.dataSources.add(Cesium.KmlDataSource.load(file));
+        }
+    
+        input.click();
+        // var link = prompt("KMZ File link", "example/link/file.kmz");
+        // var fullLink = "ProxyUrlGenerator.generateProxyUrl(link);
+        //   try {
+        //    window.addPC(fullLink);
+        //  } catch (error) {
+        //    console.error(
+        //      `There was an error while adding ${fullLink}. ${error}`
+        //    );
+        //  }
+        }
+        </script>
+ </head>
+
+<body>
+  <script src="PotreeCopied/libs/jquery/jquery-3.1.1.min.js"></script>
+  <script src="PotreeCopied/libs/spectrum/spectrum.js"></script>
+  <script src="PotreeCopied/libs/jquery-ui/jquery-ui.min.js"></script>
+  <script src="PotreeCopied/libs/other/BinaryHeap.js"></script>
+  <script src="PotreeCopied/libs/tween/tween.min.js"></script>
+  <script src="PotreeCopied/libs/d3/d3.js"></script>
+  <script src="PotreeCopied/libs/proj4/proj4.js"></script>
+  <script src="PotreeCopied/libs/openlayers3/ol.js"></script>
+  <script src="PotreeCopied/libs/i18next/i18next.js"></script>
+  <script src="PotreeCopied/libs/jstree/jstree.js"></script>
+  <script src="PotreeCopied/build/potree/potree.js"></script>
+  <script src="PotreeCopied/libs/plasio/js/laslaz.js"></script>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.122/Build/Cesium/Cesium.js"></script>
+  
+
+<script type="module" src="flex.js"></script>
+
+</body>
+</html>
