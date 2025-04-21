@@ -31,11 +31,6 @@ You might need to navigate into the PotreeCopied folder inside of that and run n
 npm install
 ```
 
-You'll also have to install npm http-proxy to bypass the CORS restrictions:
-```sh
-npm install http-proxy
-```
-
 You also need to change the Cesium access token to one of your own - navigate to FLEX/Tokens.js and add a Cesium.Ion.defaultAccessToken that you can get from https://cesium.com/. I'd like to untie this from Cesium ION at some point but for now this is the only way I have to get the terrain data. I have removed mine from the code I uploaded because I believe it is only meant for personal use. Also Add your Google Maps API key if you want the Google Maps Model to work.
 
 --- 
