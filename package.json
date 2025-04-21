@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "cesium": "^1.128.0",
     "http-proxy": "^1.18.1"
   }
 }

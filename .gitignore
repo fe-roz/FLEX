@@ -1,2 +1,6 @@
 node_modules/
 Tokens.js
+Tokens.js.example
+FLEX.bat
+FLEX.sh
+user_files/
