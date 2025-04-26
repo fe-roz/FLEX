@@ -118,10 +118,10 @@ window.potreeViewer = new Potree.Viewer(document.getElementById("potree_render_a
   useDefaultRenderLoop: false
 });
 potreeViewer.setEDLEnabled(true);
-potreeViewer.setEDLRadius(1.0); //2.0
-potreeViewer.setEDLStrength(0.2);
+potreeViewer.setEDLRadius(3.5); //2.0
+potreeViewer.setEDLStrength(0.4);
 potreeViewer.setFOV(60);
-potreeViewer.setPointBudget(20_000_000);
+potreeViewer.setPointBudget(10_000_000);
 potreeViewer.classifications = ClassificationScheme;
 // potreeViewer.setMinNodeSize(50);
 potreeViewer.loadSettingsFromURL();
@@ -345,7 +345,7 @@ const imageryLayers = cesiumViewer.imageryLayers;
 const viewModel = {
 showlidar  : false,
 googleMapsOn  : false,
-usgsRef : true,
+usgsRef : false,
 layers: [],
 baseLayers: [],
 upLayer: null,
@@ -612,14 +612,14 @@ e.pointcloud.matrix.set(1, 0, 0, 0,
   let material = e.pointcloud.material;
   
   material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
-  material.size = 0.27;
+  material.size = 0.29;
   material.weightRGB = 0;
   material.weightIntensity = 1;
   material.weightClassification = 1;
   material.intensityRange = [0,65536];
   material.intensityGamma = 3.02;
   material.intensityContrast = 0.71;
-  material.intensityBrightness = 0.35;
+  material.intensityBrightness = 0.45;
 
   material.shape = Potree.PointShape.CIRCLE;
   material.activeAttributeName = "composite"; // composite
@@ -754,21 +754,12 @@ e.pointcloud.matrix.set(1, 0, 0, 0,
 
 }
 if (flags.displayPC){
-window.addPC("http://localhost:8083/GRN3/ept.json");
-//https://ot-process2.sdsc.edu/appEntwineEPTService1710109846278868656237/pc1710109735500
-// window.addPC("https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/entwine/geoid18/9262/ept.json"); // NorCal Kangaroo Mtn, Skorp?
-// window.addPC(ProxyUrlGenerator.generateProxyUrl("https://ot-process2.sdsc.edu/appEntwineEPTService1714692934285-1026035806/pc1714692403090/ept.json")); // LS Bluffs North of the Marbles
-// window.addPC(ProxyUrlGenerator.generateProxyUrl("https://ot-process2.sdsc.edu/appEntwineEPTService1710112615372926451108/pc1710112504574/ept.json"));
-// window.addPC(ProxyUrlGenerator.generateProxyUrl("https://ot-process2.sdsc.edu/appEntwineEPTService1710113099587-473228176/pc1710112958845/ept.json"));
-// window.addPC(ProxyUrlGenerator.generateProxyUrl("https://ot-process2.sdsc.edu/appEntwineEPTService1710109846278868656237/pc1710109735500/ept.json"));
+  // window.addPC("http://localhost:8083/B22_10/A/ept.json");
+// window.addPC("http://localhost:8083/MF/ept.json");
+// window.addPC("http://localhost:8083/KMF/ept.json");
+// window.addPC("http://localhost:8083/KMF2/ept.json");
+// window.addPC("http://localhost:8083/CS/ept.json");
 
-
-//https://ot-process2.sdsc.edu/appEntwineEPTService1710113099587-473228176/pc1710112958845
-//https://ot-process2.sdsc.edu/appEntwineEPTService1710112615372926451108/pc1710112504574
-
-// window.addPC("http://localhost:8083/PC/ept.json");
-// window.addPC("https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/entwine/geoid18/9782/ept.json");
-// window.addPC("http://localhost:8083/T2/ept.json");
 }
 
 
