@@ -23,7 +23,7 @@
       @import url(https://sandcastle.cesium.com/templates/bucket.css);
 
       #toolbar {
-        background: rgba(42, 42, 42, 0.8);
+        background: rgba(42, 42, 42, 0.7);
         padding: 4px;
         border-radius: 4px;
       }
@@ -48,6 +48,88 @@
         transform: translateY(-33px);
         transition: none;
       }
+
+      .collapse {
+        display: none;
+        transition: all 0.3s ease;
+      }
+
+      .collapse.show {
+        display: block;
+      }
+
+      /* Button hover effects */
+      .btn-primary {
+        position: relative;
+        transition: opacity 0.3s ease;
+      }
+
+      .btn-primary:not(:hover) {
+        opacity: 1;
+      }
+
+      .btn-primary:hover {
+        opacity: 1;
+      }
+
+      /* Server Files Styling */
+      .server-files-container {
+        max-height: 300px;
+        overflow-y: auto;
+        padding: 8px;
+      }
+
+      .server-file-item {
+        display: block;
+        padding: 8px;
+        margin: 4px 0;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 4px;
+        color: #fff;
+        text-decoration: none;
+        transition: background-color 0.2s ease;
+      }
+
+      .server-file-item:hover {
+        background: rgba(255, 255, 255, 0.2);
+        color: #fff;
+        text-decoration: none;
+      }
+
+      .server-file-item .file-name {
+        font-weight: 500;
+      }
+
+      .server-file-item .file-info {
+        font-size: 0.8em;
+        opacity: 0.8;
+      }
+
+      .directory-browser {
+        padding: 8px;
+      }
+
+      .directory-section {
+        margin-bottom: 12px;
+      }
+
+      .directory-header {
+        color: #fff;
+        font-weight: 500;
+        padding: 8px;
+        background: rgba(255, 255, 255, 0.15);
+        border-radius: 4px;
+        margin-bottom: 8px;
+      }
+
+      .error-message {
+        color: #ff6b6b;
+        padding: 8px;
+        background: rgba(255, 107, 107, 0.1);
+        border-radius: 4px;
+        margin: 8px 0;
+      }
+
     </style>
 
   <div class="potree_container" style="position: absolute;  width: 100%; height: 100%; left: 0px; top: 0px; ">
@@ -73,7 +155,6 @@
          <!--  <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#potree_sidebar_container" aria-expanded="false" aria-controls="potree_sidebar_container">
             Potree Controls
           </button> -->
-        </p>
         <div class="collapse" id="controlsCollapsible">
           <h2>Key Controls Cheatsheet:</h2>
           <p>
@@ -228,6 +309,37 @@
         //    );
         //  }
         }
+        document.addEventListener('DOMContentLoaded', function() {
+        const buttons = document.querySelectorAll('.btn-primary[data-toggle="collapse"]');
+        
+        buttons.forEach(button => {
+          const targetId = button.getAttribute('data-target');
+          const target = document.querySelector(targetId);
+          
+          // Show content on button hover
+          button.addEventListener('mouseenter', () => {
+            target.classList.add('show');
+          });
+          
+          // Hide content when mouse leaves both button and content
+          let timeout;
+          const hideContent = () => {
+            timeout = setTimeout(() => {
+              if (!target.matches(':hover')) {
+                target.classList.remove('show');
+              }
+            }, 100);
+          };
+          
+          button.addEventListener('mouseleave', hideContent);
+          target.addEventListener('mouseleave', hideContent);
+          
+          // Clear timeout if mouse enters content
+          target.addEventListener('mouseenter', () => {
+            clearTimeout(timeout);
+          });
+        });
+      });
         </script>
  </head>
 

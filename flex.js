@@ -759,7 +759,17 @@ if (flags.displayPC){
 // window.addPC("http://localhost:8083/KMF/ept.json");
 // window.addPC("http://localhost:8083/KMF2/ept.json");
 // window.addPC("http://localhost:8083/CS/ept.json");
-
+//https://ot-process2.sdsc.edu/appEntwineEPTService1710109846278868656237/pc1710109735500
+// window.addPC("https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/entwine/geoid18/9262/ept.json"); // NorCal Kangaroo Mtn, Skorp?
+// window.addPC(ProxyUrlGenerator.generateProxyUrl("https://ot-process2.sdsc.edu/appEntwineEPTService1714692934285-1026035806/pc1714692403090/ept.json")); // LS Bluffs North of the Marbles
+// window.addPC(ProxyUrlGenerator.generateProxyUrl("https://ot-process2.sdsc.edu/appEntwineEPTService1710112615372926451108/pc1710112504574/ept.json"));
+// window.addPC(ProxyUrlGenerator.generateProxyUrl("https://ot-process2.sdsc.edu/appEntwineEPTService1710113099587-473228176/pc1710112958845/ept.json"));
+// window.addPC(ProxyUrlGenerator.generateProxyUrl("https://ot-process2.sdsc.edu/appEntwineEPTService1710109846278868656237/pc1710109735500/ept.json"));
+//https://ot-process2.sdsc.edu/appEntwineEPTService1710113099587-473228176/pc1710112958845
+//https://ot-process2.sdsc.edu/appEntwineEPTService1710112615372926451108/pc1710112504574
+// window.addPC("http://localhost:8083/PC/ept.json");
+// window.addPC("https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/entwine/geoid18/9782/ept.json");
+// window.addPC("http://localhost:8083/T2/ept.json");
 }
 
 
