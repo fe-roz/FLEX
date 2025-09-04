@@ -15,11 +15,104 @@ terrainShadows: Cesium.ShadowMode.DISABLED,
 });
 cesiumViewer.camera.frustum.fov = (90*Cesium.Math.PI)/180;
 
+// Add a floating action button that appears when an entity is selected
+let floatingButton = null;
+
+// Create the floating button once
+function createFloatingButton() {
+  if (floatingButton) return;
+  
+  floatingButton = document.createElement('div');
+  floatingButton.innerHTML = `
+    <button id="floating-action-btn" style="
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: #0078d4; 
+      color: white; 
+      border: none; 
+      padding: 12px 20px; 
+      border-radius: 8px; 
+      cursor: pointer;
+      font-size: 16px;
+      z-index: 9999;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      display: none;
+      transition: all 0.3s ease;
+    ">📊 Add Point Cloud</button>
+  `;
+  
+  // Add click handler
+  const btn = floatingButton.querySelector('#floating-action-btn');
+  if (btn) {
+          btn.onclick = function() {
+        if (cesiumViewer.selectedEntity) {
+
+          const properties = cesiumViewer.selectedEntity.properties;
+          if (properties && properties._url && properties._url._value) {
+            const url = properties._url._value;
+            // console.log('Found URL in properties:', url);
+            window.addPC(url);
+          } else {
+            console.log('No URL found in properties');
+            console.log('Properties object:', properties);
+          }
+        }
+      };
+  }
+  
+  // Add to body
+  document.body.appendChild(floatingButton);
+  console.log('Floating button created');
+}
+
+// Monitor entity selection
+let lastSelectedEntity = null;
+
+setInterval(() => {
+  const currentEntity = cesiumViewer.selectedEntity;
+  
+  // Entity selection changed
+  if (currentEntity !== lastSelectedEntity) {
+    if (currentEntity && !lastSelectedEntity) {
+      // Entity was selected
+      console.log('Entity selected:', currentEntity.id);
+      showFloatingButton();
+    } else if (!currentEntity && lastSelectedEntity) {
+      // Entity was deselected
+      console.log('Entity deselected');
+      hideFloatingButton();
+    }
+    lastSelectedEntity = currentEntity;
+  }
+}, 100);
+
+function showFloatingButton() {
+  if (!floatingButton) {
+    createFloatingButton();
+  }
+  
+  const btn = floatingButton.querySelector('#floating-action-btn');
+  if (btn) {
+    btn.style.display = 'block';
+    btn.style.transform = 'scale(1)';
+    console.log('Floating button shown');
+  }
+}
+
+function hideFloatingButton() {
+  if (floatingButton) {
+    const btn = floatingButton.querySelector('#floating-action-btn');
+    if (btn) {
+      btn.style.display = 'none';
+      btn.style.transform = 'scale(0.8)';
+      console.log('Floating button hidden');
+    }
+  }
+}
 
 // Add fog at the distance so we don't see the other side of the world?
 // Make a way to toggle this map.
-
-
 
 try {
   const tileset = await Cesium.createGooglePhotorealistic3DTileset();
@@ -132,48 +225,14 @@ potreeViewer.setDescription(`
   Potree is active`);
 
 
-// cesiumViewer.dataSources.add(Cesium.GeoJsonDataSource.load(ProxyUrlGenerator.generateProxyUrl('https://feroz.us/routes.geojson')));
 if (flags.displayCave){
   const promise2 = Cesium.GeoJsonDataSource.load(
-    "./llb6.json"
+    "./user_files/yourfile.geojson"
     );
     promise2
       .then(function (dataSource) {
         cesiumViewer.dataSources.add(dataSource);
-        // console.log(dataSource);
 
-        // var entities = dataSource.entities.values;
-        // // console.log(dataSource);
-        //   let maxEl;
-        //   let minEl;
-        //   for (var i = 0; i < entities.length; i++) { //get max and min elevation
-        //     var entity = entities[i];
-        //     var elevation = entity.properties.ELEVATION._value;
-        //     if (i == 0){
-        //       maxEl = elevation;
-        //       minEl = elevation;
-        //     }else{
-        //       if (elevation < minEl){
-        //         minEl = elevation;
-        //       }else if (elevation > maxEl){
-        //         maxEl = elevation;
-        //       }
-        //     }
-        //   }
-        //   // console.log(minEl,maxEl);
-        //   var colorBottom = [0,0.1,1,1];
-        //   var colorTop = [1,0.1,0,1];
-        //   for (var i = 0; i < entities.length; i++) {
-        //     var entity = entities[i];
-        //     var elevation = entity.properties.ELEVATION._value;
-        //     var ep = (elevation-minEl)/(maxEl-minEl);
-        //     var color = [1,0,0,1];
-        //     // for (var i = 0; i < 3; i++) {
-        //     //   color[i] = (ep*colorTop[i] + (1-ep)*colorBottom[i]);
-        //     // }
-        //     entity.polyline.material.color = Cesium.Color.RED;
-        //     // console.log(entity);
-        //   }
 
       })
       .catch(function (error) {
@@ -181,86 +240,8 @@ if (flags.displayCave){
         window.alert(error);
       });
 
-// var promise = Cesium.IonResource.fromAssetId(96794)
-//   .then(function (resource) {
-//     return Cesium.GeoJsonDataSource.load(resource);
-//   })
-//   .then(function (dataSource) {
-//     viewer.dataSources.add(dataSource);
-//     var entities = dataSource.entities.values;
-
-//       var colorHash = {};
-//       for (var i = 0; i < entities.length; i++) {
-//         //For each entity, create a random color based on the state name.
-//         //Some states have multiple entities, so we store the color in a
-//         //hash so that we use the same color for the entire state.
-//         var entity = entities[i];
-//         var name = entity.name;
-//         var color = colorHash[name];
-//         colorHash['Paz'] = Cesium.Color.BLUE;
-//         colorHash['Cara Sucia - San Pedro'] = Cesium.Color.RED;
-//         colorHash['Sirama'] = Cesium.Color.BLUE;
-//         colorHash['Goascorán'] = Cesium.Color.RED;
-//         colorHash['Lempa Alta'] = Cesium.Color.GREEN;
-//         colorHash['Grande de Sonsonate'] = Cesium.Color.YELLOW;
-//         colorHash['Grande de San Miguel'] = Cesium.Color.GREEN;
-//         colorHash['Lempa Media'] = Cesium.Color.YELLOW;
-//         colorHash['Mandinga -  Comalapa'] = Cesium.Color.BLUE;
-//         colorHash['Jíboa'] = Cesium.Color.RED;
-//         colorHash['Bahía de Jiquilisco'] = Cesium.Color.BLUE;
-//         colorHash['Estero de Jaltepeque'] = Cesium.Color.GREEN;
-//         colorHash['Lempa Baja'] = Cesium.Color.YELLOW;
-//         colorHash['Lempa Media'] = Cesium.Color.BLACK; //color doesnt change
-//         entity.polygon.material = color;
-//       }
-  
-//   })
-//   .then(function (dataSource) {
-//     return viewer.zoomTo(dataSource);
-//   })
-//   .otherwise(function (error) {
-//     console.log(error);
-//   });
-
 };
 
-// const displayAPC = 0;
-// if (displayAPC == 1){
-//   const promise3 = Cesium.GeoJsonDataSource.load(
-//       ProxyUrlGenerator.generateProxyUrl(
-//         "https://feroz.us/APC.geojson"
-//       )
-//     );
-//     promise3
-//       .then(function (dataSource) {
-//         cesiumViewer.dataSources.add(dataSource);
-//         // const entities = dataSource.entities.values;
-//         // for (let i = 0; i < entities.length; i++) {
-//         //   //For each entity, create a random color based on the state name.
-//         //   //Some states have multiple entities, so we store the color in a
-//         //   //hash so that we use the same color for the entire state.
-//         //   const entity = entities[i];
-//         //   const colorp = Cesium.Color.AQUA;
-//         //   Cesium.Color.fromAlpha(colorp, 0.5, colorp);
-//         //   entity.polygon.material = colorp;
-//         //   entity.polygon.outline = false;
-//         // }
-
-//       })
-//       .catch(function (error) {
-//         //Display any errrors encountered while loading.
-//         window.alert(error);
-//       });
-// };
-
-// cesiumViewer.dataSources.add(
-//   Cesium.KmlDataSource.load(
-//     ProxyUrlGenerator.generateProxyUrl(
-//       https://feroz.us/Escalante.kml",
-//     )
-//     // options: {clampToGround : true},
-//   )
-// );
 
 Cesium.Math.setRandomNumberSeed(0);
 const promise = Cesium.GeoJsonDataSource.load(
@@ -345,7 +326,7 @@ const imageryLayers = cesiumViewer.imageryLayers;
 const viewModel = {
 showlidar  : false,
 googleMapsOn  : false,
-usgsRef : false,
+usgsRef : true,
 layers: [],
 baseLayers: [],
 upLayer: null,
@@ -756,9 +737,13 @@ e.pointcloud.matrix.set(1, 0, 0, 0,
 if (flags.displayPC){
   // window.addPC("http://localhost:8083/B22_10/A/ept.json");
 // window.addPC("http://localhost:8083/MF/ept.json");
-// window.addPC("http://localhost:8083/KMF/ept.json");
+// window.addPC("http://localhost:8083/KMFA/ept.json");
 // window.addPC("http://localhost:8083/KMF2/ept.json");
 // window.addPC("http://localhost:8083/CS/ept.json");
+// window.addPC("http://localhost:8083/M4/ept.json");
+// window.addPC("http://localhost:8083/2IFG/ept.json");
+// window.addPC("http://localhost:8083/TIFG/ept.json");
+// window.addPC("http://localhost:8083/YM/ept.json");
 //https://ot-process2.sdsc.edu/appEntwineEPTService1710109846278868656237/pc1710109735500
 // window.addPC("https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/entwine/geoid18/9262/ept.json"); // NorCal Kangaroo Mtn, Skorp?
 // window.addPC(ProxyUrlGenerator.generateProxyUrl("https://ot-process2.sdsc.edu/appEntwineEPTService1714692934285-1026035806/pc1714692403090/ept.json")); // LS Bluffs North of the Marbles

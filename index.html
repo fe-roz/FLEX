@@ -51,25 +51,15 @@
 
       .collapse {
         display: none;
-        transition: all 0.3s ease;
       }
 
       .collapse.show {
         display: block;
       }
 
-      /* Button hover effects */
+      /* Button styling */
       .btn-primary {
         position: relative;
-        transition: opacity 0.3s ease;
-      }
-
-      .btn-primary:not(:hover) {
-        opacity: 1;
-      }
-
-      .btn-primary:hover {
-        opacity: 1;
       }
 
       /* Server Files Styling */
@@ -140,18 +130,18 @@
       <div id="loadingOverlay"><h1>Loading...</h1></div>
       <div id="toolbar" style="z-index: 10; ">
         <p>
-          <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#layersCollapsible" aria-expanded="false" aria-controls="layersCollapsible">
-            Layers
-          </button>
-          <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#pointCloudCollapsible" aria-expanded="false" aria-controls="pointCloudCollapsible">
-            Point Cloud
-          </button>
-          <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#dataCollapsible" aria-expanded="false" aria-controls="dataCollapsible">
-            Data
-          </button>
-          <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#controlsCollapsible" aria-expanded="false" aria-controls="controlsCollapsible">
-            Controls
-          </button>
+                     <button class="btn btn-primary" type="button" data-target="#layersCollapsible">
+             Layers
+           </button>
+           <button class="btn btn-primary" type="button" data-target="#pointCloudCollapsible">
+             Point Cloud
+           </button>
+           <button class="btn btn-primary" type="button" data-target="#dataCollapsible">
+             Data
+           </button>
+           <button class="btn btn-primary" type="button" data-target="#controlsCollapsible">
+             Controls
+           </button>
          <!--  <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#potree_sidebar_container" aria-expanded="false" aria-controls="potree_sidebar_container">
             Potree Controls
           </button> -->
@@ -310,33 +300,15 @@
         //  }
         }
         document.addEventListener('DOMContentLoaded', function() {
-        const buttons = document.querySelectorAll('.btn-primary[data-toggle="collapse"]');
+        const buttons = document.querySelectorAll('.btn-primary[data-target]');
         
         buttons.forEach(button => {
           const targetId = button.getAttribute('data-target');
           const target = document.querySelector(targetId);
           
-          // Show content on button hover
-          button.addEventListener('mouseenter', () => {
-            target.classList.add('show');
-          });
-          
-          // Hide content when mouse leaves both button and content
-          let timeout;
-          const hideContent = () => {
-            timeout = setTimeout(() => {
-              if (!target.matches(':hover')) {
-                target.classList.remove('show');
-              }
-            }, 100);
-          };
-          
-          button.addEventListener('mouseleave', hideContent);
-          target.addEventListener('mouseleave', hideContent);
-          
-          // Clear timeout if mouse enters content
-          target.addEventListener('mouseenter', () => {
-            clearTimeout(timeout);
+          // Toggle content on button click instead of hover
+          button.addEventListener('click', () => {
+            target.classList.toggle('show');
           });
         });
       });
