@@ -221,13 +221,12 @@ potreeViewer.loadSettingsFromURL();
 potreeViewer.setBackground(null);
 potreeViewer.useHQ = false;
 // potreeViewer.setLengthUnit('m');
-potreeViewer.setDescription(`
-  Potree is active`);
+potreeViewer.setDescription("");
 
 
 if (flags.displayCave){
   const promise2 = Cesium.GeoJsonDataSource.load(
-    "./user_files/yourfile.geojson"
+    "./user_files/.geojson"
     );
     promise2
       .then(function (dataSource) {
@@ -321,12 +320,350 @@ scene.globe.translucency.frontFaceAlphaByDistance = new Cesium.NearFarScalar(
 );
 scene.globe.translucency.frontFaceAlphaByDistance.nearValue = 0.7;
 scene.globe.translucency.frontFaceAlphaByDistance.farValue = 1;
+let compassRenderer = null;
+let compassOverlayElement = null;
+let compassLabelElement = null;
+let compassScene = null;
+let compassCamera = null;
+let compassGroup = null;
+const compassStyleGroups = {};
+let compassStyleIndex = 2;
+const compassStyles = [
+  "needle-rose",
+  "triad-gizmo",
+  "orbital-rings",
+  "north-beacon"
+];
+const enuFrameScratch = new Cesium.Matrix4();
+const eastWorldScratch = new Cesium.Cartesian3();
+const northWorldScratch = new Cesium.Cartesian3();
+const upWorldScratch = new Cesium.Cartesian3();
+const localNorthScratch = new Cesium.Cartesian3();
+const localUpScratch = new Cesium.Cartesian3();
+const compassNorthAxis = new THREE.Vector3();
+const compassUpAxis = new THREE.Vector3();
+const compassEastAxis = new THREE.Vector3();
+const compassMatrix = new THREE.Matrix4();
+const cardinalPoints = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+const compassSizeByStyle = {
+  "needle-rose": { width: 150, height: 150 },
+  "triad-gizmo": { width: 140, height: 140 },
+  "orbital-rings": { width: 150, height: 150 },
+  "north-beacon": { width: 130, height: 130 }
+};
+
+function normalizeDegrees(value) {
+  let wrapped = value % 360;
+  if (wrapped < 0) {
+    wrapped += 360;
+  }
+  return wrapped;
+}
+
+function getCardinalLabel(angleDegrees) {
+  const index = Math.round(normalizeDegrees(angleDegrees) / 45) % 8;
+  return cardinalPoints[index];
+}
+
+function createNeedleRoseGroup() {
+  const group = new THREE.Group();
+
+  const ringGeometry = new THREE.TorusGeometry(1.5, 0.04, 12, 48);
+  const ringMaterial = new THREE.MeshStandardMaterial({
+    color: 0xdddddd,
+    transparent: true,
+    opacity: 0.85
+  });
+  group.add(new THREE.Mesh(ringGeometry, ringMaterial));
+
+  const shaftGeometry = new THREE.CylinderGeometry(0.05, 0.05, 1.6, 12);
+  const northShaft = new THREE.Mesh(
+    shaftGeometry,
+    new THREE.MeshStandardMaterial({ color: 0xff2b2b })
+  );
+  northShaft.position.y = 0.8;
+  group.add(northShaft);
+
+  const southShaft = new THREE.Mesh(
+    shaftGeometry,
+    new THREE.MeshStandardMaterial({ color: 0x888888 })
+  );
+  southShaft.position.y = -0.8;
+  group.add(southShaft);
+
+  const tipGeometry = new THREE.ConeGeometry(0.14, 0.38, 16);
+  const northTip = new THREE.Mesh(
+    tipGeometry,
+    new THREE.MeshStandardMaterial({ color: 0xff2b2b })
+  );
+  northTip.position.y = 1.74;
+  group.add(northTip);
+
+  const southTip = new THREE.Mesh(
+    tipGeometry,
+    new THREE.MeshStandardMaterial({ color: 0x888888 })
+  );
+  southTip.position.y = -1.74;
+  southTip.rotation.x = Math.PI;
+  group.add(southTip);
+
+  const hub = new THREE.Mesh(
+    new THREE.SphereGeometry(0.12, 14, 12),
+    new THREE.MeshStandardMaterial({ color: 0xffffff })
+  );
+  group.add(hub);
+
+  return group;
+}
+
+function createTriadGizmoGroup() {
+  const group = new THREE.Group();
+  const origin = new THREE.Vector3(0, 0, 0);
+  group.add(new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), origin, 2.0, 0xff2b2b, 0.45, 0.24));
+  group.add(new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), origin, 1.6, 0x4aa3ff, 0.35, 0.2));
+  group.add(new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), origin, 1.6, 0x44dd88, 0.35, 0.2));
+
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(1.45, 0.025, 10, 40),
+    new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 })
+  );
+  group.add(ring);
+
+  return group;
+}
+
+function createOrbitalRingsGroup() {
+  const group = new THREE.Group();
+
+  const sphere = new THREE.Mesh(
+    new THREE.SphereGeometry(0.18, 16, 14),
+    new THREE.MeshStandardMaterial({ color: 0xffffff })
+  );
+  group.add(sphere);
+
+  const ringMain = new THREE.Mesh(
+    new THREE.TorusGeometry(1.35, 0.04, 14, 64),
+    new THREE.MeshStandardMaterial({ color: 0xe5e5e5, transparent: true, opacity: 0.8 })
+  );
+  group.add(ringMain);
+
+  const ringTilt = new THREE.Mesh(
+    new THREE.TorusGeometry(1.0, 0.03, 12, 48),
+    new THREE.MeshStandardMaterial({ color: 0x8fd3ff, transparent: true, opacity: 0.8 })
+  );
+  ringTilt.rotation.x = Math.PI / 2;
+  group.add(ringTilt);
+
+  const northArrow = new THREE.Mesh(
+    new THREE.ConeGeometry(0.16, 0.48, 18),
+    new THREE.MeshStandardMaterial({ color: 0xff2b2b })
+  );
+  northArrow.position.y = 1.72;
+  group.add(northArrow);
+
+  return group;
+}
+
+function createNorthBeaconGroup() {
+  const group = new THREE.Group();
+  const materialRed = new THREE.MeshStandardMaterial({ color: 0xff3a3a });
+  const materialWhite = new THREE.MeshStandardMaterial({ color: 0xffffff });
+
+  const shaft = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.09, 0.09, 2.3, 16),
+    materialWhite
+  );
+  group.add(shaft);
+
+  const northHead = new THREE.Mesh(
+    new THREE.ConeGeometry(0.24, 0.7, 20),
+    materialRed
+  );
+  northHead.position.y = 1.5;
+  group.add(northHead);
+
+  return group;
+}
+
+function applyCompassStyleLayout() {
+  if (!compassOverlayElement || !compassRenderer) {
+    return;
+  }
+
+  const styleName = compassStyles[compassStyleIndex];
+  const size = compassSizeByStyle[styleName] || compassSizeByStyle["needle-rose"];
+  compassOverlayElement.style.width = `${size.width}px`;
+  compassOverlayElement.style.height = `${size.height}px`;
+  compassRenderer.setSize(size.width, size.height, false);
+
+  if (compassCamera) {
+    compassCamera.aspect = size.width / size.height;
+    compassCamera.updateProjectionMatrix();
+  }
+}
+
+function setCompassStyle(styleName) {
+  const nextIndex = compassStyles.indexOf(styleName);
+  if (nextIndex === -1) {
+    console.warn(`Unknown compass style: ${styleName}`);
+    return;
+  }
+  compassStyleIndex = nextIndex;
+  applyCompassStyleLayout();
+  Object.keys(compassStyleGroups).forEach((key) => {
+    compassStyleGroups[key].visible = key === styleName;
+  });
+  if (compassLabelElement) {
+    compassLabelElement.innerText = `Style: ${styleName}`;
+  }
+  console.log(`Compass style: ${styleName}`);
+}
+
+function cycleCompassStyle() {
+  compassStyleIndex = (compassStyleIndex + 1) % compassStyles.length;
+  setCompassStyle(compassStyles[compassStyleIndex]);
+}
+
+function initNorthCompass() {
+  compassOverlayElement = document.getElementById("north_compass_overlay");
+  if (!compassOverlayElement) {
+    console.warn("North compass overlay element was not found.");
+    return;
+  }
+  compassOverlayElement.innerHTML = "";
+
+  compassRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+  compassRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  compassRenderer.setClearColor(0x000000, 0);
+  compassOverlayElement.appendChild(compassRenderer.domElement);
+
+  compassLabelElement = document.createElement("div");
+  compassLabelElement.style.position = "absolute";
+  compassLabelElement.style.left = "0";
+  compassLabelElement.style.top = "-8px";
+  compassLabelElement.style.width = "100%";
+  compassLabelElement.style.textAlign = "center";
+  compassLabelElement.style.font = "11px sans-serif";
+  compassLabelElement.style.lineHeight = "1.15";
+  compassLabelElement.style.color = "#d8d8d8";
+  compassLabelElement.style.textShadow = "0 0 4px rgba(0,0,0,0.85)";
+  compassOverlayElement.appendChild(compassLabelElement);
+
+  compassScene = new THREE.Scene();
+  compassCamera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
+  compassCamera.position.set(0, 0, 6.5);
+  compassCamera.lookAt(0, 0, 0);
+
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
+  const keyLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  keyLight.position.set(4, 5, 6);
+  compassScene.add(ambientLight);
+  compassScene.add(keyLight);
+
+  compassGroup = new THREE.Group();
+  compassStyleGroups["needle-rose"] = createNeedleRoseGroup();
+  compassStyleGroups["triad-gizmo"] = createTriadGizmoGroup();
+  compassStyleGroups["orbital-rings"] = createOrbitalRingsGroup();
+  compassStyleGroups["north-beacon"] = createNorthBeaconGroup();
+  Object.keys(compassStyleGroups).forEach((key) => {
+    compassStyleGroups[key].visible = false;
+    compassGroup.add(compassStyleGroups[key]);
+  });
+  compassScene.add(compassGroup);
+
+  setCompassStyle(compassStyles[compassStyleIndex]);
+  window.setCompassStyle = setCompassStyle;
+  window.cycleCompassStyle = cycleCompassStyle;
+  console.log("Press N to cycle compass styles.");
+}
+
+function updateNorthCompass() {
+  if (!compassRenderer || !compassScene || !compassCamera || !compassGroup) {
+    return;
+  }
+
+  const camera = cesiumViewer.camera;
+  const cameraPosition = camera.positionWC;
+  const cameraDirection = camera.directionWC;
+  const cameraRight = camera.rightWC;
+  const cameraUp = camera.upWC;
+
+  Cesium.Transforms.eastNorthUpToFixedFrame(
+    cameraPosition,
+    ellipsoid,
+    enuFrameScratch
+  );
+
+  northWorldScratch.x = enuFrameScratch[4];
+  northWorldScratch.y = enuFrameScratch[5];
+  northWorldScratch.z = enuFrameScratch[6];
+  Cesium.Cartesian3.normalize(northWorldScratch, northWorldScratch);
+  eastWorldScratch.x = enuFrameScratch[0];
+  eastWorldScratch.y = enuFrameScratch[1];
+  eastWorldScratch.z = enuFrameScratch[2];
+  Cesium.Cartesian3.normalize(eastWorldScratch, eastWorldScratch);
+  upWorldScratch.x = enuFrameScratch[8];
+  upWorldScratch.y = enuFrameScratch[9];
+  upWorldScratch.z = enuFrameScratch[10];
+  Cesium.Cartesian3.normalize(upWorldScratch, upWorldScratch);
+
+  localNorthScratch.x = Cesium.Cartesian3.dot(northWorldScratch, cameraRight);
+  localNorthScratch.y = Cesium.Cartesian3.dot(northWorldScratch, cameraUp);
+  localNorthScratch.z = -Cesium.Cartesian3.dot(northWorldScratch, cameraDirection);
+  localUpScratch.x = Cesium.Cartesian3.dot(upWorldScratch, cameraRight);
+  localUpScratch.y = Cesium.Cartesian3.dot(upWorldScratch, cameraUp);
+  localUpScratch.z = -Cesium.Cartesian3.dot(upWorldScratch, cameraDirection);
+
+  if (
+    Cesium.Cartesian3.magnitudeSquared(localNorthScratch) < 1e-8 ||
+    Cesium.Cartesian3.magnitudeSquared(localUpScratch) < 1e-8
+  ) {
+    return;
+  }
+
+  Cesium.Cartesian3.normalize(localNorthScratch, localNorthScratch);
+  Cesium.Cartesian3.normalize(localUpScratch, localUpScratch);
+
+  compassNorthAxis.set(
+    localNorthScratch.x,
+    localNorthScratch.y,
+    localNorthScratch.z
+  );
+  compassUpAxis.set(
+    localUpScratch.x,
+    localUpScratch.y,
+    localUpScratch.z
+  );
+  compassEastAxis.crossVectors(compassNorthAxis, compassUpAxis);
+  if (compassEastAxis.lengthSq() < 1e-8) {
+    return;
+  }
+  compassEastAxis.normalize();
+  compassNorthAxis.crossVectors(compassUpAxis, compassEastAxis).normalize();
+
+  const styleName = compassStyles[compassStyleIndex];
+  const headingRadians = Math.atan2(
+    Cesium.Cartesian3.dot(cameraDirection, eastWorldScratch),
+    Cesium.Cartesian3.dot(cameraDirection, northWorldScratch)
+  );
+  const headingDegrees = normalizeDegrees((headingRadians * 180) / Math.PI);
+  const upDotDirection = Cesium.Cartesian3.dot(cameraDirection, upWorldScratch);
+  const clampedUpDot = Math.max(-1, Math.min(1, upDotDirection));
+  const inclinationDegrees = (Math.asin(clampedUpDot) * 180) / Math.PI;
+  compassMatrix.makeBasis(compassEastAxis, compassNorthAxis, compassUpAxis);
+  compassGroup.setRotationFromMatrix(compassMatrix);
+  compassRenderer.render(compassScene, compassCamera);
+  compassLabelElement.innerHTML =
+    `${Math.round(headingDegrees)}° ${getCardinalLabel(headingDegrees)}<br>` +
+    `${inclinationDegrees >= 0 ? "+" : ""}${inclinationDegrees.toFixed(1)}°`;
+}
+
 const imageryLayers = cesiumViewer.imageryLayers;
 
 const viewModel = {
 showlidar  : false,
 googleMapsOn  : false,
-usgsRef : true,
+usgsRef : false,
 layers: [],
 baseLayers: [],
 upLayer: null,
@@ -370,132 +707,247 @@ canLower: function (layerIndex) {
 },
 };
 const baseLayers = viewModel.baseLayers;
+const layerCatalog = [];
+let miniMapMap = null;
+let miniMapView = null;
+let miniMapBaseLayer = null;
+let miniMapAttentionLayer = null;
+let miniMapAttentionSource = null;
+let miniMapLabelLayer = null;
+let miniMapLabelSource = null;
+let miniMapCenterLayer = null;
+let miniMapCenterFeature = null;
+let miniMapAttentionEnabled = true;
+let miniMapHoverLabelElement = null;
+let miniMapVisibilityHeight = 15000;
+let miniMapLastSyncTimestamp = 0;
+let miniMapLastCameraPosition = null;
+let miniMapLastHeading = 0;
+let miniMapLastSavedAt = 0;
+let miniMapLastRenderAt = 0;
+let miniMapLastAttentionRenderAt = 0;
+let miniMapLastLabelSyncAt = 0;
+const miniMapLabelEntities = new Map();
+const ATTENTION_STORAGE_KEY = "flex_minimap_attention_v1";
+const ATTENTION_CELL_METERS = 15;
+const ATTENTION_SAVE_INTERVAL_MS = 10000;
+const ATTENTION_MAX_POINTS_RENDER = 320;
+const MINIMAP_RENDER_INTERVAL_MOVING_MS = 120;
+const MINIMAP_RENDER_INTERVAL_IDLE_MS = 420;
+const MINIMAP_ATTENTION_RENDER_INTERVAL_MS = 900;
+const MINIMAP_LABEL_SYNC_INTERVAL_MS = 1400;
+const attentionGrid = {};
+let attentionDirty = false;
+let miniMapCurrentRadiusMeters = 500;
+const ENABLE_MINIMAP_HEATMAP = false;
+
+function proxifyOlSource(source) {
+  if (!source || typeof source.getTileLoadFunction !== "function") {
+    return source;
+  }
+  const defaultTileLoad = source.getTileLoadFunction();
+  source.setTileLoadFunction((tile, src) => {
+    const proxySrc = ProxyUrlGenerator.generateProxyUrl(src);
+    defaultTileLoad(tile, proxySrc || src);
+  });
+  return source;
+}
+
+const miniMapLayerDefs = [
+  {
+    name: "Bing Maps Aerial",
+    createSource: () =>
+      proxifyOlSource(new ol.source.XYZ({
+        url: "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        crossOrigin: "anonymous",
+        maxZoom: 19
+      }))
+  },
+  {
+    name: "OpenStreetMaps",
+    createSource: () => proxifyOlSource(new ol.source.OSM())
+  },
+  {
+    name: "Slope Angle",
+    createSource: () =>
+      proxifyOlSource(new ol.source.XYZ({
+        url: "https://caltopo.com/tile/sg/{z}/{x}/{y}.png",
+        crossOrigin: "anonymous",
+        maxZoom: 18
+      }))
+  },
+  {
+    name: "US Karst Map",
+    createSource: () =>
+      proxifyOlSource(new ol.source.XYZ({
+        url: "https://tiles.arcgis.com/tiles/hoKRg7d6zCP8hwp2/arcgis/rest/services/Carbonate_Karst/MapServer/tile/{z}/{y}/{x}?blankTile=false",
+        crossOrigin: "anonymous",
+        maxZoom: 18
+      }))
+  },
+  {
+    name: "NGMDB Mosaic",
+    createSource: () =>
+      proxifyOlSource(
+        new ol.source.TileArcGISRest({
+          url: "https://ngmdb-tiles.usgs.gov/arcgis/rest/services/mapview/ngmdbMosaic/ImageServer",
+          params: {
+            FORMAT: "jpgpng",
+            F: "image"
+          },
+          crossOrigin: "anonymous"
+        })
+      )
+  }
+];
 
 Cesium.knockout.track(viewModel);
+function buildLayerCatalog() {
+  layerCatalog.splice(0, layerCatalog.length);
+  layerCatalog.push(
+    {
+      name: "Bing Maps Aerial",
+      kind: "base",
+      createProvider: () => Cesium.createWorldImageryAsync()
+    },
+    {
+      name: "Bing Maps Road",
+      kind: "base",
+      createProvider: () =>
+        Cesium.createWorldImageryAsync({
+          style: Cesium.IonWorldImageryStyle.ROAD
+        })
+    },
+    {
+      name: "ArcGIS World Street Maps",
+      kind: "base",
+      createProvider: () =>
+        Cesium.ArcGisMapServerImageryProvider.fromUrl(
+          "https://services.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer"
+        )
+    },
+    {
+      name: "OpenStreetMaps",
+      kind: "base",
+      createProvider: () => new Cesium.OpenStreetMapImageryProvider()
+    },
+    {
+      name: "Stamen Maps",
+      kind: "base",
+      createProvider: () =>
+        new Cesium.OpenStreetMapImageryProvider({
+          url: "https://stamen-tiles.a.ssl.fastly.net/watercolor/",
+          fileExtension: "jpg",
+          credit:
+            "Map tiles by Stamen Design, under CC BY 3.0. Data by OpenStreetMap, under CC BY SA."
+        })
+    },
+    {
+      name: "Natural Earth II (local)",
+      kind: "base",
+      createProvider: () =>
+        Cesium.TileMapServiceImageryProvider.fromUrl(
+          Cesium.buildModuleUrl("Assets/Textures/NaturalEarthII")
+        )
+    },
+    {
+      name: "USGS Shaded Relief (via WMTS)",
+      kind: "base",
+      createProvider: () =>
+        new Cesium.WebMapTileServiceImageryProvider({
+          url:
+            "https://basemap.nationalmap.gov/arcgis/rest/services/USGSShadedReliefOnly/MapServer/WMTS",
+          layer: "USGSShadedReliefOnly",
+          style: "default",
+          format: "image/jpeg",
+          tileMatrixSetID: "default028mm",
+          maximumLevel: 19,
+          credit: "U. S. Geological Survey"
+        })
+    },
+    {
+      name: "Slope Angle",
+      kind: "overlay",
+      alpha: 1.0,
+      show: false,
+      createProvider: () =>
+        new Cesium.UrlTemplateImageryProvider({
+          url: ProxyUrlGenerator.generateProxyUrl(Cesium.buildModuleUrl("https://caltopo.com/tile/sg") + "/{z}/{x}/{y}.png"),
+          tilingScheme: new Cesium.WebMercatorTilingScheme(),
+          maximumLevel: 18
+        })
+    },
+    {
+      name: "US Karst Map",
+      kind: "overlay",
+      alpha: 1.0,
+      show: false,
+      createProvider: () =>
+        new Cesium.UrlTemplateImageryProvider({
+          url: Cesium.buildModuleUrl("https://tiles.arcgis.com/tiles/hoKRg7d6zCP8hwp2/arcgis/rest/services/Carbonate_Karst/MapServer/tile") + "/{z}/{y}/{x}?blankTile=false",
+          tilingScheme: new Cesium.WebMercatorTilingScheme(),
+          maximumLevel: 18
+        })
+    },
+    {
+      name: "OpenTopo datasets",
+      kind: "overlay",
+      alpha: 1.0,
+      show: false,
+      createProvider: () =>
+        new Cesium.UrlTemplateImageryProvider({
+          url: "https://portal.opentopography.org/geoserver/OPENTOPO/wms?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&FORMAT=image%2Fpng&TRANSPARENT=true&STYLES&LAYERS=OPENTOPO%3Adatasets_view&CQL_FILTER=is_global%20%3D%20false&SRS=EPSG%3A4326&WIDTH=256&HEIGHT=256&BBOX={westProjected}%2C{southProjected}%2C{eastProjected}%2C{northProjected}",
+          tilingScheme: new Cesium.GeographicTilingScheme(),
+          enablePickFeatures: false,
+          pickFeaturesUrl: "https://portal.opentopography.org/geoserver/OPENTOPO/wms?0=C&1=Q&2=L&3=_&4=F&5=I&6=L&7=T&8=E&9=R&10=%20&11=%3D&12=%20&13=i&14=s&15=_&16=g&17=l&18=o&19=b&20=a&21=l&22=%20&23=%3D&24=%20&25=f&26=a&27=l&28=s&29=e&service=WMS&version=1.1.1&request=GetFeatureInfo&layers=OPENTOPO%3Adatasets_view&BBOX={westProjected}%2C{southProjected}%2C{eastProjected}%2C{northProjected}&width=256&height=256&srs=EPSG%3A4326&query_layers=OPENTOPO%3Adatasets_view&info_format=application%2Fjson&x={i}&y={j}",
+          maximumLevel: 18
+        })
+    },
+    {
+      name: "NGMDB Mosaic",
+      kind: "overlay",
+      alpha: 1.0,
+      show: false,
+      createProvider: () =>
+        new Cesium.UrlTemplateImageryProvider({
+          url: ProxyUrlGenerator.generateProxyUrl("https://ngmdb-tiles.usgs.gov/arcgis/rest/services/mapview/ngmdbMosaic/ImageServer/exportImage?f=image&bbox={westProjected}%2C{southProjected}%2C{eastProjected}%2C{northProjected}&format=jpgpng&mosaicRule=%7Bascending%3Atrue%7D"),
+          maximumLevel: 15
+        })
+    },
+    {
+      name: "Snow Depth",
+      kind: "overlay",
+      alpha: 1.0,
+      show: false,
+      createProvider: () =>
+        new Cesium.UrlTemplateImageryProvider({
+          url: "https://mapservices.weather.noaa.gov/raster/rest/services/snow/NOHRSC_Snow_Analysis/MapServer/export?bbox={westProjected}%2C{southProjected}%2C{eastProjected}%2C{northProjected}&bboxSR=102100&imageSR=102100&format=png32&transparent=true&layers=show%3A3&f=image",
+          maximumLevel: 15
+        })
+    },
+    {
+      name: "Tile Coordinates",
+      kind: "overlay",
+      alpha: 1.0,
+      show: false,
+      createProvider: () => new Cesium.TileCoordinatesImageryProvider()
+    }
+  );
+}
+
 function setupLayers() {
-addBaseLayerOption(
-  "Bing Maps Aerial",
-  Cesium.createWorldImageryAsync()
-);
-addBaseLayerOption(
-  "Bing Maps Road",
-  Cesium.createWorldImageryAsync({
-    style: Cesium.IonWorldImageryStyle.ROAD,
-  })
-);
-addBaseLayerOption(
-  "ArcGIS World Street Maps",
-  Cesium.ArcGisMapServerImageryProvider.fromUrl(
-    "https://services.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer"
-  )
-);
-addBaseLayerOption(
-  "OpenStreetMaps",
-  new Cesium.OpenStreetMapImageryProvider()
-);
-addBaseLayerOption(
-  "Stamen Maps",
-  new Cesium.OpenStreetMapImageryProvider({
-    url: "https://stamen-tiles.a.ssl.fastly.net/watercolor/",
-    fileExtension: "jpg",
-    credit:
-      "Map tiles by Stamen Design, under CC BY 3.0. Data by OpenStreetMap, under CC BY SA.",
-  })
-);
-addBaseLayerOption(
-  "Natural Earth II (local)",
-  Cesium.TileMapServiceImageryProvider.fromUrl(
-    Cesium.buildModuleUrl("Assets/Textures/NaturalEarthII")
-  )
-);
-addBaseLayerOption(
-  "USGS Shaded Relief (via WMTS)",
-  new Cesium.WebMapTileServiceImageryProvider({
-    url:
-      "https://basemap.nationalmap.gov/arcgis/rest/services/USGSShadedReliefOnly/MapServer/WMTS",
-    layer: "USGSShadedReliefOnly",
-    style: "default",
-    format: "image/jpeg",
-    tileMatrixSetID: "default028mm",
-    maximumLevel: 19,
-    credit: "U. S. Geological Survey",
-  })
-);
-addLayerOption(
-  "Slope Angle",
-  new Cesium.UrlTemplateImageryProvider({
-    url: ProxyUrlGenerator.generateProxyUrl(Cesium.buildModuleUrl('https://caltopo.com/tile/sg') + '/{z}/{x}/{y}.png'),
-    tilingScheme : new Cesium.WebMercatorTilingScheme(),
-    maximumLevel : 18
-  }),
-  1.0,
-  false
-);
-
-addLayerOption(
-  "US Karst Map",
-  new Cesium.UrlTemplateImageryProvider({
-    url: Cesium.buildModuleUrl('https://tiles.arcgis.com/tiles/hoKRg7d6zCP8hwp2/arcgis/rest/services/Carbonate_Karst/MapServer/tile') + '/{z}/{y}/{x}?blankTile=false',
-    tilingScheme : new Cesium.WebMercatorTilingScheme(),
-    maximumLevel : 18
-  }),
-  1.0,
-  false
-);
-
-// addLayerOption(
-//     "OpenTopo-Clickable-ish",
-//     new Cesium.WebMapServiceImageryProvider({
-//     url : 'https://portal.opentopography.org/geoserver/OPENTOPO/wms?',
-//     layers : 'OPENTOPO:datasets_view',
-//     maximumLevel : 18,
-//   }),
-//   1.0,
-//   false
-// );
-
-addLayerOption(
-  "OpenTopo datasets",
-  new Cesium.UrlTemplateImageryProvider({
-  url : 'https://portal.opentopography.org/geoserver/OPENTOPO/wms?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&FORMAT=image%2Fpng&TRANSPARENT=true&STYLES&LAYERS=OPENTOPO%3Adatasets_view&CQL_FILTER=is_global%20%3D%20false&SRS=EPSG%3A4326&WIDTH=256&HEIGHT=256&BBOX={westProjected}%2C{southProjected}%2C{eastProjected}%2C{northProjected}',
-  tilingScheme : new Cesium.GeographicTilingScheme(),
-  enablePickFeatures : false,
-  pickFeaturesUrl : 'https://portal.opentopography.org/geoserver/OPENTOPO/wms?0=C&1=Q&2=L&3=_&4=F&5=I&6=L&7=T&8=E&9=R&10=%20&11=%3D&12=%20&13=i&14=s&15=_&16=g&17=l&18=o&19=b&20=a&21=l&22=%20&23=%3D&24=%20&25=f&26=a&27=l&28=s&29=e&service=WMS&version=1.1.1&request=GetFeatureInfo&layers=OPENTOPO%3Adatasets_view&BBOX={westProjected}%2C{southProjected}%2C{eastProjected}%2C{northProjected}&width=256&height=256&srs=EPSG%3A4326&query_layers=OPENTOPO%3Adatasets_view&info_format=application%2Fjson&x={i}&y={j}',
-  //https://portal.opentopography.org/geoserver/OPENTOPO/wms?0=C&1=Q&2=L&3=_&4=F&5=I&6=L&7=T&8=E&9=R&10=%20&11=%3D&12=%20&13=i&14=s&15=_&16=g&17=l&18=o&19=b&20=a&21=l&22=%20&23=%3D&24=%20&25=f&26=a&27=l&28=s&29=e&service=WMS&version=1.1.1&request=GetFeatureInfo&layers=OPENTOPO%3Adatasets_view&bbox=-116.71875000000001%2C36.5625%2C-115.31250000000001%2C37.96875&width=256&height=256&srs=EPSG%3A4326&query_layers=OPENTOPO%3Adatasets_view&info_format=application%2Fjson&x=20&y=215
-  maximumLevel : 18,
-}),
-1.0,
-false
-);
-
-
-addLayerOption(
-  "NGMDB Mosaic",
-  new Cesium.UrlTemplateImageryProvider({
-  url: ProxyUrlGenerator.generateProxyUrl("https://ngmdb.usgs.gov/arcgis/rest/services/mapview/ngmdbMosaic/ImageServer/exportImage?f=image&bbox={westProjected}%2C{southProjected}%2C{eastProjected}%2C{northProjected}&format=jpgpng&mosaicRule=%7B%22ascending%22%3Atrue%7D"),
-  maximumLevel: 15, 
-  }),
-  1.0,
-  false
-);
-
-// https://mapservices.weather.noaa.gov/raster/rest/services/snow/NOHRSC_Snow_Analysis/MapServer/export?bbox=-13544942.404164584%2C4787689.669480136%2C-13454899.584844613%2C4854113.44705998&bboxSR=102100&imageSR=102100&size=1767%2C1303&dpi=144&format=png32&transparent=true&layers=show%3A3&f=image
-addLayerOption(
-  "Snow Depth",
-  new Cesium.UrlTemplateImageryProvider({
-  url: "https://mapservices.weather.noaa.gov/raster/rest/services/snow/NOHRSC_Snow_Analysis/MapServer/export?bbox={westProjected}%2C{southProjected}%2C{eastProjected}%2C{northProjected}&bboxSR=102100&imageSR=102100&format=png32&transparent=true&layers=show%3A3&f=image",
-  maximumLevel: 15, 
-  }),
-  1.0,
-  false
-);
-
-addLayerOption(
-  "Tile Coordinates",
-  new Cesium.TileCoordinatesImageryProvider(),
-  1.0,
-  false
-);
+  for (const layerDef of layerCatalog) {
+    if (layerDef.kind === "base") {
+      addBaseLayerOption(layerDef.name, layerDef.createProvider());
+    } else {
+      addLayerOption(
+        layerDef.name,
+        layerDef.createProvider(),
+        layerDef.alpha,
+        layerDef.show
+      );
+    }
+  }
 }
 async function addBaseLayerOption(name, imageryProviderPromise) {
 try {
@@ -548,7 +1000,398 @@ for (let i = numLayers - 1; i >= 0; --i) {
 // console.log(cesiumViewer.dataSources);
 }
 
+function loadAttentionGrid() {
+  if (!ENABLE_MINIMAP_HEATMAP) {
+    return;
+  }
+  try {
+    const raw = window.localStorage.getItem(ATTENTION_STORAGE_KEY);
+    if (!raw) {
+      return;
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || !parsed.grid) {
+      return;
+    }
+    Object.assign(attentionGrid, parsed.grid);
+  } catch (error) {
+    console.warn("Unable to load minimap attention data.", error);
+  }
+}
+
+function saveAttentionGrid(force) {
+  if (!ENABLE_MINIMAP_HEATMAP) {
+    return;
+  }
+  const now = Date.now();
+  if (!force && (!attentionDirty || now - miniMapLastSavedAt < ATTENTION_SAVE_INTERVAL_MS)) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      ATTENTION_STORAGE_KEY,
+      JSON.stringify({
+        savedAt: now,
+        grid: attentionGrid
+      })
+    );
+    attentionDirty = false;
+    miniMapLastSavedAt = now;
+  } catch (error) {
+    console.warn("Unable to persist minimap attention data.", error);
+  }
+}
+
+function getAttentionKey(lonDeg, latDeg) {
+  const cellDeg = ATTENTION_CELL_METERS / 111320;
+  const lonKey = Math.round(lonDeg / cellDeg);
+  const latKey = Math.round(latDeg / cellDeg);
+  return `${lonKey},${latKey}`;
+}
+
+function unpackAttentionKey(key) {
+  const parts = key.split(",");
+  const cellDeg = ATTENTION_CELL_METERS / 111320;
+  const lon = Number(parts[0]) * cellDeg;
+  const lat = Number(parts[1]) * cellDeg;
+  return { lon, lat };
+}
+
+function addAttentionAt(lonDeg, latDeg, radiusMeters, amount) {
+  if (!ENABLE_MINIMAP_HEATMAP) {
+    return;
+  }
+  const radiusCells = Math.max(1, Math.ceil(radiusMeters / ATTENTION_CELL_METERS));
+  for (let ix = -radiusCells; ix <= radiusCells; ix++) {
+    for (let iy = -radiusCells; iy <= radiusCells; iy++) {
+      const distanceMeters = Math.hypot(ix * ATTENTION_CELL_METERS, iy * ATTENTION_CELL_METERS);
+      if (distanceMeters > radiusMeters) {
+        continue;
+      }
+      const lon = lonDeg + (ix * ATTENTION_CELL_METERS) / 111320;
+      const lat = latDeg + (iy * ATTENTION_CELL_METERS) / 111320;
+      const key = getAttentionKey(lon, lat);
+      const radialWeight = 1 - distanceMeters / Math.max(radiusMeters, 1);
+      const previous = attentionGrid[key] || 0;
+      attentionGrid[key] = previous + amount * radialWeight;
+    }
+  }
+  attentionDirty = true;
+}
+
+function renderMiniMapAttention(centerLonDeg, centerLatDeg) {
+  if (!ENABLE_MINIMAP_HEATMAP) {
+    return;
+  }
+  if (!miniMapMap || !miniMapAttentionSource) {
+    return;
+  }
+  miniMapAttentionSource.clear();
+  if (!miniMapAttentionEnabled) {
+    return;
+  }
+
+  const maxDistance = Math.max(350, miniMapCurrentRadiusMeters * 1.4);
+  const maxLonDelta = maxDistance / (111320 * Math.max(0.2, Math.cos((centerLatDeg * Math.PI) / 180)));
+  const maxLatDelta = maxDistance / 111320;
+  const entries = [];
+  for (const [key, score] of Object.entries(attentionGrid)) {
+    if (score <= 0) {
+      continue;
+    }
+    const unpacked = unpackAttentionKey(key);
+    if (Math.abs(unpacked.lon - centerLonDeg) > maxLonDelta || Math.abs(unpacked.lat - centerLatDeg) > maxLatDelta) {
+      continue;
+    }
+    entries.push({ ...unpacked, score });
+  }
+  entries.sort((a, b) => b.score - a.score);
+  const visible = entries.slice(0, ATTENTION_MAX_POINTS_RENDER);
+  const peak = visible.length ? visible[0].score : 1;
+  for (const item of visible) {
+    const normalized = Math.min(1, item.score / peak);
+    const feature = new ol.Feature({
+      geometry: new ol.geom.Point(ol.proj.fromLonLat([item.lon, item.lat]))
+    });
+    feature.setStyle(
+      new ol.style.Style({
+        image: new ol.style.Circle({
+          radius: 1.8 + normalized * 4.2,
+          fill: new ol.style.Fill({
+            color: `rgba(255, ${Math.round(220 - normalized * 120)}, 50, ${0.25 + normalized * 0.7})`
+          }),
+          stroke: new ol.style.Stroke({
+            color: "rgba(255,255,255,0.3)",
+            width: 0.5
+          })
+        })
+      })
+    );
+    miniMapAttentionSource.addFeature(feature);
+  }
+}
+
+function initMiniMapLayerControls() {
+  const layerSelect = document.getElementById("mini_map_layer_select");
+  const heatToggle = document.getElementById("mini_map_attention_toggle");
+  const heatToggleLabel = heatToggle ? heatToggle.parentElement : null;
+  miniMapHoverLabelElement = document.getElementById("mini_map_hover_label");
+  if (!layerSelect || !heatToggle) {
+    return;
+  }
+  layerSelect.innerHTML = "";
+  for (const layerDef of miniMapLayerDefs) {
+    const option = document.createElement("option");
+    option.value = layerDef.name;
+    option.innerText = layerDef.name;
+    layerSelect.appendChild(option);
+  }
+  layerSelect.value = "Bing Maps Aerial";
+  layerSelect.addEventListener("change", () => {
+    applyMiniMapLayer(layerSelect.value);
+  });
+  if (!ENABLE_MINIMAP_HEATMAP) {
+    miniMapAttentionEnabled = false;
+    heatToggle.checked = false;
+    if (heatToggleLabel) {
+      heatToggleLabel.style.display = "none";
+    }
+  } else {
+    heatToggle.checked = miniMapAttentionEnabled;
+    heatToggle.addEventListener("change", () => {
+      miniMapAttentionEnabled = heatToggle.checked;
+    });
+  }
+}
+
+async function applyMiniMapLayer(layerName) {
+  if (!miniMapBaseLayer) {
+    return;
+  }
+  const layerDef = miniMapLayerDefs.find((entry) => entry.name === layerName);
+  if (!layerDef) {
+    return;
+  }
+  try {
+    const source = await Promise.resolve(layerDef.createSource());
+    miniMapBaseLayer.setSource(source);
+  } catch (error) {
+    console.error(`Unable to set minimap layer ${layerName}.`, error);
+  }
+}
+
+function syncMiniMapLabels() {
+  if (!miniMapLabelSource) {
+    return;
+  }
+  const mainEntities = cesiumViewer.entities.values;
+  const aliveIds = new Set();
+  for (const entity of mainEntities) {
+    if (!entity || !entity.position || !entity.label || !entity.properties || !entity.properties.isUserLabel) {
+      continue;
+    }
+    aliveIds.add(entity.id);
+    const positionNow = entity.position.getValue(Cesium.JulianDate.now());
+    if (!positionNow) {
+      continue;
+    }
+    const cart = Cesium.Cartographic.fromCartesian(positionNow);
+    const lon = Cesium.Math.toDegrees(cart.longitude);
+    const lat = Cesium.Math.toDegrees(cart.latitude);
+    const labelText = entity.label.text.getValue ? entity.label.text.getValue(Cesium.JulianDate.now()) : entity.label.text;
+    if (!miniMapLabelEntities.has(entity.id)) {
+      const feature = new ol.Feature({
+        geometry: new ol.geom.Point(ol.proj.fromLonLat([lon, lat]))
+      });
+      feature.set("labelText", labelText);
+      feature.setStyle(
+        new ol.style.Style({
+          image: new ol.style.Circle({
+            radius: 3.5,
+            fill: new ol.style.Fill({ color: "rgba(80,220,255,0.95)" }),
+            stroke: new ol.style.Stroke({ color: "rgba(0,0,0,0.9)", width: 1 })
+          })
+        })
+      );
+      miniMapLabelSource.addFeature(feature);
+      miniMapLabelEntities.set(entity.id, feature);
+    } else {
+      const feature = miniMapLabelEntities.get(entity.id);
+      feature.getGeometry().setCoordinates(ol.proj.fromLonLat([lon, lat]));
+      feature.set("labelText", labelText);
+    }
+  }
+  for (const [mainId, feature] of miniMapLabelEntities.entries()) {
+    if (!aliveIds.has(mainId)) {
+      miniMapLabelSource.removeFeature(feature);
+      miniMapLabelEntities.delete(mainId);
+    }
+  }
+}
+
+function initMiniMapHover() {
+  if (!miniMapMap || !miniMapHoverLabelElement) {
+    return;
+  }
+  miniMapMap.on("pointermove", (event) => {
+    const feature = miniMapMap.forEachFeatureAtPixel(event.pixel, (hitFeature) => hitFeature);
+    const foundText = feature ? feature.get("labelText") : "";
+    if (foundText && typeof foundText === "string") {
+      miniMapHoverLabelElement.style.display = "block";
+      miniMapHoverLabelElement.innerText = foundText;
+    } else {
+      miniMapHoverLabelElement.style.display = "none";
+      miniMapHoverLabelElement.innerText = "";
+    }
+  }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+}
+
+function initMiniMap() {
+  const miniMapContainer = document.getElementById("mini_map_canvas");
+  if (!miniMapContainer) {
+    return;
+  }
+
+  miniMapBaseLayer = new ol.layer.Tile({
+    source: new ol.source.OSM()
+  });
+  miniMapAttentionSource = new ol.source.Vector();
+  miniMapAttentionLayer = new ol.layer.Vector({
+    source: miniMapAttentionSource
+  });
+  miniMapLabelSource = new ol.source.Vector();
+  miniMapLabelLayer = new ol.layer.Vector({
+    source: miniMapLabelSource
+  });
+  miniMapCenterFeature = new ol.Feature({
+    geometry: new ol.geom.Point(ol.proj.fromLonLat([0, 0]))
+  });
+  miniMapCenterFeature.setStyle(
+    new ol.style.Style({
+      image: new ol.style.Circle({
+        radius: 4,
+        fill: new ol.style.Fill({ color: "rgba(255,255,255,1)" }),
+        stroke: new ol.style.Stroke({ color: "rgba(0,0,0,0.95)", width: 2 })
+      })
+    })
+  );
+  miniMapCenterLayer = new ol.layer.Vector({
+    source: new ol.source.Vector({
+      features: [miniMapCenterFeature]
+    })
+  });
+  miniMapView = new ol.View({
+    center: ol.proj.fromLonLat([0, 0]),
+    zoom: 13,
+    rotation: 0,
+    constrainRotation: false
+  });
+  miniMapMap = new ol.Map({
+    target: "mini_map_canvas",
+    layers: [miniMapBaseLayer, miniMapAttentionLayer, miniMapLabelLayer, miniMapCenterLayer],
+    view: miniMapView,
+    controls: [],
+    interactions: ol.interaction.defaults({
+      dragPan: false,
+      mouseWheelZoom: false,
+      doubleClickZoom: false,
+      pinchZoom: false,
+      keyboard: false,
+      altShiftDragRotate: false,
+      pinchRotate: false
+    })
+  });
+  initMiniMapLayerControls();
+  initMiniMapHover();
+  applyMiniMapLayer("Bing Maps Aerial");
+}
+
+function sampleHeightAboveGround(positionCartographic) {
+  const groundHeight = scene.globe.getHeight(positionCartographic);
+  if (groundHeight === undefined || Number.isNaN(groundHeight)) {
+    return Math.max(positionCartographic.height, 0);
+  }
+  return positionCartographic.height - groundHeight;
+}
+
+function syncMiniMapFrame(timestampMs, cameraCartographic) {
+  if (!miniMapMap || !miniMapView || !cameraCartographic) {
+    return;
+  }
+
+  const lonDeg = Cesium.Math.toDegrees(cameraCartographic.longitude);
+  const latDeg = Cesium.Math.toDegrees(cameraCartographic.latitude);
+  const heightAboveGround = Math.max(sampleHeightAboveGround(cameraCartographic), 0);
+  const container = document.getElementById("mini_map_container");
+  if (container) {
+    container.style.display = heightAboveGround <= miniMapVisibilityHeight ? "block" : "none";
+  }
+  if (heightAboveGround > miniMapVisibilityHeight) {
+    return;
+  }
+
+  const heading = cesiumViewer.camera.heading;
+  const minimapHeight = Cesium.Math.clamp(heightAboveGround * 4.0 + 600, 800, 30000);
+  miniMapCurrentRadiusMeters = minimapHeight * 0.55;
+
+  let isMoving = false;
+  let headingDelta = 0;
+  if (miniMapLastCameraPosition !== null) {
+    const distanceMoved = Cesium.Cartesian3.distance(cesiumViewer.camera.positionWC, miniMapLastCameraPosition);
+    headingDelta = Math.abs(Cesium.Math.negativePiToPi(heading - miniMapLastHeading));
+    const deltaSeconds = Math.max((timestampMs - miniMapLastSyncTimestamp) / 1000, 0.001);
+    isMoving = distanceMoved > 2 || headingDelta > Cesium.Math.toRadians(1.5);
+    if (isMoving) {
+      const speed = distanceMoved / deltaSeconds;
+      const proximityWeight = 1 / (1 + heightAboveGround / 350);
+      const movementWeight = Math.min(3.5, 0.3 + speed / 18);
+      const attentionAmount = proximityWeight * movementWeight * deltaSeconds;
+      const radiusMeters = Cesium.Math.clamp(heightAboveGround * 0.85 + 20, 20, 900);
+      addAttentionAt(lonDeg, latDeg, radiusMeters, attentionAmount);
+    }
+  }
+
+  const renderIntervalMs = isMoving ? MINIMAP_RENDER_INTERVAL_MOVING_MS : MINIMAP_RENDER_INTERVAL_IDLE_MS;
+  const shouldRenderFrame =
+    timestampMs - miniMapLastRenderAt >= renderIntervalMs ||
+    headingDelta > Cesium.Math.toRadians(0.25);
+  const attentionIntervalMs = isMoving
+    ? MINIMAP_ATTENTION_RENDER_INTERVAL_MS
+    : MINIMAP_ATTENTION_RENDER_INTERVAL_MS * 2;
+  const shouldRenderAttention = timestampMs - miniMapLastAttentionRenderAt >= attentionIntervalMs;
+  const shouldSyncLabels = timestampMs - miniMapLastLabelSyncAt >= MINIMAP_LABEL_SYNC_INTERVAL_MS;
+
+  if (shouldRenderAttention) {
+    renderMiniMapAttention(lonDeg, latDeg);
+    miniMapLastAttentionRenderAt = timestampMs;
+  }
+
+  if (shouldSyncLabels) {
+    syncMiniMapLabels();
+    miniMapLastLabelSyncAt = timestampMs;
+  }
+
+  if (shouldRenderFrame) {
+    const center = ol.proj.fromLonLat([lonDeg, latDeg]);
+    const zoom = Cesium.Math.clamp(17 - Math.log2(Math.max(200, minimapHeight) / 75), 3, 18);
+    miniMapView.setCenter(center);
+    miniMapView.setRotation(-heading);
+    miniMapView.setZoom(zoom);
+    miniMapCenterFeature.getGeometry().setCoordinates(center);
+    miniMapLastRenderAt = timestampMs;
+  }
+
+  saveAttentionGrid(false);
+  miniMapLastCameraPosition = Cesium.Cartesian3.clone(cesiumViewer.camera.positionWC, miniMapLastCameraPosition || new Cesium.Cartesian3());
+  miniMapLastHeading = heading;
+  miniMapLastSyncTimestamp = timestampMs;
+}
+
+buildLayerCatalog();
 setupLayers();
+loadAttentionGrid();
+initMiniMap();
+window.addEventListener("beforeunload", () => saveAttentionGrid(true));
 
 window.addPC = function(url){
 
@@ -735,11 +1578,23 @@ e.pointcloud.matrix.set(1, 0, 0, 0,
 
 }
 if (flags.displayPC){
-  // window.addPC("http://localhost:8083/B22_10/A/ept.json");
-// window.addPC("http://localhost:8083/MF/ept.json");
+  // window.addPC("http://10.3.90.211:8083/MK/ept.json");
+  // window.addPC("http://localhost:8083/marbles/ept.json");
+  // window.addPC("http://localhost:8083/B22_10/D/ept.json");
+// window.addPC("http://localhost:8083/EMK/ept.json");
 // window.addPC("http://localhost:8083/KMFA/ept.json");
-// window.addPC("http://localhost:8083/KMF2/ept.json");
-// window.addPC("http://localhost:8083/CS/ept.json");
+// window.addPC("http://localhost:8083/BC/ept.json");
+// window.addPC("http://localhost:8083/H1/ept.json");
+// window.addPC("http://localhost:8083/H2/ept.json");
+// window.addPC("http://localhost:8083/H3/ept.json");
+// window.addPC("http://localhost:8083/H4/ept.json");
+// window.addPC("http://localhost:8083/H8/ept.json");
+// window.addPC("http://localhost:8083/SFK0/ept.json");
+// window.addPC("http://localhost:8083/SFK1/ept.json");
+// window.addPC("http://localhost:8083/SFK2/ept.json");
+// window.addPC("http://localhost:8083/SFK3/ept.json");
+// window.addPC("http://localhost:8083/SFK4/ept.json");
+// window.addPC("http://localhost:8083/LS/ept.json");
 // window.addPC("http://localhost:8083/M4/ept.json");
 // window.addPC("http://localhost:8083/2IFG/ept.json");
 // window.addPC("http://localhost:8083/TIFG/ept.json");
@@ -955,6 +1810,8 @@ switch (keyCode) {
     return "displayPC";
   case "O".charCodeAt(0):
     return "displayCave";
+  case "N".charCodeAt(0):
+    return "cycleCompassStyle";
   default:
     return undefined;
 }
@@ -1082,6 +1939,8 @@ function (e) {
       flags[flagName] = !flags[flagName];
     }else if (flagName == "displayCave" ){ // Toggle Flags
       flags[flagName] = !flags[flagName];
+    }else if (flagName == "cycleCompassStyle"){
+      cycleCompassStyle();
     }else if (flagName == "toggleOther"){
       flags[flagName] = !flags[flagName];
       potreeViewer.setClassificationVisibility(0,flags[flagName]);
@@ -1129,6 +1988,9 @@ function (e) {
           text: "S".concat(labelName),
         },
         position: cesiumViewer.camera.position,
+        properties: {
+          isUserLabel: true
+        },
         point: {},
       });
     }else if (flagName == "pointM"){ // add entity point where camera is currently located
@@ -1142,6 +2004,9 @@ function (e) {
           text: "M".concat(labelName),
         },
         position: cesiumViewer.camera.position,
+        properties: {
+          isUserLabel: true
+        },
         point: {},
       });
     }else if (flagName == "pointL"){ // add entity point where camera is currently located
@@ -1155,6 +2020,9 @@ function (e) {
           text: "L".concat(labelName),
         },
         position: cesiumViewer.camera.position,
+        properties: {
+          isUserLabel: true
+        },
         point: {},
       });
     }else if (flagName == "route"){ // startor stop recording route. If starting, add route point where camera is currently located.
@@ -1230,7 +2098,7 @@ document.addEventListener(
 "keyup",
 function (e) {
   const flagName = getFlagForKeyCode(e.keyCode);
-  if ((typeof flagName !== "undefined")&&(flagName !== "Fly")&&(flagName !== "TouchFly")&&(flagName !== "hideCesium")&&(flagName !== "showlidar")&&(flagName !== "removePC")&&(flagName !== "toggleOther")&&(flagName !== "toggleGround")&&(flagName !== "toggleVeg")&&(flagName !== "toggleLowNoise")&&(flagName !== "toggleAll")&&(flagName !== "displayPC")&&(flagName !== "displayCave")) {
+  if ((typeof flagName !== "undefined")&&(flagName !== "Fly")&&(flagName !== "TouchFly")&&(flagName !== "hideCesium")&&(flagName !== "showlidar")&&(flagName !== "removePC")&&(flagName !== "toggleOther")&&(flagName !== "toggleGround")&&(flagName !== "toggleVeg")&&(flagName !== "toggleLowNoise")&&(flagName !== "toggleAll")&&(flagName !== "displayPC")&&(flagName !== "displayCave")&&(flagName !== "cycleCompassStyle")) {
     flags[flagName] = false;
   }
 },
@@ -1435,6 +2303,7 @@ function loop(timestamp){
   let coords = cCamLat.toFixed(5) + ", " + cCamLong.toFixed(5);
   document.getElementById("coord_display").innerText = coords;
   document.getElementById("elev_display").innerText = "Height: " + cCamHeight.toFixed(0) + "m";
+  syncMiniMapFrame(timestamp, cCamPosCart);
 
   if(window.toScene !== undefined){
     // do fun proj4 stuff with camera settings
@@ -1502,5 +2371,7 @@ function loop(timestamp){
   }
 
   potreeViewer.render();
+  updateNorthCompass();
 }
+initNorthCompass();
 requestAnimationFrame(loop);

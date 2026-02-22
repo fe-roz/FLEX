@@ -6,9 +6,12 @@ const url = require('url');
 
 const settings = require('./settings');
 
+
 const server = http.createServer((req, res) => {
     const parsedUrl = url.parse(req.url, true);
     const sanitizedPath = sanitizePath(parsedUrl.pathname);
+
+    console.log(`Request: ${req.method} ${parsedUrl.pathname} -> ${sanitizedPath}`);
 
     if (sanitizedPath === '/proxy' && parsedUrl.query.url) {
         handleProxyRequest(req, res, parsedUrl.query.url);
@@ -114,3 +117,4 @@ function getContentType(filePath) {
     // Add more content types as needed
     return 'application/octet-stream'; // Default
 }
+
