@@ -10,6 +10,11 @@ const serverConfig = {
         // Whitelist of domains allowed for proxying
         // Each entry can be a string (exact match) or a regular expression
         whitelist: [
+            '127.0.0.1',
+            'localhost',
+            /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/,
+            /^192\.168\.\d{1,3}\.\d{1,3}$/,
+            /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/,
             'usgs.entwine.io',
             'caltopo.com',
             'ngmdb-tiles.usgs.gov',
@@ -24,6 +29,10 @@ const serverConfig = {
             'ot-process2.sdsc.edu',
             'noaa-nos-coastal-lidar-pds.s3.amazonaws.com',
         ]
+    },
+    backend: {
+        baseUrl: 'http://127.0.0.1:8083',
+        autoLoadCatalog: true
     }
 };
 

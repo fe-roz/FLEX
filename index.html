@@ -196,6 +196,321 @@
         display: none;
       }
 
+      #workflow_panel {
+        position: fixed;
+        top: 16px;
+        right: 290px;
+        width: 340px;
+        max-height: calc(100vh - 32px);
+        overflow-y: auto;
+        z-index: 30;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: rgba(16, 18, 24, 0.88);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: #f2f4f8;
+        font-size: 13px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+        display: none;
+      }
+
+      #workflow_panel h3 {
+        margin: 0 0 8px;
+        font-size: 16px;
+      }
+
+      .workflow_section {
+        margin-bottom: 10px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      }
+
+      .workflow_section:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+        padding-bottom: 0;
+      }
+
+      .workflow_row {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+
+      .workflow_row input,
+      .workflow_row textarea {
+        width: 100%;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        border-radius: 4px;
+        background: rgba(0, 0, 0, 0.2);
+        color: #fff;
+        padding: 6px;
+        font-size: 12px;
+      }
+
+      .workflow_row textarea {
+        min-height: 78px;
+        resize: vertical;
+      }
+
+      .workflow_btn_row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 6px;
+      }
+
+      .workflow_btn_row button {
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 4px;
+        background: rgba(66, 133, 244, 0.22);
+        color: #fff;
+        padding: 5px 8px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      .workflow_btn_row button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .workflow_card {
+        padding: 7px;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.08);
+        margin-top: 6px;
+        white-space: pre-wrap;
+      }
+
+      .wf_status_badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+        line-height: 1.2;
+        margin-left: 6px;
+        border: 1px solid transparent;
+      }
+
+      .wf_status_complete {
+        background: rgba(46, 125, 50, 0.25);
+        border-color: rgba(76, 175, 80, 0.55);
+        color: #b9f6ca;
+      }
+
+      .wf_status_downloading {
+        background: rgba(25, 118, 210, 0.26);
+        border-color: rgba(100, 181, 246, 0.6);
+        color: #bbdefb;
+      }
+
+      .wf_status_paused {
+        background: rgba(245, 124, 0, 0.26);
+        border-color: rgba(255, 183, 77, 0.65);
+        color: #ffe0b2;
+      }
+
+      .wf_status_error {
+        background: rgba(198, 40, 40, 0.28);
+        border-color: rgba(239, 83, 80, 0.65);
+        color: #ffcdd2;
+      }
+
+      .wf_status_default {
+        background: rgba(120, 120, 120, 0.22);
+        border-color: rgba(200, 200, 200, 0.45);
+        color: #eceff1;
+      }
+
+      #workflow_log {
+        max-height: 140px;
+        overflow-y: auto;
+        font-family: monospace;
+        font-size: 11px;
+      }
+
+      #top_quick_controls {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin: 6px 0;
+      }
+
+      #top_server_status_panel {
+        margin-top: 6px;
+        padding: 6px 8px;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.08);
+        color: #fff;
+        font-size: 11px;
+        display: none;
+      }
+
+      #top_draw_status {
+        color: #dce6f2;
+        font-size: 11px;
+        margin-top: 4px;
+      }
+
+      #queue_manager_window {
+        position: fixed;
+        top: 18px;
+        left: 18px;
+        width: min(980px, calc(100vw - 36px));
+        max-height: calc(100vh - 36px);
+        z-index: 35;
+        border-radius: 10px;
+        background: rgba(16, 18, 24, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+        color: #f2f4f8;
+        display: none;
+      }
+
+      #queue_manager_header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 12px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+      }
+
+      #queue_manager_controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 8px 12px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      #queue_manager_controls button {
+        border: 1px solid rgba(255, 255, 255, 0.28);
+        border-radius: 4px;
+        background: rgba(66, 133, 244, 0.22);
+        color: #fff;
+        padding: 5px 8px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      #qm_status {
+        font-size: 12px;
+        color: #c7d7ef;
+        padding: 0 12px 8px;
+      }
+
+      #qm_table_container {
+        max-height: calc(100vh - 170px);
+        overflow: auto;
+        padding: 0 12px 12px;
+      }
+
+      #qm_generation_log {
+        margin: 0 12px 8px;
+        padding: 6px 8px;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.08);
+        color: #dfe8f5;
+        font-size: 11px;
+        max-height: 120px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+      }
+
+      .qm_group_header {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: rgba(32, 36, 45, 0.95);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 6px;
+        margin-top: 10px;
+        padding: 6px 8px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 12px;
+      }
+
+      .qm_group_selected {
+        border-color: rgba(0, 255, 255, 0.9);
+        box-shadow: 0 0 0 2px rgba(0, 255, 255, 0.25) inset;
+      }
+
+      .qm_rows {
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-top: none;
+        border-radius: 0 0 6px 6px;
+      }
+
+      .qm_row {
+        display: grid;
+        grid-template-columns: 2.4fr 1fr 1fr auto;
+        gap: 8px;
+        align-items: center;
+        padding: 8px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        font-size: 12px;
+      }
+
+      .qm_row:first-child {
+        border-top: none;
+      }
+
+      .qm_state_grey {
+        background: rgba(130, 130, 130, 0.12);
+      }
+
+      .qm_state_yellow {
+        background: rgba(255, 193, 7, 0.14);
+      }
+
+      .qm_state_green {
+        background: rgba(76, 175, 80, 0.14);
+      }
+
+      .qm_col_title {
+        font-weight: 600;
+        margin-bottom: 3px;
+      }
+
+      .qm_progress {
+        position: relative;
+        height: 16px;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.12);
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+      }
+
+      .qm_progress_fill {
+        height: 100%;
+        background: rgba(66, 133, 244, 0.55);
+      }
+
+      .qm_progress_label {
+        position: absolute;
+        inset: 0;
+        font-size: 10px;
+        line-height: 14px;
+        text-align: center;
+        color: #fff;
+      }
+
+      .qm_actions button {
+        margin-right: 4px;
+        margin-bottom: 3px;
+        border: 1px solid rgba(255, 255, 255, 0.28);
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.08);
+        color: #fff;
+        font-size: 11px;
+        padding: 3px 6px;
+      }
+
     </style>
 
   <div class="potree_container" style="position: absolute;  width: 100%; height: 100%; left: 0px; top: 0px; ">
@@ -204,6 +519,49 @@
         <div id="potree_render_area"style="pointer-events: none"></div>
       </div>
       <div id="north_compass_overlay"></div>
+      <div id="workflow_panel">
+        <h3>Workflow</h3>
+        <div id="wf_selection_section" class="workflow_section">
+          <div><strong>Selected AOI:</strong> <span id="wf_selected_aoi">None</span></div>
+          <div><strong>Selected Process Area:</strong> <span id="wf_selected_process_area">None</span></div>
+        </div>
+        <div id="wf_aoi_create_section" class="workflow_section" style="display:none;">
+          <div class="workflow_row">
+            <input id="wf_aoi_name" type="text" placeholder="AOI name">
+          </div>
+          <div class="workflow_row">
+            <textarea id="wf_aoi_geojson" placeholder='GeoJSON Polygon, e.g. {"type":"Polygon","coordinates":[[...]]}'></textarea>
+          </div>
+          <div class="workflow_btn_row">
+            <button id="wf_create_aoi_btn">Create AOI</button>
+            <button id="wf_reload_aoi_btn">Reload AOIs</button>
+          </div>
+        </div>
+        <div id="wf_aoi_ops_section" class="workflow_section">
+          <div class="workflow_btn_row">
+            <button id="wf_create_process_areas_btn" disabled>Create / Update Process Areas</button>
+            <button id="wf_show_process_areas_btn" disabled>Show Process Areas</button>
+            <button id="wf_rename_aoi_btn" disabled>Rename AOI</button>
+            <button id="wf_delete_aoi_btn" disabled>Delete AOI</button>
+          </div>
+          <div id="wf_action_status" class="workflow_card">Idle</div>
+        </div>
+        <div id="wf_pa_ops_section" class="workflow_section">
+          <div class="workflow_btn_row">
+            <button id="wf_download_primary_btn" disabled>Start Download</button>
+            <button id="wf_download_toggle_btn" disabled>Pause Download</button>
+            <button id="wf_integrity_btn" disabled>Integrity Check</button>
+            <button id="wf_ept_build_btn" disabled>Process EPT</button>
+          </div>
+          <div id="wf_download_status" class="workflow_card">Download: n/a</div>
+          <div id="wf_integrity_status" class="workflow_card">Integrity: n/a</div>
+          <div id="wf_ept_status" class="workflow_card">EPT: n/a</div>
+        </div>
+        <div id="wf_activity_section" class="workflow_section">
+          <strong>Recent activity</strong>
+          <div id="workflow_log" class="workflow_card">No events yet.</div>
+        </div>
+      </div>
       <div id="mini_map_container">
         <div id="mini_map_canvas"></div>
         <div id="mini_map_controls">
@@ -218,6 +576,20 @@
       <div id="loadingOverlay"><h1>Loading...</h1></div>
       <div id="toolbar" style="z-index: 10; ">
         <p>
+          <button id="top_server_status_btn" class="btn btn-primary" type="button" data-target="#serverCollapsible">Server: checking...</button>
+          <div class="collapse" id="serverCollapsible">
+            <div class="workflow_btn_row" style="margin-top: 6px;">
+              <button id="top_toggle_aois_btn" class="btn btn-primary" type="button">Hide Areas Of Interest</button>
+              <button id="top_draw_aoi_btn" class="btn btn-primary" type="button">Draw AOI</button>
+              <button id="top_upload_aoi_btn" class="btn btn-primary" type="button">Upload AOIs</button>
+              <button id="top_queue_manager_btn" class="btn btn-primary" type="button">Queue Manager</button>
+            </div>
+            <div id="top_draw_status">AOI draw mode inactive.</div>
+            <div id="top_server_status_panel" style="display:block;">
+              <div><strong>Connection:</strong> <span id="sv_connection_status">Checking...</span></div>
+              <div><strong>Tasks:</strong> <span id="sv_task_summary">Loading...</span></div>
+            </div>
+          </div>
                      <button class="btn btn-primary" type="button" data-target="#layersCollapsible">
              Layers
            </button>
@@ -339,6 +711,21 @@
           </button>
          <div id="elev_display"></div>
         </div>
+      </div>
+      <div id="queue_manager_window">
+        <div id="queue_manager_header">
+          <strong>Queue Manager</strong>
+          <button id="qm_close_btn" type="button">Close</button>
+        </div>
+        <div id="queue_manager_controls">
+          <button id="qm_generate_btn" type="button">Generate Missing PAs</button>
+          <button id="qm_start_btn" type="button">Start Auto Queue</button>
+          <button id="qm_stop_btn" type="button">Stop Auto Queue</button>
+          <button id="qm_refresh_btn" type="button">Refresh</button>
+        </div>
+        <div id="qm_status">Queue not loaded.</div>
+        <div id="qm_generation_log">PA generation log: no runs yet.</div>
+        <div id="qm_table_container"></div>
       </div>
   </div>
 
