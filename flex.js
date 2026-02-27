@@ -909,11 +909,8 @@ function styleAoiEntities() {
     entity.polygon.material = isSelected
       ? Cesium.Color.CYAN.withAlpha(0.45)
       : baseColor;
-    entity.polygon.outline = true;
-    entity.polygon.outlineColor = isSelected
-      ? Cesium.Color.CYAN.withAlpha(1.0)
-      : baseOutline;
-    entity.polygon.outlineWidth = isSelected ? 3 : 2;
+    // Avoid Cesium polygon-outline geometry path (can crash on tiny/degenerate edges).
+    entity.polygon.outline = false;
     entity.polygon.heightReference = Cesium.HeightReference.CLAMP_TO_GROUND;
     const hierarchy = entity.polygon.hierarchy && typeof entity.polygon.hierarchy.getValue === "function"
       ? entity.polygon.hierarchy.getValue(now)
@@ -1046,10 +1043,8 @@ function styleProcessAreaEntities() {
     entity.polygon.material = isSelected
       ? Cesium.Color.CYAN.withAlpha(0.5)
       : baseColor;
-    entity.polygon.outline = true;
-    entity.polygon.outlineColor = isSelected
-      ? Cesium.Color.CYAN.withAlpha(1.0)
-      : baseOutline;
+    // Keep fill-based styling only; disable polygon outline to avoid render crash path.
+    entity.polygon.outline = false;
     entity.polygon.heightReference = Cesium.HeightReference.CLAMP_TO_GROUND;
   }
 }
@@ -1998,9 +1993,8 @@ if (window.serverConfig?.backend?.autoLoadCatalog) {
         }
         if (entity.polygon) {
           entity.polygon.material = Cesium.Color.CYAN.withAlpha(0.35);
-          entity.polygon.outline = true;
-          entity.polygon.outlineColor = Cesium.Color.CYAN.withAlpha(0.9);
-          entity.polygon.extrudedHeight = 3000;
+          entity.polygon.outline = false;
+          entity.polygon.extrudedHeight = undefined;
         }
       }
       console.log(`Loaded backend EPT catalog with ${entities.length} feature(s).`);
