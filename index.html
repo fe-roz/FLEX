@@ -576,18 +576,21 @@
       <div id="loadingOverlay"><h1>Loading...</h1></div>
       <div id="toolbar" style="z-index: 10; ">
         <p>
-          <button id="top_server_status_btn" class="btn btn-primary" type="button" data-target="#serverCollapsible">Server: checking...</button>
+          <button id="top_server_status_btn" class="btn btn-primary" type="button" data-target="#serverCollapsible">Connect to LAN Server</button>
           <div class="collapse" id="serverCollapsible">
-            <div class="workflow_btn_row" style="margin-top: 6px;">
-              <button id="top_toggle_aois_btn" class="btn btn-primary" type="button">Hide Areas Of Interest</button>
-              <button id="top_draw_aoi_btn" class="btn btn-primary" type="button">Draw AOI</button>
-              <button id="top_upload_aoi_btn" class="btn btn-primary" type="button">Upload AOIs</button>
-              <button id="top_queue_manager_btn" class="btn btn-primary" type="button">Queue Manager</button>
-            </div>
-            <div id="top_draw_status">AOI draw mode inactive.</div>
-            <div id="top_server_status_panel" style="display:block;">
-              <div><strong>Connection:</strong> <span id="sv_connection_status">Checking...</span></div>
-              <div><strong>Tasks:</strong> <span id="sv_task_summary">Loading...</span></div>
+            <div id="server_connected_controls" style="display:none;">
+              <div class="workflow_btn_row" style="margin-top: 6px;">
+                <button id="top_toggle_aois_btn" class="btn btn-primary" type="button">Hide Areas Of Interest</button>
+                <button id="top_draw_aoi_btn" class="btn btn-primary" type="button">Draw AOI</button>
+                <button id="top_upload_aoi_btn" class="btn btn-primary" type="button">Upload AOIs</button>
+                <button id="top_queue_manager_btn" class="btn btn-primary" type="button">Queue Manager</button>
+              </div>
+              <div id="top_draw_status">AOI draw mode inactive.</div>
+              <div id="top_server_status_panel" style="display:block;">
+                <div><strong>Connection:</strong> <span id="sv_connection_status">Not connected</span></div>
+                <div><strong>Tasks:</strong> <span id="sv_task_summary">—</span></div>
+              </div>
+              <button id="top_server_disconnect_btn" class="btn btn-secondary btn-sm" type="button" style="margin-top: 6px;">Disconnect</button>
             </div>
           </div>
                      <button class="btn btn-primary" type="button" data-target="#layersCollapsible">

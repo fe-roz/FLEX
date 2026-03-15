@@ -2,50 +2,17 @@ import * as THREE from "./PotreeCopied/libs/three.js/build/three.module.js";
 
 import "../Tokens.js";
 
-function getBackendBaseUrl() {
-  if (window.serverConfig && window.serverConfig.backend && window.serverConfig.backend.baseUrl) {
-    return window.serverConfig.backend.baseUrl.replace(/\/$/, "");
-  }
-  return "http://127.0.0.1:8083";
-}
-
-function toAbsoluteUrl(pathOrUrl) {
-  if (!pathOrUrl || typeof pathOrUrl !== "string") {
-    return null;
-  }
-  if (pathOrUrl.startsWith("http://") || pathOrUrl.startsWith("https://")) {
-    return pathOrUrl;
-  }
-  const base = getBackendBaseUrl();
-  return `${base}${pathOrUrl.startsWith("/") ? "" : "/"}${pathOrUrl}`;
-}
-
-const workflowState = {
-  selectedAoiId: null,
-  selectedAoiName: null,
-  selectedProcessAreaId: null,
-  selectedProcessAreaName: null,
-  aoiDataSource: null,
-  processAreaDataSource: null,
-  aoiVisible: true,
-  busy: false,
-  logs: [],
-  pollTimer: null,
-  latestDownloadStatus: null,
-  latestIntegrityStatus: null,
-  latestEptStatus: null,
-  aoiStatusById: {},
-  drawModeActive: false,
-  drawHandler: null,
-  drawPositions: [],
-  drawVertexEntities: [],
-  drawLineEntity: null,
-  drawPolygonEntity: null,
-  serverMonitorTimer: null,
-  queuePanelOpen: false,
-  queuePollTimer: null,
-  latestQueueOverview: null
-};
+import {
+  getBackendBaseUrl,
+  toAbsoluteUrl,
+  workflowState,
+  backendApi,
+  setText,
+  appendWorkflowLog,
+  setWorkflowActionStatus,
+  setWorkflowBusy,
+  registerUpdateWorkflowButtons
+} from "./api.js";
 
 function isAoiGeometry(geometry) {
   if (!geometry || typeof geometry !== "object") {
@@ -364,6 +331,9 @@ function hideProcessAreaLayer() {
 }
 
 async function refreshServerMonitor() {
+  if (!workflowState.serverConnected) {
+    return;
+  }
   const statusEl = document.getElementById("top_server_status_btn");
   const connEl = document.getElementById("sv_connection_status");
   const taskEl = document.getElementById("sv_task_summary");
@@ -410,6 +380,97 @@ async function refreshServerMonitor() {
     ? `EPT: ${eptJob.status} (${eptJob.stage || "n/a"})`
     : `EPT: ${ept && ept.ept_ready ? "Ready" : "n/a"}`;
   taskEl.textContent = `${queueText} | ${dlText} | ${eptText}`;
+}
+
+async function connectToServer() {
+  const statusEl = document.getElementById("top_server_status_btn");
+  const controlsEl = document.getElementById("server_connected_controls");
+  if (statusEl) {
+    statusEl.textContent = "Connecting...";
+    statusEl.style.background = "";
+    statusEl.style.borderColor = "";
+  }
+  try {
+    await backendApi("/api/v1/health");
+  } catch (error) {
+    if (statusEl) {
+      statusEl.textContent = "Server: Offline";
+      statusEl.style.background = "rgba(120, 120, 120, 0.35)";
+      statusEl.style.borderColor = "rgba(170, 170, 170, 0.8)";
+    }
+    appendWorkflowLog(`Could not reach server: ${error.message}`, "error");
+    // Brief delay then reset button so user can retry
+    setTimeout(() => {
+      if (!workflowState.serverConnected && statusEl) {
+        statusEl.textContent = "Connect to LAN Server";
+        statusEl.style.background = "";
+        statusEl.style.borderColor = "";
+      }
+    }, 3000);
+    return;
+  }
+  workflowState.serverConnected = true;
+  if (controlsEl) {
+    controlsEl.style.display = "block";
+  }
+  if (statusEl) {
+    statusEl.textContent = "Server: Online";
+    statusEl.style.background = "rgba(46, 125, 50, 0.35)";
+    statusEl.style.borderColor = "rgba(102, 187, 106, 0.8)";
+  }
+  appendWorkflowLog("Connected to LAN server.");
+
+  // Start the periodic health check
+  if (!workflowState.serverMonitorTimer) {
+    workflowState.serverMonitorTimer = setInterval(() => {
+      refreshServerMonitor().catch(() => {});
+    }, 3000);
+  }
+
+  // Load server data now that we are connected
+  refreshQueueOverview()
+    .then(() => {
+      if (workflowState.latestQueueOverview?.service?.running) {
+        startQueuePolling();
+      }
+    })
+    .catch(() => {});
+  backendApi("/api/v1/queue/generate-missing-pas/last-run")
+    .then((result) => {
+      if ((result?.requested_aois || 0) > 0) {
+        appendWorkflowLog(summarizeQueueGenerationResult(result));
+      }
+    })
+    .catch(() => {});
+  loadAoiCatalogToMap().catch((error) => {
+    appendWorkflowLog(`Failed to load AOI catalog: ${error.message}`, "error");
+  });
+
+  // Load backend EPT catalog
+  if (window.serverConfig?.backend?.autoLoadCatalog) {
+    loadBackendCatalog();
+  }
+}
+
+function disconnectFromServer() {
+  workflowState.serverConnected = false;
+  const statusEl = document.getElementById("top_server_status_btn");
+  const controlsEl = document.getElementById("server_connected_controls");
+  if (workflowState.serverMonitorTimer) {
+    clearInterval(workflowState.serverMonitorTimer);
+    workflowState.serverMonitorTimer = null;
+  }
+  stopWorkflowPolling();
+  stopQueuePolling();
+  if (statusEl) {
+    statusEl.textContent = "Connect to LAN Server";
+    statusEl.style.background = "";
+    statusEl.style.borderColor = "";
+  }
+  if (controlsEl) {
+    controlsEl.style.display = "none";
+  }
+  appendWorkflowLog("Disconnected from LAN server.");
 }
 
 function escapeHtml(value) {
@@ -639,69 +700,6 @@ function getPropertyValue(entity, key) {
   return prop;
 }
 
-async function backendApi(path, options = {}) {
-  const target = toAbsoluteUrl(path);
-  const requestOptions = {
-    method: options.method || "GET",
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {})
-    }
-  };
-  if (options.body !== undefined) {
-    requestOptions.body = JSON.stringify(options.body);
-  }
-  const response = await fetch(target, requestOptions);
-  const responseText = await response.text();
-  let payload = null;
-  if (responseText) {
-    try {
-      payload = JSON.parse(responseText);
-    } catch (error) {
-      payload = { raw: responseText };
-    }
-  }
-  if (!response.ok) {
-    const detail = payload && payload.detail ? payload.detail : `${response.status} ${response.statusText}`;
-    throw new Error(`${path}: ${detail}`);
-  }
-  return payload;
-}
-
-function appendWorkflowLog(message, level = "info") {
-  const timestamp = new Date().toLocaleTimeString();
-  workflowState.logs.unshift(`[${timestamp}] ${level.toUpperCase()} ${message}`);
-  workflowState.logs = workflowState.logs.slice(0, 20);
-  const logEl = document.getElementById("workflow_log");
-  if (logEl) {
-    logEl.textContent = workflowState.logs.join("\n");
-  }
-}
-
-function setWorkflowActionStatus(message, isError = false) {
-  const el = document.getElementById("wf_action_status");
-  if (!el) {
-    return;
-  }
-  el.textContent = message;
-  el.style.background = isError ? "rgba(211, 47, 47, 0.25)" : "rgba(255, 255, 255, 0.08)";
-}
-
-function setWorkflowBusy(busy, message) {
-  workflowState.busy = busy;
-  if (message) {
-    setWorkflowActionStatus(message, false);
-  }
-  updateWorkflowButtons();
-}
-
-function setText(id, value) {
-  const el = document.getElementById(id);
-  if (el) {
-    el.textContent = value;
-  }
-}
-
 function updateWorkflowSelectionLabels() {
   setText("wf_selected_aoi", workflowState.selectedAoiName || "None");
   setText("wf_selected_process_area", workflowState.selectedProcessAreaName || "None");
@@ -755,6 +753,10 @@ function updateWorkflowButtons() {
     eptBtn.textContent = eptReady ? "EPT Ready" : "Process EPT";
   }
 }
+
+// Register updateWorkflowButtons so the shared api module can call it
+// from setWorkflowBusy without a circular import.
+registerUpdateWorkflowButtons(updateWorkflowButtons);
 
 function formatDownloadStatus(status) {
   if (!status) {
@@ -1631,25 +1633,21 @@ function initWorkflowPanel() {
   updateStatusCards();
   updateWorkflowButtons();
   updateWorkflowPanelVisibility();
-  refreshServerMonitor().catch(() => {});
-  refreshQueueOverview()
-    .then(() => {
-      if (workflowState.latestQueueOverview?.service?.running) {
-        startQueuePolling();
+
+  // Server connection is manual — user clicks "Connect to LAN Server"
+  const serverBtn = document.getElementById("top_server_status_btn");
+  if (serverBtn) {
+    serverBtn.addEventListener("click", () => {
+      if (!workflowState.serverConnected) {
+        connectToServer();
       }
-    })
-    .catch(() => {});
-  backendApi("/api/v1/queue/generate-missing-pas/last-run")
-    .then((result) => {
-      if ((result?.requested_aois || 0) > 0) {
-        appendWorkflowLog(summarizeQueueGenerationResult(result));
-      }
-    })
-    .catch(() => {});
-  if (!workflowState.serverMonitorTimer) {
-    workflowState.serverMonitorTimer = setInterval(() => {
-      refreshServerMonitor().catch(() => {});
-    }, 3000);
+    });
+  }
+  const disconnectBtn = document.getElementById("top_server_disconnect_btn");
+  if (disconnectBtn) {
+    disconnectBtn.addEventListener("click", () => {
+      disconnectFromServer();
+    });
   }
 }
 
@@ -1971,7 +1969,7 @@ promise
     window.alert(error);
   });
 
-if (window.serverConfig?.backend?.autoLoadCatalog) {
+function loadBackendCatalog() {
   const backendCatalogUrl = `${getBackendBaseUrl()}/api/v1/catalog/ept_datasets.geojson`;
   const backendCatalogPromise = Cesium.GeoJsonDataSource.load(backendCatalogUrl);
   backendCatalogPromise
@@ -3124,9 +3122,6 @@ window.addEventListener("beforeunload", () => {
   stopAoiDrawMode("AOI draw mode ended.");
 });
 initWorkflowPanel();
-loadAoiCatalogToMap().catch((error) => {
-  appendWorkflowLog(`Failed to load AOI catalog: ${error.message}`, "error");
-});
 
 window.addPC = function(url){
 
