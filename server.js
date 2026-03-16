@@ -13,8 +13,13 @@ const server = http.createServer((req, res) => {
 
     console.log(`Request: ${req.method} ${parsedUrl.pathname} -> ${sanitizedPath}`);
 
-    if (sanitizedPath === '/proxy' && parsedUrl.query.url) {
-        handleProxyRequest(req, res, parsedUrl.query.url);
+    if (sanitizedPath === '/proxy') {
+        // Extract the target URL from the query string.  The url= value
+        // may itself contain & characters so we cannot rely on standard
+        // query-string parsing.  Instead, take everything after "url=".
+        const rawQuery = parsedUrl.query.url
+            || (req.url.includes('?url=') ? decodeURIComponent(req.url.split('?url=')[1]) : null);
+        handleProxyRequest(req, res, rawQuery);
     } else {
         handleFileRequest(req, res, sanitizedPath);
     }
@@ -70,12 +75,27 @@ function handleProxyRequest(req, res, targetUrl) {
         return;
     }
 
+    // Only forward safe headers — drop origin, referer, cookie, and
+    // connection-management headers that can confuse the upstream server
+    // or cause the proxy to hang on keep-alive mismatches.
+    const forwardHeaders = { host: parsedTargetUrl.hostname };
+    const skipHeaders = new Set([
+        'host', 'origin', 'referer', 'cookie', 'connection',
+        'upgrade', 'proxy-connection', 'keep-alive',
+        'transfer-encoding', 'te'
+    ]);
+    for (const [key, value] of Object.entries(req.headers)) {
+        if (!skipHeaders.has(key.toLowerCase())) {
+            forwardHeaders[key] = value;
+        }
+    }
+
     const options = {
         hostname: parsedTargetUrl.hostname,
         port: parsedTargetUrl.port || (parsedTargetUrl.protocol === 'https:' ? 443 : 80),
         path: parsedTargetUrl.path,
         method: req.method,
-        headers: { ...req.headers, host: parsedTargetUrl.hostname }
+        headers: forwardHeaders
     };
 
     const proxyReq = (parsedTargetUrl.protocol === 'https:' ? https : http).request(options, (proxyRes) => {

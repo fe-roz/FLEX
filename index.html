@@ -602,12 +602,50 @@
            <button class="btn btn-primary" type="button" data-target="#dataCollapsible">
              Data
            </button>
+           <button class="btn btn-primary" type="button" data-target="#incidenceCollapsible">
+             Incidence Angle
+           </button>
            <button class="btn btn-primary" type="button" data-target="#controlsCollapsible">
              Controls
            </button>
          <!--  <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#potree_sidebar_container" aria-expanded="false" aria-controls="potree_sidebar_container">
             Potree Controls
           </button> -->
+        <div class="collapse" id="incidenceCollapsible">
+          <div style="padding: 8px;">
+            <label><input type="checkbox" id="incidence_toggle"> Show Incidence Lines</label><br>
+            <label style="margin-top: 4px; display: block;">
+              Length: <input type="range" id="incidence_length" min="0.5" max="50" step="0.5" value="2" style="width: 120px; vertical-align: middle;">
+              <span id="incidence_length_label">2m</span>
+            </label>
+            <label style="margin-top: 4px; display: block;">
+              Radius: <input type="range" id="incidence_radius" min="0.01" max="0.5" step="0.01" value="0.05" style="width: 120px; vertical-align: middle;">
+              <span id="incidence_radius_label">0.05m</span>
+            </label>
+            <label style="margin-top: 4px; display: block;">
+              Max: <input type="range" id="incidence_max_points" min="1000" max="100000" step="1000" value="20000" style="width: 120px; vertical-align: middle;">
+              <span id="incidence_max_points_label">20k</span>
+            </label>
+            <label style="margin-top: 4px; display: block;">
+              Color:
+              <select id="incidence_color_mode">
+                <option value="angle">Scan Angle</option>
+                <option value="flightline" selected>Flight Line</option>
+              </select>
+            </label>
+            <button id="incidence_flip" class="btn btn-sm btn-secondary" style="margin-top: 6px;">Flip Angles</button>
+            <div style="margin-top: 6px;">
+              <strong>Show classes:</strong><br>
+              <label><input type="checkbox" id="incidence_cls_2"> Ground (2)</label><br>
+              <label><input type="checkbox" id="incidence_cls_3"> Low Veg (3)</label><br>
+              <label><input type="checkbox" id="incidence_cls_4"> Med Veg (4)</label><br>
+              <label><input type="checkbox" id="incidence_cls_5"> High Veg (5)</label><br>
+              <label><input type="checkbox" id="incidence_cls_6"> Building (6)</label><br>
+              <label><input type="checkbox" id="incidence_cls_7" checked> Low Noise (7)</label><br>
+              <label><input type="checkbox" id="incidence_cls_other"> Other / Unclassified</label>
+            </div>
+          </div>
+        </div>
         <div class="collapse" id="controlsCollapsible">
           <h2>Key Controls Cheatsheet:</h2>
           <p>

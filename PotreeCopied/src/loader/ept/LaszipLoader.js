@@ -120,6 +120,7 @@ export class EptLazBatcher {
 			let returnNumbers = new Uint8Array(e.data.returnNumber);
 			let numberOfReturns = new Uint8Array(e.data.numberOfReturns);
 			let pointSourceIDs = new Uint16Array(e.data.pointSourceID);
+			let scanAngles = new Float32Array(e.data.scanAngle);
 			let indices = new Uint8Array(e.data.indices);
 			let gpsTime = new Float32Array(e.data.gpsTime);
 
@@ -137,6 +138,9 @@ export class EptLazBatcher {
 					new THREE.BufferAttribute(numberOfReturns, 1));
 			g.setAttribute('source id',
 					new THREE.BufferAttribute(pointSourceIDs, 1));
+			// FLEX: scan angle rank for angle of incidence visualization
+			g.setAttribute('scan angle',
+					new THREE.BufferAttribute(scanAngles, 1));
 			g.setAttribute('indices',
 					new THREE.BufferAttribute(indices, 4));
 			g.setAttribute('gpsTime',

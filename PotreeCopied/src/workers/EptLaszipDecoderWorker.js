@@ -40,6 +40,7 @@ function readUsingDataView(event) {
 	let psBuff = new ArrayBuffer(numPoints * 2);
 	let gpsBuff64 = new ArrayBuffer(numPoints * 8);
 	let gpsBuff32 = new ArrayBuffer(numPoints * 4);
+	let saBuff = new ArrayBuffer(numPoints * 4); // FLEX: scan angle rank
 
 	let positions = new Float32Array(pBuff);
 	let colors = new Uint8Array(cBuff);
@@ -50,6 +51,7 @@ function readUsingDataView(event) {
 	let pointSourceIDs = new Uint16Array(psBuff);
 	let gpsTime64 = new Float64Array(gpsBuff64)
 	let gpsTime32 = new Float32Array(gpsBuff32)
+	let scanAngles = new Float32Array(saBuff) // FLEX: scan angle rank
 
 	// Point format 3 contains an 8-byte GpsTime before RGB values, so make
 	// sure we have the correct color offset.
@@ -111,6 +113,14 @@ function readUsingDataView(event) {
 		let classification = sourceView.getUint8(i * pointSize + 15, true);
 		classifications[i] = classification;
 
+		// SCAN ANGLE RANK (signed int8 at byte 16 for formats 0-5,
+		// signed int16 at byte 16 for formats 6-10 scaled by 0.006)
+		if (pointFormat <= 5) {
+			scanAngles[i] = sourceView.getInt8(i * pointSize + 16);
+		} else {
+			scanAngles[i] = sourceView.getInt16(i * pointSize + 16, true) * 0.006;
+		}
+
 		// POINT SOURCE ID
 		let pointSourceID = sourceView.getUint16(i * pointSize + 18, true);
 		pointSourceIDs[i] = pointSourceID;
@@ -132,6 +142,11 @@ function readUsingDataView(event) {
 			colors[4 * i + 2] = b;
 			colors[4 * i + 3] = 255;
 		}
+
+		// GPS TIME (Float64 at format-specific offset)
+		if (gpsOffset !== null) {
+			gpsTime64[i] = sourceView.getFloat64(i * pointSize + gpsOffset, true);
+		}
 	}
 
 	let min = Infinity
@@ -143,7 +158,7 @@ function readUsingDataView(event) {
 	}
 
 	for (let i = 0; i < numPoints; i++) {
-		gpsTime32[i] = gpsTime64[i] = min
+		gpsTime32[i] = gpsTime64[i] - min
 	}
 
 	let indices = new ArrayBuffer(numPoints * 4);
@@ -173,6 +188,7 @@ function readUsingDataView(event) {
 		returnNumber: rnBuff,
 		numberOfReturns: nrBuff,
 		pointSourceID: psBuff,
+		scanAngle: saBuff,
 		tightBoundingBox: tightBoundingBox,
 		indices: indices,
 		gpsTime: gpsBuff32,
@@ -187,6 +203,7 @@ function readUsingDataView(event) {
 		message.returnNumber,
 		message.numberOfReturns,
 		message.pointSourceID,
+		message.scanAngle,
 		message.indices,
 		message.gpsTime
 	];
