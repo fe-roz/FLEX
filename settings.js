@@ -31,7 +31,7 @@ const serverConfig = {
         ]
     },
     backend: {
-        baseUrl: 'http://127.0.0.1:8083',
+        baseUrl: 'http://10.3.90.211:8083',
         autoLoadCatalog: true
     }
 };

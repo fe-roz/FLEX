@@ -137,27 +137,69 @@
 
       #mini_map_container {
         position: fixed;
-        right: 18px;
-        bottom: 18px;
+        /* left/top set by JS */
         width: 260px;
-        height: 260px;
+        height: 285px; /* 25px titlebar + 260px map */
         border-radius: 10px;
         overflow: hidden;
         z-index: 21;
         background: rgba(8, 10, 14, 0.7);
         box-shadow: 0 8px 18px rgba(0, 0, 0, 0.35);
         border: 1px solid rgba(255, 255, 255, 0.35);
+        min-width: 160px;
+        min-height: 135px;
+        user-select: none;
+      }
+
+      #mini_map_titlebar {
+        position: absolute;
+        top: 0; left: 0; right: 0;
+        height: 25px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 6px;
+        background: rgba(22, 25, 35, 0.92);
+        border-bottom: 1px solid rgba(255,255,255,0.15);
+        cursor: grab;
+        z-index: 3;
+      }
+
+      #mini_map_titlebar:active {
+        cursor: grabbing;
+      }
+
+      #mini_map_title_text {
+        font-size: 11px;
+        color: rgba(255,255,255,0.7);
+        pointer-events: none;
+      }
+
+      #mini_map_close_btn {
+        background: none;
+        border: none;
+        color: rgba(255,255,255,0.55);
+        font-size: 14px;
+        line-height: 1;
+        cursor: pointer;
+        padding: 0 2px;
+        border-radius: 3px;
+      }
+
+      #mini_map_close_btn:hover {
+        color: #fff;
+        background: rgba(255,255,255,0.15);
       }
 
       #mini_map_canvas {
         position: absolute;
-        inset: 0;
+        top: 25px; left: 0; right: 0; bottom: 0;
       }
 
       #mini_map_controls {
         position: absolute;
         left: 6px;
-        top: 6px;
+        top: 31px; /* 25px titlebar + 6px padding */
         right: 6px;
         display: flex;
         gap: 6px;
@@ -195,6 +237,58 @@
         pointer-events: none;
         display: none;
       }
+
+      /* HTML screen-space label overlay */
+      #html_label_container {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 20;
+        overflow: hidden;
+      }
+
+      .html-label {
+        position: absolute;
+        transform: translate(-50%, calc(-100% - 8px)); /* sit 8px above the dot */
+        pointer-events: none;
+        white-space: nowrap;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 13px;
+        font-weight: 600;
+        color: #fff;
+        text-shadow: 0 0 4px #000, 0 0 8px #000;
+        background: rgba(0,0,0,0.45);
+        border: 1px solid rgba(255,255,255,0.25);
+      }
+
+      /* Dot marker at the exact projected point position */
+      .html-label::after {
+        content: '';
+        position: absolute;
+        bottom: -14px; /* 6px gap below label + 8px to center the 8px dot at screenPos.y */
+        left: 50%;
+        transform: translateX(-50%);
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.95);
+        border: 2px solid rgba(0, 0, 0, 0.75);
+        box-shadow: 0 0 5px rgba(0, 0, 0, 0.6);
+      }
+
+      .mini_map_resize {
+        position: absolute;
+        width: 14px;
+        height: 14px;
+        z-index: 4;
+        background: radial-gradient(circle, rgba(255,255,255,0.3) 1.5px, transparent 1.5px);
+        background-size: 4px 4px;
+      }
+      .mini_map_resize[data-corner="nw"] { top:0;    left:0;  cursor: nwse-resize; background-position: top left; }
+      .mini_map_resize[data-corner="ne"] { top:0;    right:0; cursor: nesw-resize; background-position: top right; }
+      .mini_map_resize[data-corner="sw"] { bottom:0; left:0;  cursor: nesw-resize; background-position: bottom left; }
+      .mini_map_resize[data-corner="se"] { bottom:0; right:0; cursor: nwse-resize; background-position: bottom right; }
 
       #workflow_panel {
         position: fixed;
@@ -563,6 +657,10 @@
         </div>
       </div>
       <div id="mini_map_container">
+        <div id="mini_map_titlebar">
+          <span id="mini_map_title_text">Minimap</span>
+          <button id="mini_map_close_btn" title="Close (M)">✕</button>
+        </div>
         <div id="mini_map_canvas"></div>
         <div id="mini_map_controls">
           <select id="mini_map_layer_select"></select>
@@ -572,11 +670,22 @@
           </label>
         </div>
         <div id="mini_map_hover_label"></div>
+        <div class="mini_map_resize" data-corner="nw"></div>
+        <div class="mini_map_resize" data-corner="ne"></div>
+        <div class="mini_map_resize" data-corner="sw"></div>
+        <div class="mini_map_resize" data-corner="se"></div>
       </div>
+      <div id="html_label_container"></div>
       <div id="loadingOverlay"><h1>Loading...</h1></div>
       <div id="toolbar" style="z-index: 10; ">
         <p>
           <button id="top_server_status_btn" class="btn btn-primary" type="button" data-target="#serverCollapsible">Connect to LAN Server</button>
+          <button id="session_save_btn" class="btn btn-sm btn-secondary" type="button"
+            onclick="window._sessionSave && window._sessionSave()"
+            title="Save session (camera, layers, point clouds)"
+            style="font-size:11px; padding:2px 8px; margin-left:4px;">💾 Save</button>
+          <span id="session_save_indicator"
+            style="font-size:10px; color:#aaffaa; display:none; margin-left:4px; vertical-align:middle;"></span>
           <div class="collapse" id="serverCollapsible">
             <div id="server_connected_controls" style="display:none;">
               <div class="workflow_btn_row" style="margin-top: 6px;">
@@ -607,6 +716,9 @@
            </button>
            <button class="btn btn-primary" type="button" data-target="#controlsCollapsible">
              Controls
+           </button>
+           <button class="btn btn-primary" type="button" data-target="#caltopoCollapsible">
+             CalTopo
            </button>
          <!--  <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#potree_sidebar_container" aria-expanded="false" aria-controls="potree_sidebar_container">
             Potree Controls
@@ -663,14 +775,20 @@
             [L] - Toggle viewable LiDAR Datasets<br>
             [H] - Hide/Show Cesium Earth model (does not control Google model)<br>
             [N] - Cycle compass style<br>
+            [M] - Toggle minimap<br>
             <br>
             Labeling: <br>
+            <label style="display:inline-flex;align-items:center;gap:6px;margin-bottom:4px;">
+              <input type="checkbox" id="html_labels_toggle" checked>
+              HTML labels (always visible over point clouds)
+            </label><br>
             [Z] - Create point of Small interest (does not prompt for name)<br>
             [X] - Create point of Medium interest (prompts for name)<br>
             [C] - Create point of Large interest (prompts for name)<br>
-            [V] - Start or end a route (prompts for name)<br>
+            [R] - Start or end a route (prompts for name)<br>
             [B] - Add point along a route, if started<br>
             [K] - Download KMZ file with all labeled points and routes<br>
+            [V] - Toggle depth/distance measurement from current position<br>
             <br>
             Point Cloud (depends on classification): <br>
             [1] - Toggle Other Classifications<br>
@@ -678,7 +796,7 @@
             [3] - Toggle Vegetation<br>
             [4] - Toggle Low Noise<br>
             [5] - Toggle All Points<br>
-            [R] - Remove All Ppont Clouds<br>
+            [0] - Remove All Point Clouds<br>
           </p>
         </div>
         <div class="collapse" id="layersCollapsible">
@@ -737,6 +855,66 @@
             Add KMZ file
           </button>
         </div>
+
+        <div class="collapse" id="caltopoCollapsible">
+          <div style="padding:8px 4px; display:flex; flex-direction:column; gap:6px;">
+
+            <!-- Bookmarklet login -->
+            <div id="caltopo_login_section" style="display:flex; flex-direction:column; gap:5px;">
+              <div style="font-size:10px; opacity:0.6; line-height:1.6;">
+                <b style="opacity:1;">Step 1</b> — drag to bookmarks bar (once):<br>
+                <a id="caltopo_bookmarklet_link" href="#"
+                  style="display:inline-block; margin:3px 0; padding:3px 10px;
+                         background:rgba(255,160,0,0.18); color:#fca;
+                         border:1px solid rgba(255,160,0,0.5); border-radius:4px;
+                         font-size:11px; font-weight:bold; text-decoration:none;
+                         cursor:grab; user-select:none;"
+                  title="Drag to bookmarks bar">
+                  📎 Link FLEX to CalTopo
+                </a><br>
+                <b style="opacity:1;">Step 2</b> — log into CalTopo in any tab, then click the bookmark.
+              </div>
+            </div>
+            <!-- Active session row -->
+            <div id="caltopo_loggedin_section"
+              style="display:none; align-items:center; gap:8px; font-size:11px; color:#8f8;">
+              <span>✓ CalTopo session active</span>
+              <button onclick="window._caltopoLogout()"
+                class="btn btn-sm btn-secondary"
+                style="font-size:10px; padding:1px 6px;">Disconnect</button>
+            </div>
+
+            <hr style="border-color:rgba(255,255,255,0.15); margin:2px 0;">
+
+            <div style="font-size:11px; opacity:0.65; margin-bottom:2px;">KML Network Link</div>
+            <input id="caltopo_url_input" type="text"
+              placeholder="caltopo.com/m/XXXXX  or bare map ID"
+              style="font-size:11px; padding:3px 6px; width:100%; box-sizing:border-box;
+                     background:#1a1a2e; color:#fff;
+                     border:1px solid rgba(255,255,255,0.3); border-radius:4px;">
+            <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+              <label style="font-size:11px; opacity:0.8; margin:0;">Refresh:</label>
+              <select id="caltopo_interval_select"
+                style="font-size:11px; background:#1a1a2e; color:#fff;
+                       border:1px solid rgba(255,255,255,0.3); border-radius:4px; padding:2px 4px;">
+                <option value="0">Off (manual)</option>
+                <option value="10">10 s</option>
+                <option value="30" selected>30 s</option>
+                <option value="60">1 min</option>
+                <option value="300">5 min</option>
+              </select>
+              <button onclick="window._loadCaltopo()"
+                class="btn btn-sm btn-primary"
+                style="font-size:11px; padding:2px 8px;">Load</button>
+              <button onclick="window._clearCaltopo()"
+                class="btn btn-sm btn-secondary"
+                style="font-size:11px; padding:2px 8px;">Clear</button>
+            </div>
+            <span id="caltopo_status" style="font-size:10px; color:#8f8; min-height:14px;"></span>
+
+          </div>
+        </div>
+
         <!-- <div class="collapse" id="potree_sidebar_container"> </div> -->
         
 

@@ -15,6 +15,10 @@ import {
 } from "./api.js";
 
 import { viewModel, loadLayers, updateLayerList } from "./layers.js";
+import {
+  initSession, notifyPcLoaded, notifyCaltopoChanged, saveSession, loadSession,
+  restoreCamera, restoreLayerState, onCameraFrame,
+} from "./session.js";
 
 function isAoiGeometry(geometry) {
   if (!geometry || typeof geometry !== "object") {
@@ -1666,6 +1670,10 @@ terrainShadows: Cesium.ShadowMode.DISABLED,
 });
 cesiumViewer.camera.frustum.fov = (90*Cesium.Math.PI)/180;
 
+// Restore camera from last session immediately (before anything else moves the camera)
+const _savedSession = loadSession();
+if (_savedSession) restoreCamera(_savedSession, cesiumViewer);
+
 // Cesium's InfoBox uses a sandboxed iframe that blocks scripts by default.
 // Remove the sandbox entirely so entity description HTML renders correctly.
 const infoBoxFrame = cesiumViewer.infoBox?.frame;
@@ -1904,12 +1912,12 @@ potreeViewer.setDescription("");
 
 if (flags.displayCave){
   const promise2 = Cesium.GeoJsonDataSource.load(
-    "./user_files/.geojson"
+    "./user_files/caves_v2.geojson",
+    { clampToGround: false } 
     );
     promise2
       .then(function (dataSource) {
         cesiumViewer.dataSources.add(dataSource);
-
 
       })
       .catch(function (error) {
@@ -2395,11 +2403,14 @@ let miniMapAttentionLayer = null;
 let miniMapAttentionSource = null;
 let miniMapLabelLayer = null;
 let miniMapLabelSource = null;
+let miniMapCaltopoSource = null;
+let miniMapCaltopoLayer = null;
 let miniMapCenterLayer = null;
 let miniMapCenterFeature = null;
 let miniMapAttentionEnabled = true;
 let miniMapHoverLabelElement = null;
 let miniMapVisibilityHeight = 15000;
+let miniMapUserHidden = false;
 let miniMapLastSyncTimestamp = 0;
 let miniMapLastCameraPosition = null;
 let miniMapLastHeading = 0;
@@ -2710,6 +2721,94 @@ function syncMiniMapLabels() {
   }
 }
 
+/**
+ * Populate the CalTopo minimap layer from a freshly-loaded Cesium KmlDataSource.
+ * Called after every successful KML fetch.  Handles Points, Polylines, and Polygons.
+ */
+function syncMinimapCaltopoFeatures(ds) {
+  if (!miniMapCaltopoSource || !ds) return;
+  miniMapCaltopoSource.clear();
+
+  const now = Cesium.JulianDate.now();
+
+  // Shared styles
+  const pointStyle = new ol.style.Style({
+    image: new ol.style.Circle({
+      radius: 5,
+      fill:   new ol.style.Fill({ color: 'rgba(255,160,0,0.9)' }),
+      stroke: new ol.style.Stroke({ color: '#fff', width: 1.5 }),
+    }),
+    text: new ol.style.Text({
+      offsetY: -12,
+      font:    'bold 11px sans-serif',
+      fill:    new ol.style.Fill({ color: '#fff' }),
+      stroke:  new ol.style.Stroke({ color: 'rgba(0,0,0,0.7)', width: 3 }),
+    }),
+  });
+
+  const lineStyle = new ol.style.Style({
+    stroke: new ol.style.Stroke({ color: 'rgba(255,160,0,0.9)', width: 2 }),
+  });
+
+  const polyStyle = new ol.style.Style({
+    stroke: new ol.style.Stroke({ color: 'rgba(255,160,0,0.9)', width: 2 }),
+    fill:   new ol.style.Fill({ color: 'rgba(255,160,0,0.15)' }),
+  });
+
+  function cartToLonLat(c3) {
+    const c = Cesium.Cartographic.fromCartesian(c3);
+    return [Cesium.Math.toDegrees(c.longitude), Cesium.Math.toDegrees(c.latitude)];
+  }
+
+  for (const entity of ds.entities.values) {
+    try {
+      // ── Point / Billboard ──────────────────────────────────────────────────
+      if (entity.position) {
+        const pos = entity.position.getValue(now);
+        if (!pos) continue;
+        const ll = cartToLonLat(pos);
+        if (!isFinite(ll[0]) || !isFinite(ll[1])) continue;
+        const feat = new ol.Feature({ geometry: new ol.geom.Point(ol.proj.fromLonLat(ll)) });
+        const name = entity.name || '';
+        // Clone style so we can set per-feature text
+        const st = pointStyle.clone();
+        if (name) st.getText().setText(name);
+        feat.setStyle(st);
+        feat.set('caltopoName', name);
+        miniMapCaltopoSource.addFeature(feat);
+      }
+      // ── Polyline ───────────────────────────────────────────────────────────
+      else if (entity.polyline) {
+        const positions = entity.polyline.positions?.getValue(now);
+        if (!positions || positions.length < 2) continue;
+        const coords = positions.map(cartToLonLat).filter(ll => isFinite(ll[0]));
+        if (coords.length < 2) continue;
+        const feat = new ol.Feature({
+          geometry: new ol.geom.LineString(coords.map(ll => ol.proj.fromLonLat(ll)))
+        });
+        feat.setStyle(lineStyle);
+        if (entity.name) feat.set('caltopoName', entity.name);
+        miniMapCaltopoSource.addFeature(feat);
+      }
+      // ── Polygon ────────────────────────────────────────────────────────────
+      else if (entity.polygon) {
+        const hierarchy = entity.polygon.hierarchy?.getValue(now);
+        if (!hierarchy?.positions) continue;
+        const ring = hierarchy.positions.map(cartToLonLat).filter(ll => isFinite(ll[0]));
+        if (ring.length < 3) continue;
+        const feat = new ol.Feature({
+          geometry: new ol.geom.Polygon([ring.map(ll => ol.proj.fromLonLat(ll))])
+        });
+        feat.setStyle(polyStyle);
+        if (entity.name) feat.set('caltopoName', entity.name);
+        miniMapCaltopoSource.addFeature(feat);
+      }
+    } catch (err) {
+      // Skip malformed entities silently
+    }
+  }
+}
+
 function initMiniMapHover() {
   if (!miniMapMap || !miniMapHoverLabelElement) {
     return;
@@ -2744,6 +2843,10 @@ function initMiniMap() {
   miniMapLabelLayer = new ol.layer.Vector({
     source: miniMapLabelSource
   });
+  miniMapCaltopoSource = new ol.source.Vector();
+  miniMapCaltopoLayer = new ol.layer.Vector({
+    source: miniMapCaltopoSource
+  });
   miniMapCenterFeature = new ol.Feature({
     geometry: new ol.geom.Point(ol.proj.fromLonLat([0, 0]))
   });
@@ -2769,7 +2872,7 @@ function initMiniMap() {
   });
   miniMapMap = new ol.Map({
     target: "mini_map_canvas",
-    layers: [miniMapBaseLayer, miniMapAttentionLayer, miniMapLabelLayer, miniMapCenterLayer],
+    layers: [miniMapBaseLayer, miniMapAttentionLayer, miniMapCaltopoLayer, miniMapLabelLayer, miniMapCenterLayer],
     view: miniMapView,
     controls: [],
     interactions: ol.interaction.defaults({
@@ -2785,6 +2888,123 @@ function initMiniMap() {
   initMiniMapLayerControls();
   initMiniMapHover();
   applyMiniMapLayer("Bing Maps Aerial");
+  initMiniMapWindow();
+}
+
+function initMiniMapWindow() {
+  const STORAGE_KEY = 'flex_minimap_window_v2';
+  const container = document.getElementById('mini_map_container');
+  const titlebar  = document.getElementById('mini_map_titlebar');
+  const closeBtn  = document.getElementById('mini_map_close_btn');
+  if (!container || !titlebar) return;
+
+  const MIN_W = 160, MIN_H = 135;
+
+  // Default position: bottom-right corner
+  function defaultGeometry() {
+    return {
+      left:   window.innerWidth  - 18 - 260,
+      top:    window.innerHeight - 18 - 285,
+      width:  260,
+      height: 285,
+    };
+  }
+
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch(_) {}
+  let geo = Object.assign(defaultGeometry(), saved || {});
+
+  function applyGeometry(g) {
+    const vw = window.innerWidth, vh = window.innerHeight;
+    g.width  = Math.max(MIN_W, Math.min(g.width,  vw - 10));
+    g.height = Math.max(MIN_H, Math.min(g.height, vh - 10));
+    g.left   = Math.max(0, Math.min(g.left, vw - g.width));
+    g.top    = Math.max(0, Math.min(g.top,  vh - g.height));
+    container.style.left   = g.left   + 'px';
+    container.style.top    = g.top    + 'px';
+    container.style.width  = g.width  + 'px';
+    container.style.height = g.height + 'px';
+    container.style.right  = '';
+    container.style.bottom = '';
+    geo = { left: g.left, top: g.top, width: g.width, height: g.height };
+    if (miniMapMap) miniMapMap.updateSize();
+  }
+
+  function saveGeometry() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(geo)); } catch(_) {}
+  }
+
+  applyGeometry(geo);
+
+  // --- Drag (titlebar) ---
+  titlebar.addEventListener('mousedown', (e) => {
+    if (e.target === closeBtn) return;
+    e.preventDefault();
+    const startX = e.clientX, startY = e.clientY;
+    const startLeft = geo.left, startTop = geo.top;
+    function onMove(e) {
+      applyGeometry({ ...geo, left: startLeft + (e.clientX - startX), top: startTop + (e.clientY - startY) });
+    }
+    function onUp() {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      saveGeometry();
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+
+  // --- Resize (4 corners) ---
+  // Each corner encodes which edges move via data-corner: nw / ne / sw / se
+  container.querySelectorAll('.mini_map_resize').forEach(handle => {
+    handle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const corner   = handle.dataset.corner; // 'nw','ne','sw','se'
+      const startX   = e.clientX, startY = e.clientY;
+      const startGeo = { ...geo };
+
+      function onMove(e) {
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        const g = { ...startGeo };
+
+        // Horizontal: 'w' side moves left edge, 'e' side moves right edge
+        if (corner.includes('w')) {
+          g.left  = startGeo.left  + dx;
+          g.width = startGeo.width - dx;
+        } else {
+          g.width = startGeo.width + dx;
+        }
+
+        // Vertical: 'n' side moves top edge, 's' side moves bottom edge
+        if (corner.includes('n')) {
+          g.top    = startGeo.top    + dy;
+          g.height = startGeo.height - dy;
+        } else {
+          g.height = startGeo.height + dy;
+        }
+
+        applyGeometry(g);
+      }
+      function onUp() {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        saveGeometry();
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  });
+
+  // --- Close button ---
+  closeBtn.addEventListener('click', () => {
+    miniMapUserHidden = true;
+    container.style.display = 'none';
+  });
+
+  // Re-clamp if browser window resizes
+  window.addEventListener('resize', () => applyGeometry({ ...geo }));
 }
 
 function sampleHeightAboveGround(positionCartographic) {
@@ -2804,10 +3024,11 @@ function syncMiniMapFrame(timestampMs, cameraCartographic) {
   const latDeg = Cesium.Math.toDegrees(cameraCartographic.latitude);
   const heightAboveGround = Math.max(sampleHeightAboveGround(cameraCartographic), 0);
   const container = document.getElementById("mini_map_container");
+  const showMiniMap = !miniMapUserHidden && heightAboveGround <= miniMapVisibilityHeight;
   if (container) {
-    container.style.display = heightAboveGround <= miniMapVisibilityHeight ? "block" : "none";
+    container.style.display = showMiniMap ? "block" : "none";
   }
-  if (heightAboveGround > miniMapVisibilityHeight) {
+  if (!showMiniMap) {
     return;
   }
 
@@ -2869,10 +3090,62 @@ function syncMiniMapFrame(timestampMs, cameraCartographic) {
 }
 
 Cesium.knockout.track(viewModel);
-loadLayers().catch((error) => console.error("Layer loading error:", error));
+const _layersReady = loadLayers().catch((error) => console.error("Layer loading error:", error));
 loadAttentionGrid();
 initMiniMap();
+
+// Init session system (wires auto-save triggers, exposes window._sessionSave)
+initSession(cesiumViewer, viewModel);
+
+// Restore layer state once all providers have resolved
+_layersReady.then(() => {
+  if (_savedSession) restoreLayerState(_savedSession, viewModel);
+  // Subscribe overlay show/alpha changes to trigger saves
+  viewModel.layers.forEach(layer => {
+    if (!viewModel.isSelectableLayer(layer)) {
+      Cesium.knockout.getObservable(layer, 'show').subscribe(() => saveSession());
+      Cesium.knockout.getObservable(layer, 'alpha').subscribe(() => saveSession());
+    }
+  });
+  // Subscribe viewModel settings that should persist
+  Cesium.knockout.getObservable(viewModel, 'usgsRef').subscribe(() => saveSession());
+});
+
+// Restore saved state after full init (addPC interceptor and CalTopo fns are defined below this point)
+setTimeout(() => {
+  if (_savedSession?.pointClouds?.length) {
+    showPcRestorePrompt(_savedSession.pointClouds);
+  }
+  // Check if server still has an active CalTopo session
+  fetch('/caltopo/status').then(r => r.json()).then(data => {
+    if (data.loggedIn) _showCaltopoLoggedIn();
+  }).catch(() => {});
+
+  // Poll for bookmarklet login (updates UI within 3s of clicking bookmark)
+  setInterval(() => {
+    const loginSection = document.getElementById('caltopo_login_section');
+    if (!loginSection || loginSection.style.display === 'none') return;
+    fetch('/caltopo/status').then(r => r.json()).then(data => {
+      if (data.loggedIn) {
+        _showCaltopoLoggedIn();
+        if (caltopoState.url) _fetchCaltopoKml();
+      }
+    }).catch(() => {});
+  }, 3000);
+
+  // Auto-restore CalTopo KML (no prompt — it's a live feed, should just resume)
+  if (_savedSession?.caltopoUrl) {
+    const input = document.getElementById('caltopo_url_input');
+    const sel   = document.getElementById('caltopo_interval_select');
+    if (input) input.value = _savedSession.caltopoUrl;
+    if (sel && _savedSession.caltopoInterval != null) {
+      sel.value = String(_savedSession.caltopoInterval);
+    }
+    loadCaltopoKml(_savedSession.caltopoUrl, _savedSession.caltopoInterval ?? 30);
+  }
+}, 0);
 window.addEventListener("beforeunload", () => {
+  saveSession();
   saveAttentionGrid(true);
   stopWorkflowPolling();
   if (workflowState.serverMonitorTimer) {
@@ -3102,8 +3375,203 @@ if (flags.displayPC){
 // window.addPC("http://localhost:8083/T2/ept.json");
 }
 
+// Intercept addPC to track loaded URLs for session persistence
+const _origAddPC = window.addPC;
+window.addPC = function(url) {
+  notifyPcLoaded(url);
+  return _origAddPC(url);
+};
+
+// Show a dismissible banner prompting to restore saved point clouds
+function showPcRestorePrompt(urls) {
+  const toolbar = document.getElementById('toolbar');
+  if (!toolbar) return;
+  const n = urls.length;
+  const banner = document.createElement('div');
+  banner.id = 'session_pc_prompt';
+  banner.className = 'alert alert-info alert-dismissible';
+  banner.style.cssText = 'font-size:12px; padding:6px 12px; margin:4px 0 0; display:flex; align-items:center; gap:8px;';
+  banner.innerHTML = `
+    <span>Restore ${n} point cloud${n > 1 ? 's' : ''} from last session?</span>
+    <button id="session_pc_yes" class="btn btn-sm btn-primary" style="padding:1px 8px; font-size:11px;">Yes</button>
+    <button id="session_pc_no"  class="btn btn-sm btn-secondary" style="padding:1px 8px; font-size:11px;">No</button>
+  `;
+  toolbar.prepend(banner);
+  document.getElementById('session_pc_yes').addEventListener('click', () => {
+    urls.forEach(url => window.addPC(url));
+    banner.remove();
+  });
+  document.getElementById('session_pc_no').addEventListener('click', () => banner.remove());
+}
 
 
+// ── CalTopo KML Network Link ──────────────────────────────────────────────────
+
+const caltopoState = {
+  url:        null,
+  interval:   30,
+  dataSource: null,
+  pollTimer:  null,
+};
+
+/** Normalize various CalTopo URL forms → the canonical ?format=kml data URL, or null.
+ *  Accepted forms:
+ *    https://caltopo.com/m/UUQ119H
+ *    https://caltopo.com/m/UUQ119H?format=kml   (already correct)
+ *    UUQ119H                                     (bare map ID)
+ */
+function _normalizeCaltopoUrl(raw) {
+  const trimmed = (raw || '').trim();
+  if (!trimmed) return null;
+  // Bare map ID — alphanumeric, 3-10 chars
+  if (/^[A-Za-z0-9]{3,10}$/.test(trimmed)) {
+    return `https://caltopo.com/m/${trimmed}?format=kml`;
+  }
+  // Any caltopo.com/m/ID form (with or without ?format=kml)
+  const match = trimmed.match(/caltopo\.com\/m\/([A-Za-z0-9]+)/i);
+  if (match) {
+    return `https://caltopo.com/m/${match[1]}?format=kml`;
+  }
+  return null;
+}
+
+function _setCaltopoStatus(msg, color) {
+  const el = document.getElementById('caltopo_status');
+  if (el) { el.textContent = msg; el.style.color = color || '#ccc'; }
+}
+
+async function _fetchCaltopoKml() {
+  if (!caltopoState.url) return;
+  const proxiedUrl = ProxyUrlGenerator.generateProxyUrl(caltopoState.url);
+  try {
+    _setCaltopoStatus('updating…', '#aaa');
+    const ds = await Cesium.KmlDataSource.load(proxiedUrl, {
+      camera:        cesiumViewer.scene.camera,
+      canvas:        cesiumViewer.scene.canvas,
+      clampToGround: true,
+    });
+    if (caltopoState.dataSource) {
+      cesiumViewer.dataSources.remove(caltopoState.dataSource, true);
+    }
+    ds.name = 'CalTopo';
+    cesiumViewer.dataSources.add(ds);
+    caltopoState.dataSource = ds;
+    syncMinimapCaltopoFeatures(ds);
+    const t = new Date().toLocaleTimeString();
+    _setCaltopoStatus(`✓ loaded ${t}`, '#8f8');
+  } catch (e) {
+    console.warn('[caltopo] load failed:', e);
+    _setCaltopoStatus('⚠ load failed — check URL/proxy', '#f88');
+  }
+}
+
+async function loadCaltopoKml(rawUrl, intervalSecs) {
+  const kmlUrl = _normalizeCaltopoUrl(rawUrl);
+  if (!kmlUrl) {
+    _setCaltopoStatus('⚠ invalid CalTopo URL', '#f88');
+    return;
+  }
+  _clearCaltopoTimers();
+  caltopoState.url      = kmlUrl;
+  caltopoState.interval = intervalSecs;
+
+  await _fetchCaltopoKml();
+
+  if (intervalSecs > 0) {
+    caltopoState.pollTimer = setInterval(_fetchCaltopoKml, intervalSecs * 1000);
+  }
+
+  notifyCaltopoChanged(kmlUrl, intervalSecs);
+}
+
+function _clearCaltopoTimers() {
+  if (caltopoState.pollTimer) {
+    clearInterval(caltopoState.pollTimer);
+    caltopoState.pollTimer = null;
+  }
+}
+
+function clearCaltopo() {
+  _clearCaltopoTimers();
+  if (caltopoState.dataSource) {
+    cesiumViewer.dataSources.remove(caltopoState.dataSource, true);
+    caltopoState.dataSource = null;
+  }
+  if (miniMapCaltopoSource) miniMapCaltopoSource.clear();
+  caltopoState.url = null;
+  _setCaltopoStatus('', '');
+  notifyCaltopoChanged(null, 30);
+}
+
+// Expose to toolbar onclick handlers (can't use ES module imports from inline HTML)
+window._loadCaltopo = () => {
+  const url      = (document.getElementById('caltopo_url_input')?.value || '').trim();
+  const interval = parseInt(document.getElementById('caltopo_interval_select')?.value || '30', 10);
+  if (url) loadCaltopoKml(url, interval);
+};
+window._clearCaltopo = () => clearCaltopo();
+
+// ── CalTopo authentication (bookmarklet-based) ────────────────────────────────
+
+async function caltopoLogin(cookie) {
+  if (!cookie) return;
+  _setCaltopoStatus('applying session…', '#aaa');
+  try {
+    const r    = await fetch('/caltopo/login', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ cookie }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      _showCaltopoLoggedIn();
+      _setCaltopoStatus('', '');
+      if (caltopoState.url) _fetchCaltopoKml();
+    } else {
+      _setCaltopoStatus(`⚠ ${data.error}`, '#f88');
+    }
+  } catch (e) {
+    _setCaltopoStatus('⚠ request failed', '#f88');
+  }
+}
+
+async function caltopoLogout() {
+  await fetch('/caltopo/logout', { method: 'POST' }).catch(() => {});
+  _showCaltopoLoginForm();
+  _setCaltopoStatus('', '');
+}
+
+function _showCaltopoLoggedIn() {
+  const loginEl = document.getElementById('caltopo_login_section');
+  const inEl    = document.getElementById('caltopo_loggedin_section');
+  if (loginEl) loginEl.style.display = 'none';
+  if (inEl)    inEl.style.display    = 'flex';
+}
+
+function _showCaltopoLoginForm() {
+  const loginEl = document.getElementById('caltopo_login_section');
+  const inEl    = document.getElementById('caltopo_loggedin_section');
+  if (loginEl) loginEl.style.display = 'flex';
+  if (inEl)    inEl.style.display    = 'none';
+}
+
+window._caltopoLogout = () => caltopoLogout();
+
+// Build bookmarklet href dynamically — runs on caltopo.com, sends document.cookie to FLEX
+(function _initCaltopoBookmarklet() {
+  const origin = window.location.origin;
+  const code = `(function(){` +
+    `fetch('${origin}/caltopo/login',{` +
+      `method:'POST',` +
+      `headers:{'Content-Type':'application/json'},` +
+      `body:JSON.stringify({cookie:document.cookie})` +
+    `}).then(function(r){return r.json()})` +
+    `.then(function(d){alert(d.ok?'\u2713 FLEX connected to CalTopo!':'\u26a0 '+d.error)})` +
+    `.catch(function(){alert('\u26a0 Could not reach FLEX \u2014 is the server running?')})` +
+  `})()`;
+  const link = document.getElementById('caltopo_bookmarklet_link');
+  if (link) link.href = 'javascript:' + code;
+}());
 
 const toolbar = document.getElementById("toolbar");
 Cesium.knockout.applyBindings(viewModel, toolbar);
@@ -3249,7 +3717,7 @@ moverRateMultiplyer/=1.15;
 // }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 function getFlagForKeyCode(keyCode) {
 switch (keyCode) {
-  case "R".charCodeAt(0):
+  case "0".charCodeAt(0):
     return "removePC";
   case "L".charCodeAt(0):
     return "showlidar";
@@ -3286,6 +3754,8 @@ switch (keyCode) {
   case "C".charCodeAt(0):
     return "pointL";
   case "V".charCodeAt(0):
+    return "measureDepth";
+  case "R".charCodeAt(0):
     return "route";
   case "B".charCodeAt(0):
     return "routePoint";
@@ -3299,6 +3769,8 @@ switch (keyCode) {
     return "displayCave";
   case "N".charCodeAt(0):
     return "cycleCompassStyle";
+  case "M".charCodeAt(0):
+    return "toggleMiniMap";
   default:
     return undefined;
 }
@@ -3402,6 +3874,11 @@ touchFlyDirection = Cesium.Cartesian3.clone(cesiumViewer.camera.direction);
 document.addEventListener(
 "keydown",
 function (e) {
+  const tag = document.activeElement && document.activeElement.tagName;
+  const isTyping = tag === "INPUT" || tag === "TEXTAREA" || document.activeElement.isContentEditable;
+  if (isTyping) {
+    return;
+  }
   if (workflowState.drawModeActive && e.key === "Escape") {
     stopAoiDrawMode("AOI draw canceled.");
     return;
@@ -3432,6 +3909,15 @@ function (e) {
       flags[flagName] = !flags[flagName];
     }else if (flagName == "cycleCompassStyle"){
       cycleCompassStyle();
+    }else if (flagName == "toggleMiniMap"){
+      miniMapUserHidden = !miniMapUserHidden;
+      const container = document.getElementById("mini_map_container");
+      if (container) {
+        container.style.display = miniMapUserHidden ? "none" : "block";
+        if (!miniMapUserHidden && miniMapMap) miniMapMap.updateSize();
+      }
+    }else if (flagName == "measureDepth"){
+      toggleMeasureMode();
     }else if (flagName == "toggleOther"){
       flags[flagName] = !flags[flagName];
       potreeViewer.setClassificationVisibility(0,flags[flagName]);
@@ -3589,7 +4075,7 @@ document.addEventListener(
 "keyup",
 function (e) {
   const flagName = getFlagForKeyCode(e.keyCode);
-  if ((typeof flagName !== "undefined")&&(flagName !== "Fly")&&(flagName !== "TouchFly")&&(flagName !== "hideCesium")&&(flagName !== "showlidar")&&(flagName !== "removePC")&&(flagName !== "toggleOther")&&(flagName !== "toggleGround")&&(flagName !== "toggleVeg")&&(flagName !== "toggleLowNoise")&&(flagName !== "toggleAll")&&(flagName !== "displayPC")&&(flagName !== "displayCave")&&(flagName !== "cycleCompassStyle")) {
+  if ((typeof flagName !== "undefined")&&(flagName !== "Fly")&&(flagName !== "TouchFly")&&(flagName !== "hideCesium")&&(flagName !== "showlidar")&&(flagName !== "removePC")&&(flagName !== "toggleOther")&&(flagName !== "toggleGround")&&(flagName !== "toggleVeg")&&(flagName !== "toggleLowNoise")&&(flagName !== "toggleAll")&&(flagName !== "displayPC")&&(flagName !== "displayCave")&&(flagName !== "cycleCompassStyle")&&(flagName !== "measureDepth")&&(flagName !== "toggleMiniMap")) {
     flags[flagName] = false;
   }
 },
@@ -4257,8 +4743,288 @@ potreeViewer.scene.scene.add(incidenceState.linesGroup);
 }
 
 
+// ── Depth / distance measurement mode ────────────────────────────────────────
+// Press V to set an origin at the current camera position.
+// A live readout shows vertical, horizontal, and total distance from that point.
+// Press V again to clear.
+
+const measureState = {
+  active:     false,
+  origin:     null,  // Cesium.Cartesian3
+  originCart: null,  // Cesium.Cartographic
+  panel:      null,  // readout DOM element
+  originDiv:  null,  // HTML marker at origin
+  readoutEl:  null,  // child div updated each frame
+  unit:       'm',   // 'm' or 'ft'
+  _last:      null,  // { total, horizontal, vertical, azimuth, inclination }
+};
+
+function toggleMeasureMode() {
+  if (measureState.active) {
+    // --- Turn off ---
+    measureState.active     = false;
+    measureState.origin     = null;
+    measureState.originCart = null;
+    if (measureState.panel) measureState.panel.style.display = 'none';
+    if (measureState.originDiv) { measureState.originDiv.style.display = 'none'; }
+  } else {
+    // --- Turn on: snapshot current camera position as origin ---
+    const pos  = cesiumViewer.camera.position.clone();
+    const cart = Cesium.Cartographic.fromCartesian(pos);
+    measureState.active     = true;
+    measureState.origin     = pos;
+    measureState.originCart = cart;
+    if (measureState.panel) measureState.panel.style.display = 'block';
+  }
+}
+
+function _copySurveyShot() {
+  const s = measureState._last;
+  if (!s) return;
+  const factor = measureState.unit === 'ft' ? 3.28084 : 1;
+  const dist = (s.total * factor).toFixed(2);
+  const az   = s.azimuth.toFixed(1);
+  const inc  = s.inclination.toFixed(1);
+  const unit = measureState.unit;
+  const text = `${dist}\t${az}\t${inc}\t(${unit})`;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('measure_copy_btn');
+    if (btn) { btn.textContent = '✓ Copied'; setTimeout(() => { btn.textContent = '📋 Copy'; }, 1500); }
+  }).catch(() => {
+    console.warn('[measure] clipboard write failed');
+  });
+}
+
+function updateMeasureDisplay() {
+  if (!measureState.active || !measureState.origin) return;
+
+  // Lazy-create the panel (static structure — only built once)
+  if (!measureState.panel) {
+    const panel = document.createElement('div');
+    panel.id = 'measure_panel';
+    panel.style.cssText = [
+      'position:fixed', 'bottom:24px', 'left:50%',
+      'transform:translateX(-50%)',
+      'background:rgba(10,12,18,0.88)',
+      'border:1px solid rgba(255,255,255,0.25)',
+      'border-radius:8px', 'padding:8px 16px',
+      'color:#fff', 'font-size:13px', 'font-family:monospace',
+      'z-index:25', 'pointer-events:auto',
+      'white-space:nowrap', 'text-align:center',
+      'box-shadow:0 4px 14px rgba(0,0,0,0.5)',
+      'min-width:420px',
+    ].join(';');
+
+    // Static header row with unit toggle + copy button
+    const btnStyle = [
+      'font-size:11px', 'padding:1px 7px', 'margin-left:6px',
+      'background:rgba(255,255,255,0.12)', 'color:#fff',
+      'border:1px solid rgba(255,255,255,0.3)', 'border-radius:4px',
+      'cursor:pointer',
+    ].join(';');
+
+    const header = document.createElement('div');
+    header.style.cssText = 'margin-bottom:5px; display:flex; justify-content:space-between; align-items:center;';
+    header.innerHTML =
+      `<span style="opacity:0.6;font-size:11px;">📐 Measuring from origin &nbsp;|&nbsp; press V to clear</span>` +
+      `<span>` +
+        `<button id="measure_unit_btn" style="${btnStyle}">[m]</button>` +
+        `<button id="measure_copy_btn" style="${btnStyle}">📋 Copy</button>` +
+      `</span>`;
+    panel.appendChild(header);
+
+    // Dynamic readout updated each frame
+    const readout = document.createElement('div');
+    readout.id = 'measure_readout';
+    panel.appendChild(readout);
+
+    document.body.appendChild(panel);
+    measureState.panel    = panel;
+    measureState.readoutEl = readout;
+
+    // Unit toggle
+    document.getElementById('measure_unit_btn').addEventListener('click', () => {
+      measureState.unit = measureState.unit === 'm' ? 'ft' : 'm';
+      document.getElementById('measure_unit_btn').textContent =
+        measureState.unit === 'm' ? '[m]' : '[ft]';
+    });
+
+    // Copy button
+    document.getElementById('measure_copy_btn').addEventListener('click', _copySurveyShot);
+
+  }
+
+  if (!measureState.originDiv) {
+    const d = document.createElement('div');
+    d.id = 'measure_origin_marker';
+    d.style.cssText = [
+      'position:fixed', 'pointer-events:none', 'z-index:24',
+      'width:14px', 'height:14px',
+      'border:2px solid #ff6600',
+      'border-radius:50%',
+      'background:rgba(255,102,0,0.35)',
+      'transform:translate(-50%,-50%)',
+      'box-shadow:0 0 6px rgba(255,102,0,0.8)',
+    ].join(';');
+    document.getElementById('html_label_container').appendChild(d);
+    measureState.originDiv = d;
+  }
+
+  // Update origin marker screen position
+  const originScreen = cesiumViewer.scene.cartesianToCanvasCoordinates(measureState.origin);
+  if (originScreen) {
+    measureState.originDiv.style.display = 'block';
+    measureState.originDiv.style.left    = Math.round(originScreen.x) + 'px';
+    measureState.originDiv.style.top     = Math.round(originScreen.y) + 'px';
+  } else {
+    measureState.originDiv.style.display = 'none';
+  }
+
+  // Compute distances
+  const curPos  = cesiumViewer.camera.position;
+  const curCart = Cesium.Cartographic.fromCartesian(curPos);
+
+  const total      = Cesium.Cartesian3.distance(curPos, measureState.origin);
+  const vertical   = curCart.height - measureState.originCart.height;
+  const horizontal = Math.sqrt(Math.max(0, total * total - vertical * vertical));
+
+  // Compute azimuth + inclination in ENU frame at origin
+  const enuTransform = Cesium.Transforms.eastNorthUpToFixedFrame(measureState.origin);
+  const inv   = Cesium.Matrix4.inverseTransformation(enuTransform, new Cesium.Matrix4());
+  const delta = Cesium.Cartesian3.subtract(curPos, measureState.origin, new Cesium.Cartesian3());
+  const local = Cesium.Matrix4.multiplyByPointAsVector(inv, delta, new Cesium.Cartesian3());
+  // local.x = East, local.y = North, local.z = Up
+  const azimuth     = (Math.atan2(local.x, local.y) * 180 / Math.PI + 360) % 360;
+  const inclination = Math.atan2(local.z, horizontal) * 180 / Math.PI;
+
+  // Store for copy button
+  measureState._last = { total, horizontal, vertical, azimuth, inclination };
+
+  // Apply unit conversion for display
+  const factor   = measureState.unit === 'ft' ? 3.28084 : 1;
+  const unitSfx  = measureState.unit;
+  const fmt      = n => (n * factor).toFixed(1) + ' ' + unitSfx;
+  const vDir     = vertical < 0 ? '▼' : '▲';
+  const vCol     = vertical < 0 ? '#6af' : '#fa6';
+
+  measureState.readoutEl.innerHTML =
+    `<span style="color:${vCol}">${vDir} Vert: <b>${fmt(Math.abs(vertical))}</b></span>` +
+    `&nbsp;&nbsp;` +
+    `<span style="color:#8f8">→ Horiz: <b>${fmt(horizontal)}</b></span>` +
+    `&nbsp;&nbsp;` +
+    `<span style="color:#fff">⤢ Total: <b>${fmt(total)}</b></span>` +
+    `<br>` +
+    `<span style="color:#fc9; font-size:12px;">` +
+      `Az: <b>${azimuth.toFixed(1)}°</b>` +
+      `&nbsp;&nbsp;Inc: <b>${inclination.toFixed(1)}°</b>` +
+    `</span>`;
+}
+
+// ── HTML screen-space label overlay ──────────────────────────────────────────
+// Projects isUserLabel entity positions to screen coords each frame and renders
+// them as DOM divs on top of both the Cesium and Potree canvases.
+
+const htmlLabelState = {
+  enabled: true,
+  container: document.getElementById('html_label_container'),
+  // Map from entity.id → <div> element
+  divs: new Map(),
+};
+
+// Wire toggle checkbox
+{
+  const toggle = document.getElementById('html_labels_toggle');
+  if (toggle) {
+    toggle.addEventListener('change', () => {
+      htmlLabelState.enabled = toggle.checked;
+      if (!htmlLabelState.enabled) {
+        // Clear all HTML divs and re-show native Cesium labels
+        htmlLabelState.divs.forEach(div => div.remove());
+        htmlLabelState.divs.clear();
+        cesiumViewer.entities.values.forEach(e => {
+          if (e.label && (
+            (e.properties && e.properties.isUserLabel) ||
+            (e.polyline && e.label)
+          )) {
+            e.label.show = true;
+          }
+        });
+      }
+    });
+  }
+}
+
+function updateHtmlLabels() {
+  if (!htmlLabelState.enabled || !htmlLabelState.container) return;
+
+  const scene    = cesiumViewer.scene;
+  const entities = cesiumViewer.entities.values;
+  const now      = Cesium.JulianDate.now();
+  const liveIds  = new Set(); // all entity IDs that should have a label div
+
+  for (const entity of entities) {
+    // Match user POI labels (Z/X/C) AND route labels (have label but no isUserLabel)
+    if (!entity.label) continue;
+    const isUserPoi   = entity.properties && entity.properties.isUserLabel;
+    const isRoutLabel = entity.polyline && entity.label; // route entities have polyline + label
+    if (!isUserPoi && !isRoutLabel) continue;
+    if (!entity.position) continue;
+
+    // Always suppress native Cesium label when HTML mode is on
+    entity.label.show = false;
+
+    liveIds.add(entity.id);
+
+    const worldPos = entity.position.getValue(now);
+    if (!worldPos) continue;
+
+    // Project to canvas coords — cartesianToCanvasCoordinates returns null if behind camera
+    const screenPos = scene.cartesianToCanvasCoordinates(worldPos);
+    if (!screenPos) {
+      const div = htmlLabelState.divs.get(entity.id);
+      if (div) div.style.display = 'none';
+      continue;
+    }
+
+    // Off-screen cull (with margin so labels near edges don't pop)
+    const margin = 60;
+    if (screenPos.x < -margin || screenPos.x > window.innerWidth  + margin ||
+        screenPos.y < -margin || screenPos.y > window.innerHeight + margin) {
+      const div = htmlLabelState.divs.get(entity.id);
+      if (div) div.style.display = 'none';
+      continue;
+    }
+
+    // Create div on first appearance
+    let div = htmlLabelState.divs.get(entity.id);
+    if (!div) {
+      div = document.createElement('div');
+      div.className = 'html-label';
+      const text = entity.label.text && entity.label.text.getValue
+        ? entity.label.text.getValue(now)
+        : (entity.label.text || entity.name || '');
+      div.textContent = text;
+      htmlLabelState.container.appendChild(div);
+      htmlLabelState.divs.set(entity.id, div);
+    }
+
+    div.style.display = 'block';
+    div.style.left    = Math.round(screenPos.x) + 'px';
+    div.style.top     = Math.round(screenPos.y) + 'px';
+  }
+
+  // Remove divs for entities that have been deleted from the scene
+  for (const [id, div] of htmlLabelState.divs) {
+    if (!liveIds.has(id)) {
+      div.remove();
+      htmlLabelState.divs.delete(id);
+    }
+  }
+}
+
 function loop(timestamp){
   requestAnimationFrame(loop);
+  onCameraFrame();
 
   // console.log(timestamp);
 
@@ -4359,6 +5125,8 @@ function loop(timestamp){
   }
 
   updateNorthCompass();
+  updateHtmlLabels();
+  updateMeasureDisplay();
 }
 initNorthCompass();
 requestAnimationFrame(loop);

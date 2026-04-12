@@ -6,6 +6,43 @@ const url = require('url');
 
 const settings = require('./settings');
 
+// ── CalTopo session cookie (stored in memory + persisted to file) ─────────────
+const COOKIE_FILE = path.join(__dirname, '.caltopo_session');
+let caltopoSessionCookie = _loadPersistedCookie();
+
+function _loadPersistedCookie() {
+    try {
+        const data = fs.readFileSync(COOKIE_FILE, 'utf8').trim();
+        if (data) {
+            console.log('[caltopo] Loaded persisted session cookie from file');
+            return data;
+        }
+    } catch (e) {
+        // File doesn't exist or can't be read — that's fine
+    }
+    return null;
+}
+
+function _persistCookie(cookie) {
+    try {
+        if (cookie) {
+            fs.writeFileSync(COOKIE_FILE, cookie, 'utf8');
+        } else {
+            fs.unlinkSync(COOKIE_FILE);
+        }
+    } catch (e) {
+        console.warn('[caltopo] Could not persist cookie to file:', e.message);
+    }
+}
+
+// ── Helper: send a JSON response with CORS headers ───────────────────────────
+function jsonResponse(res, data, status = 200) {
+    res.writeHead(status, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+    });
+    res.end(JSON.stringify(data));
+}
 
 const server = http.createServer((req, res) => {
     const parsedUrl = url.parse(req.url, true);
@@ -13,7 +50,25 @@ const server = http.createServer((req, res) => {
 
     console.log(`Request: ${req.method} ${parsedUrl.pathname} -> ${sanitizedPath}`);
 
-    if (sanitizedPath === '/proxy') {
+    if (sanitizedPath === '/caltopo/login' && req.method === 'POST') {
+        handleCaltopoLogin(req, res);
+    } else if (sanitizedPath === '/caltopo/logout' && req.method === 'POST') {
+        caltopoSessionCookie = null;
+        _persistCookie(null);
+        console.log('[caltopo] Session cleared');
+        jsonResponse(res, { ok: true });
+    } else if (sanitizedPath === '/caltopo/status' && req.method === 'GET') {
+        jsonResponse(res, { loggedIn: !!caltopoSessionCookie });
+    // ── CORS preflight ────────────────────────────────────────────────────────
+    } else if (req.method === 'OPTIONS') {
+        res.writeHead(204, {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+        });
+        res.end();
+    // ── Existing proxy + static file routes ───────────────────────────────────
+    } else if (sanitizedPath === '/proxy') {
         // Extract the target URL from the query string.  The url= value
         // may itself contain & characters so we cannot rely on standard
         // query-string parsing.  Instead, take everything after "url=".
@@ -60,6 +115,28 @@ function handleFileRequest(req, res, sanitizedPath) {
     });
 }
 
+// ── CalTopo login handler ─────────────────────────────────────────────────────
+
+function handleCaltopoLogin(req, res) {
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => {
+        try {
+            const { cookie } = JSON.parse(body);
+            if (!cookie) {
+                jsonResponse(res, { ok: false, error: 'Missing cookie field' }, 400);
+                return;
+            }
+            caltopoSessionCookie = cookie;
+            _persistCookie(cookie);
+            console.log('[caltopo] Session cookie stored');
+            jsonResponse(res, { ok: true });
+        } catch (e) {
+            jsonResponse(res, { ok: false, error: 'Invalid JSON' }, 400);
+        }
+    });
+}
+
 function handleProxyRequest(req, res, targetUrl) {
     if (!targetUrl) {
         res.writeHead(400, { 'Content-Type': 'text/plain' });
@@ -88,6 +165,13 @@ function handleProxyRequest(req, res, targetUrl) {
         if (!skipHeaders.has(key.toLowerCase())) {
             forwardHeaders[key] = value;
         }
+    }
+
+    // Inject CalTopo session cookie + origin/referer when proxying caltopo.com
+    if (parsedTargetUrl.hostname === 'caltopo.com') {
+        if (caltopoSessionCookie) forwardHeaders['cookie'] = caltopoSessionCookie;
+        forwardHeaders['origin'] = 'https://caltopo.com';
+        forwardHeaders['referer'] = 'https://caltopo.com/';
     }
 
     const options = {
@@ -137,4 +221,3 @@ function getContentType(filePath) {
     // Add more content types as needed
     return 'application/octet-stream'; // Default
 }
-
