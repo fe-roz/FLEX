@@ -3792,8 +3792,12 @@ function _hagScanTiles() {
     const pcZCorr = pc.matrix?.elements?.[14] ?? 0;
 
     for (const node of (pc.visibleNodes || [])) {
-      // Use pc name + node name as a stable tile key
-      const key = (pc.name || '') + '/' + (node.name || node.id || '?');
+      // Use pc name + geometry-node name as a stable tile key.
+      // PointCloudOctreeNode (the tree node) does NOT have .name — that lives on
+      // node.geometryNode and node.sceneNode.  Using node.name would give '?' for
+      // every node, making them all collide in processedNodes and causing only the
+      // first visible node to ever be scanned.
+      const key = (pc.name || '') + '/' + (node.geometryNode?.name || node.sceneNode?.name || '?');
       if (_hag.processedNodes.has(key)) continue;
       _hag.processedNodes.add(key);
 
