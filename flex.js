@@ -3954,10 +3954,11 @@ function renderLayerList() {
     row.dataset.layerIdx = String(i);
     row.style.cssText = 'display:flex; align-items:center; padding:2px 0; gap:4px;';
 
-    // ⠿ drag handle
+    // ⠿ drag handle (visual affordance only — the whole row is draggable)
     const handle = document.createElement('span');
     handle.textContent = '⠿';
-    handle.style.cssText = 'cursor:grab; color:rgba(255,255,255,0.35); font-size:14px; flex-shrink:0; user-select:none; padding:0 2px;';
+    handle.className = 'lp-drag-handle';
+    handle.style.userSelect = 'none';
     handle.title = 'Drag to reorder';
 
     // Visibility checkbox
@@ -4000,21 +4001,22 @@ function renderLayerList() {
     row.appendChild(removeBtn);
     body.appendChild(row);
 
-    // ── Drag-and-drop (handle-initiated) ─────────────────────────────────
-    // mousedown on the handle arms the row for dragging.  We intentionally
-    // do NOT reset draggable on mouseup — some browsers fire mouseup on the
-    // source element as the drag begins, killing the drag before dragstart.
-    // draggable is reset in dragend instead.
-    handle.addEventListener('mousedown', () => { row.draggable = true; });
+    // ── Drag-and-drop ─────────────────────────────────────────────────────
+    // Keep draggable=true statically — setting it in mousedown is unreliable
+    // because some browsers evaluate the attribute at the start of the gesture
+    // before mousedown handlers can fire.  Browsers naturally prevent a drag
+    // from starting on interactive children (checkbox, range slider) so those
+    // controls keep working even though the parent row is always draggable.
+    row.draggable = true;
 
     row.addEventListener('dragstart', e => {
       dragSrc = i;
       e.dataTransfer.effectAllowed = 'move';
-      setTimeout(() => row.style.opacity = '0.4', 0);
+      // Defer opacity so the drag ghost captures the un-faded appearance
+      setTimeout(() => { row.style.opacity = '0.4'; }, 0);
     });
     row.addEventListener('dragend', () => {
       row.style.opacity = '';
-      row.draggable = false;
       body.querySelectorAll('.lp-drag-over').forEach(r => r.classList.remove('lp-drag-over'));
       dragSrc = null;
     });
@@ -4024,8 +4026,8 @@ function renderLayerList() {
       body.querySelectorAll('.lp-drag-over').forEach(r => r.classList.remove('lp-drag-over'));
       row.classList.add('lp-drag-over');
     });
-    // Only clear the highlight when the cursor leaves the row entirely,
-    // not when it merely enters a child element (checkbox, slider, ×, etc.).
+    // Only clear the highlight when the pointer truly leaves this row,
+    // not when it enters one of its child elements.
     row.addEventListener('dragleave', e => {
       if (!row.contains(e.relatedTarget)) row.classList.remove('lp-drag-over');
     });
