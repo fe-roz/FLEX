@@ -4086,8 +4086,13 @@ window._hagDebug = function() {
     console.log(`  uniforms: tex=${u?.uGroundTex?.value ? 'set' : 'null'}, origin=[${u?.uGroundOrigin?.value}], cellSize=${u?.uGroundCellSize?.value}, texSize=[${u?.uGroundTexSize?.value}], hagRange=[${u?.uHagRange?.value}]`);
     const defines = pc.material?.defines;
     console.log(`  defines Map has clip_hag_enabled: ${pc.material?.defines?.has?.('clip_hag_enabled')}`);
-    // Sample first visible node for classification/position diagnostic
-    const sampleNode = (pc.visibleNodes || [])[0];
+    // Sample a fine (non-skipped) visible node for position/classification diagnostic.
+    const pcZCorrDbg = pc.matrix?.elements?.[14] ?? 0;
+    const sampleNode = (pc.visibleNodes || []).find(n => {
+      const b = n.geometryNode?.boundingBox;
+      if (!b) return false;
+      return Math.max(b.max.x - b.min.x, b.max.y - b.min.y) <= HAG_GRID_RADIUS * 6;
+    }) || (pc.visibleNodes || [])[0];
     if (sampleNode) {
       const geom = sampleNode.geometryNode?.geometry;
       const pos = geom?.attributes?.position?.array;
@@ -4100,8 +4105,7 @@ window._hagDebug = function() {
       console.log(`  sample node "${sampleNode.geometryNode?.name}": ${pos?.length/3|0} pts, span=${spanX.toFixed(0)}×${spanY.toFixed(0)} m [${skipped ? 'SKIPPED coarse' : 'OK to scan'}], bb=[${bb?.min.x.toFixed(0)},${bb?.min.y.toFixed(0)}]-[${bb?.max.x.toFixed(0)},${bb?.max.y.toFixed(0)}]`);
       console.log(`  cls counts (first 2000 pts):`, clsCounts, `class2=${class2}`);
       if (pos && bb) {
-        const pcZCorr = pc.matrix?.elements?.[14] ?? 0;
-        const geoX0 = pos[0] + bb.min.x, geoY0 = pos[1] + bb.min.y, geoZ0 = pos[2] + bb.min.z + pcZCorr;
+        const geoX0 = pos[0] + bb.min.x, geoY0 = pos[1] + bb.min.y, geoZ0 = pos[2] + bb.min.z + pcZCorrDbg;
         console.log(`  first pt geo coords: (${geoX0.toFixed(2)}, ${geoY0.toFixed(2)}, ${geoZ0.toFixed(2)})`);
         if (_hag.grid) {
           const cx = (geoX0 - _hag.originX) / _hag.cellSize | 0;
