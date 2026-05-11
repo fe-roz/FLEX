@@ -3736,10 +3736,11 @@ const _hag = {
   originY:        0.0,
   processedNodes: new Set(),
   enabled:        false,
-  minHag:         -0.5,
-  maxHag:          5.0,
-  _uploadTimer:   null,
-  _scanInterval:  null,
+  minHag:         -1.0,
+  maxHag:          10.0,
+  _uploadTimer:      null,
+  _scanInterval:     null,
+  _lastRebuildTime:  0,     // ms timestamp of last grid rebuild (rate-limit guard)
 };
 
 /**
@@ -3837,21 +3838,39 @@ function _hagScanTiles() {
   // minimum (confirmed in EptBinaryDecoderWorker.js: x = raw*scale+offset - nodeMin).
   // elements[14] of the PC matrix is the column-major Z translation.
   const allNodes = [];
+  const currentKeys = new Set();
   for (const pc of pcs) {
     const pcZCorr = pc.matrix?.elements?.[14] ?? 0;
     for (const node of (pc.visibleNodes || [])) {
       allNodes.push({ pc, node, pcZCorr });
+      const key = (pc.name || '') + '/' + (node.geometryNode?.name || node.sceneNode?.name || '?');
+      currentKeys.add(key);
     }
   }
 
   if (allNodes.length === 0) return;
 
-  // Lazily build the grid the first time we have visible geometry.
-  if (!_hag.grid) {
-    if (!_hagBuildGrid(allNodes)) return;
-    // processedNodes was cleared in _hagInitGrid, so all nodes are new.
+  // Detect if any previously-processed node is no longer visible (camera moved or
+  // LOD changed).  When that happens, discard the entire grid and rebuild from the
+  // current visible set so stale ground estimates don't linger.
+  // Rate-limit rebuilds to at most once every 3 s to avoid thrashing.
+  const now = Date.now();
+  let needRebuild = !_hag.grid;
+  if (!needRebuild && _hag.processedNodes.size > 0) {
+    for (const key of _hag.processedNodes) {
+      if (!currentKeys.has(key)) { needRebuild = true; break; }
+    }
   }
 
+  if (needRebuild) {
+    const lastRebuild = _hag._lastRebuildTime || 0;
+    if (now - lastRebuild < 3000) return;   // too soon — wait for next tick
+    _hag._lastRebuildTime = now;
+    if (!_hagBuildGrid(allNodes)) return;
+    _hag.processedNodes.clear();
+  }
+
+  // ── Inner node scan ──────────────────────────────────────────────────────────
   let updated = false;
 
   for (const { pc, node, pcZCorr } of allNodes) {
@@ -3866,8 +3885,10 @@ function _hagScanTiles() {
     if (!pos || pos.length < 3) continue;
     const cls = geom.attributes?.classification?.array; // Uint8Array or undefined
 
-    // If the cloud has real classification data, use only class 2 (ground).
-    // Unclassified clouds have all zeros — probe the first 512 points to decide.
+    // If the cloud has real classification data, prefer class-2 (ground) points.
+    // Coarse LOD nodes sometimes contain ZERO class-2 returns — in that case fall
+    // back to all points (minimum Z across any return is a valid ground estimate
+    // for aerial LiDAR over open terrain).
     let useClassFilter = false;
     if (cls) {
       const probe = Math.min(512, cls.length);
@@ -3890,25 +3911,39 @@ function _hagScanTiles() {
     const gH       = _hag.gridH;
     const grid     = _hag.grid;
 
-    let nodePts = 0;
-    for (let i = 0; i < numPts; i++) {
-      if (useClassFilter && cls[i] !== 2) continue;
-
+    // Helper: write one point into the ground grid, keeping per-cell minimum Z.
+    const writePoint = (i) => {
       // Convert node-local → geographic by adding the node BB min.
-      // Store Z as (geographic + pcZCorr) so the shader's subtraction of
+      // Z stored as (geographic + pcZCorr) so the shader's subtraction of
       // modelMatrix[3][2] (= nodeBBMinZ + pcZCorr) yields true HAG.
       const x = pos[i * 3]     + nbX;
       const y = pos[i * 3 + 1] + nbY;
       const z = pos[i * 3 + 2] + nbZ + pcZCorr;
-
       const cx = (x - ox) / cellSize | 0;
       const cy = (y - oy) / cellSize | 0;
-      if (cx < 0 || cx >= gW || cy < 0 || cy >= gH) continue;
-
+      if (cx < 0 || cx >= gW || cy < 0 || cy >= gH) return false;
       const idx = (cy * gW + cx) * 4;   // RGBA stride — R channel holds ground Z
       if (z < grid[idx]) grid[idx] = z;
-      nodePts++;
+      return true;
+    };
+
+    let nodePts = 0;
+
+    // Pass 1: class-2 ground returns (if classification is available).
+    if (useClassFilter) {
+      for (let i = 0; i < numPts; i++) {
+        if (cls[i] === 2 && writePoint(i)) nodePts++;
+      }
     }
+
+    // Pass 2: fallback — if no class-2 written (coarse LOD or atypical data),
+    // use ALL returns.  Minimum Z still approximates ground for aerial LiDAR.
+    if (nodePts === 0) {
+      for (let i = 0; i < numPts; i++) {
+        if (writePoint(i)) nodePts++;
+      }
+    }
+
     if (nodePts > 0) updated = true;
   }
 
@@ -4017,6 +4052,28 @@ window._hagDebug = function() {
     console.log(`  uniforms: tex=${u?.uGroundTex?.value ? 'set' : 'null'}, origin=[${u?.uGroundOrigin?.value}], cellSize=${u?.uGroundCellSize?.value}, texSize=[${u?.uGroundTexSize?.value}], hagRange=[${u?.uHagRange?.value}]`);
     const defines = pc.material?.defines;
     console.log(`  defines Map has clip_hag_enabled: ${pc.material?.defines?.has?.('clip_hag_enabled')}`);
+    // Sample first visible node for classification/position diagnostic
+    const sampleNode = (pc.visibleNodes || [])[0];
+    if (sampleNode) {
+      const geom = sampleNode.geometryNode?.geometry;
+      const pos = geom?.attributes?.position?.array;
+      const cls = geom?.attributes?.classification?.array;
+      const bb  = sampleNode.geometryNode?.boundingBox;
+      let clsCounts = {}; let class2 = 0;
+      if (cls) { for (let k=0; k<Math.min(cls.length,2000); k++) { clsCounts[cls[k]] = (clsCounts[cls[k]]||0)+1; if(cls[k]===2) class2++; } }
+      console.log(`  sample node "${sampleNode.geometryNode?.name}": ${pos?.length/3|0} pts, bb=[${bb?.min.x.toFixed(0)},${bb?.min.y.toFixed(0)}]-[${bb?.max.x.toFixed(0)},${bb?.max.y.toFixed(0)}]`);
+      console.log(`  cls counts (first 2000 pts):`, clsCounts, `class2=${class2}`);
+      if (pos && bb) {
+        const pcZCorr = pc.matrix?.elements?.[14] ?? 0;
+        const geoX0 = pos[0] + bb.min.x, geoY0 = pos[1] + bb.min.y, geoZ0 = pos[2] + bb.min.z + pcZCorr;
+        console.log(`  first pt geo coords: (${geoX0.toFixed(2)}, ${geoY0.toFixed(2)}, ${geoZ0.toFixed(2)})`);
+        if (_hag.grid) {
+          const cx = (geoX0 - _hag.originX) / _hag.cellSize | 0;
+          const cy = (geoY0 - _hag.originY) / _hag.cellSize | 0;
+          console.log(`  first pt → cell (${cx}, ${cy}), in-bounds: ${cx>=0 && cx<_hag.gridW && cy>=0 && cy<_hag.gridH}`);
+        }
+      }
+    }
   });
   console.groupEnd();
 };
@@ -4620,7 +4677,9 @@ renderPoiList();
   const hagSummary   = document.getElementById('lp-hag-label');
 
   function _fmtHag(v) {
-    return (v >= 0 ? '' : '−') + Math.abs(v).toFixed(1) + ' m';
+    const abs = Math.abs(v);
+    const sign = v < 0 ? '−' : '';
+    return sign + (abs >= 10 ? abs.toFixed(0) : abs.toFixed(1)) + ' m';
   }
   function _updateHagSummary() {
     if (hagSummary) hagSummary.textContent =
@@ -4637,8 +4696,8 @@ renderPoiList();
   if (hagMinSlider) {
     hagMinSlider.addEventListener('input', () => {
       const min = parseFloat(hagMinSlider.value);
-      // Clamp: min must stay below max
-      const max = Math.max(min + 0.5, _hag.maxHag);
+      // Clamp: min must stay at least 1 m below max
+      const max = Math.max(min + 1, _hag.maxHag);
       if (hagMaxSlider) hagMaxSlider.value = max;
       if (hagMinLabel) hagMinLabel.textContent = _fmtHag(min);
       if (hagMaxLabel) hagMaxLabel.textContent = _fmtHag(max);
@@ -4649,7 +4708,7 @@ renderPoiList();
   if (hagMaxSlider) {
     hagMaxSlider.addEventListener('input', () => {
       const max = parseFloat(hagMaxSlider.value);
-      const min = Math.min(max - 0.5, _hag.minHag);
+      const min = Math.min(max - 1, _hag.minHag);
       if (hagMinSlider) hagMinSlider.value = min;
       if (hagMinLabel) hagMinLabel.textContent = _fmtHag(min);
       if (hagMaxLabel) hagMaxLabel.textContent = _fmtHag(max);
