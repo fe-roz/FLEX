@@ -14,10 +14,13 @@ import {
   registerUpdateWorkflowButtons
 } from "./api.js";
 
-import { viewModel, loadLayers, updateLayerList } from "./layers.js";
+import { viewModel, loadLayers, updateLayerList, LAYER_CATALOG, addCatalogLayer, removeCatalogLayer } from "./layers.js";
+import { initializeContextMenu } from "./context-menu.js";
 import {
   initSession, notifyPcLoaded, notifyCaltopoChanged, saveSession, loadSession,
   restoreCamera, restoreLayerState, onCameraFrame,
+  notifyDataFilesChanged, notifyCaveVisibilityChanged, notifyPoiVisibilityChanged,
+  notifyPanelSectionToggled,
 } from "./session.js";
 
 function isAoiGeometry(geometry) {
@@ -1910,22 +1913,7 @@ potreeViewer.useHQ = false;
 potreeViewer.setDescription("");
 
 
-if (flags.displayCave){
-  const promise2 = Cesium.GeoJsonDataSource.load(
-    "./user_files/caves_v2.geojson",
-    { clampToGround: false } 
-    );
-    promise2
-      .then(function (dataSource) {
-        cesiumViewer.dataSources.add(dataSource);
-
-      })
-      .catch(function (error) {
-        //Display any errrors encountered while loading.
-        window.alert(error);
-      });
-
-};
+// Cave survey loaded on demand via #lp-cave-toggle in the Layers panel
 
 
 Cesium.Math.setRandomNumberSeed(0);
@@ -2411,6 +2399,7 @@ let miniMapAttentionEnabled = true;
 let miniMapHoverLabelElement = null;
 let miniMapVisibilityHeight = 15000;
 let miniMapUserHidden = false;
+let miniMapZoomOffset = 0;  // scroll-wheel baseline adjustment (integer zoom steps)
 let miniMapLastSyncTimestamp = 0;
 let miniMapLastCameraPosition = null;
 let miniMapLastHeading = 0;
@@ -2854,8 +2843,8 @@ function initMiniMap() {
     new ol.style.Style({
       image: new ol.style.Circle({
         radius: 4,
-        fill: new ol.style.Fill({ color: "rgba(255,255,255,1)" }),
-        stroke: new ol.style.Stroke({ color: "rgba(0,0,0,0.95)", width: 2 })
+        fill: new ol.style.Fill({ color: "rgba(0,220,80,1)" }),
+        stroke: new ol.style.Stroke({ color: "rgba(0,0,0,0.85)", width: 2 })
       })
     })
   );
@@ -2997,6 +2986,17 @@ function initMiniMapWindow() {
     });
   });
 
+  // --- Scroll wheel: adjust baseline zoom offset ---
+  container.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Each detent zooms in or out by 1 step (clamp to ±6 so it can't go crazy)
+    miniMapZoomOffset = Cesium.Math.clamp(
+      miniMapZoomOffset + (e.deltaY < 0 ? 1 : -1),
+      -6, 6
+    );
+  }, { passive: false });
+
   // --- Close button ---
   closeBtn.addEventListener('click', () => {
     miniMapUserHidden = true;
@@ -3075,7 +3075,7 @@ function syncMiniMapFrame(timestampMs, cameraCartographic) {
 
   if (shouldRenderFrame) {
     const center = ol.proj.fromLonLat([lonDeg, latDeg]);
-    const zoom = Cesium.Math.clamp(17 - Math.log2(Math.max(200, minimapHeight) / 75), 3, 18);
+    const zoom = Cesium.Math.clamp(17 - Math.log2(Math.max(200, minimapHeight) / 75) + miniMapZoomOffset, 3, 18);
     miniMapView.setCenter(center);
     miniMapView.setRotation(-heading);
     miniMapView.setZoom(zoom);
@@ -3093,22 +3093,48 @@ Cesium.knockout.track(viewModel);
 const _layersReady = loadLayers().catch((error) => console.error("Layer loading error:", error));
 loadAttentionGrid();
 initMiniMap();
+initializeContextMenu({ Cesium, cesiumViewer });
 
 // Init session system (wires auto-save triggers, exposes window._sessionSave)
 initSession(cesiumViewer, viewModel);
 
-// Restore layer state once all providers have resolved
-_layersReady.then(() => {
-  if (_savedSession) restoreLayerState(_savedSession, viewModel);
-  // Subscribe overlay show/alpha changes to trigger saves
-  viewModel.layers.forEach(layer => {
-    if (!viewModel.isSelectableLayer(layer)) {
-      Cesium.knockout.getObservable(layer, 'show').subscribe(() => saveSession());
-      Cesium.knockout.getObservable(layer, 'alpha').subscribe(() => saveSession());
+// Activate layers — either from saved session or first-run defaults.
+// loadLayers() now only strips Cesium's built-in layer and builds the catalog;
+// it adds nothing to the scene.  We add layers here so the session controls
+// exactly which catalog entries are in the active stack.
+_layersReady.then(async () => {
+  const savedLayers = _savedSession?.layers?.layers;
+
+  if (savedLayers?.length) {
+    // Session exists: re-add saved layers.  They're stored top→bottom in
+    // viewModel order, so add in reverse so index-0 ends up on top.
+    for (let i = savedLayers.length - 1; i >= 0; i--) {
+      const { name, show, alpha } = savedLayers[i];
+      const layer = await addCatalogLayer(name, show, alpha);
+      if (layer) subscribeLayerToSession(layer);
     }
-  });
-  // Subscribe viewModel settings that should persist
+    if (_savedSession.layers.usgsRef !== undefined) {
+      viewModel.usgsRef = _savedSession.layers.usgsRef;
+    }
+  } else {
+    // No session: add the four default active layers (bottom → top order).
+    // Only OSM is visible; the others are in the list but toggled off.
+    const defaults = [
+      { name: 'Bing Maps Aerial', show: false, alpha: 1.0 },
+      { name: 'NGMDB Mosaic',     show: false, alpha: 1.0 },
+      { name: 'Slope Angle',      show: false, alpha: 1.0 },
+      { name: 'OpenStreetMaps',   show: true,  alpha: 1.0 },
+    ];
+    for (const d of defaults) {
+      const layer = await addCatalogLayer(d.name, d.show, d.alpha);
+      if (layer) subscribeLayerToSession(layer);
+    }
+  }
+
+  // Subscribe viewModel-level settings that should persist
   Cesium.knockout.getObservable(viewModel, 'usgsRef').subscribe(() => saveSession());
+
+  renderLayerList();
 });
 
 // Restore saved state after full init (addPC interceptor and CalTopo fns are defined below this point)
@@ -3143,6 +3169,37 @@ setTimeout(() => {
     }
     loadCaltopoKml(_savedSession.caltopoUrl, _savedSession.caltopoInterval ?? 30);
   }
+
+  // Auto-restore URL-sourced data files silently
+  if (_savedSession?.dataFiles?.length) {
+    for (const f of _savedSession.dataFiles) {
+      addDataFile(f.url, f.label).catch(e => console.warn('[session] data file restore failed:', e));
+    }
+  }
+
+  // Restore cave visibility
+  if (_savedSession?.caveVisible) {
+    const caveToggle = document.getElementById('lp-cave-toggle');
+    if (caveToggle) caveToggle.checked = true;
+    setCaveSurveyVisible(true);
+  }
+
+  // Restore POI visibility
+  if (_savedSession?.poiVisible === false) {
+    const poiToggle = document.getElementById('html_labels_toggle');
+    if (poiToggle) { poiToggle.checked = false; poiToggle.dispatchEvent(new Event('change')); }
+  }
+
+  // Restore panel section open/closed state
+  if (_savedSession?.panelSections) {
+    for (const [id, open] of Object.entries(_savedSession.panelSections)) {
+      const body = document.getElementById(id);
+      if (!body) continue;
+      body.classList.toggle('open', open);
+      const arrow = body.previousElementSibling?.querySelector('.lp-section-arrow');
+      if (arrow) arrow.style.transform = open ? '' : 'rotate(-90deg)';
+    }
+  }
 }, 0);
 window.addEventListener("beforeunload", () => {
   saveSession();
@@ -3156,9 +3213,76 @@ window.addEventListener("beforeunload", () => {
 });
 initWorkflowPanel();
 
+// ── Update checker ────────────────────────────────────────────────────────────
+window._checkForUpdates = async function () {
+  const btn       = document.getElementById('update_check_btn');
+  const indicator = document.getElementById('update_status_indicator');
+  if (!indicator) return;
+
+  const _setStatus = (msg, color) => {
+    indicator.textContent = msg;
+    indicator.style.color = color;
+    indicator.style.display = 'inline';
+  };
+
+  if (btn) btn.disabled = true;
+  _setStatus('Checking…', '#aaa');
+
+  try {
+    const res  = await fetch('/api/updates/check');
+    const data = await res.json();
+
+    if (!data.ok) {
+      _setStatus('⚠ ' + (data.error || 'Check failed'), '#f77');
+      return;
+    }
+
+    if (data.behind === 0) {
+      _setStatus(`✓ Up to date (${data.currentHash})`, '#aaffaa');
+      return;
+    }
+
+    // There are updates available — ask to apply
+    const apply = confirm(
+      `${data.behind} update${data.behind === 1 ? '' : 's'} available ` +
+      `(${data.currentHash} → ${data.remoteHash}).\n\nApply now? ` +
+      `(FLEX will need to be restarted after)`
+    );
+    if (!apply) {
+      _setStatus(`${data.behind} update${data.behind === 1 ? '' : 's'} available`, '#ffdd88');
+      return;
+    }
+
+    _setStatus('Applying…', '#aaa');
+    const applyRes  = await fetch('/api/updates/apply', { method: 'POST' });
+    const applyData = await applyRes.json();
+
+    if (applyData.ok) {
+      _setStatus('✓ Updated — please restart FLEX', '#aaffaa');
+      console.log('[updates]', applyData.output);
+    } else {
+      _setStatus('✗ Update failed — see console', '#f77');
+      console.error('[updates] git pull failed:\n', applyData.output);
+    }
+  } catch (e) {
+    _setStatus('✗ Server unreachable', '#f77');
+    console.error('[updates] fetch error:', e);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+};
+
 window.addPC = function(url){
 
-Potree.loadPointCloud(url, "test", function(e){
+// Derive a readable name from the URL: use the path segment before /ept.json
+const _pcName = (function() {
+  try {
+    const parts = url.replace(/\/ept\.json.*$/i, '').split('/');
+    return parts[parts.length - 1] || url;
+  } catch(_) { return url; }
+})();
+
+Potree.loadPointCloud(url, _pcName, function(e){
   let potreeScene = potreeViewer.scene;
   let pointcloudProjection = proj4.defs("EPSG:3857");
   potreeScene.addPointCloud(e.pointcloud);
@@ -3375,11 +3499,37 @@ if (flags.displayPC){
 // window.addPC("http://localhost:8083/T2/ept.json");
 }
 
-// Intercept addPC to track loaded URLs for session persistence
+// Intercept addPC to track loaded URLs for session persistence and update panel
 const _origAddPC = window.addPC;
 window.addPC = function(url) {
   notifyPcLoaded(url);
-  return _origAddPC(url);
+  const pcsBefore = (potreeViewer?.scene?.pointclouds || []).length;
+  const statusEl = document.getElementById('lp-pc-status');
+  const result = _origAddPC(url);
+  // Potree loads async; poll until the new cloud appears (success) or give up (failure)
+  let tries = 0;
+  const poll = setInterval(() => {
+    const pcs = potreeViewer?.scene?.pointclouds || [];
+    renderPcList();
+    if (pcs.length > pcsBefore) {
+      clearInterval(poll);
+      if (statusEl) {
+        const loaded = pcs[pcs.length - 1];
+        statusEl.textContent = '✓ Loaded: ' + (loaded?.name || 'point cloud');
+        statusEl.style.color = '#5d5';
+      }
+      // Auto-hide the LiDAR dataset footprints — no longer needed once a cloud is loaded
+      if (viewModel.showlidar) viewModel.showlidar = false;
+    } else if (++tries >= 30) {
+      // ~9 seconds with no new cloud — likely a bad URL or CORS/proxy error
+      clearInterval(poll);
+      if (statusEl) {
+        statusEl.textContent = '✗ Failed to load — check URL and server';
+        statusEl.style.color = '#f77';
+      }
+    }
+  }, 300);
+  return result;
 };
 
 // Show a dismissible banner prompting to restore saved point clouds
@@ -3459,9 +3609,11 @@ async function _fetchCaltopoKml() {
     syncMinimapCaltopoFeatures(ds);
     const t = new Date().toLocaleTimeString();
     _setCaltopoStatus(`✓ loaded ${t}`, '#8f8');
+    renderCaltopoStatus();
   } catch (e) {
     console.warn('[caltopo] load failed:', e);
     _setCaltopoStatus('⚠ load failed — check URL/proxy', '#f88');
+    renderCaltopoStatus();
   }
 }
 
@@ -3501,6 +3653,459 @@ function clearCaltopo() {
   caltopoState.url = null;
   _setCaltopoStatus('', '');
   notifyCaltopoChanged(null, 30);
+  renderCaltopoStatus();
+}
+
+// ── Layers Panel ──────────────────────────────────────────────────────────────
+
+/** Toggle a .lp-section-body open/closed */
+window._lpToggle = function(headerEl) {
+  const body  = headerEl.nextElementSibling;
+  const arrow = headerEl.querySelector('.lp-section-arrow');
+  const open  = body.classList.toggle('open');
+  if (arrow) arrow.style.transform = open ? '' : 'rotate(-90deg)';
+  // Persist collapse state if this section has an ID
+  if (body.id) notifyPanelSectionToggled(body.id, open);
+};
+
+// ── Point Cloud list ──────────────────────────────────────────────────────────
+
+function renderPcList() {
+  const container = document.getElementById('lp-pc-list');
+  if (!container) return;
+  const pcs = potreeViewer?.scene?.pointclouds || [];
+  if (pcs.length === 0) {
+    container.innerHTML = '<div class="lp-empty">No point clouds loaded</div>';
+    return;
+  }
+  container.innerHTML = '';
+  pcs.forEach((pc, i) => {
+    const row = document.createElement('div');
+    row.className = 'lp-row';
+    const name = pc.name || pc.pcoGeometry?.url?.split('/').slice(-2, -1)[0] || `PC ${i + 1}`;
+    row.innerHTML =
+      `<button class="lp-eye-btn" title="Toggle visibility">${pc.visible !== false ? '👁' : '🚫'}</button>` +
+      `<span class="lp-row-name" title="${name}">${name}</span>` +
+      `<button class="lp-remove-btn" title="Remove">✕</button>`;
+    row.querySelector('.lp-eye-btn').addEventListener('click', () => {
+      pc.visible = pc.visible === false ? true : false;
+      renderPcList();
+    });
+    row.querySelector('.lp-remove-btn').addEventListener('click', () => removePc(pc));
+    container.appendChild(row);
+  });
+}
+
+function removePc(pc) {
+  const pcs = potreeViewer.scene.pointclouds;
+  const children = potreeViewer.scene.scenePointCloud.children;
+  const ci = children.indexOf(pc);
+  if (ci !== -1) children.splice(ci, 1);
+  const pi = pcs.indexOf(pc);
+  if (pi !== -1) pcs.splice(pi, 1);
+  renderPcList();
+  saveSession();
+}
+
+// ── Data Files list ───────────────────────────────────────────────────────────
+
+const loadedDataFiles = [];
+let _dataFileIdCounter = 0;
+
+function renderDataFileList() {
+  const container = document.getElementById('lp-data-list');
+  if (!container) return;
+  if (loadedDataFiles.length === 0) {
+    container.innerHTML = '<div class="lp-empty">No data files loaded</div>';
+    return;
+  }
+  container.innerHTML = '';
+  loadedDataFiles.forEach(entry => {
+    const row = document.createElement('div');
+    row.className = 'lp-row';
+    row.innerHTML =
+      `<button class="lp-eye-btn" title="Toggle visibility">${entry.show ? '👁' : '🚫'}</button>` +
+      `<span class="lp-row-name" title="${entry.label}">${entry.label}</span>` +
+      `<span class="lp-badge">${entry.type}</span>` +
+      `<button class="lp-remove-btn" title="Remove">✕</button>`;
+    row.querySelector('.lp-eye-btn').addEventListener('click', () => {
+      entry.show = !entry.show;
+      if (entry.dataSource) entry.dataSource.show = entry.show;
+      renderDataFileList();
+    });
+    row.querySelector('.lp-remove-btn').addEventListener('click', () => removeDataFile(entry.id));
+    container.appendChild(row);
+  });
+}
+
+async function addDataFile(fileOrUrl, label) {
+  let ds, type, entryLabel;
+  try {
+    if (typeof fileOrUrl === 'string') {
+      const url = fileOrUrl;
+      const ext = url.split('?')[0].split('.').pop().toLowerCase();
+      type = (ext === 'geojson' || ext === 'json') ? 'geojson' : (ext === 'kmz' ? 'kmz' : 'kml');
+      entryLabel = label || url.split('/').pop().split('?')[0] || url;
+      const proxied = url.startsWith('http') ? ProxyUrlGenerator.generateProxyUrl(url) : url;
+      if (type === 'geojson' || type === 'json') {
+        ds = await Cesium.GeoJsonDataSource.load(proxied);
+      } else {
+        ds = await Cesium.KmlDataSource.load(proxied, {
+          camera: cesiumViewer.scene.camera,
+          canvas: cesiumViewer.scene.canvas,
+          clampToGround: true,
+        });
+      }
+    } else {
+      // File object
+      const file = fileOrUrl;
+      const ext = file.name.split('.').pop().toLowerCase();
+      type = (ext === 'geojson' || ext === 'json') ? 'geojson' : (ext === 'kmz' ? 'kmz' : 'kml');
+      entryLabel = label || file.name;
+      const objectUrl = URL.createObjectURL(file);
+      if (type === 'geojson' || type === 'json') {
+        ds = await Cesium.GeoJsonDataSource.load(objectUrl);
+      } else {
+        ds = await Cesium.KmlDataSource.load(objectUrl, {
+          camera: cesiumViewer.scene.camera,
+          canvas: cesiumViewer.scene.canvas,
+          clampToGround: true,
+        });
+      }
+    }
+    cesiumViewer.dataSources.add(ds);
+    const entry = {
+      id: ++_dataFileIdCounter,
+      label: entryLabel,
+      type,
+      url: typeof fileOrUrl === 'string' ? fileOrUrl : null,
+      dataSource: ds,
+      show: true,
+    };
+    loadedDataFiles.push(entry);
+    renderDataFileList();
+    notifyDataFilesChanged(loadedDataFiles);
+  } catch (err) {
+    console.error('[layers] addDataFile failed:', err);
+    alert('Failed to load file: ' + err.message);
+  }
+}
+
+function removeDataFile(id) {
+  const idx = loadedDataFiles.findIndex(e => e.id === id);
+  if (idx === -1) return;
+  const entry = loadedDataFiles[idx];
+  if (entry.dataSource) cesiumViewer.dataSources.remove(entry.dataSource, true);
+  loadedDataFiles.splice(idx, 1);
+  renderDataFileList();
+  notifyDataFilesChanged(loadedDataFiles);
+}
+
+window._addDataFile = function() {
+  // Try file picker first, fall back to URL prompt
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.kml,.kmz,.geojson,.json';
+  input.onchange = e => {
+    const file = e.target.files[0];
+    if (file) addDataFile(file);
+  };
+  input.click();
+};
+
+window.addKMZ = function() { window._addDataFile(); };
+
+// ── Points of Interest panel list ─────────────────────────────────────────────
+
+function renderPoiList() {
+  const list   = document.getElementById('lp-poi-list');
+  const group  = document.getElementById('lp-poi-group');
+  const badge  = document.getElementById('lp-poi-count-badge');
+  if (!list) return;
+
+  const entities = cesiumViewer.entities.values.filter(
+    e => e.properties && e.properties.isUserLabel
+  );
+
+  // Update count badge
+  if (badge) {
+    badge.textContent = entities.length;
+    badge.style.display = entities.length ? 'inline' : 'none';
+  }
+  if (group) group.style.display = entities.length ? 'block' : 'none';
+
+  list.innerHTML = '';
+  entities.forEach(entity => {
+    const name = (entity.label && entity.label.text && entity.label.text.getValue
+      ? entity.label.text.getValue(Cesium.JulianDate.now())
+      : entity.label?.text) || entity.id;
+    const row = document.createElement('div');
+    row.className = 'lp-row';
+    row.innerHTML =
+      `<span class="lp-row-name" style="font-size:10px;" title="${name}">${name}</span>` +
+      `<button class="lp-remove-btn" title="Delete">✕</button>`;
+    row.querySelector('.lp-remove-btn').addEventListener('click', () => {
+      cesiumViewer.entities.remove(entity);
+      renderPoiList();
+    });
+    list.appendChild(row);
+  });
+}
+
+window._exportPoi = function(format) {
+  const entities = new Cesium.EntityCollection();
+  cesiumViewer.entities.values
+    .filter(e => e.properties && e.properties.isUserLabel)
+    .forEach(e => entities.add(e));
+
+  if (format === 'kmz') {
+    Cesium.exportKml({ entities, kmz: true })
+      .then(r => downloadBlob('points_of_interest.kmz', r.kmz))
+      .catch(console.error);
+  } else {
+    // GeoJSON — build manually from entity positions
+    const features = cesiumViewer.entities.values
+      .filter(e => e.properties && e.properties.isUserLabel && e.position)
+      .map(e => {
+        const cart = e.position.getValue(Cesium.JulianDate.now());
+        const carto = Cesium.Cartographic.fromCartesian(cart);
+        const name = (e.label?.text?.getValue
+          ? e.label.text.getValue(Cesium.JulianDate.now())
+          : e.label?.text) || '';
+        return {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [
+            Cesium.Math.toDegrees(carto.longitude),
+            Cesium.Math.toDegrees(carto.latitude),
+            carto.height
+          ]},
+          properties: { name }
+        };
+      });
+    const geojson = JSON.stringify({ type: 'FeatureCollection', features }, null, 2);
+    const blob = new Blob([geojson], { type: 'application/geo+json' });
+    downloadBlob('points_of_interest.geojson', blob);
+  }
+};
+
+// ── CalTopo status row ────────────────────────────────────────────────────────
+
+function renderCaltopoStatus() {
+  const dot  = document.getElementById('lp-ct-dot');
+  const text = document.getElementById('lp-ct-text');
+  if (!dot || !text) return;
+  if (caltopoState.url) {
+    const id = (caltopoState.url.match(/\/m\/([A-Za-z0-9]+)/) || [])[1] || caltopoState.url;
+    dot.style.color  = '#4f4';
+    text.textContent = `Active — ${id}`;
+  } else {
+    dot.style.color  = 'rgba(255,255,255,0.3)';
+    text.textContent = 'Not loaded';
+  }
+}
+
+// ── Cave Survey toggle ────────────────────────────────────────────────────────
+
+let _caveDataSource = null;
+
+async function setCaveSurveyVisible(visible) {
+  if (visible && !_caveDataSource) {
+    try {
+      const ds = await Cesium.GeoJsonDataSource.load('./user_files/caves_v2.geojson', { clampToGround: false });
+      cesiumViewer.dataSources.add(ds);
+      _caveDataSource = ds;
+    } catch (e) {
+      console.warn('[cave] failed to load caves_v2.geojson:', e);
+    }
+  } else if (!visible && _caveDataSource) {
+    cesiumViewer.dataSources.remove(_caveDataSource, true);
+    _caveDataSource = null;
+  }
+  notifyCaveVisibilityChanged(visible);
+}
+
+// ── Overlay drag-and-drop ─────────────────────────────────────────────────────
+
+// ── Layer list (fully manual render — no Knockout foreach) ───────────────────
+// viewModel.layers[] is the source of truth. We own the DOM and sync back.
+
+/**
+ * Wire a freshly-added ImageryLayer to the session save system.
+ * Must be called once per layer after addCatalogLayer() resolves.
+ */
+function subscribeLayerToSession(layer) {
+  if (!layer?.name) return;
+  Cesium.knockout.getObservable(layer, 'show')?.subscribe(() => saveSession());
+  Cesium.knockout.getObservable(layer, 'alpha')?.subscribe(() => saveSession());
+}
+
+function renderLayerList() {
+  const body = document.getElementById('lp-layers-body');
+  if (!body) return;
+  body.innerHTML = '';
+
+  // All active layers in one flat list (top → bottom in viewModel order).
+  const active = viewModel.layers.filter(l => l.name);
+  let dragSrc = null;
+
+  active.forEach((layer, i) => {
+    const row = document.createElement('div');
+    row.className = 'lp-row';
+    row.dataset.layerIdx = String(i);
+    row.style.cssText = 'display:flex; align-items:center; padding:2px 0; gap:4px;';
+
+    // ⠿ drag handle
+    const handle = document.createElement('span');
+    handle.textContent = '⠿';
+    handle.style.cssText = 'cursor:grab; color:rgba(255,255,255,0.35); font-size:14px; flex-shrink:0; user-select:none; padding:0 2px;';
+    handle.title = 'Drag to reorder';
+
+    // Visibility checkbox
+    const chk = document.createElement('input');
+    chk.type = 'checkbox';
+    chk.checked = !!layer.show;
+    chk.style.margin = '0';
+    chk.addEventListener('change', () => { layer.show = chk.checked; });
+
+    // Name label
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = layer.name;
+    nameSpan.style.cssText = 'flex:1; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+
+    // Opacity slider
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = '0'; slider.max = '1'; slider.step = '0.01';
+    slider.value = String(layer.alpha ?? 1);
+    slider.style.cssText = 'width:62px; flex-shrink:0;';
+    slider.addEventListener('input', () => { layer.alpha = parseFloat(slider.value); });
+
+    // × Remove button
+    const removeBtn = document.createElement('button');
+    removeBtn.textContent = '×';
+    removeBtn.title = 'Remove from active layers';
+    removeBtn.style.cssText = 'background:none; border:none; cursor:pointer; color:rgba(255,100,100,0.65); font-size:15px; flex-shrink:0; padding:0 2px; line-height:1;';
+    removeBtn.addEventListener('mouseenter', () => { removeBtn.style.color = 'rgba(255,60,60,1)'; });
+    removeBtn.addEventListener('mouseleave', () => { removeBtn.style.color = 'rgba(255,100,100,0.65)'; });
+    removeBtn.addEventListener('click', () => {
+      removeCatalogLayer(layer);
+      saveSession();
+      renderLayerList();
+    });
+
+    row.appendChild(handle);
+    row.appendChild(chk);
+    row.appendChild(nameSpan);
+    row.appendChild(slider);
+    row.appendChild(removeBtn);
+    body.appendChild(row);
+
+    // ── Drag-and-drop (handle-initiated) ─────────────────────────────────
+    handle.addEventListener('mousedown', () => { row.draggable = true; });
+    handle.addEventListener('mouseup',   () => { row.draggable = false; });
+
+    row.addEventListener('dragstart', e => {
+      dragSrc = i;
+      e.dataTransfer.effectAllowed = 'move';
+      setTimeout(() => row.style.opacity = '0.4', 0);
+    });
+    row.addEventListener('dragend', () => {
+      row.style.opacity = '';
+      row.draggable = false;
+      body.querySelectorAll('.lp-drag-over').forEach(r => r.classList.remove('lp-drag-over'));
+      dragSrc = null;
+    });
+    row.addEventListener('dragover', e => {
+      e.preventDefault();
+      body.querySelectorAll('.lp-drag-over').forEach(r => r.classList.remove('lp-drag-over'));
+      row.classList.add('lp-drag-over');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('lp-drag-over'));
+    row.addEventListener('drop', e => {
+      e.preventDefault();
+      row.classList.remove('lp-drag-over');
+      if (dragSrc === null || dragSrc === i) return;
+      const movedLayer = active[dragSrc];
+      const steps = i - dragSrc;
+      if (steps < 0) {
+        for (let s = 0; s < -steps; s++) viewModel.raise(movedLayer, viewModel.layers.indexOf(movedLayer));
+      } else {
+        for (let s = 0; s < steps; s++) viewModel.lower(movedLayer, viewModel.layers.indexOf(movedLayer));
+      }
+      saveSession();
+      renderLayerList();
+    });
+  });
+
+  // ── Add layer button + picker dropdown ───────────────────────────────────
+  const activeNames = new Set(active.map(l => l.name));
+  const available   = LAYER_CATALOG.filter(d => !activeNames.has(d.name));
+
+  const footer = document.createElement('div');
+  footer.style.cssText = 'margin-top:5px; position:relative;';
+
+  const addBtn = document.createElement('button');
+  addBtn.textContent = '+ Add layer';
+  addBtn.style.cssText = [
+    'width:100%; font-size:10px; padding:3px 0;',
+    'background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.2);',
+    'border-radius:4px; color:rgba(255,255,255,0.75); cursor:pointer; letter-spacing:0.03em;',
+  ].join('');
+  if (available.length === 0) {
+    addBtn.disabled = true;
+    addBtn.style.opacity = '0.38';
+    addBtn.title = 'All catalog layers are already active';
+  }
+  footer.appendChild(addBtn);
+
+  // Picker panel (hidden until + is clicked)
+  const picker = document.createElement('div');
+  picker.style.cssText = [
+    'display:none; position:absolute; top:calc(100% + 2px); left:0; right:0; z-index:60;',
+    'background:rgba(18,20,28,0.98); border:1px solid rgba(255,255,255,0.2);',
+    'border-radius:6px; overflow:hidden; box-shadow:0 4px 14px rgba(0,0,0,0.55);',
+    'max-height:220px; overflow-y:auto;',
+  ].join('');
+
+  available.forEach(def => {
+    const item = document.createElement('div');
+    item.textContent = def.name;
+    item.style.cssText = 'padding:6px 10px; font-size:11px; color:rgba(255,255,255,0.85); cursor:pointer; white-space:nowrap;';
+    item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,0.1)'; });
+    item.addEventListener('mouseleave', () => { item.style.background = ''; });
+    item.addEventListener('click', async () => {
+      picker.style.display = 'none';
+      addBtn.disabled = true;
+      addBtn.textContent = `⏳ Adding ${def.name}…`;
+      const newLayer = await addCatalogLayer(def.name, true, 1.0);
+      if (newLayer) {
+        subscribeLayerToSession(newLayer);
+        saveSession();
+      }
+      renderLayerList();   // re-render with the new layer in the active list
+    });
+    picker.appendChild(item);
+  });
+
+  footer.appendChild(picker);
+  body.appendChild(footer);
+
+  // Toggle picker on button click; close when clicking anywhere outside
+  addBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const opening = picker.style.display === 'none';
+    picker.style.display = opening ? 'block' : 'none';
+    if (opening) {
+      const onOutside = (e2) => {
+        if (!footer.contains(e2.target)) {
+          picker.style.display = 'none';
+          document.removeEventListener('click', onOutside, true);
+        }
+      };
+      // Defer so the opening click itself isn't captured
+      setTimeout(() => document.addEventListener('click', onOutside, true), 0);
+    }
+  });
 }
 
 // Expose to toolbar onclick handlers (can't use ES module imports from inline HTML)
@@ -3576,26 +4181,43 @@ window._caltopoLogout = () => caltopoLogout();
 const toolbar = document.getElementById("toolbar");
 Cesium.knockout.applyBindings(viewModel, toolbar);
 
-Cesium.knockout
-.getObservable(viewModel, "selectedLayer")
-.subscribe(function (baseLayer) {
-  let activeLayerIndex = 0;
-  const numLayers = viewModel.layers.length;
-  for (let i = 0; i < numLayers; ++i) {
-    if (viewModel.isSelectableLayer(viewModel.layers[i])) {
-      activeLayerIndex = i;
-      break;
+// Init layers panel interactivity (after Knockout owns the DOM)
+renderPcList();
+renderDataFileList();
+renderCaltopoStatus();
+renderPoiList();
+
+// Cave survey toggle
+{
+  const caveToggle = document.getElementById('lp-cave-toggle');
+  if (caveToggle) {
+    if (flags.displayCave) {
+      caveToggle.checked = true;
+      setCaveSurveyVisible(true);
     }
+    caveToggle.addEventListener('change', () => setCaveSurveyVisible(caveToggle.checked));
   }
-  const activeLayer = viewModel.layers[activeLayerIndex];
-  const show = activeLayer.show;
-  const alpha = activeLayer.alpha;
-  cesiumViewer.imageryLayers.remove(activeLayer, false);
-  cesiumViewer.imageryLayers.add(baseLayer, numLayers - activeLayerIndex - 1);
-  baseLayer.show = show;
-  baseLayer.alpha = alpha;
-  updateLayerList();
-});
+}
+
+// Scene section checkboxes — wire directly (not via Knockout binding context)
+{
+  const lidarChk = document.getElementById('lp-showlidar-chk');
+  const mapsChk  = document.getElementById('lp-googlemaps-chk');
+  if (lidarChk) {
+    lidarChk.checked = !!viewModel.showlidar;
+    lidarChk.addEventListener('change', () => { viewModel.showlidar = lidarChk.checked; });
+    // Keep in sync when [L] key toggles it
+    Cesium.knockout.getObservable(viewModel, 'showlidar').subscribe(v => { lidarChk.checked = !!v; });
+  }
+  if (mapsChk) {
+    mapsChk.checked = !!viewModel.googleMapsOn;
+    mapsChk.addEventListener('change', () => { viewModel.googleMapsOn = mapsChk.checked; });
+    Cesium.knockout.getObservable(viewModel, 'googleMapsOn').subscribe(v => { mapsChk.checked = !!v; });
+  }
+}
+
+// (selectedLayer subscriber removed — all layers are now managed uniformly
+//  via eye-toggle in renderLayerList; no separate base-layer dropdown.)
 
 Cesium.knockout.getObservable(viewModel, "showlidar").subscribe(
 function (newValue) {
@@ -3957,51 +4579,38 @@ function (e) {
       pointCounter +=1;
       let preview = "Point of Small interest ".concat(pointCounter.toString());
       let labelName = preview;
-      // let labelName = prompt("Name", preview);
       console.log("Added point of Small interest: S".concat(pointCounter.toString()));
       cesiumViewer.entities.add({
-        label: {
-          scale: 0.75,
-          text: "S".concat(labelName),
-        },
+        label: { scale: 0.75, text: "S: ".concat(labelName) },
         position: cesiumViewer.camera.position,
-        properties: {
-          isUserLabel: true
-        },
+        properties: { isUserLabel: true },
         point: {},
       });
+      renderPoiList();
     }else if (flagName == "pointM"){ // add entity point where camera is currently located
       pointCounter +=1;
       let preview = "Point of Medium interest ".concat(pointCounter.toString());
       let labelName = prompt("Name", preview);
       console.log("Added point of Medium interest: M".concat(pointCounter.toString()));
       cesiumViewer.entities.add({
-        label: {
-          scale: 1,
-          text: "M".concat(labelName),
-        },
+        label: { scale: 1, text: "M: ".concat(labelName) },
         position: cesiumViewer.camera.position,
-        properties: {
-          isUserLabel: true
-        },
+        properties: { isUserLabel: true },
         point: {},
       });
+      renderPoiList();
     }else if (flagName == "pointL"){ // add entity point where camera is currently located
       pointCounter +=1;
       let preview = "Point of Large interest ".concat(pointCounter.toString());
       let labelName = prompt("Name", preview);
       console.log("Added point of Large interest: L".concat(pointCounter.toString()));
       cesiumViewer.entities.add({
-        label: {
-          scale: 1.5,
-          text: "L".concat(labelName),
-        },
+        label: { scale: 1.5, text: "L: ".concat(labelName) },
         position: cesiumViewer.camera.position,
-        properties: {
-          isUserLabel: true
-        },
+        properties: { isUserLabel: true },
         point: {},
       });
+      renderPoiList();
     }else if (flagName == "route"){ // startor stop recording route. If starting, add route point where camera is currently located.
       if (creatingRoute == ""){
         let preview = "Route ";
@@ -4087,11 +4696,12 @@ const camera = cesiumViewer.camera;
 // camera.frustum.fov = (Math.PI/2);
 
 if (flags.removePC){
-  while (potreeViewer.scene.pointclouds.length > 0) { 
-    potreeViewer.scene.scenePointCloud.children.splice(potreeViewer.scene.scenePointCloud.children.indexOf(potreeViewer.scene.pointclouds[0]), 1,); 
+  while (potreeViewer.scene.pointclouds.length > 0) {
+    potreeViewer.scene.scenePointCloud.children.splice(potreeViewer.scene.scenePointCloud.children.indexOf(potreeViewer.scene.pointclouds[0]), 1,);
     potreeViewer.scene.pointclouds.splice(0, 1); }
   console.log("Removed Point Clouds");
   flags.removePC = false;
+  renderPcList();
 }
 if (flags.showlidar){
   viewModel.showlidar = !viewModel.showlidar;
@@ -4931,12 +5541,13 @@ const htmlLabelState = {
   divs: new Map(),
 };
 
-// Wire toggle checkbox
+// Wire POI / HTML labels toggle checkbox
 {
   const toggle = document.getElementById('html_labels_toggle');
   if (toggle) {
     toggle.addEventListener('change', () => {
       htmlLabelState.enabled = toggle.checked;
+      notifyPoiVisibilityChanged(toggle.checked);
       if (!htmlLabelState.enabled) {
         // Clear all HTML divs and re-show native Cesium labels
         htmlLabelState.divs.forEach(div => div.remove());

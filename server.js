@@ -3,6 +3,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
+const { exec } = require('child_process');
 
 const settings = require('./settings');
 
@@ -59,6 +60,11 @@ const server = http.createServer((req, res) => {
         jsonResponse(res, { ok: true });
     } else if (sanitizedPath === '/caltopo/status' && req.method === 'GET') {
         jsonResponse(res, { loggedIn: !!caltopoSessionCookie });
+    // ── Update endpoints ──────────────────────────────────────────────────────
+    } else if (sanitizedPath === '/api/updates/check' && req.method === 'GET') {
+        handleUpdatesCheck(req, res);
+    } else if (sanitizedPath === '/api/updates/apply' && req.method === 'POST') {
+        handleUpdatesApply(req, res);
     // ── CORS preflight ────────────────────────────────────────────────────────
     } else if (req.method === 'OPTIONS') {
         res.writeHead(204, {
@@ -220,4 +226,54 @@ function getContentType(filePath) {
     if (ext === '.txt') return 'text/plain';
     // Add more content types as needed
     return 'application/octet-stream'; // Default
+}
+
+// ── Git update handlers ───────────────────────────────────────────────────────
+
+/**
+ * GET /api/updates/check
+ * Fetches from origin and reports how many commits behind HEAD is.
+ * Response: { ok, behind, currentHash, remoteHash, error? }
+ */
+function handleUpdatesCheck(req, res) {
+    const cwd = __dirname;
+    // First fetch — don't fail the response if fetch itself fails (offline)
+    exec('git fetch origin', { cwd }, (fetchErr) => {
+        if (fetchErr) {
+            console.warn('[updates] git fetch failed (offline?):', fetchErr.message);
+        }
+        // Count commits between HEAD and origin/HEAD
+        exec('git rev-list HEAD..origin/HEAD --count', { cwd }, (countErr, countOut) => {
+            if (countErr) {
+                return jsonResponse(res, { ok: false, error: 'Not a git repo or no remote configured' }, 500);
+            }
+            const behind = parseInt(countOut.trim(), 10) || 0;
+            // Grab the two hashes for display
+            exec('git rev-parse --short HEAD', { cwd }, (hashErr, hashOut) => {
+                const currentHash = hashErr ? '?' : hashOut.trim();
+                exec('git rev-parse --short origin/HEAD', { cwd }, (rhashErr, rhashOut) => {
+                    const remoteHash = rhashErr ? '?' : rhashOut.trim();
+                    jsonResponse(res, { ok: true, behind, currentHash, remoteHash });
+                });
+            });
+        });
+    });
+}
+
+/**
+ * POST /api/updates/apply
+ * Runs `git pull --ff-only` and returns the output.
+ * Response: { ok, output, error? }
+ */
+function handleUpdatesApply(req, res) {
+    const cwd = __dirname;
+    exec('git pull --ff-only', { cwd }, (err, stdout, stderr) => {
+        const output = (stdout + stderr).trim();
+        if (err) {
+            console.error('[updates] git pull failed:', output);
+            return jsonResponse(res, { ok: false, output, error: err.message }, 500);
+        }
+        console.log('[updates] git pull succeeded:', output);
+        jsonResponse(res, { ok: true, output });
+    });
 }

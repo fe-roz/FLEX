@@ -2,7 +2,7 @@
 // Saves camera position, layer state, loaded point cloud URLs, and misc settings to localStorage.
 
 const SESSION_KEY          = 'flex_session_v1';
-const SCHEMA_VERSION       = 1;
+const SCHEMA_VERSION       = 3;  // v3: unified layer list (no base/overlay split)
 const AUTOSAVE_INTERVAL_MS = 15_000;  // periodic save every 15s
 const CAMERA_SETTLE_MS     = 2_000;   // debounce after camera stops moving
 
@@ -15,6 +15,10 @@ let _indicator       = null;
 let _indicatorTimer  = null;
 let _caltopoUrl      = null;
 let _caltopoInterval = 30;
+let _dataFiles       = [];   // [{label, type, url}] — URL-sourced only
+let _caveVisible     = false;
+let _poiVisible      = true;
+let _panelSections   = {};   // { sectionBodyId: true/false (open) }
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -29,13 +33,6 @@ export function initSession(cesiumViewer, viewModel) {
 
   // Expose to toolbar Save button (can't import ES modules from inline onclick)
   window._sessionSave = saveSession;
-
-  // Auto-save when base layer changes
-  if (viewModel) {
-    Cesium.knockout
-      .getObservable(viewModel, 'selectedLayer')
-      .subscribe(() => saveSession());
-  }
 
   // Periodic save
   setInterval(saveSession, AUTOSAVE_INTERVAL_MS);
@@ -60,6 +57,32 @@ export function notifyCaltopoChanged(url, intervalSecs) {
   saveSession();
 }
 
+export function notifyDataFilesChanged(entries) {
+  // entries: the full loadedDataFiles array from flex.js
+  _dataFiles = entries
+    .filter(e => e.url)
+    .map(e => ({ label: e.label, type: e.type, url: e.url }));
+  saveSession();
+}
+
+export function notifyCaveVisibilityChanged(visible) {
+  _caveVisible = !!visible;
+  saveSession();
+}
+
+export function notifyPoiVisibilityChanged(visible) {
+  _poiVisible = !!visible;
+  saveSession();
+}
+
+/**
+ * Called by _lpToggle in flex.js each time a panel section is opened/closed.
+ */
+export function notifyPanelSectionToggled(sectionBodyId, isOpen) {
+  _panelSections[sectionBodyId] = isOpen;
+  saveSession();
+}
+
 /**
  * Serialize current state to localStorage.
  */
@@ -74,6 +97,10 @@ export function saveSession() {
       pointClouds:     Array.from(_loadedPcUrls),
       caltopoUrl:      _caltopoUrl,
       caltopoInterval: _caltopoInterval,
+      dataFiles:       _dataFiles,
+      caveVisible:     _caveVisible,
+      poiVisible:      _poiVisible,
+      panelSections:   { ..._panelSections },
     };
     localStorage.setItem(SESSION_KEY, JSON.stringify(snapshot));
     _flashIndicator(true);
@@ -118,23 +145,17 @@ export function restoreCamera(session, cesiumViewer) {
 
 /**
  * Restore layer state from a saved session object.
- * Must be called AFTER loadLayers() resolves so baseLayers[] is populated.
+ * Must be called AFTER loadLayers() resolves so viewModel.layers[] is populated.
  */
 export function restoreLayerState(session, viewModel) {
   if (!session?.layers) return;
-  const { baseLayerName, overlays } = session.layers;
+  const { layers, usgsRef } = session.layers;
 
-  // Restore base layer — the existing Knockout subscriber in flex.js handles the swap
-  if (baseLayerName && viewModel.baseLayers) {
-    const target = viewModel.baseLayers.find(l => l.name === baseLayerName);
-    if (target) viewModel.selectedLayer = target;
-  }
-
-  // Restore overlay show/alpha
-  if (overlays && viewModel.layers) {
-    for (const saved of overlays) {
+  // Restore show/alpha for every named layer
+  if (layers && viewModel.layers) {
+    for (const saved of layers) {
       const live = viewModel.layers.find(l => l.name === saved.name);
-      if (live && !viewModel.isSelectableLayer(live)) {
+      if (live) {
         live.show  = saved.show;
         live.alpha = saved.alpha;
       }
@@ -142,9 +163,7 @@ export function restoreLayerState(session, viewModel) {
   }
 
   // Restore misc viewModel settings
-  if (session.layers.usgsRef !== undefined) {
-    viewModel.usgsRef = session.layers.usgsRef;
-  }
+  if (usgsRef !== undefined) viewModel.usgsRef = usgsRef;
 }
 
 /**
@@ -178,12 +197,14 @@ function _collectCamera() {
 
 function _collectLayers() {
   if (!_viewModel) return null;
-  const overlays = (_viewModel.layers || [])
-    .filter(l => !_viewModel.isSelectableLayer(l))
-    .map(l => ({ name: l.name, show: l.show, alpha: l.alpha }));
+  // Don't snapshot until layers have actually loaded (avoid overwriting a good
+  // restore with an empty list during the async provider-creation window).
+  const allLayers = _viewModel.layers || [];
+  if (allLayers.length === 0) return null;
   return {
-    baseLayerName: _viewModel.selectedLayer ? _viewModel.selectedLayer.name : null,
-    overlays,
+    layers: allLayers
+      .filter(l => l.name)   // skip any unnamed system layers
+      .map(l => ({ name: l.name, show: !!l.show, alpha: l.alpha ?? 1 })),
     usgsRef: !!_viewModel.usgsRef,
   };
 }

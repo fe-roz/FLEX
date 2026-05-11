@@ -28,6 +28,11 @@ const serverConfig = {
             'data.example.org',
             'ot-process2.sdsc.edu',
             'noaa-nos-coastal-lidar-pds.s3.amazonaws.com',
+            'tiles.maps.eox.at',
+            'tile.openstreetmap.org',
+            'a.tile.openstreetmap.org',
+            'b.tile.openstreetmap.org',
+            'c.tile.openstreetmap.org',
         ]
     },
     backend: {

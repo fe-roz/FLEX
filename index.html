@@ -49,6 +49,118 @@
         transition: none;
       }
 
+      /* ── Layers Panel ─────────────────────────────────────────────── */
+      .lp-section { border-bottom: 1px solid rgba(255,255,255,0.1); }
+      .lp-section:last-child { border-bottom: none; }
+      .lp-section-header {
+        display: flex; align-items: center; gap: 5px;
+        padding: 5px 4px; cursor: pointer;
+        font-size: 10px; font-weight: 600; letter-spacing: 0.06em;
+        color: rgba(255,255,255,0.55); text-transform: uppercase;
+        user-select: none;
+      }
+      .lp-section-header:hover { color: rgba(255,255,255,0.85); }
+      .lp-section-arrow { font-size: 9px; transition: transform 0.15s; display: inline-block; }
+      .lp-section-body { padding: 3px 4px 6px; display: none; }
+      .lp-section-body.open { display: block; }
+
+      /* overlay / pc rows */
+      .lp-row {
+        display: flex; align-items: center; gap: 5px;
+        padding: 2px 0; font-size: 11px; color: rgba(255,255,255,0.85);
+      }
+      .lp-row-name {
+        flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .lp-drag-handle {
+        cursor: grab; opacity: 0.4; font-size: 13px; flex-shrink: 0;
+        padding: 0 2px;
+      }
+      .lp-drag-handle:active { cursor: grabbing; }
+      .lp-drag-over { background: rgba(255,255,255,0.08); border-radius: 3px; }
+      .lp-eye-btn {
+        background: none; border: none; cursor: pointer; padding: 0 2px;
+        font-size: 13px; line-height: 1; opacity: 0.7; flex-shrink: 0;
+      }
+      .lp-eye-btn:hover { opacity: 1; }
+      .lp-remove-btn {
+        background: none; border: none; cursor: pointer; padding: 0 2px;
+        font-size: 12px; color: rgba(255,100,100,0.7); flex-shrink: 0;
+        line-height: 1;
+      }
+      .lp-remove-btn:hover { color: rgba(255,80,80,1); }
+      .lp-alpha {
+        width: 70px; flex-shrink: 0;
+      }
+      .lp-badge {
+        font-size: 9px; padding: 1px 4px; border-radius: 3px;
+        background: rgba(255,255,255,0.15); color: rgba(255,255,255,0.6);
+        flex-shrink: 0; text-transform: uppercase; letter-spacing: 0.04em;
+      }
+      .lp-basemap-select {
+        width: 100%; font-size: 11px; background: #1a1a2e; color: #fff;
+        border: 1px solid rgba(255,255,255,0.3); border-radius: 4px;
+        padding: 3px 5px; box-sizing: border-box;
+      }
+      .lp-add-btn {
+        font-size: 10px; padding: 2px 8px; margin-top: 4px;
+        opacity: 0.8;
+      }
+      .lp-add-btn:hover { opacity: 1; }
+      .lp-empty { font-size: 10px; color: rgba(255,255,255,0.35); padding: 2px 0; }
+      /* Panel wrapper inside each collapsible */
+      .lp-panel-wrap { padding: 4px 2px; min-width: 240px; }
+      /* Section-group labels (e.g. "Surface Features") */
+      .lp-group-label {
+        font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+        color: rgba(255,255,255,0.3); padding: 8px 4px 3px;
+        border-top: 1px solid rgba(255,255,255,0.08); margin-top: 2px;
+      }
+      /* Nav button row */
+      .flex-nav { display: flex; flex-wrap: wrap; gap: 3px; padding: 3px 2px 4px; }
+      .flex-nav .btn { font-size: 11px; padding: 3px 7px; }
+
+      /* ── Right-click context menu ───────────────────────────────────────── */
+      .map-context-menu {
+        display: none; position: fixed; z-index: 2000; min-width: 160px;
+        background: rgba(20,20,22,0.96); backdrop-filter: blur(8px);
+        border: 1px solid rgba(255,255,255,0.12); border-radius: 6px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.55);
+        padding: 4px 0; font-family: 'SF Mono', ui-monospace, monospace;
+        font-size: 11px; overflow: hidden;
+      }
+      .map-context-menu.visible { display: block; }
+      .context-menu-coords {
+        padding: 6px 10px; color: #4ade80; cursor: pointer;
+        transition: background 0.1s; user-select: none;
+      }
+      .context-menu-coords:hover  { background: rgba(255,255,255,0.08); }
+      .context-menu-coords:active { background: rgba(255,255,255,0.12); }
+      .context-menu-divider { height: 1px; background: rgba(255,255,255,0.1); margin: 3px 0; }
+      .context-menu-item {
+        display: flex; align-items: center; width: 100%;
+        padding: 5px 10px; background: transparent; border: none;
+        color: rgba(255,255,255,0.85); font-family: inherit; font-size: 11px;
+        text-align: left; cursor: pointer; transition: background 0.1s;
+        text-decoration: none; box-sizing: border-box;
+      }
+      .context-menu-item:hover  { background: rgba(255,255,255,0.08); }
+      .context-menu-item:active { background: rgba(255,255,255,0.12); }
+      .context-menu-text { flex: 1; }
+      .context-menu-external { opacity: 0.4; margin-left: 6px; font-size: 10px; }
+      .context-menu-link { color: rgba(255,255,255,0.85); }
+      .context-menu-link:hover .context-menu-external { opacity: 0.7; }
+      .context-menu-toast {
+        position: fixed; bottom: 80px; left: 50%;
+        transform: translateX(-50%) translateY(10px);
+        padding: 6px 12px; background: rgba(20,20,22,0.96);
+        border: 1px solid rgba(255,255,255,0.1); border-radius: 4px;
+        color: #4ade80; font-family: 'SF Mono', ui-monospace, monospace;
+        font-size: 11px; opacity: 0; transition: opacity 0.15s, transform 0.15s;
+        pointer-events: none; z-index: 3000;
+      }
+      .context-menu-toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+
       .collapse {
         display: none;
       }
@@ -677,258 +789,344 @@
       </div>
       <div id="html_label_container"></div>
       <div id="loadingOverlay"><h1>Loading...</h1></div>
-      <div id="toolbar" style="z-index: 10; ">
-        <p>
-          <button id="top_server_status_btn" class="btn btn-primary" type="button" data-target="#serverCollapsible">Connect to LAN Server</button>
+      <div id="toolbar" style="z-index: 10;">
+
+        <!-- ── Save + Updates ────────────────────────────────────────────── -->
+        <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap; padding:4px 2px 2px;">
           <button id="session_save_btn" class="btn btn-sm btn-secondary" type="button"
             onclick="window._sessionSave && window._sessionSave()"
             title="Save session (camera, layers, point clouds)"
-            style="font-size:11px; padding:2px 8px; margin-left:4px;">💾 Save</button>
+            style="font-size:11px; padding:2px 8px;">💾 Save</button>
           <span id="session_save_indicator"
-            style="font-size:10px; color:#aaffaa; display:none; margin-left:4px; vertical-align:middle;"></span>
-          <div class="collapse" id="serverCollapsible">
-            <div id="server_connected_controls" style="display:none;">
-              <div class="workflow_btn_row" style="margin-top: 6px;">
-                <button id="top_toggle_aois_btn" class="btn btn-primary" type="button">Hide Areas Of Interest</button>
-                <button id="top_draw_aoi_btn" class="btn btn-primary" type="button">Draw AOI</button>
-                <button id="top_upload_aoi_btn" class="btn btn-primary" type="button">Upload AOIs</button>
-                <button id="top_queue_manager_btn" class="btn btn-primary" type="button">Queue Manager</button>
-              </div>
-              <div id="top_draw_status">AOI draw mode inactive.</div>
-              <div id="top_server_status_panel" style="display:block;">
-                <div><strong>Connection:</strong> <span id="sv_connection_status">Not connected</span></div>
-                <div><strong>Tasks:</strong> <span id="sv_task_summary">—</span></div>
-              </div>
-              <button id="top_server_disconnect_btn" class="btn btn-secondary btn-sm" type="button" style="margin-top: 6px;">Disconnect</button>
+            style="font-size:10px; color:#aaffaa; display:none;"></span>
+          <button id="update_check_btn" class="btn btn-sm btn-secondary" type="button"
+            onclick="window._checkForUpdates && window._checkForUpdates()"
+            title="Check for FLEX updates"
+            style="font-size:11px; padding:2px 8px;">🔄 Updates</button>
+          <span id="update_status_indicator"
+            style="font-size:10px; display:none;"></span>
+        </div>
+
+        <!-- ── Main nav ──────────────────────────────────────────────────── -->
+        <div class="flex-nav">
+          <button class="btn btn-primary" type="button" data-target="#mapLayersCollapsible">🗺 Map Layers</button>
+          <button class="btn btn-primary" type="button" data-target="#featuresCollapsible">📍 Features</button>
+          <button class="btn btn-primary" type="button" data-target="#lidarCollapsible">☁ LiDAR</button>
+          <button class="btn btn-primary" type="button" data-target="#toolsCollapsible">🔧 Tools</button>
+          <button class="btn btn-primary" type="button" data-target="#helpCollapsible">❓ Help</button>
+        </div>
+
+        <!-- ── Server controls: hidden — JS still needs these IDs ────────── -->
+        <button id="top_server_status_btn" type="button" style="display:none;">Connect to LAN Server</button>
+        <div id="serverCollapsible" style="display:none;">
+          <div id="server_connected_controls" style="display:none;">
+            <div class="workflow_btn_row">
+              <button id="top_toggle_aois_btn" class="btn btn-primary" type="button">Hide Areas Of Interest</button>
+              <button id="top_draw_aoi_btn"    class="btn btn-primary" type="button">Draw AOI</button>
+              <button id="top_upload_aoi_btn"  class="btn btn-primary" type="button">Upload AOIs</button>
+              <button id="top_queue_manager_btn" class="btn btn-primary" type="button">Queue Manager</button>
             </div>
-          </div>
-                     <button class="btn btn-primary" type="button" data-target="#layersCollapsible">
-             Layers
-           </button>
-           <button class="btn btn-primary" type="button" data-target="#pointCloudCollapsible">
-             Point Cloud
-           </button>
-           <button class="btn btn-primary" type="button" data-target="#dataCollapsible">
-             Data
-           </button>
-           <button class="btn btn-primary" type="button" data-target="#incidenceCollapsible">
-             Incidence Angle
-           </button>
-           <button class="btn btn-primary" type="button" data-target="#controlsCollapsible">
-             Controls
-           </button>
-           <button class="btn btn-primary" type="button" data-target="#caltopoCollapsible">
-             CalTopo
-           </button>
-         <!--  <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#potree_sidebar_container" aria-expanded="false" aria-controls="potree_sidebar_container">
-            Potree Controls
-          </button> -->
-        <div class="collapse" id="incidenceCollapsible">
-          <div style="padding: 8px;">
-            <label><input type="checkbox" id="incidence_toggle"> Show Incidence Lines</label><br>
-            <label style="margin-top: 4px; display: block;">
-              Length: <input type="range" id="incidence_length" min="0.5" max="50" step="0.5" value="2" style="width: 120px; vertical-align: middle;">
-              <span id="incidence_length_label">2m</span>
-            </label>
-            <label style="margin-top: 4px; display: block;">
-              Radius: <input type="range" id="incidence_radius" min="0.01" max="0.5" step="0.01" value="0.05" style="width: 120px; vertical-align: middle;">
-              <span id="incidence_radius_label">0.05m</span>
-            </label>
-            <label style="margin-top: 4px; display: block;">
-              Max: <input type="range" id="incidence_max_points" min="1000" max="100000" step="1000" value="20000" style="width: 120px; vertical-align: middle;">
-              <span id="incidence_max_points_label">20k</span>
-            </label>
-            <label style="margin-top: 4px; display: block;">
-              Color:
-              <select id="incidence_color_mode">
-                <option value="angle">Scan Angle</option>
-                <option value="flightline" selected>Flight Line</option>
-              </select>
-            </label>
-            <button id="incidence_flip" class="btn btn-sm btn-secondary" style="margin-top: 6px;">Flip Angles</button>
-            <div style="margin-top: 6px;">
-              <strong>Show classes:</strong><br>
-              <label><input type="checkbox" id="incidence_cls_2"> Ground (2)</label><br>
-              <label><input type="checkbox" id="incidence_cls_3"> Low Veg (3)</label><br>
-              <label><input type="checkbox" id="incidence_cls_4"> Med Veg (4)</label><br>
-              <label><input type="checkbox" id="incidence_cls_5"> High Veg (5)</label><br>
-              <label><input type="checkbox" id="incidence_cls_6"> Building (6)</label><br>
-              <label><input type="checkbox" id="incidence_cls_7" checked> Low Noise (7)</label><br>
-              <label><input type="checkbox" id="incidence_cls_other"> Other / Unclassified</label>
+            <div id="top_draw_status">AOI draw mode inactive.</div>
+            <div id="top_server_status_panel">
+              <div><strong>Connection:</strong> <span id="sv_connection_status">Not connected</span></div>
+              <div><strong>Tasks:</strong> <span id="sv_task_summary">—</span></div>
             </div>
+            <button id="top_server_disconnect_btn" class="btn btn-secondary btn-sm" type="button">Disconnect</button>
           </div>
         </div>
-        <div class="collapse" id="controlsCollapsible">
-          <h2>Key Controls Cheatsheet:</h2>
-          <p>
-            Movement: <br>
-            [F] - Toggle Fly mode<br>
-            [W] - Forwards (Fly mode)<br>
-            [A] - Left (Fly mode)<br>
-            [S] - Backwards (Fly mode)<br>
-            [D] - Right (Fly mode)<br>
-            [Q] - Down (Fly mode)<br>
-            [E] - Up (Fly mode)<br>
-            [Scrollwheel] - Flight speed (Fly mode)<br>
-            <br>
-            Controls: <br>
-            [L] - Toggle viewable LiDAR Datasets<br>
-            [H] - Hide/Show Cesium Earth model (does not control Google model)<br>
-            [N] - Cycle compass style<br>
-            [M] - Toggle minimap<br>
-            <br>
-            Labeling: <br>
-            <label style="display:inline-flex;align-items:center;gap:6px;margin-bottom:4px;">
-              <input type="checkbox" id="html_labels_toggle" checked>
-              HTML labels (always visible over point clouds)
-            </label><br>
-            [Z] - Create point of Small interest (does not prompt for name)<br>
-            [X] - Create point of Medium interest (prompts for name)<br>
-            [C] - Create point of Large interest (prompts for name)<br>
-            [R] - Start or end a route (prompts for name)<br>
-            [B] - Add point along a route, if started<br>
-            [K] - Download KMZ file with all labeled points and routes<br>
-            [V] - Toggle depth/distance measurement from current position<br>
-            <br>
-            Point Cloud (depends on classification): <br>
-            [1] - Toggle Other Classifications<br>
-            [2] - Toggle Ground<br>
-            [3] - Toggle Vegetation<br>
-            [4] - Toggle Low Noise<br>
-            [5] - Toggle All Points<br>
-            [0] - Remove All Point Clouds<br>
-          </p>
-        </div>
-        <div class="collapse" id="layersCollapsible">
-         <table >
-            <tbody>
-              <tr>
-                <td><input type="checkbox" data-bind="checked: showlidar"></td>
-                <td><span>Show Lidar Datasets</span></td>
-                <!-- <td>
-                  <span data-bind="text: name, visible: !$parent.isSelectableLayer($data)"></span>
-                  <select data-bind="visible: $parent.isSelectableLayer($data), options: $parent.baseLayers, optionsText: 'name', value: $parent.selectedLayer"></select>
-                </td> -->
-                <!-- <td>
-                  <input type="range" min="0" max="1" step="0.01" data-bind="value: lidaralpha, valueUpdate: 'input'">
-                </td> -->
-              </tr>
-              <tr>
-                <td><input type="checkbox" data-bind="checked: googleMapsOn"></td>
-                <td><span>Google Maps Model</span></td>
-              </tr>
-            </tbody>
-            <tbody data-bind="foreach: layers">
-              <tr data-bind="css: { up: $parent.upLayer === $data, down: $parent.downLayer === $data }">
-                <td><input type="checkbox" data-bind="checked: show"></td>
-                <td>
-                  <span data-bind="text: name, visible: !$parent.isSelectableLayer($data)"></span>
-                  <select data-bind="visible: $parent.isSelectableLayer($data), options: $parent.baseLayers, optionsText: 'name', value: $parent.selectedLayer"></select>
-                </td>
-                <td>
-                  <input type="range" min="0" max="1" step="0.01" data-bind="value: alpha, valueUpdate: 'input'">
-                </td>
-                <td>
-                  <button type="button" class="cesium-button" data-bind="click: function() { $parent.raise($data, $index()); }, visible: $parent.canRaise($index())">
-                    ▲
-                  </button>
-                </td>
-                <td>
-                  <button type="button" class="cesium-button" data-bind="click: function() { $parent.lower($data, $index()); }, visible: $parent.canLower($index())">
-                    ▼
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        
-        <div class="collapse" id="pointCloudCollapsible">
-          <td><input type="checkbox" data-bind="checked: usgsRef"></td>
-          <td><span>USGS Reference Fix</span></td>
-          <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#pointCloudCollapsible" aria-expanded="false" onclick="addEPT()">
-            Add EPT link manually
-          </button>
-        </div>
-        <div class="collapse" id="dataCollapsible">
-          <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#dataCollapsible" aria-expanded="false" onclick="addKMZ()">
-            Add KMZ file
-          </button>
-        </div>
 
-        <div class="collapse" id="caltopoCollapsible">
-          <div style="padding:8px 4px; display:flex; flex-direction:column; gap:6px;">
-
-            <!-- Bookmarklet login -->
-            <div id="caltopo_login_section" style="display:flex; flex-direction:column; gap:5px;">
-              <div style="font-size:10px; opacity:0.6; line-height:1.6;">
-                <b style="opacity:1;">Step 1</b> — drag to bookmarks bar (once):<br>
-                <a id="caltopo_bookmarklet_link" href="#"
-                  style="display:inline-block; margin:3px 0; padding:3px 10px;
-                         background:rgba(255,160,0,0.18); color:#fca;
-                         border:1px solid rgba(255,160,0,0.5); border-radius:4px;
-                         font-size:11px; font-weight:bold; text-decoration:none;
-                         cursor:grab; user-select:none;"
-                  title="Drag to bookmarks bar">
-                  📎 Link FLEX to CalTopo
-                </a><br>
-                <b style="opacity:1;">Step 2</b> — log into CalTopo in any tab, then click the bookmark.
+        <!-- ══════════════ MAP LAYERS ══════════════════════════════════════ -->
+        <div class="collapse" id="mapLayersCollapsible">
+          <div class="lp-panel-wrap">
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▸</span> Layers
+              </div>
+              <div class="lp-section-body open" id="lp-layers-body">
+                <!-- populated by renderLayerList() -->
               </div>
             </div>
-            <!-- Active session row -->
-            <div id="caltopo_loggedin_section"
-              style="display:none; align-items:center; gap:8px; font-size:11px; color:#8f8;">
-              <span>✓ CalTopo session active</span>
-              <button onclick="window._caltopoLogout()"
-                class="btn btn-sm btn-secondary"
-                style="font-size:10px; padding:1px 6px;">Disconnect</button>
-            </div>
 
-            <hr style="border-color:rgba(255,255,255,0.15); margin:2px 0;">
-
-            <div style="font-size:11px; opacity:0.65; margin-bottom:2px;">KML Network Link</div>
-            <input id="caltopo_url_input" type="text"
-              placeholder="caltopo.com/m/XXXXX  or bare map ID"
-              style="font-size:11px; padding:3px 6px; width:100%; box-sizing:border-box;
-                     background:#1a1a2e; color:#fff;
-                     border:1px solid rgba(255,255,255,0.3); border-radius:4px;">
-            <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-              <label style="font-size:11px; opacity:0.8; margin:0;">Refresh:</label>
-              <select id="caltopo_interval_select"
-                style="font-size:11px; background:#1a1a2e; color:#fff;
-                       border:1px solid rgba(255,255,255,0.3); border-radius:4px; padding:2px 4px;">
-                <option value="0">Off (manual)</option>
-                <option value="10">10 s</option>
-                <option value="30" selected>30 s</option>
-                <option value="60">1 min</option>
-                <option value="300">5 min</option>
-              </select>
-              <button onclick="window._loadCaltopo()"
-                class="btn btn-sm btn-primary"
-                style="font-size:11px; padding:2px 8px;">Load</button>
-              <button onclick="window._clearCaltopo()"
-                class="btn btn-sm btn-secondary"
-                style="font-size:11px; padding:2px 8px;">Clear</button>
+            <!-- Google Maps 3D model toggle -->
+            <div class="lp-section" style="border-bottom:none;">
+              <div class="lp-row" style="padding:5px 4px;">
+                <input type="checkbox" id="lp-googlemaps-chk" style="margin:0;">
+                <span class="lp-row-name">Google Maps Model</span>
+              </div>
             </div>
-            <span id="caltopo_status" style="font-size:10px; color:#8f8; min-height:14px;"></span>
 
           </div>
         </div>
 
-        <!-- <div class="collapse" id="potree_sidebar_container"> </div> -->
-        
+        <!-- ══════════════ FEATURES ════════════════════════════════════════ -->
+        <div class="collapse" id="featuresCollapsible">
+          <div class="lp-panel-wrap">
 
+            <div class="lp-group-label">Surface Features</div>
 
+            <!-- Points of Interest -->
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▸</span> Points of Interest
+                <span id="lp-poi-count-badge"
+                  style="margin-left:4px; font-size:9px; background:rgba(255,200,80,0.25);
+                         color:rgba(255,200,80,0.9); border-radius:8px; padding:1px 5px;
+                         font-weight:400; letter-spacing:0; text-transform:none; display:none;">0</span>
+              </div>
+              <div class="lp-section-body open" id="lp-poi-body">
+                <label class="lp-row" style="cursor:pointer; margin-bottom:4px;">
+                  <input type="checkbox" id="html_labels_toggle" checked style="margin:0;">
+                  <span class="lp-row-name">Show labels</span>
+                </label>
+                <div id="lp-poi-group" style="display:none;">
+                  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:3px;">
+                    <span style="font-size:10px; opacity:0.55; text-transform:uppercase; letter-spacing:0.05em;">Unsaved points</span>
+                    <div style="display:flex; gap:4px;">
+                      <button class="btn btn-sm btn-secondary" style="font-size:9px; padding:1px 5px;"
+                        onclick="window._exportPoi('kmz')">KMZ</button>
+                      <button class="btn btn-sm btn-secondary" style="font-size:9px; padding:1px 5px;"
+                        onclick="window._exportPoi('geojson')">GeoJSON</button>
+                    </div>
+                  </div>
+                  <div id="lp-poi-list"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- CalTopo Maps -->
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▸</span> CalTopo Maps
+                <span id="lp-ct-dot" style="font-size:9px; margin-left:4px; color:rgba(255,255,255,0.3);">⬤</span>
+              </div>
+              <div class="lp-section-body open" id="lp-caltopo-body">
+                <!-- Status line -->
+                <div style="font-size:10px; color:rgba(255,255,255,0.55); margin-bottom:5px;">
+                  <span id="lp-ct-text">Not loaded</span>
+                </div>
+                <!-- Bookmarklet login -->
+                <div id="caltopo_login_section" style="display:flex; flex-direction:column; gap:4px; margin-bottom:4px;">
+                  <div style="font-size:10px; opacity:0.6; line-height:1.6;">
+                    <b style="opacity:1;">Step 1</b> — drag to bookmarks bar (once):<br>
+                    <a id="caltopo_bookmarklet_link" href="#"
+                      style="display:inline-block; margin:3px 0; padding:3px 10px;
+                             background:rgba(255,160,0,0.18); color:#fca;
+                             border:1px solid rgba(255,160,0,0.5); border-radius:4px;
+                             font-size:11px; font-weight:bold; text-decoration:none;
+                             cursor:grab; user-select:none;" title="Drag to bookmarks bar">
+                      📎 Link FLEX to CalTopo
+                    </a><br>
+                    <b style="opacity:1;">Step 2</b> — log into CalTopo in any tab, then click the bookmark.
+                  </div>
+                </div>
+                <!-- Active session row -->
+                <div id="caltopo_loggedin_section"
+                  style="display:none; align-items:center; gap:8px; font-size:11px; color:#8f8; margin-bottom:4px;">
+                  <span>✓ CalTopo session active</span>
+                  <button onclick="window._caltopoLogout()" class="btn btn-sm btn-secondary"
+                    style="font-size:10px; padding:1px 6px;">Disconnect</button>
+                </div>
+                <hr style="border-color:rgba(255,255,255,0.12); margin:4px 0;">
+                <div style="font-size:11px; opacity:0.65; margin-bottom:3px;">KML Network Link</div>
+                <input id="caltopo_url_input" type="text"
+                  placeholder="caltopo.com/m/XXXXX  or bare map ID"
+                  style="font-size:11px; padding:3px 6px; width:100%; box-sizing:border-box;
+                         background:#1a1a2e; color:#fff;
+                         border:1px solid rgba(255,255,255,0.3); border-radius:4px; margin-bottom:4px;">
+                <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                  <label style="font-size:11px; opacity:0.8; margin:0;">Refresh:</label>
+                  <select id="caltopo_interval_select"
+                    style="font-size:11px; background:#1a1a2e; color:#fff;
+                           border:1px solid rgba(255,255,255,0.3); border-radius:4px; padding:2px 4px;">
+                    <option value="0">Off (manual)</option>
+                    <option value="10">10 s</option>
+                    <option value="30" selected>30 s</option>
+                    <option value="60">1 min</option>
+                    <option value="300">5 min</option>
+                  </select>
+                  <button onclick="window._loadCaltopo()" class="btn btn-sm btn-primary"
+                    style="font-size:11px; padding:2px 8px;">Load</button>
+                  <button onclick="window._clearCaltopo()" class="btn btn-sm btn-secondary"
+                    style="font-size:11px; padding:2px 8px;">Clear</button>
+                </div>
+                <span id="caltopo_status" style="font-size:10px; color:#8f8; min-height:14px; display:block; margin-top:4px;"></span>
+              </div>
+            </div>
+
+            <div class="lp-group-label">Cave Features</div>
+
+            <!-- Cave GeoJSON files + cave survey toggle -->
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▸</span> Cave Features
+              </div>
+              <div class="lp-section-body open" id="lp-data-body">
+                <div id="lp-data-list"></div>
+                <div style="margin-top:4px;">
+                  <button class="btn btn-sm btn-primary lp-add-btn" onclick="window._addDataFile()">+ Add KMZ / GeoJSON</button>
+                </div>
+                <div class="lp-row" style="margin-top:6px; padding-top:5px; border-top:1px solid rgba(255,255,255,0.1);">
+                  <input type="checkbox" id="lp-cave-toggle" style="margin:0;">
+                  <span class="lp-row-name" style="font-size:10px;">Cave Survey (caves_v2.geojson)</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ══════════════ LIDAR ═══════════════════════════════════════════ -->
+        <div class="collapse" id="lidarCollapsible">
+          <div class="lp-panel-wrap">
+
+            <!-- Point Clouds -->
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▸</span> Point Clouds
+              </div>
+              <div class="lp-section-body open" id="lp-pc-body">
+                <div id="lp-pc-list"></div>
+                <div id="lp-pc-status" style="font-size:10px; color:#aaa; min-height:14px; padding:2px 0;"></div>
+                <div style="margin-top:4px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                  <button class="btn btn-sm btn-primary lp-add-btn" onclick="addEPT()">+ Add EPT link</button>
+                  <label class="lp-row" style="margin:0; cursor:pointer;">
+                    <input type="checkbox" data-bind="checked: usgsRef" style="margin:0;">
+                    <span style="font-size:10px; opacity:0.7;">USGS Ref Fix</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <!-- Scene toggles -->
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▸</span> Scene
+              </div>
+              <div class="lp-section-body open" id="lp-scene-body">
+                <div class="lp-row">
+                  <input type="checkbox" id="lp-showlidar-chk" style="margin:0;">
+                  <span class="lp-row-name">Show LiDAR Datasets</span>
+                </div>
+                <div style="margin-top:6px; padding-top:5px; border-top:1px solid rgba(255,255,255,0.1);">
+                  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:3px;">
+                    <span style="font-size:11px; color:rgba(255,255,255,0.85);">Point Budget</span>
+                    <span id="lp-point-budget-label" style="font-size:11px; color:rgba(255,255,255,0.6); font-variant-numeric:tabular-nums;">10 M</span>
+                  </div>
+                  <input type="range" id="lp-point-budget"
+                    min="500000" max="20000000" step="500000" value="10000000"
+                    style="width:100%;"
+                    oninput="
+                      var v = parseInt(this.value);
+                      window.potreeViewer && window.potreeViewer.setPointBudget(v);
+                      document.getElementById('lp-point-budget-label').textContent =
+                        v >= 1000000 ? (v/1000000).toFixed(1).replace(/\.0$/,'') + ' M'
+                                     : (v/1000).toFixed(0) + ' K';
+                    ">
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ══════════════ TOOLS ═══════════════════════════════════════════ -->
+        <div class="collapse" id="toolsCollapsible">
+          <div class="lp-panel-wrap">
+
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▸</span> Incidence Angle
+              </div>
+              <div class="lp-section-body open" id="lp-incidence-body">
+                <div style="padding:2px 0;">
+                  <label><input type="checkbox" id="incidence_toggle"> Show Incidence Lines</label><br>
+                  <label style="margin-top:4px; display:block;">
+                    Length: <input type="range" id="incidence_length" min="0.5" max="50" step="0.5" value="2" style="width:110px; vertical-align:middle;">
+                    <span id="incidence_length_label">2m</span>
+                  </label>
+                  <label style="margin-top:4px; display:block;">
+                    Radius: <input type="range" id="incidence_radius" min="0.01" max="0.5" step="0.01" value="0.05" style="width:110px; vertical-align:middle;">
+                    <span id="incidence_radius_label">0.05m</span>
+                  </label>
+                  <label style="margin-top:4px; display:block;">
+                    Max: <input type="range" id="incidence_max_points" min="1000" max="100000" step="1000" value="20000" style="width:110px; vertical-align:middle;">
+                    <span id="incidence_max_points_label">20k</span>
+                  </label>
+                  <label style="margin-top:4px; display:block;">
+                    Color:
+                    <select id="incidence_color_mode">
+                      <option value="angle">Scan Angle</option>
+                      <option value="flightline" selected>Flight Line</option>
+                    </select>
+                  </label>
+                  <button id="incidence_flip" class="btn btn-sm btn-secondary" style="margin-top:6px;">Flip Angles</button>
+                  <div style="margin-top:6px;">
+                    <strong>Show classes:</strong><br>
+                    <label><input type="checkbox" id="incidence_cls_2"> Ground (2)</label><br>
+                    <label><input type="checkbox" id="incidence_cls_3"> Low Veg (3)</label><br>
+                    <label><input type="checkbox" id="incidence_cls_4"> Med Veg (4)</label><br>
+                    <label><input type="checkbox" id="incidence_cls_5"> High Veg (5)</label><br>
+                    <label><input type="checkbox" id="incidence_cls_6"> Building (6)</label><br>
+                    <label><input type="checkbox" id="incidence_cls_7" checked> Low Noise (7)</label><br>
+                    <label><input type="checkbox" id="incidence_cls_other"> Other / Unclassified</label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ══════════════ HELP ════════════════════════════════════════════ -->
+        <div class="collapse" id="helpCollapsible">
+          <div class="lp-panel-wrap">
+            <div style="padding:2px 0; font-size:11px; color:rgba(255,255,255,0.8); line-height:1.75;">
+
+              <div style="margin-bottom:10px;">
+                <a href="https://github.com/ferozfeerasta/FLEX" target="_blank" rel="noopener noreferrer"
+                  style="color:#7bbfff; font-size:11px; text-decoration:none;">
+                  📖 FLEX on GitHub ↗
+                </a>
+              </div>
+
+              <div style="font-size:9px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:rgba(255,255,255,0.4); margin-bottom:3px;">Movement</div>
+              [F] Toggle fly mode<br>
+              [W/A/S/D] Fly forward / left / back / right<br>
+              [Q / E] Fly down / up<br>
+              [Scroll] Flight speed<br>
+
+              <div style="font-size:9px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:rgba(255,255,255,0.4); margin:8px 0 3px;">View</div>
+              [H] Hide/show terrain<br>
+              [L] Toggle LiDAR datasets<br>
+              [N] Cycle compass style<br>
+              [M] Toggle mini-map<br>
+
+              <div style="font-size:9px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:rgba(255,255,255,0.4); margin:8px 0 3px;">Labeling</div>
+              [Z] Small POI (no name)<br>
+              [X] Medium POI (name prompt)<br>
+              [C] Large POI (name prompt)<br>
+              [R] Start / end route<br>
+              [B] Add waypoint to route<br>
+              [K] Download KMZ<br>
+              [V] Toggle depth measurement<br>
+
+              <div style="font-size:9px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:rgba(255,255,255,0.4); margin:8px 0 3px;">Point Cloud</div>
+              [1–5] Toggle classification layers<br>
+              [0] Remove all point clouds<br>
+            </div>
+          </div>
+        </div>
+
+        <!-- Coordinates display -->
         <div style="display:block;" id="coord_container">
           <span>Coordinates: </span>
           <span id="coord_display"></span>
-          <button display:inline;  onclick="copyCoords()">
-            <!-- funny way of rendering a "copy" button from just unicode -->
-            <span style="font-size: .875em; margin-right: .125em; position: relative; top: -.25em; left: -.125em">
-              📄<span style="position: absolute; top: .25em; left: .25em">📄</span>
+          <button onclick="copyCoords()">
+            <span style="font-size:.875em; margin-right:.125em; position:relative; top:-.25em; left:-.125em">
+              📄<span style="position:absolute; top:.25em; left:.25em">📄</span>
             </span>
           </button>
-         <div id="elev_display"></div>
+          <div id="elev_display"></div>
         </div>
       </div>
       <div id="queue_manager_window">
@@ -962,16 +1160,26 @@
         navigator.clipboard.writeText(copyText);
         }
     
-        function addEPT(){ 
-        var link = prompt("EPT link", "example/link/ept.json");
-        var fullLink = ProxyUrlGenerator.generateProxyUrl(link);
-        try {
-            window.addPC(fullLink);
-        } catch (error) {
-            console.error(
-            `There was an error while adding ${fullLink}. ${error}`
-            );
-        }
+        function addEPT(){
+          var link = prompt("EPT link", "http://localhost:8083/example/ept.json");
+          if (!link || !link.trim()) return;
+          link = link.trim();
+          // Do NOT proxy the URL — Potree resolves sub-files (ept-hierarchy/, ept-data/, …)
+          // relative to the base URL; wrapping in /proxy?url= corrupts that resolution.
+          var statusEl = document.getElementById('lp-pc-status');
+          if (statusEl) {
+            statusEl.textContent = '⏳ Loading…';
+            statusEl.style.color = '#aaa';
+          }
+          try {
+            window.addPC(link);
+          } catch (error) {
+            console.error('Error adding EPT: ' + error);
+            if (statusEl) {
+              statusEl.textContent = '✗ ' + (error.message || error);
+              statusEl.style.color = '#f77';
+            }
+          }
         }
     
         function addKMZ(){ 
@@ -996,18 +1204,33 @@
         }
 
         document.addEventListener('DOMContentLoaded', function() {
-        const buttons = document.querySelectorAll('.btn-primary[data-target]');
-        
-        buttons.forEach(button => {
-          const targetId = button.getAttribute('data-target');
-          const target = document.querySelector(targetId);
-          
-          // Toggle content on button click instead of hover
-          button.addEventListener('click', () => {
-            target.classList.toggle('show');
+          // All collapsible nav panels — clicking a button toggles its panel
+          // and closes all others (accordion behaviour).
+          const navPanelIds = [
+            '#mapLayersCollapsible',
+            '#featuresCollapsible',
+            '#lidarCollapsible',
+            '#toolsCollapsible',
+            '#helpCollapsible',
+          ];
+
+          document.querySelectorAll('.flex-nav .btn-primary[data-target]').forEach(button => {
+            const targetId = button.getAttribute('data-target');
+            const target   = document.querySelector(targetId);
+            if (!target) return;
+
+            button.addEventListener('click', () => {
+              const isOpen = target.classList.contains('show');
+              // Close all nav panels
+              navPanelIds.forEach(id => {
+                const el = document.querySelector(id);
+                if (el) el.classList.remove('show');
+              });
+              // Toggle the clicked one open (unless it was already open)
+              if (!isOpen) target.classList.add('show');
+            });
           });
         });
-      });
         </script>
  </head>
 
