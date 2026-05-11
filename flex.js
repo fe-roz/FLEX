@@ -3742,22 +3742,68 @@ const _hag = {
   _scanInterval:  null,
 };
 
-/** Set up the grid from a newly-loaded point cloud's bounding box. */
+/**
+ * Start the HAG scan interval for a newly-loaded point cloud.
+ * The grid is NOT created here — it is built lazily on the first scan tick
+ * that finds visible nodes, so it is sized to the actual loaded data rather
+ * than the (potentially county-wide) EPT bounding box.
+ */
 function _hagInitGrid(pc) {
-  const bb = pc.pcoGeometry?.boundingBox;
-  if (!bb) { console.warn('[hag] No bounding box available yet'); return; }
+  // Reset any previous grid state.
+  _hag.grid = null;
+  _hag.gridW = 0;
+  _hag.gridH = 0;
+  if (_hag.texture) { _hag.texture.dispose(); _hag.texture = null; }
+  _hag.processedNodes.clear();
 
-  const spanX = bb.max.x - bb.min.x;
-  const spanY = bb.max.y - bb.min.y;
-  // Target ~1 m cells, cap at 1024 × 1024 to bound memory (~4 MB).
-  _hag.cellSize = Math.max(0.5, Math.max(spanX, spanY) / 1024);
-  _hag.gridW    = Math.min(1024, Math.ceil(spanX / _hag.cellSize) + 2);
-  _hag.gridH    = Math.min(1024, Math.ceil(spanY / _hag.cellSize) + 2);
-  _hag.originX  = bb.min.x;
-  _hag.originY  = bb.min.y;
+  if (_hag._scanInterval) clearInterval(_hag._scanInterval);
+  _hag._scanInterval = setInterval(_hagScanTiles, 250);
 
-  // 4 floats per pixel (RGBA) — RedFormat not available in this THREE.js build.
-  // The shader reads .r; G/B/A are unused padding.
+  console.log('[hag] Scan started — grid will be built from visible nodes.');
+}
+
+/**
+ * Build (or rebuild) the ground-Z grid from the bounding boxes of the nodes
+ * in `allNodes` (array of {pc, node, pcZCorr}).
+ *
+ * Strategy: use the actual visible-node extents, not the EPT bounding box,
+ * and cap cell size at HAG_CELL_SIZE_MAX to avoid coarse-cell artefacts.
+ * A 1024×1024 grid at 2 m/cell covers 2 km × 2 km — enough for any local
+ * LiDAR survey regardless of how large the parent EPT dataset is.
+ */
+const HAG_CELL_SIZE_MAX = 2.0;   // metres — increase for wider coverage
+
+function _hagBuildGrid(allNodes) {
+  // Compute the tight XY extent of all visible node bounding boxes.
+  let minX = Infinity, minY = Infinity;
+  let maxX = -Infinity, maxY = -Infinity;
+
+  for (const { node } of allNodes) {
+    const bb = node.geometryNode?.boundingBox;
+    if (!bb) continue;
+    if (bb.min.x < minX) minX = bb.min.x;
+    if (bb.min.y < minY) minY = bb.min.y;
+    if (bb.max.x > maxX) maxX = bb.max.x;
+    if (bb.max.y > maxY) maxY = bb.max.y;
+  }
+
+  if (!isFinite(minX)) return false;   // No nodes with geometry yet — try later.
+
+  const spanX = maxX - minX;
+  const spanY = maxY - minY;
+  const MARGIN = 16;  // extra cells on each side so edges don't clip right away
+  const MAX_DIM = 1024;
+
+  // Cell size: at most HAG_CELL_SIZE_MAX, no smaller than 0.25 m.
+  _hag.cellSize = Math.max(0.25,
+    Math.min(HAG_CELL_SIZE_MAX, Math.max(spanX, spanY) / (MAX_DIM - 2 * MARGIN)));
+
+  _hag.gridW   = Math.min(MAX_DIM, Math.ceil(spanX / _hag.cellSize) + MARGIN * 2);
+  _hag.gridH   = Math.min(MAX_DIM, Math.ceil(spanY / _hag.cellSize) + MARGIN * 2);
+  _hag.originX = minX - MARGIN * _hag.cellSize;
+  _hag.originY = minY - MARGIN * _hag.cellSize;
+
+  // 4 floats per pixel (RGBA) — shader reads .r; G/B/A are unused padding.
   _hag.grid = new Float32Array(_hag.gridW * _hag.gridH * 4).fill(1e30);
 
   if (_hag.texture) _hag.texture.dispose();
@@ -3769,12 +3815,16 @@ function _hagInitGrid(pc) {
   _hag.texture.magFilter = THREE.NearestFilter;
   _hag.texture.needsUpdate = true;
 
-  _hag.processedNodes.clear();
+  // Push the new texture reference (and dimensions) to all active materials.
+  // This also enables the define on materials if _hag.enabled is true.
+  _hagPushUniforms();
 
-  if (_hag._scanInterval) clearInterval(_hag._scanInterval);
-  _hag._scanInterval = setInterval(_hagScanTiles, 250);
-
-  console.log(`[hag] Grid ${_hag.gridW}×${_hag.gridH} @ ${_hag.cellSize.toFixed(2)} m/cell`);
+  console.log(
+    `[hag] Grid ${_hag.gridW}×${_hag.gridH} @ ${_hag.cellSize.toFixed(2)} m/cell, ` +
+    `origin (${_hag.originX.toFixed(0)}, ${_hag.originY.toFixed(0)}), ` +
+    `covers ${(_hag.gridW * _hag.cellSize).toFixed(0)} × ${(_hag.gridH * _hag.cellSize).toFixed(0)} m`
+  );
+  return true;
 }
 
 /** Scan all loaded tiles for new nodes and accumulate ground Z into the grid. */
@@ -3782,83 +3832,87 @@ function _hagScanTiles() {
   const pcs = potreeViewer?.scene?.pointclouds;
   if (!pcs || pcs.length === 0) return;
 
-  let updated = false;
-
+  // Gather all visible (tree) nodes with their per-PC Z correction.
+  // EPT binary decoder stores positions RELATIVE to each node's own bounding-box
+  // minimum (confirmed in EptBinaryDecoderWorker.js: x = raw*scale+offset - nodeMin).
+  // elements[14] of the PC matrix is the column-major Z translation.
+  const allNodes = [];
   for (const pc of pcs) {
-    // EPT binary decoder stores positions RELATIVE to each node's own bounding-box
-    // minimum (confirmed in EptBinaryDecoderWorker.js: x = raw*scale+offset - nodeMin).
-    // The point-cloud's matrix has only a Z-translation (to align with Cesium terrain);
-    // elements[14] is the column-major Z translation component.
     const pcZCorr = pc.matrix?.elements?.[14] ?? 0;
-
     for (const node of (pc.visibleNodes || [])) {
-      // Use pc name + geometry-node name as a stable tile key.
-      // PointCloudOctreeNode (the tree node) does NOT have .name — that lives on
-      // node.geometryNode and node.sceneNode.  Using node.name would give '?' for
-      // every node, making them all collide in processedNodes and causing only the
-      // first visible node to ever be scanned.
-      const key = (pc.name || '') + '/' + (node.geometryNode?.name || node.sceneNode?.name || '?');
-      if (_hag.processedNodes.has(key)) continue;
-      _hag.processedNodes.add(key);
-
-      const geom = node.geometryNode?.geometry;
-      if (!geom) continue;
-      const pos = geom.attributes?.position?.array;   // Float32Array, packed XYZ
-      if (!pos || pos.length < 3) continue;
-      const cls = geom.attributes?.classification?.array; // Uint8Array or undefined
-
-      // Detect real classification: if any point has class > 0, use class-2 only.
-      // (Unclassified clouds get classification = 0 from defaultAttributeValues.)
-      let useClassFilter = false;
-      if (cls) {
-        const probe = Math.min(512, cls.length);
-        for (let k = 0; k < probe; k++) {
-          if (cls[k] > 0.5) { useClassFilter = true; break; }
-        }
-      }
-
-      // Node bounding-box min in geographic (EPT) space — add to node-local positions
-      // to get geographic coordinates that match the grid's origin.
-      const nodeBB = node.geometryNode.boundingBox.min;
-      const nbX = nodeBB.x;
-      const nbY = nodeBB.y;
-      const nbZ = nodeBB.z;
-
-      const numPts   = pos.length / 3;
-      const cellSize = _hag.cellSize;
-      const ox       = _hag.originX;   // pc geographic BB min X
-      const oy       = _hag.originY;   // pc geographic BB min Y
-      const gW       = _hag.gridW;
-      const gH       = _hag.gridH;
-      const grid     = _hag.grid;
-
-      let nodePts = 0;
-      // Tight typed-array loop — V8 can sustain ~300 M iterations/s here.
-      for (let i = 0; i < numPts; i++) {
-        if (useClassFilter && cls[i] !== 2) continue;
-
-        // Convert node-local → geographic by adding the node BB min.
-        // Store Z as (geographic + pcZCorr) so the shader can subtract the same
-        // modelMatrix[3][2] (which equals nodeBBMinZ + pcZCorr) to get HAG.
-        const x = pos[i * 3]     + nbX;
-        const y = pos[i * 3 + 1] + nbY;
-        const z = pos[i * 3 + 2] + nbZ + pcZCorr;
-
-        const cx = (x - ox) / cellSize | 0;  // bitwise-OR truncates to int
-        const cy = (y - oy) / cellSize | 0;
-        if (cx < 0 || cx >= gW || cy < 0 || cy >= gH) continue;
-
-        const idx = (cy * gW + cx) * 4;  // RGBA stride — write to R channel
-        if (z < grid[idx]) grid[idx] = z;
-        nodePts++;
-      }
-      if (nodePts > 0) updated = true;
-      console.log(`[hag] node ${key}: ${numPts} pts, ${nodePts} written, cls=${useClassFilter}, nbX=${nbX.toFixed(1)}, nbY=${nbY.toFixed(1)}`);
+      allNodes.push({ pc, node, pcZCorr });
     }
   }
 
+  if (allNodes.length === 0) return;
+
+  // Lazily build the grid the first time we have visible geometry.
+  if (!_hag.grid) {
+    if (!_hagBuildGrid(allNodes)) return;
+    // processedNodes was cleared in _hagInitGrid, so all nodes are new.
+  }
+
+  let updated = false;
+
+  for (const { pc, node, pcZCorr } of allNodes) {
+    // Stable cache key — PointCloudOctreeNode.name is undefined; use geometryNode.
+    const key = (pc.name || '') + '/' + (node.geometryNode?.name || node.sceneNode?.name || '?');
+    if (_hag.processedNodes.has(key)) continue;
+    _hag.processedNodes.add(key);
+
+    const geom = node.geometryNode?.geometry;
+    if (!geom) continue;
+    const pos = geom.attributes?.position?.array;   // Float32Array, packed XYZ
+    if (!pos || pos.length < 3) continue;
+    const cls = geom.attributes?.classification?.array; // Uint8Array or undefined
+
+    // If the cloud has real classification data, use only class 2 (ground).
+    // Unclassified clouds have all zeros — probe the first 512 points to decide.
+    let useClassFilter = false;
+    if (cls) {
+      const probe = Math.min(512, cls.length);
+      for (let k = 0; k < probe; k++) {
+        if (cls[k] > 0.5) { useClassFilter = true; break; }
+      }
+    }
+
+    // Node bounding-box min in geographic (EPT) space.
+    const nodeBB = node.geometryNode.boundingBox.min;
+    const nbX = nodeBB.x;
+    const nbY = nodeBB.y;
+    const nbZ = nodeBB.z;
+
+    const numPts   = pos.length / 3;
+    const cellSize = _hag.cellSize;
+    const ox       = _hag.originX;
+    const oy       = _hag.originY;
+    const gW       = _hag.gridW;
+    const gH       = _hag.gridH;
+    const grid     = _hag.grid;
+
+    let nodePts = 0;
+    for (let i = 0; i < numPts; i++) {
+      if (useClassFilter && cls[i] !== 2) continue;
+
+      // Convert node-local → geographic by adding the node BB min.
+      // Store Z as (geographic + pcZCorr) so the shader's subtraction of
+      // modelMatrix[3][2] (= nodeBBMinZ + pcZCorr) yields true HAG.
+      const x = pos[i * 3]     + nbX;
+      const y = pos[i * 3 + 1] + nbY;
+      const z = pos[i * 3 + 2] + nbZ + pcZCorr;
+
+      const cx = (x - ox) / cellSize | 0;
+      const cy = (y - oy) / cellSize | 0;
+      if (cx < 0 || cx >= gW || cy < 0 || cy >= gH) continue;
+
+      const idx = (cy * gW + cx) * 4;   // RGBA stride — R channel holds ground Z
+      if (z < grid[idx]) grid[idx] = z;
+      nodePts++;
+    }
+    if (nodePts > 0) updated = true;
+  }
+
   if (updated && !_hag._uploadTimer) {
-    // Debounce: upload texture at most once per 200 ms to avoid hammering the GPU.
     _hag._uploadTimer = setTimeout(() => {
       _hag._uploadTimer = null;
       if (_hag.texture) _hag.texture.needsUpdate = true;
@@ -3867,7 +3921,13 @@ function _hagScanTiles() {
   }
 }
 
-/** Push current grid + range uniforms to every loaded point cloud material. */
+/**
+ * Push grid uniforms to every loaded point cloud material.
+ * Also activates the shader define on materials when _hag.enabled is true —
+ * this means calling _hagPushUniforms() after the grid is first built will
+ * automatically start the filter even if the user enabled it before the grid
+ * was ready.
+ */
 function _hagPushUniforms() {
   if (!_hag.texture) return;
   for (const pc of (potreeViewer?.scene?.pointclouds || [])) {
@@ -3878,6 +3938,12 @@ function _hagPushUniforms() {
     u.uGroundCellSize.value = _hag.cellSize;
     u.uGroundTexSize.value  = [_hag.gridW, _hag.gridH];
     u.uHagRange.value       = [_hag.minHag, _hag.maxHag];
+
+    // If the user already enabled the filter before the grid was built,
+    // activate the shader define now that we have a valid texture.
+    if (_hag.enabled && pc.material) {
+      pc.material.setDefine('clip_hag_enabled', '#define clip_hag_enabled');
+    }
   }
 }
 
@@ -3886,9 +3952,15 @@ function _hagEnable(enabled) {
   _hag.enabled = enabled;
   for (const pc of (potreeViewer?.scene?.pointclouds || [])) {
     if (!pc.material) continue;
-    if (enabled) {
+    if (enabled && _hag.texture) {
+      // Only set the define when the grid is ready — otherwise the unbound
+      // sampler returns 0 and the shader incorrectly filters everything.
       pc.material.setDefine('clip_hag_enabled', '#define clip_hag_enabled');
       _hagPushUniforms();
+    } else if (enabled && !_hag.texture) {
+      // Grid not ready yet; _hagPushUniforms will activate the define once
+      // _hagBuildGrid runs on the next scan tick.
+      console.log('[hag] filter enabled — waiting for grid to build from visible nodes');
     } else {
       pc.material.removeDefine('clip_hag_enabled');
       pc.material.updateShaderSource();
@@ -3905,14 +3977,14 @@ function _hagSetRange(min, max) {
 
 /**
  * Called from the addPC success callback once a new point cloud appears in the
- * scene.  Initialises the grid from its bounding box.
+ * scene.  Resets HAG state and starts the background scan interval; the actual
+ * grid is built lazily once visible nodes are available.
  */
 function initHagFilter(pc) {
   _hagInitGrid(pc);
-  if (_hag.enabled) {
-    pc.material?.setDefine('clip_hag_enabled', '#define clip_hag_enabled');
-    _hagPushUniforms();
-  }
+  // The define and uniforms are applied later by _hagBuildGrid → _hagPushUniforms
+  // once the first batch of nodes is visible.  If the filter is already enabled,
+  // _hagPushUniforms will activate it automatically when the grid is ready.
 }
 
 // ── HAG debug helper (callable from browser console: _hagDebug()) ────────────
