@@ -3756,12 +3756,14 @@ function _hagInitGrid(pc) {
   _hag.originX  = bb.min.x;
   _hag.originY  = bb.min.y;
 
-  _hag.grid = new Float32Array(_hag.gridW * _hag.gridH).fill(1e30);
+  // 4 floats per pixel (RGBA) — RedFormat not available in this THREE.js build.
+  // The shader reads .r; G/B/A are unused padding.
+  _hag.grid = new Float32Array(_hag.gridW * _hag.gridH * 4).fill(1e30);
 
   if (_hag.texture) _hag.texture.dispose();
   _hag.texture = new THREE.DataTexture(
     _hag.grid, _hag.gridW, _hag.gridH,
-    THREE.RedFormat, THREE.FloatType
+    THREE.RGBAFormat, THREE.FloatType
   );
   _hag.texture.minFilter = THREE.NearestFilter;
   _hag.texture.magFilter = THREE.NearestFilter;
@@ -3825,7 +3827,7 @@ function _hagScanTiles() {
         const cy = (y - oy) / cellSize | 0;
         if (cx < 0 || cx >= gW || cy < 0 || cy >= gH) continue;
 
-        const idx = cy * gW + cx;
+        const idx = (cy * gW + cx) * 4;  // RGBA stride — write to R channel
         if (z < grid[idx]) grid[idx] = z;
       }
       updated = true;
