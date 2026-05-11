@@ -3785,6 +3785,12 @@ function _hagScanTiles() {
   let updated = false;
 
   for (const pc of pcs) {
+    // EPT binary decoder stores positions RELATIVE to each node's own bounding-box
+    // minimum (confirmed in EptBinaryDecoderWorker.js: x = raw*scale+offset - nodeMin).
+    // The point-cloud's matrix has only a Z-translation (to align with Cesium terrain);
+    // elements[14] is the column-major Z translation component.
+    const pcZCorr = pc.matrix?.elements?.[14] ?? 0;
+
     for (const node of (pc.visibleNodes || [])) {
       // Use pc name + node name as a stable tile key
       const key = (pc.name || '') + '/' + (node.name || node.id || '?');
@@ -3795,7 +3801,7 @@ function _hagScanTiles() {
       if (!geom) continue;
       const pos = geom.attributes?.position?.array;   // Float32Array, packed XYZ
       if (!pos || pos.length < 3) continue;
-      const cls = geom.attributes?.classification?.array; // Float32Array or undefined
+      const cls = geom.attributes?.classification?.array; // Uint8Array or undefined
 
       // Detect real classification: if any point has class > 0, use class-2 only.
       // (Unclassified clouds get classification = 0 from defaultAttributeValues.)
@@ -3807,21 +3813,32 @@ function _hagScanTiles() {
         }
       }
 
+      // Node bounding-box min in geographic (EPT) space — add to node-local positions
+      // to get geographic coordinates that match the grid's origin.
+      const nodeBB = node.geometryNode.boundingBox.min;
+      const nbX = nodeBB.x;
+      const nbY = nodeBB.y;
+      const nbZ = nodeBB.z;
+
       const numPts   = pos.length / 3;
       const cellSize = _hag.cellSize;
-      const ox       = _hag.originX;
-      const oy       = _hag.originY;
+      const ox       = _hag.originX;   // pc geographic BB min X
+      const oy       = _hag.originY;   // pc geographic BB min Y
       const gW       = _hag.gridW;
       const gH       = _hag.gridH;
       const grid     = _hag.grid;
 
+      let nodePts = 0;
       // Tight typed-array loop — V8 can sustain ~300 M iterations/s here.
       for (let i = 0; i < numPts; i++) {
-        if (useClassFilter && Math.round(cls[i]) !== 2) continue;
+        if (useClassFilter && cls[i] !== 2) continue;
 
-        const x = pos[i * 3];
-        const y = pos[i * 3 + 1];
-        const z = pos[i * 3 + 2];
+        // Convert node-local → geographic by adding the node BB min.
+        // Store Z as (geographic + pcZCorr) so the shader can subtract the same
+        // modelMatrix[3][2] (which equals nodeBBMinZ + pcZCorr) to get HAG.
+        const x = pos[i * 3]     + nbX;
+        const y = pos[i * 3 + 1] + nbY;
+        const z = pos[i * 3 + 2] + nbZ + pcZCorr;
 
         const cx = (x - ox) / cellSize | 0;  // bitwise-OR truncates to int
         const cy = (y - oy) / cellSize | 0;
@@ -3829,8 +3846,10 @@ function _hagScanTiles() {
 
         const idx = (cy * gW + cx) * 4;  // RGBA stride — write to R channel
         if (z < grid[idx]) grid[idx] = z;
+        nodePts++;
       }
-      updated = true;
+      if (nodePts > 0) updated = true;
+      console.log(`[hag] node ${key}: ${numPts} pts, ${nodePts} written, cls=${useClassFilter}, nbX=${nbX.toFixed(1)}, nbY=${nbY.toFixed(1)}`);
     }
   }
 
@@ -3891,6 +3910,40 @@ function initHagFilter(pc) {
     _hagPushUniforms();
   }
 }
+
+// ── HAG debug helper (callable from browser console: _hagDebug()) ────────────
+window._hagDebug = function() {
+  const pcs = potreeViewer?.scene?.pointclouds || [];
+  console.group('[HAG Debug]');
+  console.log('State:', JSON.stringify({
+    enabled: _hag.enabled, minHag: _hag.minHag, maxHag: _hag.maxHag,
+    gridW: _hag.gridW, gridH: _hag.gridH, cellSize: _hag.cellSize,
+    originX: _hag.originX, originY: _hag.originY,
+    textureReady: !!_hag.texture, processedNodes: _hag.processedNodes.size,
+    scanRunning: !!_hag._scanInterval,
+  }));
+  // Sample grid — count non-sentinel cells
+  if (_hag.grid) {
+    let filled = 0, total = _hag.gridW * _hag.gridH;
+    let minZ = Infinity, maxZ = -Infinity;
+    for (let i = 0; i < _hag.grid.length; i += 4) {
+      if (_hag.grid[i] < 1e29) {
+        filled++;
+        if (_hag.grid[i] < minZ) minZ = _hag.grid[i];
+        if (_hag.grid[i] > maxZ) maxZ = _hag.grid[i];
+      }
+    }
+    console.log(`Grid: ${filled}/${total} cells filled (${(100*filled/total).toFixed(1)}%), Z range ${minZ.toFixed(2)}–${maxZ.toFixed(2)}`);
+  }
+  pcs.forEach((pc, pi) => {
+    const u = pc.material?.uniforms;
+    console.log(`PC[${pi}] "${pc.name}": visibleNodes=${pc.visibleNodes?.length}, pcZCorr=${pc.matrix?.elements?.[14]}`);
+    console.log(`  uniforms: tex=${u?.uGroundTex?.value ? 'set' : 'null'}, origin=[${u?.uGroundOrigin?.value}], cellSize=${u?.uGroundCellSize?.value}, texSize=[${u?.uGroundTexSize?.value}], hagRange=[${u?.uHagRange?.value}]`);
+    const defines = pc.material?.defines;
+    console.log(`  defines Map has clip_hag_enabled: ${pc.material?.defines?.has?.('clip_hag_enabled')}`);
+  });
+  console.groupEnd();
+};
 
 // ── Data Files list ───────────────────────────────────────────────────────────
 
