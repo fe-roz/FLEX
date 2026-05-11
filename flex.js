@@ -3946,12 +3946,81 @@ function renderLayerList() {
 
   // All active layers in one flat list (top → bottom in viewModel order).
   const active = viewModel.layers.filter(l => l.name);
-  let dragSrc = null;
+
+  // ── Mouse-event drag state ─────────────────────────────────────────────
+  // We use mousedown → document mousemove/mouseup instead of the HTML5 DnD
+  // API because Cesium's event handling disrupts native drag events.
+  let _dragSrcIdx = null;
+  let _dragGhost  = null;
+  let _isDragging = false;
+  let _dragStartY = 0;
+
+  // Rows get a secondary class so we can find only layer rows (not other
+  // .lp-row elements that appear in the panel for other sections).
+  const LP_ROW_CLS = 'lp-layer-row';
+  const _lrows = () => Array.from(body.querySelectorAll('.' + LP_ROW_CLS));
+
+  function _cleanupDrag() {
+    if (_dragGhost) { _dragGhost.remove(); _dragGhost = null; }
+    _lrows().forEach(r => { r.style.opacity = ''; r.classList.remove('lp-drag-over'); });
+    _dragSrcIdx = null;
+    _isDragging = false;
+    document.removeEventListener('mousemove', _onDragMove);
+    document.removeEventListener('mouseup',   _onDragUp);
+  }
+
+  function _onDragMove(e) {
+    if (_dragSrcIdx === null) return;
+    if (!_isDragging) {
+      if (Math.abs(e.clientY - _dragStartY) < 4) return;  // 4px dead zone
+      _isDragging = true;
+      const rs = _lrows();
+      if (rs[_dragSrcIdx]) rs[_dragSrcIdx].style.opacity = '0.35';
+    }
+    if (_dragGhost) {
+      _dragGhost.style.left = (e.clientX + 14) + 'px';
+      _dragGhost.style.top  = (e.clientY - 10) + 'px';
+    }
+    // Highlight the row closest to the cursor
+    const rs = _lrows();
+    rs.forEach(r => r.classList.remove('lp-drag-over'));
+    let best = null, bestDist = Infinity;
+    for (const r of rs) {
+      const rect = r.getBoundingClientRect();
+      const dist = Math.abs(e.clientY - (rect.top + rect.height / 2));
+      if (dist < bestDist) { bestDist = dist; best = r; }
+    }
+    if (best) best.classList.add('lp-drag-over');
+  }
+
+  function _onDragUp(e) {
+    const srcIdx      = _dragSrcIdx;
+    const wasDragging = _isDragging;
+    // Read row positions BEFORE cleanupDrag wipes state
+    const rs = _lrows();
+    let targetIdx = null, bestDist = Infinity;
+    for (let j = 0; j < rs.length; j++) {
+      const rect = rs[j].getBoundingClientRect();
+      const dist = Math.abs(e.clientY - (rect.top + rect.height / 2));
+      if (dist < bestDist) { bestDist = dist; targetIdx = j; }
+    }
+    _cleanupDrag();
+    if (!wasDragging || srcIdx === null || targetIdx === null || targetIdx === srcIdx) return;
+    const movedLayer = active[srcIdx];
+    const steps = targetIdx - srcIdx;
+    if (steps < 0) {
+      for (let s = 0; s < -steps; s++) viewModel.raise(movedLayer);
+    } else {
+      for (let s = 0; s < steps; s++) viewModel.lower(movedLayer);
+    }
+    saveSession();
+    renderLayerList();
+  }
+  // ── End of drag state setup ────────────────────────────────────────────
 
   active.forEach((layer, i) => {
     const row = document.createElement('div');
-    row.className = 'lp-row';
-    row.dataset.layerIdx = String(i);
+    row.className = 'lp-row ' + LP_ROW_CLS;
     row.style.cssText = 'display:flex; align-items:center; padding:2px 0; gap:4px;';
 
     // ⠿ drag handle (visual affordance only — the whole row is draggable)
@@ -4001,56 +4070,29 @@ function renderLayerList() {
     row.appendChild(removeBtn);
     body.appendChild(row);
 
-    // ── Drag-and-drop ─────────────────────────────────────────────────────
-    // Keep draggable=true statically — setting it in mousedown is unreliable
-    // because some browsers evaluate the attribute at the start of the gesture
-    // before mousedown handlers can fire.  Browsers naturally prevent a drag
-    // from starting on interactive children (checkbox, range slider) so those
-    // controls keep working even though the parent row is always draggable.
-    row.draggable = true;
-
-    row.addEventListener('dragstart', e => {
-      dragSrc = i;
-      e.dataTransfer.effectAllowed = 'move';
-      // Defer opacity so the drag ghost captures the un-faded appearance
-      setTimeout(() => { row.style.opacity = '0.4'; }, 0);
-    });
-    row.addEventListener('dragend', () => {
-      row.style.opacity = '';
-      body.querySelectorAll('.lp-drag-over').forEach(r => r.classList.remove('lp-drag-over'));
-      dragSrc = null;
-    });
-    row.addEventListener('dragover', e => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      body.querySelectorAll('.lp-drag-over').forEach(r => r.classList.remove('lp-drag-over'));
-      row.classList.add('lp-drag-over');
-    });
-    // Only clear the highlight when the pointer truly leaves this row,
-    // not when it enters one of its child elements.
-    row.addEventListener('dragleave', e => {
-      if (!row.contains(e.relatedTarget)) row.classList.remove('lp-drag-over');
-    });
-    row.addEventListener('drop', e => {
-      e.preventDefault();
-      row.classList.remove('lp-drag-over');
-      if (dragSrc === null || dragSrc === i) return;
-      const movedLayer = active[dragSrc];
-      const steps = i - dragSrc;
-      if (steps < 0) {
-        for (let s = 0; s < -steps; s++) viewModel.raise(movedLayer);
-      } else {
-        for (let s = 0; s < steps; s++) viewModel.lower(movedLayer);
-      }
-      saveSession();
-      renderLayerList();
+    // ── Reorder via mousedown → document mousemove/mouseup ───────────────
+    row.addEventListener('mousedown', e => {
+      // Let checkboxes, sliders, and buttons handle their own clicks
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
+      if (e.button !== 0) return;
+      e.preventDefault();   // prevent text selection while dragging
+      _dragSrcIdx = i;
+      _dragStartY = e.clientY;
+      _isDragging = false;
+      // Floating ghost label that follows the cursor
+      _dragGhost = document.createElement('div');
+      _dragGhost.textContent = '⠿ ' + layer.name;
+      _dragGhost.style.cssText =
+        'position:fixed;z-index:99999;pointer-events:none;white-space:nowrap;' +
+        'padding:3px 10px;border-radius:4px;font-size:11px;' +
+        'background:rgba(28,32,50,0.97);border:1px solid rgba(255,255,255,0.3);' +
+        'color:rgba(255,255,255,0.9);box-shadow:0 3px 12px rgba(0,0,0,0.6);' +
+        `left:${e.clientX + 14}px;top:${e.clientY - 10}px;`;
+      document.body.appendChild(_dragGhost);
+      document.addEventListener('mousemove', _onDragMove);
+      document.addEventListener('mouseup',   _onDragUp);
     });
   });
-
-  // Prevent "no-drop" cursor when the pointer briefly drifts into the gap
-  // between rows or over the footer — without this some browsers cancel
-  // the pending drop.
-  body.addEventListener('dragover', e => e.preventDefault());
 
   // ── Add layer button + picker dropdown ───────────────────────────────────
   const activeNames = new Set(active.map(l => l.name));
