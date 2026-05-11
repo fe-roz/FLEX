@@ -19,6 +19,7 @@ let _dataFiles       = [];   // [{label, type, url}] — URL-sourced only
 let _caveVisible     = false;
 let _poiVisible      = true;
 let _panelSections   = {};   // { sectionBodyId: true/false (open) }
+let _pointBudget     = 10_000_000;
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -83,6 +84,11 @@ export function notifyPanelSectionToggled(sectionBodyId, isOpen) {
   saveSession();
 }
 
+export function notifyPointBudgetChanged(budget) {
+  _pointBudget = budget;
+  saveSession();
+}
+
 /**
  * Serialize current state to localStorage.
  */
@@ -101,6 +107,7 @@ export function saveSession() {
       caveVisible:     _caveVisible,
       poiVisible:      _poiVisible,
       panelSections:   { ..._panelSections },
+      pointBudget:     _pointBudget,
     };
     localStorage.setItem(SESSION_KEY, JSON.stringify(snapshot));
     _flashIndicator(true);

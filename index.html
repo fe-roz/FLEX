@@ -1014,14 +1014,7 @@
                   </div>
                   <input type="range" id="lp-point-budget"
                     min="500000" max="20000000" step="500000" value="10000000"
-                    style="width:100%;"
-                    oninput="
-                      var v = parseInt(this.value);
-                      window.potreeViewer && window.potreeViewer.setPointBudget(v);
-                      document.getElementById('lp-point-budget-label').textContent =
-                        v >= 1000000 ? (v/1000000).toFixed(1).replace(/\.0$/,'') + ' M'
-                                     : (v/1000).toFixed(0) + ' K';
-                    ">
+                    style="width:100%;">
                 </div>
               </div>
             </div>

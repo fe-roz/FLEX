@@ -20,7 +20,7 @@ import {
   initSession, notifyPcLoaded, notifyCaltopoChanged, saveSession, loadSession,
   restoreCamera, restoreLayerState, onCameraFrame,
   notifyDataFilesChanged, notifyCaveVisibilityChanged, notifyPoiVisibilityChanged,
-  notifyPanelSectionToggled,
+  notifyPanelSectionToggled, notifyPointBudgetChanged,
 } from "./session.js";
 
 function isAoiGeometry(geometry) {
@@ -4001,8 +4001,11 @@ function renderLayerList() {
     body.appendChild(row);
 
     // ── Drag-and-drop (handle-initiated) ─────────────────────────────────
+    // mousedown on the handle arms the row for dragging.  We intentionally
+    // do NOT reset draggable on mouseup — some browsers fire mouseup on the
+    // source element as the drag begins, killing the drag before dragstart.
+    // draggable is reset in dragend instead.
     handle.addEventListener('mousedown', () => { row.draggable = true; });
-    handle.addEventListener('mouseup',   () => { row.draggable = false; });
 
     row.addEventListener('dragstart', e => {
       dragSrc = i;
@@ -4017,10 +4020,15 @@ function renderLayerList() {
     });
     row.addEventListener('dragover', e => {
       e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
       body.querySelectorAll('.lp-drag-over').forEach(r => r.classList.remove('lp-drag-over'));
       row.classList.add('lp-drag-over');
     });
-    row.addEventListener('dragleave', () => row.classList.remove('lp-drag-over'));
+    // Only clear the highlight when the cursor leaves the row entirely,
+    // not when it merely enters a child element (checkbox, slider, ×, etc.).
+    row.addEventListener('dragleave', e => {
+      if (!row.contains(e.relatedTarget)) row.classList.remove('lp-drag-over');
+    });
     row.addEventListener('drop', e => {
       e.preventDefault();
       row.classList.remove('lp-drag-over');
@@ -4028,14 +4036,19 @@ function renderLayerList() {
       const movedLayer = active[dragSrc];
       const steps = i - dragSrc;
       if (steps < 0) {
-        for (let s = 0; s < -steps; s++) viewModel.raise(movedLayer, viewModel.layers.indexOf(movedLayer));
+        for (let s = 0; s < -steps; s++) viewModel.raise(movedLayer);
       } else {
-        for (let s = 0; s < steps; s++) viewModel.lower(movedLayer, viewModel.layers.indexOf(movedLayer));
+        for (let s = 0; s < steps; s++) viewModel.lower(movedLayer);
       }
       saveSession();
       renderLayerList();
     });
   });
+
+  // Prevent "no-drop" cursor when the pointer briefly drifts into the gap
+  // between rows or over the footer — without this some browsers cancel
+  // the pending drop.
+  body.addEventListener('dragover', e => e.preventDefault());
 
   // ── Add layer button + picker dropdown ───────────────────────────────────
   const activeNames = new Set(active.map(l => l.name));
@@ -4199,7 +4212,7 @@ renderPoiList();
   }
 }
 
-// Scene section checkboxes — wire directly (not via Knockout binding context)
+// Scene section checkboxes + Point Budget slider — wire directly
 {
   const lidarChk = document.getElementById('lp-showlidar-chk');
   const mapsChk  = document.getElementById('lp-googlemaps-chk');
@@ -4213,6 +4226,30 @@ renderPoiList();
     mapsChk.checked = !!viewModel.googleMapsOn;
     mapsChk.addEventListener('change', () => { viewModel.googleMapsOn = mapsChk.checked; });
     Cesium.knockout.getObservable(viewModel, 'googleMapsOn').subscribe(v => { mapsChk.checked = !!v; });
+  }
+
+  // Point Budget slider
+  const budgetSlider = document.getElementById('lp-point-budget');
+  const budgetLabel  = document.getElementById('lp-point-budget-label');
+
+  function _applyPointBudget(v) {
+    potreeViewer.setPointBudget(v);
+    if (budgetSlider) budgetSlider.value = v;
+    if (budgetLabel)  budgetLabel.textContent =
+      v >= 1_000_000 ? (v / 1_000_000).toFixed(1).replace(/\.0$/, '') + ' M'
+                     : (v / 1_000).toFixed(0) + ' K';
+  }
+
+  if (budgetSlider) {
+    // Restore saved value, or keep the hardcoded default
+    const savedBudget = _savedSession?.pointBudget;
+    if (savedBudget) _applyPointBudget(savedBudget);
+
+    budgetSlider.addEventListener('input', () => {
+      const v = parseInt(budgetSlider.value, 10);
+      _applyPointBudget(v);
+      notifyPointBudgetChanged(v);
+    });
   }
 }
 
