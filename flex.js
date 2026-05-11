@@ -3856,16 +3856,19 @@ function _hagScanTiles() {
   const pcs = potreeViewer?.scene?.pointclouds;
   if (!pcs || pcs.length === 0) return;
 
-  // Gather all visible (tree) nodes with their per-PC Z correction.
-  // EPT binary decoder stores positions RELATIVE to each node's own bounding-box
-  // minimum (confirmed in EptBinaryDecoderWorker.js: x = raw*scale+offset - nodeMin).
-  // elements[14] of the PC matrix is the column-major Z translation.
+  // Gather all visible (tree) nodes.
+  // NOTE: we no longer pass pcZCorr from the PC-level matrix.  The shader uses
+  // node.sceneNode.matrixWorld (= modelMatrix) for the Z term; Potree's scene
+  // hierarchy may include parent transforms that add significant Z offsets that
+  // pc.matrix.elements[14] alone does not capture.  We instead read
+  // sceneNode.matrixWorld.elements[14] per node — the exact value the shader
+  // uses — and store groundZ as (nodeLocalZ + sceneWorldZ14), which perfectly
+  // mirrors the shader's (position.z + modelMatrix[3][2]).
   const allNodes = [];
   const currentKeys = new Set();
   for (const pc of pcs) {
-    const pcZCorr = pc.matrix?.elements?.[14] ?? 0;
     for (const node of (pc.visibleNodes || [])) {
-      allNodes.push({ pc, node, pcZCorr });
+      allNodes.push({ pc, node });
       const key = (pc.name || '') + '/' + (node.geometryNode?.name || node.sceneNode?.name || '?');
       currentKeys.add(key);
     }
@@ -3911,7 +3914,7 @@ function _hagScanTiles() {
   // ── Inner node scan ──────────────────────────────────────────────────────────
   let updated = false;
 
-  for (const { pc, node, pcZCorr } of allNodes) {
+  for (const { pc, node } of allNodes) {
     // Stable cache key — PointCloudOctreeNode.name is undefined; use geometryNode.
     const key = (pc.name || '') + '/' + (node.geometryNode?.name || node.sceneNode?.name || '?');
     if (_hag.processedNodes.has(key)) continue;
@@ -3953,11 +3956,18 @@ function _hagScanTiles() {
       }
     }
 
-    // Node bounding-box min in geographic (EPT) space.
-    const nodeBB = node.geometryNode.boundingBox.min;
-    const nbX = nodeBB.x;
-    const nbY = nodeBB.y;
-    const nbZ = nodeBB.z;
+    // Node bounding-box min in geographic (EPT) space — used for XY only.
+    const nodeBBMin = node.geometryNode.boundingBox.min;
+    const nbX = nodeBBMin.x;
+    const nbY = nodeBBMin.y;
+
+    // Z world offset: read directly from the scene-node's world matrix element [14].
+    // This is EXACTLY what the shader receives as modelMatrix[3][2], so
+    //   groundZ (scan)  = nodeLocalZ + sceneWorldZ14
+    //   worldZ (shader) = position.z  + modelMatrix[3][2]    (same value)
+    // HAG = worldZ − groundZ = nodeLocalZ_pt − nodeLocalZ_ground = trueHAG ✓
+    // Using pc.matrix.elements[14] instead misses any parent-transform Z offset.
+    const sceneWorldZ14 = node.sceneNode?.matrixWorld?.elements?.[14] ?? 0;
 
     const numPts   = pos.length / 3;
     const cellSize = _hag.cellSize;
@@ -3969,12 +3979,9 @@ function _hagScanTiles() {
 
     // Helper: write one point into the ground grid, keeping per-cell minimum Z.
     const writePoint = (i) => {
-      // Convert node-local → geographic by adding the node BB min.
-      // Z stored as (geographic + pcZCorr) so the shader's subtraction of
-      // modelMatrix[3][2] (= nodeBBMinZ + pcZCorr) yields true HAG.
       const x = pos[i * 3]     + nbX;
       const y = pos[i * 3 + 1] + nbY;
-      const z = pos[i * 3 + 2] + nbZ + pcZCorr;
+      const z = pos[i * 3 + 2] + sceneWorldZ14;   // mirrors shader: position.z + modelMatrix[3][2]
       const cx = (x - ox) / cellSize | 0;
       const cy = (y - oy) / cellSize | 0;
       if (cx < 0 || cx >= gW || cy < 0 || cy >= gH) return false;
@@ -4104,7 +4111,7 @@ window._hagDebug = function() {
   }
   pcs.forEach((pc, pi) => {
     const u = pc.material?.uniforms;
-    console.log(`PC[${pi}] "${pc.name}": visibleNodes=${pc.visibleNodes?.length}, pcZCorr=${pc.matrix?.elements?.[14]}`);
+    console.log(`PC[${pi}] "${pc.name}": visibleNodes=${pc.visibleNodes?.length}, pc.matrix[14]=${pc.matrix?.elements?.[14]?.toFixed(2)}, pc.matrixWorld[14]=${pc.matrixWorld?.elements?.[14]?.toFixed(2)}`);
     console.log(`  uniforms: tex=${u?.uGroundTex?.value ? 'set' : 'null'}, origin=[${u?.uGroundOrigin?.value}], cellSize=${u?.uGroundCellSize?.value}, texSize=[${u?.uGroundTexSize?.value}], hagRange=[${u?.uHagRange?.value}]`);
     const defines = pc.material?.defines;
     console.log(`  defines Map has clip_hag_enabled: ${pc.material?.defines?.has?.('clip_hag_enabled')}`);
@@ -4113,7 +4120,7 @@ window._hagDebug = function() {
     const sampleNode = (pc.visibleNodes || []).find(n => {
       const b = n.geometryNode?.boundingBox;
       if (!b) return false;
-      return Math.max(b.max.x - b.min.x, b.max.y - b.min.y) <= HAG_GRID_RADIUS * 6;
+      return Math.max(b.max.x - b.min.x, b.max.y - b.min.y) <= (_hag._radius || 600) * 6;
     }) || (pc.visibleNodes || [])[0];
     if (sampleNode) {
       const geom = sampleNode.geometryNode?.geometry;
