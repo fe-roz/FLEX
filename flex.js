@@ -3895,6 +3895,24 @@ function _hagScanTiles() {
     if (_hag.processedNodes.has(key)) continue;
     _hag.processedNodes.add(key);
 
+    // ── Coarse-node guard ────────────────────────────────────────────────────
+    // The EPT root node "r" (and other very coarse nodes) have bounding boxes
+    // that span the entire survey (100+ km).  They contain only a handful of
+    // points within our 3 km camera-centred grid, so their Z values are
+    // scattered and unrepresentative — writing them creates isolated "filter
+    // islands" surrounded by unfiltered gaps.
+    // Only use nodes whose bounding-box XY span is ≤ 3× the grid radius
+    // (≤ 9 km for the default 3 km grid).  Mark coarser nodes as processed
+    // so we don't revisit them on the next tick.
+    {
+      const bb = node.geometryNode?.boundingBox;
+      if (bb) {
+        const spanX = bb.max.x - bb.min.x;
+        const spanY = bb.max.y - bb.min.y;
+        if (Math.max(spanX, spanY) > HAG_GRID_RADIUS * 6) continue;  // skip, already marked processed
+      }
+    }
+
     const geom = node.geometryNode?.geometry;
     if (!geom) continue;
     const pos = geom.attributes?.position?.array;   // Float32Array, packed XYZ
@@ -4077,7 +4095,9 @@ window._hagDebug = function() {
       const bb  = sampleNode.geometryNode?.boundingBox;
       let clsCounts = {}; let class2 = 0;
       if (cls) { for (let k=0; k<Math.min(cls.length,2000); k++) { clsCounts[cls[k]] = (clsCounts[cls[k]]||0)+1; if(cls[k]===2) class2++; } }
-      console.log(`  sample node "${sampleNode.geometryNode?.name}": ${pos?.length/3|0} pts, bb=[${bb?.min.x.toFixed(0)},${bb?.min.y.toFixed(0)}]-[${bb?.max.x.toFixed(0)},${bb?.max.y.toFixed(0)}]`);
+      const spanX = bb ? (bb.max.x - bb.min.x) : 0, spanY = bb ? (bb.max.y - bb.min.y) : 0;
+      const skipped = Math.max(spanX, spanY) > HAG_GRID_RADIUS * 6;
+      console.log(`  sample node "${sampleNode.geometryNode?.name}": ${pos?.length/3|0} pts, span=${spanX.toFixed(0)}×${spanY.toFixed(0)} m [${skipped ? 'SKIPPED coarse' : 'OK to scan'}], bb=[${bb?.min.x.toFixed(0)},${bb?.min.y.toFixed(0)}]-[${bb?.max.x.toFixed(0)},${bb?.max.y.toFixed(0)}]`);
       console.log(`  cls counts (first 2000 pts):`, clsCounts, `class2=${class2}`);
       if (pos && bb) {
         const pcZCorr = pc.matrix?.elements?.[14] ?? 0;
