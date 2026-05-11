@@ -108,6 +108,19 @@ uniform float uExtraOffset;
 
 uniform vec3 uShadowColor;
 
+// ── Height-above-ground filter ────────────────────────────────────────────────
+// uGroundTex:      R32F texture; each texel stores the minimum ground Z for that cell.
+//                  Unset cells contain 1e30 (no ground data yet).
+// uGroundOrigin:   local-space XY of the grid's bottom-left corner.
+// uGroundCellSize: side length of each grid cell in local units (metres).
+// uGroundTexSize:  grid dimensions in cells (width, height) — used for UV scaling.
+// uHagRange:       [minHAG, maxHAG] — points outside this band are culled.
+uniform sampler2D uGroundTex;
+uniform vec2      uGroundOrigin;
+uniform float     uGroundCellSize;
+uniform vec2      uGroundTexSize;
+uniform vec2      uHagRange;
+
 uniform sampler2D visibleNodes;
 uniform sampler2D gradient;
 uniform sampler2D classificationLUT;
@@ -795,8 +808,30 @@ void doClipping(){
 		vec2 range = uFilterPointSourceIDClipRange;
 		if(pointSourceID < range.x || pointSourceID > range.y){
 			gl_Position = vec4(100.0, 100.0, 100.0, 0.0);
-			
+
 			return;
+		}
+	}
+	#endif
+
+	#if defined(clip_hag_enabled)
+	{ // height-above-ground filter
+		// Map this point's local XY to a [0,1] UV in the ground texture.
+		vec2 cellF = (position.xy - uGroundOrigin) / uGroundCellSize;
+		vec2 uv    = cellF / uGroundTexSize;
+
+		// Only filter points that fall inside the grid coverage area.
+		if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
+			float groundZ = texture2D(uGroundTex, clamp(uv, 0.001, 0.999)).r;
+
+			// 1e30 is the sentinel for "no ground data in this cell yet" — let it through.
+			if (groundZ < 1e29) {
+				float hag = position.z - groundZ;
+				if (hag < uHagRange.x || hag > uHagRange.y) {
+					gl_Position = vec4(100.0, 100.0, 100.0, 0.0);
+					return;
+				}
+			}
 		}
 	}
 	#endif

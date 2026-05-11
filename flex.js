@@ -3520,6 +3520,8 @@ window.addPC = function(url) {
       }
       // Auto-hide the LiDAR dataset footprints — no longer needed once a cloud is loaded
       if (viewModel.showlidar) viewModel.showlidar = false;
+      // Initialise the HAG ground grid from this cloud's bounding box
+      initHagFilter(pcs[pcs.length - 1]);
     } else if (++tries >= 30) {
       // ~9 seconds with no new cloud — likely a bad URL or CORS/proxy error
       clearInterval(poll);
@@ -3705,6 +3707,187 @@ function removePc(pc) {
   if (pi !== -1) pcs.splice(pi, 1);
   renderPcList();
   saveSession();
+}
+
+// ── Height-Above-Ground filter ────────────────────────────────────────────────
+//
+// Architecture:
+//   • A Float32Array grid (one cell per pixel) stores the minimum ground Z seen
+//     so far in each XY bin.  Cells initialise to 1e30 (sentinel = no data yet).
+//   • Cells are filled by scanning potreeViewer.scene.pointclouds[*].visibleNodes
+//     every 250 ms.  For each newly-seen tile, we iterate the position and
+//     classification typed arrays.  If the tile has real classification data
+//     (any value ≠ 0) we only accept class-2 (ground) points; otherwise we use
+//     all points (sparse data / unclassified clouds).
+//   • The grid is uploaded to the GPU as a THREE.DataTexture (RED / Float32) and
+//     set as the uGroundTex uniform on every loaded point cloud's material.
+//   • The vertex shader (#if defined clip_hag_enabled) samples the texture, looks
+//     up the ground Z for each point's XY bin, and culls (gl_Position = out-of-clip)
+//     any point whose height-above-ground is outside [uHagRange.x, uHagRange.y].
+//   • Slider movement only updates the uniform — no CPU work, instant re-render.
+
+const _hag = {
+  grid:           null,   // Float32Array, one float per cell (ground Z or 1e30)
+  texture:        null,   // THREE.DataTexture
+  gridW:          0,
+  gridH:          0,
+  cellSize:       1.0,    // metres per cell
+  originX:        0.0,    // local-space XY of grid bottom-left corner
+  originY:        0.0,
+  processedNodes: new Set(),
+  enabled:        false,
+  minHag:         -0.5,
+  maxHag:          5.0,
+  _uploadTimer:   null,
+  _scanInterval:  null,
+};
+
+/** Set up the grid from a newly-loaded point cloud's bounding box. */
+function _hagInitGrid(pc) {
+  const bb = pc.pcoGeometry?.boundingBox;
+  if (!bb) { console.warn('[hag] No bounding box available yet'); return; }
+
+  const spanX = bb.max.x - bb.min.x;
+  const spanY = bb.max.y - bb.min.y;
+  // Target ~1 m cells, cap at 1024 × 1024 to bound memory (~4 MB).
+  _hag.cellSize = Math.max(0.5, Math.max(spanX, spanY) / 1024);
+  _hag.gridW    = Math.min(1024, Math.ceil(spanX / _hag.cellSize) + 2);
+  _hag.gridH    = Math.min(1024, Math.ceil(spanY / _hag.cellSize) + 2);
+  _hag.originX  = bb.min.x;
+  _hag.originY  = bb.min.y;
+
+  _hag.grid = new Float32Array(_hag.gridW * _hag.gridH).fill(1e30);
+
+  if (_hag.texture) _hag.texture.dispose();
+  _hag.texture = new THREE.DataTexture(
+    _hag.grid, _hag.gridW, _hag.gridH,
+    THREE.RedFormat, THREE.FloatType
+  );
+  _hag.texture.minFilter = THREE.NearestFilter;
+  _hag.texture.magFilter = THREE.NearestFilter;
+  _hag.texture.needsUpdate = true;
+
+  _hag.processedNodes.clear();
+
+  if (_hag._scanInterval) clearInterval(_hag._scanInterval);
+  _hag._scanInterval = setInterval(_hagScanTiles, 250);
+
+  console.log(`[hag] Grid ${_hag.gridW}×${_hag.gridH} @ ${_hag.cellSize.toFixed(2)} m/cell`);
+}
+
+/** Scan all loaded tiles for new nodes and accumulate ground Z into the grid. */
+function _hagScanTiles() {
+  const pcs = potreeViewer?.scene?.pointclouds;
+  if (!pcs || pcs.length === 0) return;
+
+  let updated = false;
+
+  for (const pc of pcs) {
+    for (const node of (pc.visibleNodes || [])) {
+      // Use pc name + node name as a stable tile key
+      const key = (pc.name || '') + '/' + (node.name || node.id || '?');
+      if (_hag.processedNodes.has(key)) continue;
+      _hag.processedNodes.add(key);
+
+      const geom = node.geometryNode?.geometry;
+      if (!geom) continue;
+      const pos = geom.attributes?.position?.array;   // Float32Array, packed XYZ
+      if (!pos || pos.length < 3) continue;
+      const cls = geom.attributes?.classification?.array; // Float32Array or undefined
+
+      // Detect real classification: if any point has class > 0, use class-2 only.
+      // (Unclassified clouds get classification = 0 from defaultAttributeValues.)
+      let useClassFilter = false;
+      if (cls) {
+        const probe = Math.min(512, cls.length);
+        for (let k = 0; k < probe; k++) {
+          if (cls[k] > 0.5) { useClassFilter = true; break; }
+        }
+      }
+
+      const numPts   = pos.length / 3;
+      const cellSize = _hag.cellSize;
+      const ox       = _hag.originX;
+      const oy       = _hag.originY;
+      const gW       = _hag.gridW;
+      const gH       = _hag.gridH;
+      const grid     = _hag.grid;
+
+      // Tight typed-array loop — V8 can sustain ~300 M iterations/s here.
+      for (let i = 0; i < numPts; i++) {
+        if (useClassFilter && Math.round(cls[i]) !== 2) continue;
+
+        const x = pos[i * 3];
+        const y = pos[i * 3 + 1];
+        const z = pos[i * 3 + 2];
+
+        const cx = (x - ox) / cellSize | 0;  // bitwise-OR truncates to int
+        const cy = (y - oy) / cellSize | 0;
+        if (cx < 0 || cx >= gW || cy < 0 || cy >= gH) continue;
+
+        const idx = cy * gW + cx;
+        if (z < grid[idx]) grid[idx] = z;
+      }
+      updated = true;
+    }
+  }
+
+  if (updated && !_hag._uploadTimer) {
+    // Debounce: upload texture at most once per 200 ms to avoid hammering the GPU.
+    _hag._uploadTimer = setTimeout(() => {
+      _hag._uploadTimer = null;
+      if (_hag.texture) _hag.texture.needsUpdate = true;
+      _hagPushUniforms();
+    }, 200);
+  }
+}
+
+/** Push current grid + range uniforms to every loaded point cloud material. */
+function _hagPushUniforms() {
+  if (!_hag.texture) return;
+  for (const pc of (potreeViewer?.scene?.pointclouds || [])) {
+    const u = pc.material?.uniforms;
+    if (!u) continue;
+    u.uGroundTex.value      = _hag.texture;
+    u.uGroundOrigin.value   = [_hag.originX, _hag.originY];
+    u.uGroundCellSize.value = _hag.cellSize;
+    u.uGroundTexSize.value  = [_hag.gridW, _hag.gridH];
+    u.uHagRange.value       = [_hag.minHag, _hag.maxHag];
+  }
+}
+
+/** Enable or disable the HAG filter on all loaded point clouds. */
+function _hagEnable(enabled) {
+  _hag.enabled = enabled;
+  for (const pc of (potreeViewer?.scene?.pointclouds || [])) {
+    if (!pc.material) continue;
+    if (enabled) {
+      pc.material.setDefine('clip_hag_enabled', '#define clip_hag_enabled');
+      _hagPushUniforms();
+    } else {
+      pc.material.removeDefine('clip_hag_enabled');
+      pc.material.updateShaderSource();
+    }
+  }
+}
+
+/** Update the HAG [min, max] range and push to GPU instantly. */
+function _hagSetRange(min, max) {
+  _hag.minHag = min;
+  _hag.maxHag = max;
+  if (_hag.enabled) _hagPushUniforms();
+}
+
+/**
+ * Called from the addPC success callback once a new point cloud appears in the
+ * scene.  Initialises the grid from its bounding box.
+ */
+function initHagFilter(pc) {
+  _hagInitGrid(pc);
+  if (_hag.enabled) {
+    pc.material?.setDefine('clip_hag_enabled', '#define clip_hag_enabled');
+    _hagPushUniforms();
+  }
 }
 
 // ── Data Files list ───────────────────────────────────────────────────────────
@@ -4293,6 +4476,54 @@ renderPoiList();
       const v = parseInt(budgetSlider.value, 10);
       _applyPointBudget(v);
       notifyPointBudgetChanged(v);
+    });
+  }
+
+  // ── Height-above-ground filter UI ────────────────────────────────────────
+  const hagEnable   = document.getElementById('lp-hag-enable');
+  const hagControls = document.getElementById('lp-hag-controls');
+  const hagMinSlider = document.getElementById('lp-hag-min');
+  const hagMaxSlider = document.getElementById('lp-hag-max');
+  const hagMinLabel  = document.getElementById('lp-hag-min-label');
+  const hagMaxLabel  = document.getElementById('lp-hag-max-label');
+  const hagSummary   = document.getElementById('lp-hag-label');
+
+  function _fmtHag(v) {
+    return (v >= 0 ? '' : '−') + Math.abs(v).toFixed(1) + ' m';
+  }
+  function _updateHagSummary() {
+    if (hagSummary) hagSummary.textContent =
+      _fmtHag(_hag.minHag) + ' – ' + _fmtHag(_hag.maxHag);
+  }
+
+  if (hagEnable) {
+    hagEnable.addEventListener('change', () => {
+      const on = hagEnable.checked;
+      if (hagControls) hagControls.style.display = on ? 'block' : 'none';
+      _hagEnable(on);
+    });
+  }
+  if (hagMinSlider) {
+    hagMinSlider.addEventListener('input', () => {
+      const min = parseFloat(hagMinSlider.value);
+      // Clamp: min must stay below max
+      const max = Math.max(min + 0.5, _hag.maxHag);
+      if (hagMaxSlider) hagMaxSlider.value = max;
+      if (hagMinLabel) hagMinLabel.textContent = _fmtHag(min);
+      if (hagMaxLabel) hagMaxLabel.textContent = _fmtHag(max);
+      _hagSetRange(min, max);
+      _updateHagSummary();
+    });
+  }
+  if (hagMaxSlider) {
+    hagMaxSlider.addEventListener('input', () => {
+      const max = parseFloat(hagMaxSlider.value);
+      const min = Math.min(max - 0.5, _hag.minHag);
+      if (hagMinSlider) hagMinSlider.value = min;
+      if (hagMinLabel) hagMinLabel.textContent = _fmtHag(min);
+      if (hagMaxLabel) hagMaxLabel.textContent = _fmtHag(max);
+      _hagSetRange(min, max);
+      _updateHagSummary();
     });
   }
 }

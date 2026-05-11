@@ -147,7 +147,14 @@ export class PointCloudMaterial extends THREE.RawShaderMaterial {
 			uFilterReturnNumberRange:		{ type: "fv", value: [0, 7]},
 			uFilterNumberOfReturnsRange:	{ type: "fv", value: [0, 7]},
 			uFilterGPSTimeClipRange:		{ type: "fv", value: [0, 7]},
-			uFilterPointSourceIDClipRange:		{ type: "fv", value: [0, 65535]},
+			uFilterPointSourceIDClipRange:	{ type: "fv", value: [0, 65535]},
+
+			// Height-above-ground filter
+			uGroundTex:      { type: "t",   value: null },
+			uGroundOrigin:   { type: "2fv", value: [0.0, 0.0] },
+			uGroundCellSize: { type: "f",   value: 1.0 },
+			uGroundTexSize:  { type: "2fv", value: [1.0, 1.0] },
+			uHagRange:       { type: "2fv", value: [-10.0, 100.0] },
 			matcapTextureUniform: 	{ type: "t", value: this.matcapTexture },
 			backfaceCulling: { type: "b", value: false },
 		};
