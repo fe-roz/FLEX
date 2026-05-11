@@ -3772,58 +3772,61 @@ function _hagInitGrid(pc) {
  * A 1024×1024 grid at 2 m/cell covers 2 km × 2 km — enough for any local
  * LiDAR survey regardless of how large the parent EPT dataset is.
  */
-const HAG_CELL_SIZE_MAX = 2.0;   // metres — increase for wider coverage
+// Grid covers ±HAG_GRID_RADIUS metres from the camera position.
+// 1500 m gives a 3 km × 3 km area at ~2.93 m/cell with a 1024² texture.
+const HAG_GRID_RADIUS = 1500;   // metres
+const HAG_GRID_DIM    = 1024;   // texture dimension (square)
 
+/**
+ * Convert Cesium camera ground position to Web Mercator (EPSG:3857) metres,
+ * which is the coordinate system used by USGS EPT datasets.
+ */
+function _hagGetCameraEPT() {
+  const carto = cesiumViewer?.camera?.positionCartographic;
+  if (!carto) return null;
+  const lat = Cesium.Math.toDegrees(carto.latitude);
+  const lon = Cesium.Math.toDegrees(carto.longitude);
+  const R = 6378137;
+  return {
+    x: lon * (Math.PI / 180) * R,
+    y: Math.log(Math.tan(Math.PI / 4 + lat * (Math.PI / 360))) * R,
+  };
+}
+
+/**
+ * (Re-)create the HAG ground grid centered on the current camera position.
+ * allNodes is only used for a quick sanity-check that geometry exists; the
+ * grid extent is now camera-driven, not node-BB-driven.  This avoids the
+ * root-node "r" problem where the EPT root BB spans the entire county.
+ */
 function _hagBuildGrid(allNodes) {
-  // Compute the tight XY extent of all visible node bounding boxes.
-  let minX = Infinity, minY = Infinity;
-  let maxX = -Infinity, maxY = -Infinity;
+  const cam = _hagGetCameraEPT();
+  if (!cam) return false;
 
-  for (const { node } of allNodes) {
-    const bb = node.geometryNode?.boundingBox;
-    if (!bb) continue;
-    if (bb.min.x < minX) minX = bb.min.x;
-    if (bb.min.y < minY) minY = bb.min.y;
-    if (bb.max.x > maxX) maxX = bb.max.x;
-    if (bb.max.y > maxY) maxY = bb.max.y;
-  }
-
-  if (!isFinite(minX)) return false;   // No nodes with geometry yet — try later.
-
-  const spanX = maxX - minX;
-  const spanY = maxY - minY;
-  const MARGIN = 16;  // extra cells on each side so edges don't clip right away
-  const MAX_DIM = 1024;
-
-  // Cell size: at most HAG_CELL_SIZE_MAX, no smaller than 0.25 m.
-  _hag.cellSize = Math.max(0.25,
-    Math.min(HAG_CELL_SIZE_MAX, Math.max(spanX, spanY) / (MAX_DIM - 2 * MARGIN)));
-
-  _hag.gridW   = Math.min(MAX_DIM, Math.ceil(spanX / _hag.cellSize) + MARGIN * 2);
-  _hag.gridH   = Math.min(MAX_DIM, Math.ceil(spanY / _hag.cellSize) + MARGIN * 2);
-  _hag.originX = minX - MARGIN * _hag.cellSize;
-  _hag.originY = minY - MARGIN * _hag.cellSize;
+  _hag.cellSize = (HAG_GRID_RADIUS * 2) / HAG_GRID_DIM;  // ~2.93 m/cell
+  _hag.gridW    = HAG_GRID_DIM;
+  _hag.gridH    = HAG_GRID_DIM;
+  _hag.originX  = cam.x - HAG_GRID_RADIUS;
+  _hag.originY  = cam.y - HAG_GRID_RADIUS;
 
   // 4 floats per pixel (RGBA) — shader reads .r; G/B/A are unused padding.
-  _hag.grid = new Float32Array(_hag.gridW * _hag.gridH * 4).fill(1e30);
+  _hag.grid = new Float32Array(HAG_GRID_DIM * HAG_GRID_DIM * 4).fill(1e30);
 
   if (_hag.texture) _hag.texture.dispose();
   _hag.texture = new THREE.DataTexture(
-    _hag.grid, _hag.gridW, _hag.gridH,
+    _hag.grid, HAG_GRID_DIM, HAG_GRID_DIM,
     THREE.RGBAFormat, THREE.FloatType
   );
   _hag.texture.minFilter = THREE.NearestFilter;
   _hag.texture.magFilter = THREE.NearestFilter;
   _hag.texture.needsUpdate = true;
 
-  // Push the new texture reference (and dimensions) to all active materials.
-  // This also enables the define on materials if _hag.enabled is true.
   _hagPushUniforms();
 
   console.log(
-    `[hag] Grid ${_hag.gridW}×${_hag.gridH} @ ${_hag.cellSize.toFixed(2)} m/cell, ` +
-    `origin (${_hag.originX.toFixed(0)}, ${_hag.originY.toFixed(0)}), ` +
-    `covers ${(_hag.gridW * _hag.cellSize).toFixed(0)} × ${(_hag.gridH * _hag.cellSize).toFixed(0)} m`
+    `[hag] Grid ${HAG_GRID_DIM}² @ ${_hag.cellSize.toFixed(2)} m/cell, ` +
+    `camera EPT (${cam.x.toFixed(0)}, ${cam.y.toFixed(0)}), ` +
+    `covers ${(HAG_GRID_RADIUS * 2).toFixed(0)} × ${(HAG_GRID_RADIUS * 2).toFixed(0)} m`
   );
   return true;
 }
@@ -3850,15 +3853,28 @@ function _hagScanTiles() {
 
   if (allNodes.length === 0) return;
 
-  // Detect if any previously-processed node is no longer visible (camera moved or
-  // LOD changed).  When that happens, discard the entire grid and rebuild from the
-  // current visible set so stale ground estimates don't linger.
+  // Detect rebuild conditions:
+  //   (a) No grid yet.
+  //   (b) A previously-processed node is no longer visible (LOD change).
+  //   (c) Camera has moved far enough that the grid is no longer centred on it.
   // Rate-limit rebuilds to at most once every 3 s to avoid thrashing.
   const now = Date.now();
   let needRebuild = !_hag.grid;
+
   if (!needRebuild && _hag.processedNodes.size > 0) {
     for (const key of _hag.processedNodes) {
       if (!currentKeys.has(key)) { needRebuild = true; break; }
+    }
+  }
+
+  if (!needRebuild && _hag.grid) {
+    const cam = _hagGetCameraEPT();
+    if (cam) {
+      const gridCamX = _hag.originX + HAG_GRID_RADIUS;
+      const gridCamY = _hag.originY + HAG_GRID_RADIUS;
+      // Rebuild when camera drifts more than half the radius from grid centre.
+      const drift = Math.max(Math.abs(cam.x - gridCamX), Math.abs(cam.y - gridCamY));
+      if (drift > HAG_GRID_RADIUS * 0.5) needRebuild = true;
     }
   }
 
