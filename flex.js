@@ -3773,9 +3773,27 @@ function _hagInitGrid(pc) {
  * LiDAR survey regardless of how large the parent EPT dataset is.
  */
 // Grid covers ±HAG_GRID_RADIUS metres from the camera position.
-// 1500 m gives a 3 km × 3 km area at ~2.93 m/cell with a 1024² texture.
-const HAG_GRID_RADIUS = 1500;   // metres
-const HAG_GRID_DIM    = 1024;   // texture dimension (square)
+// Radius is chosen to match the distance at which Potree loads fine nodes,
+// so the grid stays well-filled (>60%) at the current view.
+// HAG_GRID_DIM stays fixed; cell size = 2*radius/dim.
+const HAG_GRID_DIM = 1024;   // texture dimension (square)
+
+/**
+ * Pick a grid radius that matches what Potree has actually loaded.
+ * Potree's load range ≈ 2–3× camera height above terrain.
+ * We use a fraction of that so the 1024² grid stays dense.
+ */
+function _hagPickRadius() {
+  const carto = cesiumViewer?.camera?.positionCartographic;
+  if (!carto) return 600;
+  const heightM = carto.height;          // metres above WGS84 ellipsoid
+  // Step curve: keep radius ≤ ~¼ the Potree load range so fill stays high.
+  if (heightM <   500) return  200;
+  if (heightM <  1500) return  400;
+  if (heightM <  4000) return  800;
+  if (heightM < 10000) return 1500;
+  return 3000;
+}
 
 /**
  * Convert Cesium camera ground position to Web Mercator (EPSG:3857) metres,
@@ -3803,7 +3821,9 @@ function _hagBuildGrid(allNodes) {
   const cam = _hagGetCameraEPT();
   if (!cam) return false;
 
-  _hag.cellSize = (HAG_GRID_RADIUS * 2) / HAG_GRID_DIM;  // ~2.93 m/cell
+  const HAG_GRID_RADIUS = _hagPickRadius();
+  _hag._radius  = HAG_GRID_RADIUS;          // remember for drift check
+  _hag.cellSize = (HAG_GRID_RADIUS * 2) / HAG_GRID_DIM;
   _hag.gridW    = HAG_GRID_DIM;
   _hag.gridH    = HAG_GRID_DIM;
   _hag.originX  = cam.x - HAG_GRID_RADIUS;
@@ -3870,11 +3890,13 @@ function _hagScanTiles() {
   if (!needRebuild && _hag.grid) {
     const cam = _hagGetCameraEPT();
     if (cam) {
-      const gridCamX = _hag.originX + HAG_GRID_RADIUS;
-      const gridCamY = _hag.originY + HAG_GRID_RADIUS;
-      // Rebuild when camera drifts more than half the radius from grid centre.
+      const r      = _hag._radius || 600;
+      const gridCamX = _hag.originX + r;
+      const gridCamY = _hag.originY + r;
+      // Rebuild when camera drifts more than half the radius from grid centre,
+      // or when the radius tier should change (zoom level changed).
       const drift = Math.max(Math.abs(cam.x - gridCamX), Math.abs(cam.y - gridCamY));
-      if (drift > HAG_GRID_RADIUS * 0.5) needRebuild = true;
+      if (drift > r * 0.5 || _hagPickRadius() !== r) needRebuild = true;
     }
   }
 
@@ -3909,7 +3931,7 @@ function _hagScanTiles() {
       if (bb) {
         const spanX = bb.max.x - bb.min.x;
         const spanY = bb.max.y - bb.min.y;
-        if (Math.max(spanX, spanY) > HAG_GRID_RADIUS * 6) continue;  // skip, already marked processed
+        if (Math.max(spanX, spanY) > (_hag._radius || 600) * 6) continue;  // skip, already marked processed
       }
     }
 
@@ -4101,7 +4123,7 @@ window._hagDebug = function() {
       let clsCounts = {}; let class2 = 0;
       if (cls) { for (let k=0; k<Math.min(cls.length,2000); k++) { clsCounts[cls[k]] = (clsCounts[cls[k]]||0)+1; if(cls[k]===2) class2++; } }
       const spanX = bb ? (bb.max.x - bb.min.x) : 0, spanY = bb ? (bb.max.y - bb.min.y) : 0;
-      const skipped = Math.max(spanX, spanY) > HAG_GRID_RADIUS * 6;
+      const skipped = Math.max(spanX, spanY) > (_hag._radius || 600) * 6;
       console.log(`  sample node "${sampleNode.geometryNode?.name}": ${pos?.length/3|0} pts, span=${spanX.toFixed(0)}×${spanY.toFixed(0)} m [${skipped ? 'SKIPPED coarse' : 'OK to scan'}], bb=[${bb?.min.x.toFixed(0)},${bb?.min.y.toFixed(0)}]-[${bb?.max.x.toFixed(0)},${bb?.max.y.toFixed(0)}]`);
       console.log(`  cls counts (first 2000 pts):`, clsCounts, `class2=${class2}`);
       if (pos && bb) {
