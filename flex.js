@@ -3308,16 +3308,18 @@ Potree.loadPointCloud(url, _pcName, function(e){
   var pcZscale = 1/(Math.cos((pcCenterC[1]*Math.PI)/180));
   // console.log(pcZscale);
   if (viewModel.usgsRef){
+    // NAVD88 (USGS LiDAR) → WGS84 ellipsoid: apply ~-32 m geoid offset + Web Mercator Z scale
     e.pointcloud.matrix.set(1, 0, 0, 0,
-                          0, 1, 0, 0,
-                          0, 0, pcZscale, -32*pcZscale, //0, 0, pcZscale, -32*pcZscale,
-                          0, 0, 0, 1);
-} else {
-e.pointcloud.matrix.set(1, 0, 0, 0,
-                          0, 1, 0, 0,
-                          0, 0, 1, -32*0.766, //0, 0, pcZscale, -32*pcZscale,
-                          0, 0, 0, 1);
-}
+                            0, 1, 0, 0,
+                            0, 0, pcZscale, -32*pcZscale,
+                            0, 0, 0, 1);
+  } else {
+    // Already in WGS84 ellipsoidal height: only apply Web Mercator Z scale, no vertical shift
+    e.pointcloud.matrix.set(1, 0, 0, 0,
+                            0, 1, 0, 0,
+                            0, 0, pcZscale, 0,
+                            0, 0, 0, 1);
+  }
   
 
   let material = e.pointcloud.material;
