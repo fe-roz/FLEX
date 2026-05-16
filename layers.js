@@ -25,6 +25,7 @@ export const viewModel = {
   showlidar:    false,
   googleMapsOn: false,
   usgsRef:      false,
+  egm96:        false, // Matt's EGM96 precise geoid lookup — replaces fixed -32 m when on
   cesiumRender: true,  // toggle Cesium's render call each frame (false = Potree-only for perf testing)
   layers:       [],   // active ImageryLayer objects, top → bottom order
 

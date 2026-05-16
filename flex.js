@@ -1,4 +1,5 @@
 import * as THREE from "./PotreeCopied/libs/three.js/build/three.module.js";
+import { meanSeaLevel } from 'https://esm.sh/egm96-universal@1.1.1';
 
 import "../Tokens.js";
 
@@ -3098,6 +3099,23 @@ initializeContextMenu({ Cesium, cesiumViewer });
 // Init session system (wires auto-save triggers, exposes window._sessionSave)
 initSession(cesiumViewer, viewModel);
 
+// Shared helper: apply the correct Z matrix to a loaded point cloud based on
+// current toggle state.  Called at load time and on every toggle change.
+//   egm96 ON  → Matt's EGM96 precise geoid lookup (pcZscale + meanSeaLevel offset)
+//   usgsRef ON → fixed -32 m geoid lift (original USGS correction)
+//   both OFF   → original default: scale=1, fixed -32*0.766 offset
+function applyPcMatrix(pc) {
+  const z = pc._pcZscale || 1;
+  if (viewModel.egm96) {
+    const h = meanSeaLevel(pc._pcLat || 0, pc._pcLon || 0);
+    pc.matrix.set(1,0,0,0, 0,1,0,0, 0,0,z, h*z, 0,0,0,1);
+  } else if (viewModel.usgsRef) {
+    pc.matrix.set(1,0,0,0, 0,1,0,0, 0,0,z, -32*z, 0,0,0,1);
+  } else {
+    pc.matrix.set(1,0,0,0, 0,1,0,0, 0,0,1, -32*0.766, 0,0,0,1);
+  }
+}
+
 // Activate layers — either from saved session or first-run defaults.
 // loadLayers() now only strips Cesium's built-in layer and builds the catalog;
 // it adds nothing to the scene.  We add layers here so the session controls
@@ -3131,17 +3149,11 @@ _layersReady.then(async () => {
     }
   }
 
-  // Subscribe viewModel-level settings that should persist
-  Cesium.knockout.getObservable(viewModel, 'usgsRef').subscribe((val) => {
-    saveSession();
-    // Live-update matrix on every already-loaded cloud so the toggle takes effect instantly
-    potreeViewer.scene.pointclouds.forEach(pc => {
-      const z = pc._pcZscale || 1;
-      if (val) {
-        pc.matrix.set(1,0,0,0, 0,1,0,0, 0,0,z,-32*z, 0,0,0,1);
-      } else {
-        pc.matrix.set(1,0,0,0, 0,1,0,0, 0,0,z,0,     0,0,0,1);
-      }
+  // Subscribe viewModel-level settings that should persist + live-update loaded clouds
+  ['usgsRef', 'egm96'].forEach(key => {
+    Cesium.knockout.getObservable(viewModel, key).subscribe(() => {
+      saveSession();
+      potreeViewer.scene.pointclouds.forEach(applyPcMatrix);
     });
   });
 
@@ -3317,21 +3329,11 @@ Potree.loadPointCloud(url, _pcName, function(e){
   var pcz = ((e.pointcloud.boundingBox.max.z + e.pointcloud.boundingBox.min.z)/2);
   var pcCenterC = toMap.forward([pcx,pcy,pcz]);
   var pcZscale = 1/(Math.cos((pcCenterC[1]*Math.PI)/180));
-  e.pointcloud._pcZscale = pcZscale; // stash for live usgsRef toggle updates
+  e.pointcloud._pcZscale = pcZscale;       // stash for live toggle updates
+  e.pointcloud._pcLat   = pcCenterC[1];   // stash for EGM96 reactive re-apply
+  e.pointcloud._pcLon   = pcCenterC[0];
   // console.log(pcZscale);
-  if (viewModel.usgsRef){
-    // NAVD88 (USGS LiDAR) → WGS84 ellipsoid: apply ~-32 m geoid offset + Web Mercator Z scale
-    e.pointcloud.matrix.set(1, 0, 0, 0,
-                            0, 1, 0, 0,
-                            0, 0, pcZscale, -32*pcZscale,
-                            0, 0, 0, 1);
-  } else {
-    // Already in WGS84 ellipsoidal height: only apply Web Mercator Z scale, no vertical shift
-    e.pointcloud.matrix.set(1, 0, 0, 0,
-                            0, 1, 0, 0,
-                            0, 0, pcZscale, 0,
-                            0, 0, 0, 1);
-  }
+  applyPcMatrix(e.pointcloud);
   
 
   let material = e.pointcloud.material;
@@ -5776,12 +5778,16 @@ function loop(timestamp){
     // console.log(cCamPosCart.height);
     // console.log(cCamCenterObjectPosCart.height);
     
-    // pcZscale corrects for Web Mercator Z stretch (always needed, independent of datum).
-    // usgsRef only controls the Z *offset* on the point cloud matrix — not this.
-    const pcZscaleCam = 1 / Math.cos(cCamPosCart.latitude);
-    let pCamPos = toScene.forward([cCamLong, cCamLat, cCamHeight * pcZscaleCam]);
+    // Camera Z correction mirrors the point cloud matrix: pcZscale is needed whenever
+    // the cloud matrix uses it (usgsRef or egm96 ON). Original OFF mode uses scale=1 on
+    // the cloud, so the camera height is also left uncorrected for consistency.
+    let cCamHeightCorrected = cCamHeight;
+    if (viewModel.usgsRef || viewModel.egm96) {
+      cCamHeightCorrected = cCamHeight / Math.cos(cCamPosCart.latitude);
+    }
+    let pCamPos = toScene.forward([cCamLong, cCamLat, cCamHeightCorrected]);
 
-    let pCamCenterObjectPos = toScene.forward([cCamCenterObjectLong, cCamCenterObjectLat, cCamCenterObjectHeight * pcZscaleCam]);
+    let pCamCenterObjectPos = toScene.forward([cCamCenterObjectLong, cCamCenterObjectLat, cCamCenterObjectHeight]);
 
     potreeViewer.scene.view.setView(
       [pCamPos[0],pCamPos[1],pCamPos[2]],
