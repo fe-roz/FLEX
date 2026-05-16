@@ -5776,13 +5776,12 @@ function loop(timestamp){
     // console.log(cCamPosCart.height);
     // console.log(cCamCenterObjectPosCart.height);
     
-    let cCamHeightCorrected = cCamHeight;
-    if (viewModel.usgsRef){
-    cCamHeightCorrected = cCamHeight/Math.cos(cCamPosCart.latitude);
-} 
-    let pCamPos = toScene.forward([cCamLong, cCamLat, cCamHeightCorrected]);
+    // pcZscale corrects for Web Mercator Z stretch (always needed, independent of datum).
+    // usgsRef only controls the Z *offset* on the point cloud matrix — not this.
+    const pcZscaleCam = 1 / Math.cos(cCamPosCart.latitude);
+    let pCamPos = toScene.forward([cCamLong, cCamLat, cCamHeight * pcZscaleCam]);
 
-    let pCamCenterObjectPos = toScene.forward([cCamCenterObjectLong, cCamCenterObjectLat, cCamCenterObjectHeight]);
+    let pCamCenterObjectPos = toScene.forward([cCamCenterObjectLong, cCamCenterObjectLat, cCamCenterObjectHeight * pcZscaleCam]);
 
     potreeViewer.scene.view.setView(
       [pCamPos[0],pCamPos[1],pCamPos[2]],
