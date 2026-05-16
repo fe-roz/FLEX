@@ -3132,7 +3132,18 @@ _layersReady.then(async () => {
   }
 
   // Subscribe viewModel-level settings that should persist
-  Cesium.knockout.getObservable(viewModel, 'usgsRef').subscribe(() => saveSession());
+  Cesium.knockout.getObservable(viewModel, 'usgsRef').subscribe((val) => {
+    saveSession();
+    // Live-update matrix on every already-loaded cloud so the toggle takes effect instantly
+    potreeViewer.scene.pointclouds.forEach(pc => {
+      const z = pc._pcZscale || 1;
+      if (val) {
+        pc.matrix.set(1,0,0,0, 0,1,0,0, 0,0,z,-32*z, 0,0,0,1);
+      } else {
+        pc.matrix.set(1,0,0,0, 0,1,0,0, 0,0,z,0,     0,0,0,1);
+      }
+    });
+  });
 
   renderLayerList();
 });
@@ -3306,6 +3317,7 @@ Potree.loadPointCloud(url, _pcName, function(e){
   var pcz = ((e.pointcloud.boundingBox.max.z + e.pointcloud.boundingBox.min.z)/2);
   var pcCenterC = toMap.forward([pcx,pcy,pcz]);
   var pcZscale = 1/(Math.cos((pcCenterC[1]*Math.PI)/180));
+  e.pointcloud._pcZscale = pcZscale; // stash for live usgsRef toggle updates
   // console.log(pcZscale);
   if (viewModel.usgsRef){
     // NAVD88 (USGS LiDAR) → WGS84 ellipsoid: apply ~-32 m geoid offset + Web Mercator Z scale
@@ -5729,7 +5741,9 @@ function loop(timestamp){
   cesiumViewer.resize();
   // potreeViewer.resize();
 
-  cesiumViewer.render();
+  if (viewModel.cesiumRender) {
+    cesiumViewer.render();
+  }
 
   let cCamPosCart = ellipsoid.cartesianToCartographic(cesiumViewer.camera.position);
 
