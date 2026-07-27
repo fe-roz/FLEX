@@ -811,6 +811,7 @@
         <div class="flex-nav">
           <button class="btn btn-primary" type="button" data-target="#mapLayersCollapsible">🗺 Map Layers</button>
           <button class="btn btn-primary" type="button" data-target="#featuresCollapsible">📍 Features</button>
+          <button class="btn btn-primary" type="button" data-target="#caveCollapsible">🕳 Cave</button>
           <button class="btn btn-primary" type="button" data-target="#lidarCollapsible">☁ LiDAR</button>
           <button class="btn btn-primary" type="button" data-target="#toolsCollapsible">🔧 Tools</button>
           <button class="btn btn-primary" type="button" data-target="#helpCollapsible">❓ Help</button>
@@ -953,22 +954,42 @@
               </div>
             </div>
 
-            <div class="lp-group-label">Cave Features</div>
+            <div class="lp-group-label">Data Files</div>
 
-            <!-- Cave GeoJSON files + cave survey toggle -->
+            <!-- Data files (KMZ, GeoJSON, GPX) -->
             <div class="lp-section">
               <div class="lp-section-header" onclick="window._lpToggle(this)">
-                <span class="lp-section-arrow">▸</span> Cave Features
+                <span class="lp-section-arrow">▸</span> Data Files
               </div>
               <div class="lp-section-body open" id="lp-data-body">
                 <div id="lp-data-list"></div>
                 <div style="margin-top:4px;">
                   <button class="btn btn-sm btn-primary lp-add-btn" onclick="window._addDataFile()">+ Add KMZ / GeoJSON</button>
                 </div>
-                <div class="lp-row" style="margin-top:6px; padding-top:5px; border-top:1px solid rgba(255,255,255,0.1);">
-                  <input type="checkbox" id="lp-cave-toggle" style="margin:0;">
-                  <span class="lp-row-name" style="font-size:10px;">Cave Survey (caves_v2.geojson)</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ══════════════ CAVE SURVEY ══════════════════════════════════════ -->
+        <div class="collapse" id="caveCollapsible">
+          <div class="lp-panel-wrap">
+
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▸</span> Imported Surveys
+              </div>
+              <div class="lp-section-body open">
+                <div id="lp-cave-list" style="margin-bottom:4px;"></div>
+                <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:2px;">
+                  <button class="btn btn-sm btn-primary lp-add-btn" onclick="window._importCavePLT()" style="font-size:11px;">+ Import PLT</button>
+                  <label class="lp-row" style="margin:0; cursor:pointer;">
+                    <input type="checkbox" id="lp-cave-toggle" style="margin:0;">
+                    <span style="font-size:10px; opacity:0.7; margin-left:4px;">Show all</span>
+                  </label>
                 </div>
+                <div id="lp-plt-recents"></div>
               </div>
             </div>
 
@@ -998,6 +1019,7 @@
                     <span style="font-size:10px; opacity:0.7;">EGM96</span>
                   </label>
                 </div>
+                <div id="lp-ept-recents"></div>
               </div>
             </div>
 
@@ -1010,6 +1032,16 @@
                 <div class="lp-row">
                   <input type="checkbox" id="lp-showlidar-chk" style="margin:0;">
                   <span class="lp-row-name">Show LiDAR Datasets</span>
+                </div>
+                <div class="lp-row" style="flex-wrap:wrap;gap:3px;">
+                  <input type="checkbox" id="lp-showopentopo-chk" style="margin:0;">
+                  <span class="lp-row-name">Show OpenTopo Datasets</span>
+                  <span id="lp-ot-status" style="font-size:9px;color:rgba(255,255,255,0.35);margin-left:auto;"></span>
+                </div>
+                <div class="lp-row" style="flex-wrap:wrap;gap:3px;">
+                  <input type="checkbox" id="lp-showopentopo-chk" style="margin:0;">
+                  <span class="lp-row-name">Show OpenTopo Datasets</span>
+                  <span id="lp-ot-status" style="font-size:9px;color:rgba(255,255,255,0.35);margin-left:auto;"></span>
                 </div>
                 <div style="margin-top:6px; padding-top:5px; border-top:1px solid rgba(255,255,255,0.1);">
                   <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:3px;">
@@ -1096,6 +1128,8 @@
               <div style="font-size:9px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:rgba(255,255,255,0.4); margin:8px 0 3px;">View</div>
               [H] Hide/show terrain<br>
               [L] Toggle LiDAR datasets<br>
+              [O] Toggle OpenTopo datasets<br>
+              [O] Toggle OpenTopo datasets<br>
               [N] Cycle compass style<br>
               [M] Toggle mini-map<br>
 
@@ -1207,6 +1241,7 @@
           const navPanelIds = [
             '#mapLayersCollapsible',
             '#featuresCollapsible',
+            '#caveCollapsible',
             '#lidarCollapsible',
             '#toolsCollapsible',
             '#helpCollapsible',
@@ -1247,6 +1282,153 @@
   <script src="PotreeCopied/libs/plasio/js/laslaz.js"></script>
   <script src="https://cesium.com/downloads/cesiumjs/releases/1.122/Build/Cesium/Cesium.js"></script>
   
+
+<!-- ══════════ Cave Survey Import Wizard ══════════════════════════════════ -->
+
+<!-- Globe-pick banner (shown while waiting for user to click the globe) -->
+<input type="file" id="plt-restore-input" accept=".plt,.PLT,.txt" style="display:none;">
+<div id="cave-pick-banner" style="
+  display:none; position:fixed; top:60px; left:50%; transform:translateX(-50%);
+  background:rgba(0,30,60,0.92); border:1px solid rgba(100,180,255,0.5);
+  border-radius:6px; padding:10px 18px; color:#7cf; font-size:13px;
+  z-index:9998; pointer-events:none; white-space:nowrap;
+  box-shadow:0 4px 16px rgba(0,0,0,0.5);">
+  📍 Click anywhere on the globe to set the anchor point &nbsp;·&nbsp; <span style="color:#f88;">Esc to cancel</span>
+</div>
+
+<div id="cave-wizard-overlay" style="
+  display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+  background:rgba(0,0,0,0.65); z-index:9999; align-items:center; justify-content:center;">
+  <div id="cave-wizard-modal" style="
+    background:#1e2228; border:1px solid rgba(255,255,255,0.2); border-radius:8px;
+    padding:20px; width:440px; max-width:95vw; color:rgba(255,255,255,0.9);
+    font-family:inherit; font-size:12px; box-shadow:0 8px 32px rgba(0,0,0,0.6);">
+    <div style="font-size:14px; font-weight:600; margin-bottom:14px; border-bottom:1px solid rgba(255,255,255,0.15); padding-bottom:8px;">
+      Import Compass PLT Survey
+    </div>
+
+    <!-- Step 1: File -->
+    <div style="margin-bottom:8px;">
+      <input type="file" id="cwiz-file-input" accept=".plt,.PLT,.txt" style="
+        width:100%; background:#111; border:1px solid rgba(255,255,255,0.2);
+        border-radius:4px; padding:6px; color:#ddd; font-size:11px; cursor:pointer; box-sizing:border-box;">
+      <div id="cwiz-file-info" style="margin-top:5px; font-size:11px; color:#8f8; min-height:14px;"></div>
+      <div id="cwiz-stats" style="display:none; margin-top:4px; font-size:10px; color:rgba(255,255,255,0.5); line-height:1.5;"></div>
+    </div>
+
+    <!-- Step 2: Georef mode (shown after parse) -->
+    <div id="cwiz-step-georef" style="display:none; border-top:1px solid rgba(255,255,255,0.12); padding-top:10px; margin-top:6px;">
+      <div style="font-size:11px; font-weight:600; margin-bottom:8px; color:rgba(255,255,255,0.8);">Georeferencing</div>
+
+      <!-- Option A: Use file coords as-is (UTM mode) -->
+      <div style="margin-bottom:7px; padding:8px; background:rgba(255,255,255,0.03); border-radius:4px; border:1px solid rgba(255,255,255,0.12);">
+        <label style="display:flex; align-items:flex-start; gap:7px; cursor:pointer;">
+          <input type="radio" name="cwiz-georef" id="cwiz-radio-utm" value="utm" style="margin-top:2px; flex-shrink:0;">
+          <div style="flex:1;">
+            <div style="font-size:11px; font-weight:600;">Use file coordinates as-is</div>
+            <div id="cwiz-utm-hint" style="font-size:10px; color:rgba(255,255,255,0.5); margin-top:2px;">For files already in absolute UTM</div>
+            <div id="cwiz-utm-zone-row" style="display:none; margin-top:6px; display:flex; align-items:center; gap:10px;">
+              <label style="font-size:11px; display:flex; align-items:center; gap:4px; white-space:nowrap;">UTM Zone:
+                <input type="number" id="cwiz-zone-input" min="1" max="60" value="17" style="
+                  width:50px; background:#111; border:1px solid rgba(255,255,255,0.2);
+                  border-radius:3px; padding:2px 5px; color:#ddd; margin-left:4px;">
+              </label>
+              <select id="cwiz-hemi-input" style="background:#111; border:1px solid rgba(255,255,255,0.2); border-radius:3px; padding:2px 4px; color:#ddd;">
+                <option value="N">N</option>
+                <option value="S">S</option>
+              </select>
+            </div>
+          </div>
+        </label>
+      </div>
+
+      <!-- Option B: Anchor station to globe point (ENU mode) -->
+      <div style="padding:8px; background:rgba(0,180,255,0.07); border-radius:4px; border:1px solid rgba(0,180,255,0.25);">
+        <label style="display:flex; align-items:flex-start; gap:7px; cursor:pointer;">
+          <input type="radio" name="cwiz-georef" id="cwiz-radio-anchor" value="anchor" style="margin-top:2px; flex-shrink:0;">
+          <div style="flex:1;">
+            <div style="font-size:11px; font-weight:600;">Anchor a station to the globe</div>
+            <div style="font-size:10px; color:rgba(255,255,255,0.5); margin-top:2px;">Recommended for local-coordinate files</div>
+          </div>
+        </label>
+        <div id="cwiz-anchor-body" style="display:none; margin-top:8px; padding-left:20px;">
+          <!-- Station picker -->
+          <div style="margin-bottom:8px;">
+            <div style="font-size:10px; color:rgba(255,255,255,0.6); margin-bottom:3px;">Survey station to anchor:</div>
+            <select id="cwiz-station-select" style="
+              width:100%; background:#111; border:1px solid rgba(255,255,255,0.2);
+              border-radius:3px; padding:4px 6px; color:#ddd; font-size:11px; box-sizing:border-box;">
+            </select>
+          </div>
+          <!-- Anchor coordinates -->
+          <div style="font-size:10px; color:rgba(255,255,255,0.6); margin-bottom:3px;">Real-world position of that station:</div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; margin-bottom:6px;">
+            <label style="font-size:10px; color:rgba(255,255,255,0.7);">Latitude<br>
+              <input type="number" id="cwiz-anc-lat" step="any" placeholder="e.g. 37.1234" style="
+                width:100%; background:#111; border:1px solid rgba(255,255,255,0.2);
+                border-radius:3px; padding:3px 5px; color:#ddd; font-size:11px; box-sizing:border-box; margin-top:2px;">
+            </label>
+            <label style="font-size:10px; color:rgba(255,255,255,0.7);">Longitude<br>
+              <input type="number" id="cwiz-anc-lon" step="any" placeholder="e.g. -86.0567" style="
+                width:100%; background:#111; border:1px solid rgba(255,255,255,0.2);
+                border-radius:3px; padding:3px 5px; color:#ddd; font-size:11px; box-sizing:border-box; margin-top:2px;">
+            </label>
+          </div>
+          <label style="font-size:10px; color:rgba(255,255,255,0.7); display:block; margin-bottom:6px;">Elevation (metres)<br>
+            <input type="number" id="cwiz-anc-elev" step="any" placeholder="e.g. 312.0" style="
+              width:50%; background:#111; border:1px solid rgba(255,255,255,0.2);
+              border-radius:3px; padding:3px 5px; color:#ddd; font-size:11px; margin-top:2px;">
+          </label>
+          <!-- Magnetic Declination -->
+          <div id="cwiz-decl-section" style="margin-bottom:8px; border-top:1px solid rgba(255,255,255,0.08); padding-top:8px; margin-top:4px;">
+            <div style="font-size:10px; color:rgba(255,255,255,0.6); margin-bottom:4px;">Magnetic Declination <span style="color:rgba(255,255,255,0.3);">(optional)</span></div>
+            <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap;">
+              <input type="number" id="cwiz-decl-input" step="0.01" placeholder="e.g. −5.2" style="
+                width:80px; background:#111; border:1px solid rgba(255,255,255,0.2);
+                border-radius:3px; padding:3px 5px; color:#ddd; font-size:11px; box-sizing:border-box;">
+              <span style="font-size:10px; color:rgba(255,255,255,0.4);">°</span>
+              <button id="cwiz-decl-fetch" class="btn btn-sm" style="
+                font-size:10px; padding:2px 8px; background:rgba(0,180,120,0.15);
+                border:1px solid rgba(0,180,120,0.3); color:#8fa; border-radius:3px; cursor:pointer;"
+                title="Fetch from NOAA World Magnetic Model using the lat/lon above">🧭 Auto-fetch</button>
+              <span id="cwiz-decl-status" style="font-size:10px; color:rgba(255,255,255,0.35);"></span>
+            </div>
+            <div style="font-size:10px; color:rgba(255,255,255,0.3); margin-top:3px;">Rotates survey from magnetic north → true north. Leave blank to skip.</div>
+          </div>
+
+          <div style="font-size:10px; color:rgba(255,255,255,0.6); margin-bottom:4px;">Pick location by:</div>
+          <div style="display:flex; gap:5px; flex-wrap:wrap;">
+            <button id="cwiz-pick-cesium" class="btn btn-sm" style="
+              font-size:11px; padding:4px 10px; background:rgba(0,140,255,0.2);
+              border:1px solid rgba(0,140,255,0.5); color:#7cf; border-radius:4px; cursor:pointer;">
+              🌐 Cesium globe
+            </button>
+            <button id="cwiz-pick-potree" class="btn btn-sm" title="Point cloud pick — coming soon" style="
+              font-size:11px; padding:4px 10px; background:rgba(255,255,255,0.05);
+              border:1px solid rgba(255,255,255,0.15); color:rgba(255,255,255,0.3); border-radius:4px; cursor:not-allowed; opacity:0.45;" disabled>
+              ☁ Point cloud
+            </button>
+            <button id="cwiz-pick-manual" class="btn btn-sm" style="
+              font-size:11px; padding:4px 10px; background:rgba(255,255,255,0.05);
+              border:1px solid rgba(255,255,255,0.2); color:rgba(255,255,255,0.7); border-radius:4px; cursor:pointer;">
+              ✏ Manual entry
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Error -->
+    <div id="cwiz-error" style="display:none; margin-top:10px; padding:6px 8px; background:rgba(255,60,60,0.12); border:1px solid rgba(255,60,60,0.35); border-radius:4px; color:#f88; font-size:11px;"></div>
+
+    <!-- Buttons -->
+    <div style="margin-top:14px; display:flex; justify-content:flex-end; gap:8px;">
+      <button id="cwiz-cancel" class="btn btn-sm btn-secondary" style="font-size:11px; padding:4px 12px;">Cancel</button>
+      <button id="cwiz-load" class="btn btn-sm btn-primary" style="font-size:11px; padding:4px 12px;" disabled>Load Survey</button>
+    </div>
+  </div>
+</div>
+
 
 <script type="module" src="flex.js"></script>
 

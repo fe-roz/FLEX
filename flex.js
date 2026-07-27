@@ -1920,7 +1920,8 @@ potreeViewer.setDescription("");
 Cesium.Math.setRandomNumberSeed(0);
 const lidarFootprintSources = {
   usgs: null,
-  backend: null
+  backend: null,
+  noaa: null
 };
 
 function setLidarFootprintsVisible(visible) {
@@ -1929,6 +1930,9 @@ function setLidarFootprintsVisible(visible) {
   }
   if (lidarFootprintSources.backend) {
     lidarFootprintSources.backend.show = !!visible;
+  }
+  if (lidarFootprintSources.noaa) {
+    lidarFootprintSources.noaa.show = !!visible;
   }
 }
 
@@ -2002,11 +2006,178 @@ function loadBackendCatalog() {
         }
       }
       console.log(`Loaded backend EPT catalog with ${entities.length} feature(s).`);
+
     })
     .catch(function (error) {
       console.warn("Failed to load backend EPT catalog:", error);
     });
 }
+
+// ── OpenTopography WMS imagery layer ─────────────────────────────────────────
+
+function _showToast(msg, durationMs) {
+  var existing = document.getElementById('lp-ot-toast');
+  if (existing) existing.remove();
+  var toast = document.createElement('div');
+  toast.id = 'lp-ot-toast';
+  Object.assign(toast.style, {
+    position: 'fixed', bottom: '36px', left: '50%', transform: 'translateX(-50%)',
+    background: 'rgba(12,18,28,0.92)', color: '#ccc',
+    border: '1px solid rgba(100,170,255,0.25)', borderRadius: '6px',
+    padding: '6px 16px', fontSize: '12px', zIndex: '9997',
+    boxShadow: '0 2px 12px rgba(0,0,0,0.5)', pointerEvents: 'none'
+  });
+  toast.textContent = msg;
+  document.body.appendChild(toast);
+  setTimeout(function() { if (toast.parentNode) toast.remove(); }, durationMs || 4000);
+}
+
+function _otSetStatus(msg) {
+  var el = document.getElementById('lp-ot-status');
+  if (el) el.textContent = msg;
+}
+
+var otWmsLayer = null;
+
+function setOtFootprintsVisible(visible) {
+  if (otWmsLayer) {
+    otWmsLayer.show = !!visible;
+  } else if (visible) {
+    loadOtWms();
+  }
+}
+
+function loadOtWms() {
+  _otSetStatus('WMS');
+  try {
+    var provider = new Cesium.WebMapServiceImageryProvider({
+      url: '/ot-wms',
+      layers: 'OPENTOPO:datasets_view',
+      parameters: {
+        transparent: 'true',
+        format: 'image/png',
+        CQL_FILTER: "is_global=false AND host<>'USGS'"
+      },
+      tileWidth: 256,
+      tileHeight: 256
+    });
+    otWmsLayer = cesiumViewer.imageryLayers.addImageryProvider(provider);
+    otWmsLayer.show = !!viewModel.showOpenTopo;
+    otWmsLayer.alpha = 0.75;
+    console.log('OpenTopography WMS layer added.');
+  } catch(err) {
+    _otSetStatus('Error');
+    console.error('OpenTopography WMS error:', err);
+  }
+}
+// ── end OpenTopography ────────────────────────────────────────────────────────
+// ── OpenTopography click-to-query ─────────────────────────────────────────────
+
+function _otShowPopup(props, screenPos) {
+  var name      = props.projectname || props.name || 'Dataset';
+  var host      = props.host || '';
+  var urlPath   = props.url || '';
+  var platform  = props.collection_platform || '';
+  var startDate = (props.start_date || '').slice(0, 10);
+  var isRestr   = props.is_restricted || false;
+  var portalUrl = urlPath ? 'https://portal.opentopography.org' + urlPath : '';
+  var noaaId = null;
+  if (urlPath.indexOf('noaaID=') !== -1) {
+    noaaId = urlPath.split('noaaID=')[1].split('&')[0];
+  }
+  var eptUrl = noaaId
+    ? 'https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/entwine/geoid18/' + noaaId + '/ept.json'
+    : null;
+  var html =
+    '<div style="font-family:sans-serif;font-size:13px;">' +
+    '<b style="font-size:14px;">' + name + '</b><br>' +
+    (host      ? '<span style="color:#aaa;font-size:11px;">Source: ' + host + '</span><br>' : '') +
+    (platform  ? '<span style="color:#aaa;font-size:11px;">' + platform + '</span><br>' : '') +
+    (startDate ? '<span style="color:#aaa;font-size:11px;">Collected: ' + startDate + '</span><br>' : '') +
+    (isRestr   ? '<span style="color:#f88;font-size:11px;">&#9888; Restricted</span><br>' : '') +
+    '<div style="margin-top:8px;display:flex;flex-direction:column;gap:6px;">';
+  if (portalUrl) {
+    html += '<a href="' + portalUrl + '" target="_blank" ' +
+      'style="color:#6af;text-decoration:none;font-size:12px;">&#8599; View on OpenTopography</a>';
+  }
+  if (eptUrl) {
+    html += '<button id="ot-load-ept-btn" ' +
+      'style="background:#0d2a44;color:#6af;border:1px solid rgba(100,170,255,0.5);' +
+      'border-radius:4px;padding:5px 10px;cursor:pointer;font-size:12px;text-align:left;">' +
+      '&#8853; Load EPT in FLEX</button>';
+  }
+  html += '</div></div>';
+  var popup = document.getElementById('ot-popup');
+  if (!popup) {
+    popup = document.createElement('div');
+    popup.id = 'ot-popup';
+    Object.assign(popup.style, {
+      position: 'fixed', background: 'rgba(12,18,28,0.94)', color: '#ccc',
+      border: '1px solid rgba(100,170,255,0.28)', borderRadius: '8px',
+      padding: '12px 32px 12px 14px', maxWidth: '290px',
+      zIndex: '9998', boxShadow: '0 4px 22px rgba(0,0,0,0.65)',
+      pointerEvents: 'auto', lineHeight: '1.5'
+    });
+    var closeBtn = document.createElement('div');
+    closeBtn.textContent = '✕';
+    Object.assign(closeBtn.style, {
+      position: 'absolute', top: '6px', right: '10px',
+      cursor: 'pointer', color: '#888', fontSize: '14px', lineHeight: '1'
+    });
+    closeBtn.onclick = function() { popup.style.display = 'none'; };
+    popup.appendChild(closeBtn);
+    var content = document.createElement('div');
+    content.id = 'ot-popup-content';
+    popup.appendChild(content);
+    document.body.appendChild(popup);
+  }
+  document.getElementById('ot-popup-content').innerHTML = html;
+  var px = Math.min(screenPos.x + 18, window.innerWidth - 320);
+  var py = Math.max(10, Math.min(screenPos.y - 20, window.innerHeight - 260));
+  popup.style.left = px + 'px';
+  popup.style.top  = py + 'px';
+  popup.style.display = 'block';
+  if (eptUrl) {
+    var btn = document.getElementById('ot-load-ept-btn');
+    if (btn) btn.onclick = function() {
+      popup.style.display = 'none';
+      window.addPC(eptUrl);
+      _showToast('⏳ Loading: ' + name, 6000);
+    };
+  }
+}
+
+function _otHandleClick(screenPos) {
+  if (!otWmsLayer || !otWmsLayer.show) return;
+  var picked = cesiumViewer.scene.pick(screenPos);
+  if (picked && picked.id) return;
+  var ray = cesiumViewer.camera.getPickRay(screenPos);
+  if (!ray) return;
+  var cartesian = cesiumViewer.scene.globe.pick(ray, cesiumViewer.scene);
+  if (!cartesian) return;
+  var carto = Cesium.Cartographic.fromCartesian(cartesian);
+  var lon = Cesium.Math.toDegrees(carto.longitude);
+  var lat = Cesium.Math.toDegrees(carto.latitude);
+  var d = 0.3;
+  var bbox = (lon-d) + ',' + (lat-d) + ',' + (lon+d) + ',' + (lat+d);
+  var qs = '?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo' +
+    '&LAYERS=OPENTOPO%3Adatasets_view' +
+    '&QUERY_LAYERS=OPENTOPO%3Adatasets_view' +
+    '&CQL_FILTER=is_global%3Dfalse%20AND%20host%3C%3E%27USGS%27' +
+    '&INFO_FORMAT=application%2Fjson' +
+    '&FEATURE_COUNT=1' +
+    '&X=128&Y=128&WIDTH=256&HEIGHT=256' +
+    '&SRS=EPSG%3A4326' +
+    '&BBOX=' + encodeURIComponent(bbox);
+  fetch('/ot-wms' + qs)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.features || !data.features.length) return;
+      _otShowPopup(data.features[0].properties, screenPos);
+    })
+    .catch(function(e) { console.warn('OT feature info error:', e); });
+}
+// ── end OpenTopography click-to-query ─────────────────────────────────────────
 
 
 
@@ -2035,6 +2206,40 @@ canvas.setAttribute("tabindex", "0"); // needed to put focus on the canvas
 canvas.onclick = function () {
 canvas.focus();
 };
+
+// Cave survey globe-pick: intercept LEFT_CLICK when pick mode is active
+{
+  const cavePickHandler = new Cesium.ScreenSpaceEventHandler(canvas);
+  cavePickHandler.setInputAction(function(click) {
+    if (!_cavePickMode) return;
+    _cavePickMode = false;
+    const banner = document.getElementById('cave-pick-banner');
+    if (banner) banner.style.display = 'none';
+    document.getElementById('cave-wizard-overlay').style.display = 'flex';
+    const resolve = _cavePickResolve;
+    _cavePickResolve = null;
+    if (!resolve) return;
+
+    // scene.pickPosition fails when globe translucency is on — use ray/globe instead.
+    // globe.pick returns the position on the actual rendered terrain surface.
+    const ray = cesiumViewer.camera.getPickRay(click.position);
+    let pos = ray ? cesiumViewer.scene.globe.pick(ray, cesiumViewer.scene) : null;
+    if (!pos || !Cesium.defined(pos)) {
+      // Fallback: project onto smooth ellipsoid (no terrain elevation)
+      pos = cesiumViewer.camera.pickEllipsoid(click.position, cesiumViewer.scene.globe.ellipsoid);
+    }
+    if (pos && Cesium.defined(pos)) {
+      const carto = Cesium.Cartographic.fromCartesian(pos);
+      resolve({
+        lat:  Cesium.Math.toDegrees(carto.latitude),
+        lon:  Cesium.Math.toDegrees(carto.longitude),
+        elev: carto.height,
+      });
+    } else {
+      resolve(null);
+    }
+  }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+}
 
 
 const ellipsoid = scene.globe.ellipsoid;
@@ -3921,24 +4126,1253 @@ function renderCaltopoStatus() {
   }
 }
 
-// ── Cave Survey toggle ────────────────────────────────────────────────────────
+// ── Cave Survey ───────────────────────────────────────────────────────────────
+//
+// Each imported survey is stored as:
+//   { name, parsed, entities: Cesium.EntityCollection-like[], visible: true }
+// Entities are added directly to cesiumViewer.entities (not a DataSource)
+// so we have fine-grained control over each polyline / point.
 
-let _caveDataSource = null;
+let _caveImports = [];       // Array of { name, parsed, cesiumIds, visible }
+let _cwizParsed  = null;     // Holds last-parsed PLT data while wizard is open
 
-async function setCaveSurveyVisible(visible) {
-  if (visible && !_caveDataSource) {
-    try {
-      const ds = await Cesium.GeoJsonDataSource.load('./user_files/caves_v2.geojson', { clampToGround: false });
-      cesiumViewer.dataSources.add(ds);
-      _caveDataSource = ds;
-    } catch (e) {
-      console.warn('[cave] failed to load caves_v2.geojson:', e);
+// ── Recents (EPT + PLT) ───────────────────────────────────────────────────────
+// recents.json stores only lightweight metadata — NO rawText.
+// PLT file contents are stored as individual files via /api/plt-cache so that
+// large PLT files (600KB+) don't bloat the JSON payload and cause silent failures.
+let _recents = { ept: [], plt: [] };
+const RECENTS_MAX = 12;
+
+async function _loadRecents() {
+  try {
+    const r = await fetch('/api/recents');
+    if (r.ok) _recents = await r.json();
+    if (!Array.isArray(_recents.ept)) _recents.ept = [];
+    if (!Array.isArray(_recents.plt)) _recents.plt = [];
+  } catch(e) {
+    console.warn('[recents] load failed:', e);
+    _recents = { ept: [], plt: [] };
+  }
+  _renderEptRecents();
+  _renderPltRecents();
+}
+
+async function _saveRecents() {
+  // Strip any legacy rawText before saving so the payload stays small
+  const payload = {
+    ept: _recents.ept,
+    plt: _recents.plt.map(({ rawText: _drop, ...rest }) => rest),
+  };
+  try {
+    const r = await fetch('/api/recents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) console.warn('[recents] save returned', r.status);
+  } catch(e) {
+    console.warn('[recents] save failed:', e);
+  }
+}
+
+async function _savePltCache(name, rawText) {
+  try {
+    const r = await fetch('/api/plt-cache', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, text: rawText }),
+    });
+    if (!r.ok) console.warn('[plt-cache] save returned', r.status);
+  } catch(e) {
+    console.warn('[plt-cache] save failed:', e);
+  }
+}
+
+async function _fetchPltCache(name) {
+  try {
+    const r = await fetch('/api/plt-cache?name=' + encodeURIComponent(name));
+    if (r.ok) return await r.text();
+    console.warn('[plt-cache] fetch returned', r.status, 'for', name);
+  } catch(e) {
+    console.warn('[plt-cache] fetch failed:', e);
+  }
+  return null;
+}
+
+function _addEptRecent(url, name) {
+  _recents.ept = _recents.ept.filter(r => r.url !== url);
+  _recents.ept.unshift({ url, name, lastUsed: new Date().toISOString() });
+  if (_recents.ept.length > RECENTS_MAX) _recents.ept.length = RECENTS_MAX;
+  _saveRecents();
+  _renderEptRecents();
+}
+
+function _addPltRecent(name, rawText, georef) {
+  // Save raw text to its own server-side file, not into recents.json
+  _savePltCache(name, rawText);
+  // Only lightweight metadata goes into recents index
+  _recents.plt = _recents.plt.filter(r => r.name !== name);
+  _recents.plt.unshift({ name, georef, lastUsed: new Date().toISOString() });
+  if (_recents.plt.length > RECENTS_MAX) _recents.plt.length = RECENTS_MAX;
+  _saveRecents();
+  _renderPltRecents();
+}
+
+function _removeEptRecent(url) {
+  _recents.ept = _recents.ept.filter(r => r.url !== url);
+  _saveRecents();
+  _renderEptRecents();
+}
+
+function _removePltRecent(name) {
+  _recents.plt = _recents.plt.filter(r => r.name !== name);
+  _saveRecents();
+  _renderPltRecents();
+}
+
+function _renderEptRecents() {
+  const el = document.getElementById('lp-ept-recents');
+  if (!el) return;
+  if (!_recents.ept.length) { el.innerHTML = ''; return; }
+  const rows = _recents.ept.map((r, i) => {
+    const label = r.name || r.url;
+    const shortUrl = r.url.length > 60 ? '…' + r.url.slice(-57) : r.url;
+    return `<div style="display:flex;align-items:center;gap:4px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:9px;color:rgba(255,255,255,0.75);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${r.url}">${label}</div>
+        <div style="font-size:8px;color:rgba(255,255,255,0.3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${shortUrl}</div>
+      </div>
+      <button onclick="window._loadEptRecent(${i})" style="font-size:9px;padding:1px 6px;background:rgba(0,120,255,0.2);border:1px solid rgba(0,120,255,0.35);color:#8cf;border-radius:3px;cursor:pointer;white-space:nowrap;flex-shrink:0;">Load</button>
+      <button onclick="window._removeEptRecent(${i})" title="Remove" style="font-size:9px;padding:1px 4px;background:none;border:none;color:rgba(255,100,100,0.6);cursor:pointer;flex-shrink:0;">✕</button>
+    </div>`;
+  }).join('');
+  el.innerHTML = `<div style="margin-top:5px;padding-top:4px;border-top:1px solid rgba(255,255,255,0.08);">
+    <div style="font-size:9px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:3px;">Recent EPT</div>
+    ${rows}
+  </div>`;
+}
+
+function _renderPltRecents() {
+  const el = document.getElementById('lp-plt-recents');
+  if (!el) return;
+  if (!_recents.plt.length) { el.innerHTML = ''; return; }
+  const rows = _recents.plt.map((r, i) => {
+    const georefLabel = r.georef
+      ? (r.georef.mode === 'anchor'
+        ? `${Number(r.georef.lat).toFixed(4)}°, ${Number(r.georef.lon).toFixed(4)}°`
+        : `UTM ${r.georef.zone}${r.georef.south ? 'S' : 'N'}`)
+      : 'no georef stored';
+    return `<div style="display:flex;align-items:center;gap:4px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:9px;color:rgba(255,255,255,0.75);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${r.name}</div>
+        <div style="font-size:8px;color:rgba(255,255,255,0.35);">${georefLabel}</div>
+      </div>
+      <button onclick="window._loadPltRecent(${i})" style="font-size:9px;padding:1px 6px;background:rgba(0,200,120,0.15);border:1px solid rgba(0,200,120,0.3);color:#8fa;border-radius:3px;cursor:pointer;white-space:nowrap;flex-shrink:0;">Load</button>
+      <button onclick="window._removePltRecent(${i})" title="Remove" style="font-size:9px;padding:1px 4px;background:none;border:none;color:rgba(255,100,100,0.6);cursor:pointer;flex-shrink:0;">✕</button>
+    </div>`;
+  }).join('');
+  el.innerHTML = `<div style="margin-top:5px;padding-top:4px;border-top:1px solid rgba(255,255,255,0.08);">
+    <div style="font-size:9px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:3px;">Recent PLT</div>
+    ${rows}
+  </div>`;
+}
+
+window._loadEptRecent = function(i) {
+  const r = _recents.ept[i];
+  if (!r) return;
+  const statusEl = document.getElementById('lp-pc-status');
+  if (statusEl) { statusEl.textContent = '⏳ Loading…'; statusEl.style.color = '#aaa'; }
+  try { window.addPC(r.url); } catch(e) {
+    if (statusEl) { statusEl.textContent = '✗ ' + (e.message || e); statusEl.style.color = '#f77'; }
+  }
+};
+
+window._removeEptRecent = function(i) {
+  if (_recents.ept[i]) { _recents.ept.splice(i, 1); _saveRecents(); _renderEptRecents(); }
+};
+
+window._removePltRecent = function(i) {
+  if (_recents.plt[i]) { _recents.plt.splice(i, 1); _saveRecents(); _renderPltRecents(); }
+};
+
+// Holds pending georef when cache misses and user must re-select the PLT file
+let _pltRestorePending = null;
+
+// Wire the hidden restore input once DOM is ready (called at init time below)
+function _initPltRestoreInput() {
+  const inp = document.getElementById('plt-restore-input');
+  if (!inp) return;
+  inp.addEventListener('change', () => {
+    const file = inp.files[0];
+    inp.value = '';
+    if (!file || !_pltRestorePending) return;
+    const pending = _pltRestorePending;
+    _pltRestorePending = null;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const rawText = ev.target.result;
+      let parsed;
+      try { parsed = parsePLT(rawText); } catch(e) {
+        console.error('[cave] restore re-parse failed:', e); return;
+      }
+      parsed._fileName = file.name.replace(/\.plt$/i, '');
+      parsed._rawText  = rawText;
+      // Re-cache so next Load works without the file picker
+      _savePltCache(pending.name, rawText);
+      if (!pending.georef) {
+        _cwizParsed = parsed;
+        window._importCavePLT();
+        return;
+      }
+      let entry;
+      if (pending.georef.mode === 'anchor') {
+        entry = renderCaveSurveyAnchored(pending.name, parsed, pending.georef.station, pending.georef.lat, pending.georef.lon, pending.georef.elev, pending.georef.survey || '', pending.georef.declination ?? null);
+      } else {
+        entry = renderCaveSurveyUTM(pending.name, parsed, pending.georef.zone, pending.georef.south);
+      }
+      _finishCaveLoad(entry);
+    };
+    reader.readAsText(file);
+  });
+}
+
+window._loadPltRecent = async function(i) {
+  const r = _recents.plt[i];
+  if (!r) return;
+
+  // Fetch the cached PLT text from the server — no file picker needed
+  const rawText = await _fetchPltCache(r.name);
+  if (!rawText) {
+    // Cache miss (server restarted or first load). Ask user to re-select the file;
+    // georef will be applied automatically — no wizard needed.
+    console.warn('[cave] PLT cache missing for', r.name, '— prompting re-select');
+    _pltRestorePending = { name: r.name, georef: r.georef };
+    const inp = document.getElementById('plt-restore-input');
+    if (inp) {
+      // Show a small banner in the recents area, then trigger picker
+      const el = document.getElementById('lp-plt-recents');
+      if (el) {
+        const note = document.createElement('div');
+        note.style.cssText = 'font-size:10px;color:#fa0;padding:3px 6px;border:1px solid rgba(255,160,0,0.3);border-radius:3px;margin-bottom:4px;';
+        note.textContent = '⚠ Cache expired for “' + r.name + '” — re-select the .plt file to reload.';
+        el.prepend(note);
+        setTimeout(() => { try { el.removeChild(note); } catch(_) {} }, 6000);
+      }
+      inp.click();
+    } else {
+      alert('PLT file cache missing for "' + r.name + '".
+Please use the ⊕ Cave Import button to re-load the file.');
     }
-  } else if (!visible && _caveDataSource) {
-    cesiumViewer.dataSources.remove(_caveDataSource, true);
-    _caveDataSource = null;
+    return;
+  }
+
+  let parsed;
+  try { parsed = parsePLT(rawText); } catch(e) {
+    console.error('[cave] PLT re-parse failed:', e); return;
+  }
+  parsed._fileName = r.name;
+  parsed._rawText  = rawText;
+
+  if (!r.georef) {
+    // No georef saved — open wizard pre-loaded
+    _cwizParsed = parsed;
+    window._importCavePLT();
+    return;
+  }
+  // Georef saved — skip wizard and place directly
+  let entry;
+  if (r.georef.mode === 'anchor') {
+    entry = renderCaveSurveyAnchored(r.name, parsed, r.georef.station, r.georef.lat, r.georef.lon, r.georef.elev, r.georef.survey || '', r.georef.declination ?? null);
+  } else {
+    entry = renderCaveSurveyUTM(r.name, parsed, r.georef.zone, r.georef.south);
+  }
+  _finishCaveLoad(entry);
+};
+
+// ── UTM → WGS84 (Transverse Mercator inverse, WGS84 ellipsoid) ───────────────
+function utmToLatLon(easting, northing, zoneNum, isNorth) {
+  const a  = 6378137.0;
+  const f  = 1 / 298.257223563;
+  const e2 = 2*f - f*f;
+  const ep2 = e2 / (1 - e2);
+  const k0 = 0.9996;
+  const E0 = 500000;
+  const N0 = isNorth ? 0 : 10000000;
+
+  const lon0 = ((zoneNum - 1) * 6 - 180 + 3) * Math.PI / 180;
+  const M    = (northing - N0) / k0;
+  const mu   = M / (a * (1 - e2/4 - 3*e2*e2/64 - 5*e2*e2*e2/256));
+
+  const e1  = (1 - Math.sqrt(1 - e2)) / (1 + Math.sqrt(1 - e2));
+  const phi1 = mu
+    + (3*e1/2 - 27*Math.pow(e1,3)/32) * Math.sin(2*mu)
+    + (21*e1*e1/16 - 55*Math.pow(e1,4)/32) * Math.sin(4*mu)
+    + (151*Math.pow(e1,3)/96) * Math.sin(6*mu);
+
+  const N1 = a / Math.sqrt(1 - e2 * Math.sin(phi1)**2);
+  const T1 = Math.tan(phi1)**2;
+  const C1 = ep2 * Math.cos(phi1)**2;
+  const R1 = a*(1-e2) / Math.pow(1 - e2*Math.sin(phi1)**2, 1.5);
+  const D  = (easting - E0) / (N1 * k0);
+
+  const lat = phi1 - (N1*Math.tan(phi1)/R1) * (
+    D*D/2
+    - (5 + 3*T1 + 10*C1 - 4*C1*C1 - 9*ep2) * Math.pow(D,4)/24
+    + (61 + 90*T1 + 298*C1 + 45*T1*T1 - 252*ep2 - 3*C1*C1) * Math.pow(D,6)/720
+  );
+
+  const lon = lon0 + (
+    D
+    - (1 + 2*T1 + C1) * Math.pow(D,3)/6
+    + (5 - 2*C1 + 28*T1 - 3*C1*C1 + 8*ep2 + 24*T1*T1) * Math.pow(D,5)/120
+  ) / Math.cos(phi1);
+
+  return { lat: lat*180/Math.PI, lon: lon*180/Math.PI };
+}
+
+// ── Compass PLT parser ────────────────────────────────────────────────────────
+// Returns { segments, stations, fixedStations, utmZone, utmSouth, datum }
+// All metric distances in metres; coords are survey-local N/E/V in metres.
+function parsePLT(text) {
+  const lines = text.split(/\r?\n/);
+  const result = {
+    segments:      [],  // [{points:[{n,e,v,excluded}], survey?}]
+    stations:      [],  // [{n,e,v,name,survey,surveyDesc}]
+    fixedStations: [],  // [{name,n,e,v}] — UTM metres
+    surveys:       [],  // [{code,desc}] in order encountered
+    utmZone:       null,
+    utmSouth:      false,
+    datum:         null,
+  };
+
+  let currentSeg    = null;
+  let lastPt        = null;
+  let currentSurvey = null;  // {code, desc}
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    // Fixed station: P<name><whitespace><N> <E> <V>
+    // Matches lines like:  PSURVEYBASE 4136789.3 567234.1 1234.5
+    if (/^P\S+\s+[\d.\-]+\s+[\d.\-]+\s+[\d.\-]+/.test(line)) {
+      const m = line.match(/^P(\S+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)/);
+      if (m) {
+        result.fixedStations.push({
+          name: m[1],
+          n: parseFloat(m[2]) * 0.3048,  // feet → metres
+          e: parseFloat(m[3]) * 0.3048,
+          v: parseFloat(m[4]) * 0.3048,
+        });
+      }
+      continue;
+    }
+
+    const cmd  = line[0];
+    const rest = line.slice(1).trim();
+
+    if (cmd === 'O') {
+      result.datum = rest;
+    } else if (cmd === 'N') {
+      // Survey name line: N<code> <day-of-week> <month> <day> <year> C<description>
+      // e.g. "NME D 3 24 2013 CMeatgrinder via Osterizer"
+      const nCode = rest.split(/\s+/)[0] || rest;
+      const nDescM = rest.match(/C(.+)$/);
+      const nDesc = nDescM ? nDescM[1].trim() : '';
+      currentSurvey = { code: nCode, desc: nDesc };
+      result.surveys.push({ code: nCode, desc: nDesc });
+      // New survey starts a new segment context
+      currentSeg = null;
+      lastPt = null;
+    } else if (cmd === 'G') {
+      const z = parseInt(rest, 10);
+      result.utmZone  = Math.abs(z);
+      result.utmSouth = z < 0;
+    } else if (cmd === 'M' || cmd === 'D' || cmd === 'd') {
+      // Strip trailing quoted comment ("...") then tokenize
+      const stripped = rest.replace(/"[^"]*"$/, '').trim();
+      const parts = stripped.split(/\s+/);
+      if (parts.length >= 3) {
+        const pt = {
+          n:        parseFloat(parts[0]) * 0.3048,
+          e:        parseFloat(parts[1]) * 0.3048,
+          v:        parseFloat(parts[2]) * 0.3048,
+          excluded: cmd === 'd',
+        };
+        if (cmd === 'M') {
+          currentSeg = { points: [pt], survey: currentSurvey?.code || '' };
+          result.segments.push(currentSeg);
+        } else if (currentSeg) {
+          currentSeg.points.push(pt);
+        }
+        lastPt = pt;
+
+        // Parse inline tokens after the three coordinates:
+        //   S<name>               → station name
+        //   P <l> <u> <d> <r>    → LRUD passage dimensions
+        //   I <dist>              → distance from entrance
+        //   F or F<flags>         → flags (skip)
+        let ti = 3;
+        while (ti < parts.length) {
+          const tok = parts[ti];
+          if (tok.length > 1 && tok[0] === 'S' && !/^[\d.\-]/.test(tok[1])) {
+            // Inline station name: S<name> (e.g. S0, SA1, SDA11, SC2a)
+            pt.name = tok.slice(1).trim();
+          } else if (tok === 'P' && ti + 4 < parts.length) {
+            // Inline LRUD dimensions
+            pt.lrud = {
+              l: parseFloat(parts[ti+1]) * 0.3048,
+              u: parseFloat(parts[ti+2]) * 0.3048,
+              d: parseFloat(parts[ti+3]) * 0.3048,
+              r: parseFloat(parts[ti+4]) * 0.3048,
+            };
+            ti += 4;
+          } else if (tok === 'I' && ti + 1 < parts.length) {
+            // Inline distance from entrance
+            pt.dist = parseFloat(parts[ti+1]) * 0.3048;
+            ti += 1;
+          }
+          // 'F', 'FLP', etc. → flags, skip
+          ti++;
+        }
+        // If station name found inline, add to stations list
+        if (pt.name) {
+          result.stations.push({ ...pt, survey: currentSurvey?.code || '', surveyDesc: currentSurvey?.desc || '' });
+        }
+      }
+    } else if (cmd === 'S' && lastPt && !lastPt.name) {
+      // Standalone S line: only use if point doesn't already have an inline name
+      const sname = rest.trim();
+      if (sname && !/^[A-Z]\s/.test(sname)) {  // skip survey-header S lines like "SBIGFOOT-MF"
+        lastPt.name = sname;
+        result.stations.push({ ...lastPt, name: sname, survey: currentSurvey?.code || '', surveyDesc: currentSurvey?.desc || '' });
+      }
+    } else if (cmd === 'P' && lastPt && !lastPt.lrud && /^[\d.\-]+\s/.test(rest)) {
+      // Standalone P line for LRUD (only if not already set inline)
+      const parts = rest.split(/\s+/);
+      if (parts.length >= 4) {
+        lastPt.lrud = {
+          l: parseFloat(parts[0]) * 0.3048,
+          u: parseFloat(parts[1]) * 0.3048,
+          d: parseFloat(parts[2]) * 0.3048,
+          r: parseFloat(parts[3]) * 0.3048,
+        };
+      }
+    } else if (cmd === 'I' && lastPt && lastPt.dist == null) {
+      // Standalone I line for distance (only if not already set inline)
+      lastPt.dist = parseFloat(rest) * 0.3048;
+    }
+  }
+
+  return result;
+}
+
+// ── Convert parsed PLT coords → Cesium Cartesian3 positions ──────────────────
+// Uses the UTM zone from the file (or override from wizard).
+// Returns null if georef fails.
+function _pltToCartesian(parsed, zoneOverride, southOverride) {
+  const zone   = zoneOverride  ?? parsed.utmZone;
+  const isNorth = southOverride !== undefined ? !southOverride : !parsed.utmSouth;
+
+  if (!zone) return null;
+
+  const convert = (n, e, v) => {
+    const { lat, lon } = utmToLatLon(e, n, zone, isNorth);
+    return Cesium.Cartesian3.fromDegrees(lon, lat, v);
+  };
+
+  // Build polyline position arrays per segment
+  const segPositions = parsed.segments.map(seg =>
+    seg.points
+      .filter(p => !p.excluded)
+      .map(p => convert(p.n, p.e, p.v))
+      .filter(Boolean)
+  ).filter(arr => arr.length >= 2);
+
+  // Station positions
+  const stationPositions = parsed.stations.map(s => ({
+    pos:  convert(s.n, s.e, s.v),
+    name: s.name,
+    dist: s.dist,
+  })).filter(x => x.pos);
+
+  return { segPositions, stationPositions };
+}
+
+// ── Render a PLT survey into cesiumViewer.entities ───────────────────────────
+function renderCaveSurvey(name, parsed, zoneOverride, southOverride) {
+  const converted = _pltToCartesian(parsed, zoneOverride, southOverride);
+  if (!converted) {
+    console.error('[cave] Georeferencing failed — no UTM zone available');
+    return null;
+  }
+
+  const color = Cesium.Color.fromCssColorString('#00e5ff').withAlpha(0.9);
+  const stationColor = Cesium.Color.fromCssColorString('#ffeb3b');
+  const ids   = [];
+
+  // Draw passage lines
+  for (const positions of converted.segPositions) {
+    const e = cesiumViewer.entities.add({
+      name: name,
+      polyline: {
+        positions,
+        width:   1.5,
+        arcType: Cesium.ArcType.NONE,
+        material: new Cesium.ColorMaterialProperty(color),
+        clampToGround: false,
+      },
+      properties: { isCaveSurvey: true, surveyName: name },
+    });
+    ids.push(e.id);
+  }
+
+  // Draw station dots + labels
+  for (const { pos, name: sname, dist } of converted.stationPositions) {
+    const e = cesiumViewer.entities.add({
+      name:     sname || name,
+      position: pos,
+      point: {
+        pixelSize:   5,
+        color:       stationColor,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 1,
+        disableDepthTestDistance: 5000,
+      },
+      label: {
+        text:          sname || '',
+        show:          false,   // visible on click/hover via infoBox
+        font:          '10px sans-serif',
+        fillColor:     Cesium.Color.WHITE,
+        style:         Cesium.LabelStyle.FILL,
+        pixelOffset:   new Cesium.Cartesian2(0, -14),
+        disableDepthTestDistance: 5000,
+      },
+      description: dist != null
+        ? `<b>${sname}</b><br>Distance from entrance: ${dist.toFixed(1)} m`
+        : `<b>${sname}</b>`,
+      properties: { isCaveSurvey: true, surveyName: name },
+    });
+    ids.push(e.id);
+  }
+
+  const entry = { name, parsed, cesiumIds: ids, visible: true };
+  _caveImports.push(entry);
+  _renderCaveList();
+  console.log(`[cave] Rendered "${name}": ${converted.segPositions.length} segments, ${converted.stationPositions.length} stations`);
+  return entry;
+}
+
+// ── Show / hide all cave survey entities ─────────────────────────────────────
+function setCaveSurveyVisible(visible) {
+  for (const imp of _caveImports) {
+    imp.visible = visible;
+    for (const id of imp.cesiumIds) {
+      const e = cesiumViewer.entities.getById(id);
+      if (e) e.show = visible;
+    }
   }
   notifyCaveVisibilityChanged(visible);
+}
+
+// ── Render the cave import list in the panel ──────────────────────────────────
+function _renderCaveList() {
+  const list = document.getElementById('lp-cave-list');
+  if (!list) return;
+  if (!_caveImports.length) { list.innerHTML = ''; return; }
+
+  list.innerHTML = _caveImports.map((imp, i) => {
+    const g = imp.georef;
+    let infoHtml = '';
+    if (g) {
+      if (g.mode === 'anchor') {
+        const stLbl = g.station === '__first__' ? 'First point' : g.station;
+        infoHtml = `
+          <div style="font-size:10px; color:rgba(255,255,255,0.55); padding:5px 0 3px; border-top:1px solid rgba(255,255,255,0.08); margin-top:3px;">
+            <div style="margin-bottom:3px;">Anchor: <b>${stLbl}</b></div>
+            <div style="display:grid; grid-template-columns:auto 1fr; gap:2px 6px; align-items:center;">
+              <span style="opacity:0.6;">Lat</span>
+              <input type="number" step="any" value="${g.lat.toFixed(7)}" onchange="window._editCaveAnchor(${i},'lat',+this.value)"
+                style="background:#111;border:1px solid rgba(255,255,255,0.2);border-radius:3px;padding:1px 4px;color:#ddd;font-size:10px;width:100%;box-sizing:border-box;">
+              <span style="opacity:0.6;">Lon</span>
+              <input type="number" step="any" value="${g.lon.toFixed(7)}" onchange="window._editCaveAnchor(${i},'lon',+this.value)"
+                style="background:#111;border:1px solid rgba(255,255,255,0.2);border-radius:3px;padding:1px 4px;color:#ddd;font-size:10px;width:100%;box-sizing:border-box;">
+              <span style="opacity:0.6;">Elev&nbsp;m</span>
+              <input type="number" step="any" value="${g.elev.toFixed(1)}" onchange="window._editCaveAnchor(${i},'elev',+this.value)"
+                style="background:#111;border:1px solid rgba(255,255,255,0.2);border-radius:3px;padding:1px 4px;color:#ddd;font-size:10px;width:100%;box-sizing:border-box;">
+            </div>
+            <div style="margin-top:5px; display:flex; gap:5px;">
+              <button onclick="window._reanchorCave(${i})" style="font-size:10px;padding:2px 8px;background:rgba(0,140,255,0.2);border:1px solid rgba(0,140,255,0.4);color:#7cf;border-radius:3px;cursor:pointer;">
+                🌐 Re-pick on globe
+              </button>
+              <button onclick="window._rerenderCave(${i})" style="font-size:10px;padding:2px 8px;background:rgba(0,200,100,0.12);border:1px solid rgba(0,200,100,0.3);color:#8f8;border-radius:3px;cursor:pointer;">
+                ↺ Apply
+              </button>
+            </div>
+            <div style="margin-top:4px; opacity:0.45; font-size:9px;">
+              ${imp.parsed.segments.length} segments · ${imp.parsed.stations.length} stations
+            </div>
+          </div>`;
+      } else if (g.mode === 'utm') {
+        infoHtml = `
+          <div style="font-size:10px; color:rgba(255,255,255,0.55); padding:5px 0 3px; border-top:1px solid rgba(255,255,255,0.08); margin-top:3px;">
+            <div>Mode: UTM Zone <b>${g.zone}${g.south ? 'S' : 'N'}</b></div>
+            <div style="margin-top:4px; opacity:0.45; font-size:9px;">
+              ${imp.parsed.segments.length} segments · ${imp.parsed.stations.length} stations
+            </div>
+          </div>`;
+      }
+    } else {
+      infoHtml = `<div style="font-size:9px; color:rgba(255,255,255,0.3); padding:3px 0; border-top:1px solid rgba(255,255,255,0.08); margin-top:3px;">No georef info stored</div>`;
+    }
+
+    return `
+      <div style="padding:3px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
+        <div class="lp-row" style="gap:4px;">
+          <input type="checkbox" ${imp.visible ? 'checked' : ''} onchange="window._toggleCaveImport(${i}, this.checked)" style="margin:0; flex-shrink:0;">
+          <span class="lp-row-name" style="font-size:10px; cursor:pointer;" title="${imp.name}" onclick="window._toggleCaveInfo(${i})">${imp.name}</span>
+          <button onclick="window._toggleCaveInfo(${i})" style="background:none;border:none;color:rgba(255,255,255,0.4);cursor:pointer;font-size:11px;padding:0 2px;flex-shrink:0;" title="Info / Edit">ℹ</button>
+          <button onclick="window._removeCaveImport(${i})" style="background:none;border:none;color:#f88;cursor:pointer;font-size:11px;padding:0 2px;flex-shrink:0;" title="Remove">✕</button>
+        </div>
+        <div id="cave-info-${i}" style="display:none; padding-left:14px;">${infoHtml}</div>
+      </div>`;
+  }).join('');
+}
+
+window._toggleCaveInfo = function(i) {
+  const panel = document.getElementById(`cave-info-${i}`);
+  if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+};
+
+window._editCaveAnchor = function(i, field, val) {
+  const imp = _caveImports[i];
+  if (!imp || !imp.georef) return;
+  imp.georef[field] = val;
+};
+
+window._reanchorCave = async function(i) {
+  const imp = _caveImports[i];
+  if (!imp || !imp.georef || imp.georef.mode !== 'anchor') return;
+  const result = await _startGlobePick('cesium');
+  if (!result) return;
+  imp.georef.lat  = result.lat;
+  imp.georef.lon  = result.lon;
+  imp.georef.elev = result.elev;
+  window._rerenderCave(i);
+};
+
+window._rerenderCave = function(i) {
+  const imp = _caveImports[i];
+  if (!imp || !imp.georef) return;
+  // Remove old entities
+  for (const id of imp.cesiumIds) {
+    const e = cesiumViewer.entities.getById(id);
+    if (e) cesiumViewer.entities.remove(e);
+  }
+  imp.cesiumIds = [];
+  // Re-render with updated georef
+  const g = imp.georef;
+  if (g.mode === 'anchor') {
+    const anchorLocal = g.station === '__first__'
+      ? imp.parsed.segments[0]?.points[0]
+      : imp.parsed.stations.find(s => s.name === g.station) || imp.parsed.segments[0]?.points[0];
+    if (!anchorLocal) return;
+    const anchorCart = Cesium.Cartesian3.fromDegrees(g.lon, g.lat, g.elev);
+    const enuMatrix  = Cesium.Transforms.eastNorthUpToFixedFrame(anchorCart);
+    const convertFn  = (n, e, v) => {
+      const off = new Cesium.Cartesian4(e - anchorLocal.e, n - anchorLocal.n, v - anchorLocal.v, 0);
+      const w   = Cesium.Matrix4.multiplyByVector(enuMatrix, off, new Cesium.Cartesian4());
+      return new Cesium.Cartesian3(anchorCart.x + w.x, anchorCart.y + w.y, anchorCart.z + w.z);
+    };
+    // Build entities inline (can't call _buildCaveEntities cleanly since it pushes to _caveImports)
+    const color = Cesium.Color.fromCssColorString('#00e5ff').withAlpha(0.9);
+    const stationColor = Cesium.Color.fromCssColorString('#ffeb3b');
+    for (const seg of imp.parsed.segments) {
+      const positions = seg.points.filter(p => !p.excluded).map(p => convertFn(p.n, p.e, p.v)).filter(Boolean);
+      if (positions.length < 2) continue;
+      const e = cesiumViewer.entities.add({ name: imp.name, polyline: { positions, width: 1.5, arcType: Cesium.ArcType.NONE, material: new Cesium.ColorMaterialProperty(color), clampToGround: false }, properties: { isCaveSurvey: true, surveyName: imp.name } });
+      imp.cesiumIds.push(e.id);
+    }
+    for (const s of imp.parsed.stations) {
+      const pos = convertFn(s.n, s.e, s.v);
+      if (!pos) continue;
+      const e = cesiumViewer.entities.add({ name: s.name || imp.name, position: pos, point: { pixelSize: 5, color: stationColor, outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: 5000 }, label: { text: s.name || '', show: false, font: '10px sans-serif', fillColor: Cesium.Color.WHITE, style: Cesium.LabelStyle.FILL, pixelOffset: new Cesium.Cartesian2(0, -14), disableDepthTestDistance: 5000 }, description: s.dist != null ? `<b>${s.name}</b><br>Distance from entrance: ${s.dist.toFixed(1)} m` : `<b>${s.name}</b>`, properties: { isCaveSurvey: true, surveyName: imp.name } });
+      imp.cesiumIds.push(e.id);
+    }
+  }
+  _renderCaveList();
+  console.log(`[cave] Re-rendered "${imp.name}" at (${g.lat.toFixed(5)}, ${g.lon.toFixed(5)}, ${g.elev.toFixed(0)}m)`);
+};
+
+window._toggleCaveImport = function(i, visible) {
+  const imp = _caveImports[i];
+  if (!imp) return;
+  imp.visible = visible;
+  for (const id of imp.cesiumIds) {
+    const e = cesiumViewer.entities.getById(id);
+    if (e) e.show = visible;
+  }
+};
+
+window._removeCaveImport = function(i) {
+  const imp = _caveImports[i];
+  if (!imp) return;
+  for (const id of imp.cesiumIds) {
+    const e = cesiumViewer.entities.getById(id);
+    if (e) cesiumViewer.entities.remove(e);
+  }
+  _caveImports.splice(i, 1);
+  _renderCaveList();
+  if (_caveImports.length === 0) {
+    const chk = document.getElementById('lp-cave-toggle');
+    if (chk) chk.checked = false;
+    notifyCaveVisibilityChanged(false);
+  }
+};
+
+// ── Globe pick mode ──────────────────────────────────────────────────────────
+let _cavePickMode = false;
+let _cavePickResolve = null;
+
+function _startGlobePick(source = 'cesium') {
+  return new Promise(resolve => {
+    const banner = document.getElementById('cave-pick-banner');
+    const wizOverlay = document.getElementById('cave-wizard-overlay');
+
+    if (source === 'potree') {
+      // ── Potree pick: listen for click on Potree canvas, resolve with Cesium coords ──
+      // The cameras are synced, so screen (clientX, clientY) maps to the same
+      // geographic position in both Potree and Cesium.
+      const ptCanvas = potreeViewer?.renderer?.domElement;
+      if (!ptCanvas) { resolve(null); return; }
+      if (wizOverlay) wizOverlay.style.display = 'none';
+      if (banner) {
+        banner.querySelector && (banner.querySelector('span:first-child').textContent =
+          '☁ Click on the point cloud to set the anchor · Esc to cancel');
+        banner.style.display = 'block';
+      }
+      const clickH = (event) => {
+        event.stopPropagation();
+        ptCanvas.removeEventListener('click', clickH, true);
+        document.removeEventListener('keydown', escH);
+        if (banner) banner.style.display = 'none';
+        if (wizOverlay) wizOverlay.style.display = 'flex';
+        // Use Cesium for geographic coords at the same screen position
+        const screenPos = new Cesium.Cartesian2(event.clientX, event.clientY);
+        const ray = cesiumViewer.camera.getPickRay(screenPos);
+        let cart = ray ? cesiumViewer.scene.globe.pick(ray, cesiumViewer.scene) : null;
+        if (!cart || !Cesium.defined(cart)) {
+          cart = cesiumViewer.camera.pickEllipsoid(screenPos, cesiumViewer.scene.globe.ellipsoid);
+        }
+        if (cart && Cesium.defined(cart)) {
+          const carto = Cesium.Cartographic.fromCartesian(cart);
+          resolve({
+            lat:  Cesium.Math.toDegrees(carto.latitude),
+            lon:  Cesium.Math.toDegrees(carto.longitude),
+            elev: carto.height,
+          });
+        } else {
+          resolve(null);
+        }
+      };
+      const escH = (e) => {
+        if (e.key !== 'Escape') return;
+        ptCanvas.removeEventListener('click', clickH, true);
+        document.removeEventListener('keydown', escH);
+        if (banner) banner.style.display = 'none';
+        if (wizOverlay) wizOverlay.style.display = 'flex';
+        resolve(null);
+      };
+      ptCanvas.addEventListener('click', clickH, true);
+      document.addEventListener('keydown', escH);
+      return;
+    }
+
+    // ── Cesium pick (default) ─────────────────────────────────────────────────
+    _cavePickMode = true;
+    _cavePickResolve = resolve;
+    if (banner) banner.style.display = 'block';
+    if (wizOverlay) wizOverlay.style.display = 'none';
+
+    const onEsc = e => {
+      if (e.key === 'Escape') { _cancelGlobePick(); document.removeEventListener('keydown', onEsc); }
+    };
+    document.addEventListener('keydown', onEsc);
+  });
+}
+
+function _cancelGlobePick() {
+  _cavePickMode = false;
+  const banner = document.getElementById('cave-pick-banner');
+  if (banner) banner.style.display = 'none';
+  document.getElementById('cave-wizard-overlay').style.display = 'flex';
+  if (_cavePickResolve) { _cavePickResolve(null); _cavePickResolve = null; }
+}
+
+// Wired into Cesium canvas click handler (called from main click handler)
+function _onCavePickClick(windowPos) {
+  if (!_cavePickMode) return false;
+  _cavePickMode = false;
+  const banner = document.getElementById('cave-pick-banner');
+  if (banner) banner.style.display = 'none';
+
+  let cart3 = cesiumViewer.scene.pickPosition(windowPos);
+  if (!cart3 || !Cesium.defined(cart3)) {
+    // Fallback: pick on ellipsoid surface
+    cart3 = cesiumViewer.camera.pickEllipsoid(windowPos, cesiumViewer.scene.globe.ellipsoid);
+  }
+
+  const resolve = _cavePickResolve;
+  _cavePickResolve = null;
+  document.getElementById('cave-wizard-overlay').style.display = 'flex';
+
+  if (cart3 && resolve) {
+    const carto = Cesium.Cartographic.fromCartesian(cart3);
+    resolve({
+      lat:  Cesium.Math.toDegrees(carto.latitude),
+      lon:  Cesium.Math.toDegrees(carto.longitude),
+      elev: carto.height,
+    });
+  } else if (resolve) {
+    resolve(null);
+  }
+  return true;
+}
+// Canvas click handler for pick mode is wired below (in the canvas section).
+
+// ── ENU-based cave render (anchor mode) ──────────────────────────────────────
+// anchorStationName: survey station name (required; must match a parsed station)
+// anchorLat/Lon/Elev: real-world position of that station (degrees, metres)
+//
+// Multi-anchor groundwork: this function accepts a single anchor point.
+// A future version will accept an array of anchors:
+//   anchors: [{stationName, lat, lon, elev}, ...] (2+ points → least-squares fit)
+// For now the single-anchor ENU transform is exact and sufficient.
+// anchorStationName: survey station name (required; must match a parsed station)
+// surveyName: the survey the station belongs to (for multi-survey PLTs), or ''
+// declinationDeg: magnetic declination correction in degrees (positive = east), or null
+function renderCaveSurveyAnchored(name, parsed, anchorStationName, anchorLat, anchorLon, anchorElevM, surveyName = '', declinationDeg = null) {
+  // Find anchor station local coords (metres in survey space)
+  let anchorLocal;
+  if (!anchorStationName) {
+    anchorLocal = parsed.segments[0]?.points[0];
+    console.warn('[cave] No station specified; falling back to first point');
+  } else {
+    const nameNorm = String(anchorStationName).trim();
+    anchorLocal = parsed.stations.find(s => s.name === nameNorm || s.name === nameNorm.split(/[./]/)[1]);
+    if (!anchorLocal) {
+      anchorLocal = parsed.segments[0]?.points[0];
+      console.warn(`[cave] Station "${anchorStationName}" not found; using first point`);
+    }
+  }
+  if (!anchorLocal) { console.error('[cave] No anchor point available'); return null; }
+
+  // World position of anchor
+  const anchorCart = Cesium.Cartesian3.fromDegrees(anchorLon, anchorLat, anchorElevM);
+
+  // ENU frame at anchor — gives East/North/Up axes as world vectors
+  // Optionally rotate by magnetic declination so survey north matches geographic north
+  let enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(anchorCart);
+  if (declinationDeg != null && declinationDeg !== 0) {
+    const declRad = Cesium.Math.toRadians(declinationDeg);
+    const rotZ = Cesium.Matrix4.fromRotationTranslation(
+      Cesium.Matrix3.fromRotationZ(declRad),
+      Cesium.Cartesian3.ZERO
+    );
+    enuMatrix = Cesium.Matrix4.multiply(enuMatrix, rotZ, new Cesium.Matrix4());
+  }
+
+  const convert = (n, e, v) => {
+    const dE = e - anchorLocal.e;   // metres east  of anchor
+    const dN = n - anchorLocal.n;   // metres north of anchor
+    const dU = v - anchorLocal.v;   // metres up    of anchor
+    // ENU: column 0 = East, column 1 = North, column 2 = Up
+    const offset = new Cesium.Cartesian4(dE, dN, dU, 0);
+    const worldOff = Cesium.Matrix4.multiplyByVector(enuMatrix, offset, new Cesium.Cartesian4());
+    return new Cesium.Cartesian3(
+      anchorCart.x + worldOff.x,
+      anchorCart.y + worldOff.y,
+      anchorCart.z + worldOff.z
+    );
+  };
+
+  const entry = _buildCaveEntities(name, parsed, convert);
+  if (entry) {
+    entry.georef = {
+      mode: 'anchor',
+      station: anchorStationName,
+      survey: surveyName,
+      lat: anchorLat,
+      lon: anchorLon,
+      elev: anchorElevM,
+      declination: declinationDeg,
+    };
+    _renderCaveList();
+  }
+  return entry;
+}
+
+// ── UTM-based cave render (file-coords-as-is mode) ────────────────────────────
+function renderCaveSurveyUTM(name, parsed, zoneOverride, southOverride) {
+  const converted = _pltToCartesian(parsed, zoneOverride, southOverride);
+  if (!converted) return null;
+  if (converted.error) {
+    console.warn('[cave] UTM render failed:', converted.error);
+    return null;
+  }
+  // _buildCaveEntities expects a convert function; since _pltToCartesian already gives
+  // us position arrays, we use a wrapper that just returns pre-computed positions.
+  const color = Cesium.Color.fromCssColorString('#00e5ff').withAlpha(0.9);
+  const stationColor = Cesium.Color.fromCssColorString('#ffeb3b');
+  const ids = [];
+  for (const positions of converted.segPositions) {
+    const e = cesiumViewer.entities.add({
+      name, polyline: {
+        positions, width: 1.5, arcType: Cesium.ArcType.NONE,
+        material: new Cesium.ColorMaterialProperty(color), clampToGround: false,
+      },
+      properties: { isCaveSurvey: true, surveyName: name },
+    });
+    ids.push(e.id);
+  }
+  for (const { pos, name: sname, dist } of converted.stationPositions) {
+    const e = cesiumViewer.entities.add({
+      name: sname || name, position: pos,
+      point: { pixelSize: 5, color: stationColor, outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: 5000 },
+      label: { text: sname || '', show: false, font: '10px sans-serif', fillColor: Cesium.Color.WHITE, style: Cesium.LabelStyle.FILL, pixelOffset: new Cesium.Cartesian2(0, -14), disableDepthTestDistance: 5000 },
+      description: dist != null ? `<b>${sname}</b><br>Distance from entrance: ${dist.toFixed(1)} m` : `<b>${sname}</b>`,
+      properties: { isCaveSurvey: true, surveyName: name },
+    });
+    ids.push(e.id);
+  }
+  const entry = { name, parsed, cesiumIds: ids, visible: true, georef: { mode: 'utm', zone: zoneOverride, south: southOverride } };
+  _caveImports.push(entry);
+  _renderCaveList();
+  console.log(`[cave] UTM render "${name}": ${converted.segPositions.length} segs, ${converted.stationPositions.length} stations`);
+  return entry;
+}
+
+// ── Shared entity builder (used by anchor mode) ───────────────────────────────
+function _buildCaveEntities(name, parsed, convertFn) {
+  const color = Cesium.Color.fromCssColorString('#00e5ff').withAlpha(0.9);
+  const stationColor = Cesium.Color.fromCssColorString('#ffeb3b');
+  const ids = [];
+
+  for (const seg of parsed.segments) {
+    const positions = seg.points
+      .filter(p => !p.excluded)
+      .map(p => convertFn(p.n, p.e, p.v))
+      .filter(Boolean);
+    if (positions.length < 2) continue;
+    const e = cesiumViewer.entities.add({
+      name, polyline: {
+        positions, width: 1.5, arcType: Cesium.ArcType.NONE,
+        material: new Cesium.ColorMaterialProperty(color), clampToGround: false,
+      },
+      properties: { isCaveSurvey: true, surveyName: name },
+    });
+    ids.push(e.id);
+  }
+
+  for (const s of parsed.stations) {
+    const pos = convertFn(s.n, s.e, s.v);
+    if (!pos) continue;
+    const e = cesiumViewer.entities.add({
+      name: s.name || name, position: pos,
+      point: { pixelSize: 5, color: stationColor, outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: 5000 },
+      label: { text: s.name || '', show: false, font: '10px sans-serif', fillColor: Cesium.Color.WHITE, style: Cesium.LabelStyle.FILL, pixelOffset: new Cesium.Cartesian2(0, -14), disableDepthTestDistance: 5000 },
+      description: s.dist != null ? `<b>${s.name}</b><br>Distance from entrance: ${s.dist.toFixed(1)} m` : `<b>${s.name}</b>`,
+      properties: { isCaveSurvey: true, surveyName: name },
+    });
+    ids.push(e.id);
+  }
+
+  const entry = { name, parsed, cesiumIds: ids, visible: true, georef: null };
+  // georef filled in by renderCaveSurveyAnchored after calling this
+  _caveImports.push(entry);
+  _renderCaveList();
+  console.log(`[cave] Anchored render "${name}": ${ids.length} entities`);
+  return entry;
+}
+
+// Keep old renderCaveSurvey as alias for UTM mode
+function renderCaveSurvey(name, parsed, zoneOverride, southOverride) {
+  return renderCaveSurveyUTM(name, parsed, zoneOverride, southOverride);
+}
+
+// ── Wizard UI ─────────────────────────────────────────────────────────────────
+window._importCavePLT = function() {
+  _cwizParsed = null;
+  const overlay     = document.getElementById('cave-wizard-overlay');
+  const fileInput   = document.getElementById('cwiz-file-input');
+  const fileInfo    = document.getElementById('cwiz-file-info');
+  const georef      = document.getElementById('cwiz-step-georef');
+  const stats       = document.getElementById('cwiz-stats');
+  const errDiv      = document.getElementById('cwiz-error');
+  const loadBtn     = document.getElementById('cwiz-load');
+  const utmZoneRow  = document.getElementById('cwiz-utm-zone-row');
+  const anchorBody  = document.getElementById('cwiz-anchor-body');
+  const utmHint     = document.getElementById('cwiz-utm-hint');
+
+  // Reset
+  fileInput.value = '';
+  fileInfo.textContent = '';
+  stats.style.display = 'none';
+  georef.style.display = 'none';
+  errDiv.style.display = 'none';
+  loadBtn.disabled = true;
+  overlay.style.display = 'flex';
+
+  // Radio change handlers
+  const utmRadio    = document.getElementById('cwiz-radio-utm');
+  const anchorRadio = document.getElementById('cwiz-radio-anchor');
+
+  function updateModeUI() {
+    const isAnchor = anchorRadio.checked;
+    anchorBody.style.display  = isAnchor ? 'block' : 'none';
+    utmZoneRow.style.display  = isAnchor ? 'none'  : 'flex';
+  }
+  utmRadio.onchange    = updateModeUI;
+  anchorRadio.onchange = updateModeUI;
+
+  fileInput.onchange = () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const parsed = parsePLT(ev.target.result);
+        _cwizParsed = parsed;
+        _cwizParsed._fileName = file.name.replace(/\.plt$/i, '');
+        _cwizParsed._rawText  = ev.target.result;
+
+        // Stats
+        const totalPts = parsed.segments.reduce((s, seg) => s + seg.points.length, 0);
+        const allN = parsed.segments.flatMap(s => s.points.map(p => p.n));
+        const maxAbsN = allN.length ? Math.max(...allN.map(Math.abs)) : 0;
+        const isAbsUTM = maxAbsN > 500000;
+        let statsHtml = `${parsed.segments.length} segments &nbsp;·&nbsp; ${parsed.stations.length} stations &nbsp;·&nbsp; ${totalPts} points`;
+        statsHtml += `<br>Coord type: <b>${isAbsUTM ? 'Absolute UTM' : 'Local survey (offset from origin)'}</b>`;
+        if (parsed.fixedStations.length) {
+          statsHtml += `<br>Fixed ref stations in file: <b>${parsed.fixedStations.map(s => s.name).join(', ')}</b>`;
+        }
+        if (parsed.utmZone) {
+          statsHtml += `<br>Zone in file: <b>${parsed.utmZone}${parsed.utmSouth ? 'S' : 'N'}</b>${parsed.datum ? ' &nbsp;(' + parsed.datum + ')' : ''}`;
+        }
+        stats.innerHTML = statsHtml;
+        stats.style.display = 'block';
+
+        // Set recommended defaults
+        if (isAbsUTM) {
+          utmRadio.checked = true;
+          utmHint.innerHTML = `Absolute UTM detected (max northing ${(maxAbsN/1000).toFixed(0)} km)`;
+          document.getElementById('cwiz-zone-input').value = parsed.utmZone || 17;
+          document.getElementById('cwiz-hemi-input').value = parsed.utmSouth ? 'S' : 'N';
+        } else {
+          anchorRadio.checked = true;
+          utmHint.innerHTML = 'Local coords — use "Anchor" mode instead for correct placement';
+        }
+
+        // Populate station dropdown — grouped by survey (N-line code + description), naturally sorted
+        const sel = document.getElementById('cwiz-station-select');
+        sel.innerHTML = '<option value="">-- Select a station --</option>';
+
+        if (parsed.stations.length > 0) {
+          function _naturalCmp(a, b) {
+            const re = /(\d+)|(\D+)/g;
+            const pa = String(a).match(re) || [];
+            const pb = String(b).match(re) || [];
+            for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+              const ca = pa[i] || '';
+              const cb = pb[i] || '';
+              const na = parseInt(ca, 10), nb = parseInt(cb, 10);
+              const diff = (!isNaN(na) && !isNaN(nb)) ? na - nb : ca.localeCompare(cb);
+              if (diff !== 0) return diff;
+            }
+            return 0;
+          }
+
+          // Group stations by survey code, preserving survey order from file
+          // Use a Map keyed by "surveyCode|||surveyDesc" to keep unique entries in order
+          const surveyOrder = [];
+          const groups = {};
+          for (const st of parsed.stations) {
+            const code = st.survey || '';
+            const desc = st.surveyDesc || '';
+            const key  = code + '|||' + desc;
+            if (!groups[key]) {
+              groups[key] = [];
+              surveyOrder.push({ key, code, desc });
+            }
+            groups[key].push(st);
+          }
+
+          // Within each survey, sort stations naturally by name
+          for (const { key, code, desc } of surveyOrder) {
+            const sts = groups[key];
+            sts.sort((a, b) => _naturalCmp(a.name, b.name));
+            const label = code && desc ? `${code} — ${desc}`
+                        : code        ? `Survey ${code}`
+                        :               '(unsurveyed)';
+            const grp = document.createElement('optgroup');
+            grp.label = label;
+            for (const st of sts) {
+              const opt = document.createElement('option');
+              // Value encodes both survey code and station name to disambiguate duplicates
+              opt.value = JSON.stringify({ survey: code, name: st.name });
+              // Show station name + local coords (N/E in metres) — NOT "m from entrance"
+              // because we're choosing which station IS the anchor, not measuring from it
+              const coordHint = `N${st.n.toFixed(0)} E${st.e.toFixed(0)} V${st.v.toFixed(0)}`;
+              opt.textContent = `${st.name}  (${coordHint})`;
+              grp.appendChild(opt);
+            }
+            sel.appendChild(grp);
+          }
+        }
+
+        updateModeUI();
+        georef.style.display = 'block';
+        fileInfo.textContent = `✓ ${file.name}`;
+        errDiv.style.display = 'none';
+        loadBtn.disabled = false;
+      } catch(e) {
+        errDiv.textContent = 'Parse error: ' + e.message;
+        errDiv.style.display = 'block';
+        loadBtn.disabled = true;
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // ── Pick location buttons ────────────────────────────────────────────────
+  function _fillAnchorCoords(result) {
+    if (!result) return;
+    document.getElementById('cwiz-anc-lat').value  = result.lat.toFixed(7);
+    document.getElementById('cwiz-anc-lon').value  = result.lon.toFixed(7);
+    document.getElementById('cwiz-anc-elev').value = result.elev.toFixed(1);
+  }
+
+  // Cesium globe pick
+  document.getElementById('cwiz-pick-cesium').onclick = async () => {
+    _fillAnchorCoords(await _startGlobePick('cesium'));
+  };
+
+  // Potree point cloud pick (placeholder — full impl when Potree pick API is wired)
+  document.getElementById('cwiz-pick-potree').onclick = () => {
+    // TODO: potreeViewer.scene pick → resolve with {lat, lon, elev}
+    // Disabled visually for now
+  };
+
+  // Manual — just focus the lat field
+  document.getElementById('cwiz-pick-manual').onclick = () => {
+    document.getElementById('cwiz-anc-lat').focus();
+  };
+
+  // Auto-fetch magnetic declination from NOAA WMM proxy
+  document.getElementById('cwiz-decl-fetch').onclick = async () => {
+    const lat = parseFloat(document.getElementById('cwiz-anc-lat').value);
+    const lon = parseFloat(document.getElementById('cwiz-anc-lon').value);
+    const statusEl = document.getElementById('cwiz-decl-status');
+    if (isNaN(lat) || isNaN(lon)) {
+      statusEl.style.color = '#f88';
+      statusEl.textContent = 'Enter lat/lon first';
+      return;
+    }
+    statusEl.style.color = 'rgba(255,255,255,0.35)';
+    statusEl.textContent = 'Fetching…';
+    try {
+      const year = new Date().getFullYear();
+      const r = await fetch('/api/declination?lat=' + lat + '&lon=' + lon + '&year=' + year);
+      const data = await r.json();
+      if (data.declination != null) {
+        document.getElementById('cwiz-decl-input').value = data.declination.toFixed(2);
+        statusEl.style.color = '#8fa';
+        statusEl.textContent = '✓ ' + data.declination.toFixed(2) + '° (' + data.year + ')';
+      } else {
+        statusEl.style.color = '#f88';
+        statusEl.textContent = 'Error: ' + (data.error || 'unknown');
+      }
+    } catch(e) {
+      statusEl.style.color = '#f88';
+      statusEl.textContent = 'Fetch failed: ' + e.message;
+    }
+  };
+
+  document.getElementById('cwiz-cancel').onclick = () => {
+    overlay.style.display = 'none';
+    _cwizParsed = null;
+  };
+
+  loadBtn.onclick = () => {
+    if (!_cwizParsed) return;
+    errDiv.style.display = 'none';
+    const isAnchor = anchorRadio.checked;
+
+    if (isAnchor) {
+      const lat  = parseFloat(document.getElementById('cwiz-anc-lat').value);
+      const lon  = parseFloat(document.getElementById('cwiz-anc-lon').value);
+      const elev = parseFloat(document.getElementById('cwiz-anc-elev').value) || 0;
+      if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+        errDiv.textContent = 'Please enter valid latitude (−90 to 90) and longitude (−180 to 180), or click "Click on globe..."';
+        errDiv.style.display = 'block';
+        return;
+      }
+      const stationRaw = document.getElementById('cwiz-station-select').value;
+      if (!stationRaw) {
+        errDiv.textContent = 'Please select a survey station to anchor the survey.';
+        errDiv.style.display = 'block';
+        return;
+      }
+      // Station value is JSON {survey, name} to disambiguate duplicates across surveys
+      let stationSurvey = '', stationName = stationRaw;
+      try {
+        const parsed2 = JSON.parse(stationRaw);
+        stationSurvey = parsed2.survey || '';
+        stationName   = parsed2.name   || stationRaw;
+      } catch(_) { /* plain string fallback */ }
+      overlay.style.display = 'none';
+      const declVal  = parseFloat(document.getElementById('cwiz-decl-input')?.value);
+      const declInput = isNaN(declVal) ? null : declVal;
+      const entry = renderCaveSurveyAnchored(_cwizParsed._fileName, _cwizParsed, stationName, lat, lon, elev, stationSurvey, declInput);
+      _cwizParsed = null;
+      _finishCaveLoad(entry);
+    } else {
+      // UTM mode
+      let zone  = _cwizParsed.utmZone;
+      let south = _cwizParsed.utmSouth;
+      const forceManual = !document.getElementById('cwiz-radio-utm').checked || !zone;
+      if (forceManual) {
+        zone  = parseInt(document.getElementById('cwiz-zone-input').value, 10);
+        south = document.getElementById('cwiz-hemi-input').value === 'S';
+      }
+      if (!zone || zone < 1 || zone > 60) {
+        errDiv.textContent = 'Enter a valid UTM zone (1–60).';
+        errDiv.style.display = 'block';
+        return;
+      }
+      overlay.style.display = 'none';
+      const entry = renderCaveSurveyUTM(_cwizParsed._fileName, _cwizParsed, zone, south);
+      _cwizParsed = null;
+      _finishCaveLoad(entry);
+    }
+  };
+};
+
+function _finishCaveLoad(entry) {
+  if (!entry) return;
+  const chk = document.getElementById('lp-cave-toggle');
+  if (chk && !chk.checked) { chk.checked = true; notifyCaveVisibilityChanged(true); }
+  const ids = entry.cesiumIds;
+  if (ids.length) {
+    cesiumViewer.flyTo(
+      ids.map(id => cesiumViewer.entities.getById(id)).filter(Boolean),
+      { duration: 2.5, offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), 0) }
+    );
+  }
+  // Persist to PLT recents (raw text stored in parsed._rawText)
+  if (entry.parsed && entry.parsed._rawText) {
+    _addPltRecent(entry.name, entry.parsed?._rawText || '', entry.georef || null);
+  }
 }
 
 // ── Overlay drag-and-drop ─────────────────────────────────────────────────────
@@ -4288,6 +5722,12 @@ renderPoiList();
     mapsChk.addEventListener('change', () => { viewModel.googleMapsOn = mapsChk.checked; });
     Cesium.knockout.getObservable(viewModel, 'googleMapsOn').subscribe(v => { mapsChk.checked = !!v; });
   }
+  const otChk = document.getElementById('lp-showopentopo-chk');
+  if (otChk) {
+    otChk.checked = !!viewModel.showOpenTopo;
+    otChk.addEventListener('change', () => { viewModel.showOpenTopo = otChk.checked; });
+    Cesium.knockout.getObservable(viewModel, 'showOpenTopo').subscribe(v => { otChk.checked = !!v; });
+  }
 
   // Point Budget slider
   const budgetSlider = document.getElementById('lp-point-budget');
@@ -4321,6 +5761,11 @@ renderPoiList();
 Cesium.knockout.getObservable(viewModel, "showlidar").subscribe(
 function (newValue) {
   setLidarFootprintsVisible(newValue);
+}
+);
+Cesium.knockout.getObservable(viewModel, "showOpenTopo").subscribe(
+function (newValue) {
+  setOtFootprintsVisible(newValue);
 }
 );
 Cesium.knockout.getObservable(viewModel, "googleMapsOn").subscribe(
@@ -4360,6 +5805,10 @@ mousePosition = movement.endPosition;
 handler.setInputAction(function (position) {
 flags.looking = false;
 }, Cesium.ScreenSpaceEventType.LEFT_UP);
+
+handler.setInputAction(function (click) {
+  _otHandleClick(click.position);
+}, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
 // handler.setInputAction(function (movement) {
 //   if (flags.looking != true){
@@ -4486,8 +5935,10 @@ switch (keyCode) {
     return "hideCesium";
   case "P".charCodeAt(0):
     return "displayPC";
-  case "O".charCodeAt(0):
+  case "I".charCodeAt(0):
     return "displayCave";
+  case "O".charCodeAt(0):
+    return "showOpenTopo";
   case "N".charCodeAt(0):
     return "cycleCompassStyle";
   case "M".charCodeAt(0):
@@ -4627,6 +6078,8 @@ function (e) {
     }else if (flagName == "displayPC" ){ // Toggle Flags
       flags[flagName] = !flags[flagName];
     }else if (flagName == "displayCave" ){ // Toggle Flags
+      flags[flagName] = !flags[flagName];
+    }else if (flagName == "showOpenTopo" ){ // Toggle Flags
       flags[flagName] = !flags[flagName];
     }else if (flagName == "cycleCompassStyle"){
       cycleCompassStyle();
@@ -4783,7 +6236,7 @@ document.addEventListener(
 "keyup",
 function (e) {
   const flagName = getFlagForKeyCode(e.keyCode);
-  if ((typeof flagName !== "undefined")&&(flagName !== "Fly")&&(flagName !== "TouchFly")&&(flagName !== "hideCesium")&&(flagName !== "showlidar")&&(flagName !== "removePC")&&(flagName !== "toggleOther")&&(flagName !== "toggleGround")&&(flagName !== "toggleVeg")&&(flagName !== "toggleLowNoise")&&(flagName !== "toggleAll")&&(flagName !== "displayPC")&&(flagName !== "displayCave")&&(flagName !== "cycleCompassStyle")&&(flagName !== "measureDepth")&&(flagName !== "toggleMiniMap")) {
+  if ((typeof flagName !== "undefined")&&(flagName !== "Fly")&&(flagName !== "TouchFly")&&(flagName !== "hideCesium")&&(flagName !== "showlidar")&&(flagName !== "removePC")&&(flagName !== "toggleOther")&&(flagName !== "toggleGround")&&(flagName !== "toggleVeg")&&(flagName !== "toggleLowNoise")&&(flagName !== "toggleAll")&&(flagName !== "displayPC")&&(flagName !== "displayCave")&&(flagName !== "showOpenTopo")&&(flagName !== "cycleCompassStyle")&&(flagName !== "measureDepth")&&(flagName !== "toggleMiniMap")) {
     flags[flagName] = false;
   }
 },
@@ -4805,6 +6258,10 @@ if (flags.removePC){
 if (flags.showlidar){
   viewModel.showlidar = !viewModel.showlidar;
   flags.showlidar = false;
+}
+if (flags.showOpenTopo){
+  viewModel.showOpenTopo = !viewModel.showOpenTopo;
+  flags.showOpenTopo = false;
 }
 
 if ((flags.looking) && (flags.Fly)) {
