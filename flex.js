@@ -4360,8 +4360,7 @@ window._loadPltRecent = async function(i) {
       }
       inp.click();
     } else {
-      alert('PLT file cache missing for "' + r.name + '".
-Please use the ⊕ Cave Import button to re-load the file.');
+      alert('PLT file cache missing for "' + r.name + '".\nPlease use the + Cave Import button to re-load the file.');
     }
     return;
   }
@@ -4515,8 +4514,9 @@ function parsePLT(text) {
         let ti = 3;
         while (ti < parts.length) {
           const tok = parts[ti];
-          if (tok.length > 1 && tok[0] === 'S' && !/^[\d.\-]/.test(tok[1])) {
+          if (tok.length > 1 && tok[0] === 'S' && !/^[A-Z]{2,}/.test(tok.slice(1))) {
             // Inline station name: S<name> (e.g. S0, SA1, SDA11, SC2a)
+            // Skip multi-capital tokens that look like survey codes (e.g. SBIGFOOT)
             pt.name = tok.slice(1).trim();
           } else if (tok === 'P' && ti + 4 < parts.length) {
             // Inline LRUD dimensions
@@ -4599,70 +4599,6 @@ function _pltToCartesian(parsed, zoneOverride, southOverride) {
   return { segPositions, stationPositions };
 }
 
-// ── Render a PLT survey into cesiumViewer.entities ───────────────────────────
-function renderCaveSurvey(name, parsed, zoneOverride, southOverride) {
-  const converted = _pltToCartesian(parsed, zoneOverride, southOverride);
-  if (!converted) {
-    console.error('[cave] Georeferencing failed — no UTM zone available');
-    return null;
-  }
-
-  const color = Cesium.Color.fromCssColorString('#00e5ff').withAlpha(0.9);
-  const stationColor = Cesium.Color.fromCssColorString('#ffeb3b');
-  const ids   = [];
-
-  // Draw passage lines
-  for (const positions of converted.segPositions) {
-    const e = cesiumViewer.entities.add({
-      name: name,
-      polyline: {
-        positions,
-        width:   1.5,
-        arcType: Cesium.ArcType.NONE,
-        material: new Cesium.ColorMaterialProperty(color),
-        clampToGround: false,
-      },
-      properties: { isCaveSurvey: true, surveyName: name },
-    });
-    ids.push(e.id);
-  }
-
-  // Draw station dots + labels
-  for (const { pos, name: sname, dist } of converted.stationPositions) {
-    const e = cesiumViewer.entities.add({
-      name:     sname || name,
-      position: pos,
-      point: {
-        pixelSize:   5,
-        color:       stationColor,
-        outlineColor: Cesium.Color.BLACK,
-        outlineWidth: 1,
-        disableDepthTestDistance: 5000,
-      },
-      label: {
-        text:          sname || '',
-        show:          false,   // visible on click/hover via infoBox
-        font:          '10px sans-serif',
-        fillColor:     Cesium.Color.WHITE,
-        style:         Cesium.LabelStyle.FILL,
-        pixelOffset:   new Cesium.Cartesian2(0, -14),
-        disableDepthTestDistance: 5000,
-      },
-      description: dist != null
-        ? `<b>${sname}</b><br>Distance from entrance: ${dist.toFixed(1)} m`
-        : `<b>${sname}</b>`,
-      properties: { isCaveSurvey: true, surveyName: name },
-    });
-    ids.push(e.id);
-  }
-
-  const entry = { name, parsed, cesiumIds: ids, visible: true };
-  _caveImports.push(entry);
-  _renderCaveList();
-  console.log(`[cave] Rendered "${name}": ${converted.segPositions.length} segments, ${converted.stationPositions.length} stations`);
-  return entry;
-}
-
 // ── Show / hide all cave survey entities ─────────────────────────────────────
 function setCaveSurveyVisible(visible) {
   for (const imp of _caveImports) {
@@ -4700,6 +4636,13 @@ function _renderCaveList() {
               <span style="opacity:0.6;">Elev&nbsp;m</span>
               <input type="number" step="any" value="${g.elev.toFixed(1)}" onchange="window._editCaveAnchor(${i},'elev',+this.value)"
                 style="background:#111;border:1px solid rgba(255,255,255,0.2);border-radius:3px;padding:1px 4px;color:#ddd;font-size:10px;width:100%;box-sizing:border-box;">
+              <span style="opacity:0.6;">Decl&nbsp;°</span>
+              <div style="display:flex;gap:3px;align-items:center;">
+                <input type="number" step="0.01" value="${(g.declination != null ? g.declination : 0).toFixed(2)}" onchange="window._editCaveAnchor(${i},'declination',+this.value)"
+                  id="cave-decl-input-${i}"
+                  style="background:#111;border:1px solid rgba(255,255,255,0.2);border-radius:3px;padding:1px 4px;color:#ddd;font-size:10px;width:100%;box-sizing:border-box;">
+                <button onclick="window._fetchCaveDecl(${i})" title="Auto-fetch from NOAA" style="font-size:11px;padding:1px 4px;background:rgba(255,200,0,0.12);border:1px solid rgba(255,200,0,0.3);color:#fd8;border-radius:3px;cursor:pointer;white-space:nowrap;">&#x1F9ED;</button>
+              </div>
             </div>
             <div style="margin-top:5px; display:flex; gap:5px;">
               <button onclick="window._reanchorCave(${i})" style="font-size:10px;padding:2px 8px;background:rgba(0,140,255,0.2);border:1px solid rgba(0,140,255,0.4);color:#7cf;border-radius:3px;cursor:pointer;">
@@ -4750,6 +4693,34 @@ window._editCaveAnchor = function(i, field, val) {
   imp.georef[field] = val;
 };
 
+window._fetchCaveDecl = async function(i) {
+  const imp = _caveImports[i];
+  if (!imp || !imp.georef) return;
+  const g = imp.georef;
+  const inp = document.getElementById('cave-decl-input-' + i);
+  if (!inp) return;
+  const origColor = inp.style.color;
+  inp.disabled = true;
+  inp.style.color = '#aaa';
+  try {
+    const year = new Date().getFullYear();
+    const r = await fetch('/api/declination?lat=' + g.lat + '&lon=' + g.lon + '&year=' + year);
+    const data = await r.json();
+    if (data.declination != null) {
+      g.declination = data.declination;
+      inp.value = data.declination.toFixed(2);
+      inp.style.color = '#8fa';
+      setTimeout(() => { inp.style.color = origColor; inp.disabled = false; }, 2000);
+    } else {
+      inp.style.color = '#f88';
+      setTimeout(() => { inp.style.color = origColor; inp.disabled = false; }, 2000);
+    }
+  } catch(e) {
+    inp.style.color = '#f88';
+    setTimeout(() => { inp.style.color = origColor; inp.disabled = false; }, 2000);
+  }
+};
+
 window._reanchorCave = async function(i) {
   const imp = _caveImports[i];
   if (!imp || !imp.georef || imp.georef.mode !== 'anchor') return;
@@ -4778,7 +4749,14 @@ window._rerenderCave = function(i) {
       : imp.parsed.stations.find(s => s.name === g.station) || imp.parsed.segments[0]?.points[0];
     if (!anchorLocal) return;
     const anchorCart = Cesium.Cartesian3.fromDegrees(g.lon, g.lat, g.elev);
-    const enuMatrix  = Cesium.Transforms.eastNorthUpToFixedFrame(anchorCart);
+    let enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(anchorCart);
+    const decl = g.declination;
+    if (decl != null && decl !== 0) {
+      const declRad = Cesium.Math.toRadians(decl);
+      const rotZ = Cesium.Matrix4.fromRotationTranslation(
+        Cesium.Matrix3.fromRotationZ(declRad), Cesium.Cartesian3.ZERO);
+      enuMatrix = Cesium.Matrix4.multiply(enuMatrix, rotZ, new Cesium.Matrix4());
+    }
     const convertFn  = (n, e, v) => {
       const off = new Cesium.Cartesian4(e - anchorLocal.e, n - anchorLocal.n, v - anchorLocal.v, 0);
       const w   = Cesium.Matrix4.multiplyByVector(enuMatrix, off, new Cesium.Cartesian4());
@@ -7301,4 +7279,6 @@ function loop(timestamp){
   updateMeasureDisplay();
 }
 initNorthCompass();
+_loadRecents();        // populate EPT + PLT recent lists
+_initPltRestoreInput(); // wire the hidden PLT cache-miss file picker
 requestAnimationFrame(loop);
