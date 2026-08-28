@@ -31,6 +31,9 @@
     "rollup": "^1.31.1",
     "through": "~2.3.4"
   },
-  "author": "Markus Schütz",
-  "license": "BSD-2-CLAUSE"
+  "author": "Markus Sch\u00fctz",
+  "license": "BSD-2-CLAUSE",
+  "overrides": {
+    "minimist": "1.2.6"
+  }
 }
