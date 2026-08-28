@@ -23,6 +23,7 @@ let imageryLayers = null;
 
 export const viewModel = {
   showlidar:    false,
+  showOpenTopo: false,
   googleMapsOn: false,
   usgsRef:      false,
   egm96:        false, // Matt's EGM96 precise geoid lookup — replaces fixed -32 m when on
@@ -136,7 +137,7 @@ function buildLayerCatalog() {
       name:  "NGMDB Mosaic",
       alpha: 1.0,
       createProvider: () => {
-        const base = "https://ngmdb-tiles.usgs.gov/arcgis/rest/services/mapview/ngmdbMosaic/ImageServer/exportImage";
+        const base = "https://ngmdb.usgs.gov/imagery/rest/services/mapview/ngmdbMosaic/ImageServer/exportImage";
         return new Cesium.UrlTemplateImageryProvider({
           customTags: {
             ngmdbProxy: (imageryProvider, x, y, level) => {

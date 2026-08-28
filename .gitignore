@@ -5,3 +5,11 @@ Tokens.js.example
 FLEX.sh
 FLEX.bat
 .caltopo_session
+
+# Dev/debug scratch files
+ot_hosts.js
+ot_test.js
+test_shapefile.html
+
+# Claude session files
+.claude/
