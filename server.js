@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const url = require('url');
 const { exec } = require('child_process');
+const os = require('os');
 
 const settings = require('./settings');
 
@@ -76,6 +77,18 @@ const server = http.createServer((req, res) => {
         handlePltCachePost(req, res);
     } else if (sanitizedPath === '/api/declination' && req.method === 'GET') {
         handleDeclinationLocal(req, res);
+    } else if (sanitizedPath === '/api/entwine/config' && req.method === 'GET') {
+        handleEntwineConfigGet(req, res);
+    } else if (sanitizedPath === '/api/entwine/config' && req.method === 'POST') {
+        handleEntwineConfigPost(req, res);
+    } else if (sanitizedPath === '/api/entwine/datasets' && req.method === 'GET') {
+        handleEntwineDatasets(req, res);
+    } else if (sanitizedPath === '/api/entwine/status' && req.method === 'GET') {
+        handleEntwineStatus(req, res);
+    } else if (sanitizedPath === '/api/entwine/start' && req.method === 'POST') {
+        handleEntwineStart(req, res);
+    } else if (sanitizedPath === '/api/entwine/stop' && req.method === 'POST') {
+        handleEntwineStop(req, res);
     // ── CORS preflight ────────────────────────────────────────────────────────
     } else if (req.method === 'OPTIONS') {
         res.writeHead(204, {
@@ -412,6 +425,138 @@ function handlePltCachePost(req, res) {
             jsonResponse(res, { ok: false, error: e.message }, 400);
         }
     });
+}
+
+
+// ── Local Entwine server integration ─────────────────────────────────────────
+
+const ENTWINE_CONFIG_FILE = path.join(__dirname, 'user_files', 'entwine_config.json');
+
+function _loadEntwineConfig() {
+    try {
+        if (fs.existsSync(ENTWINE_CONFIG_FILE)) {
+            return JSON.parse(fs.readFileSync(ENTWINE_CONFIG_FILE, 'utf8'));
+        }
+    } catch(e) { /* ignore */ }
+    return null;
+}
+
+function handleEntwineConfigGet(req, res) {
+    const cfg = _loadEntwineConfig();
+    jsonResponse(res, cfg || { linked: false });
+}
+
+function handleEntwineConfigPost(req, res) {
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => {
+        try {
+            const data = JSON.parse(body);
+            if (!fs.existsSync(path.dirname(ENTWINE_CONFIG_FILE))) {
+                fs.mkdirSync(path.dirname(ENTWINE_CONFIG_FILE), { recursive: true });
+            }
+            fs.writeFileSync(ENTWINE_CONFIG_FILE, JSON.stringify(data, null, 2), 'utf8');
+            console.log('[entwine] config saved:', JSON.stringify(data));
+            jsonResponse(res, { ok: true });
+        } catch(e) {
+            jsonResponse(res, { ok: false, error: e.message }, 400);
+        }
+    });
+}
+
+function handleEntwineDatasets(req, res) {
+    const cfg = _loadEntwineConfig();
+    if (!cfg || !cfg.path) {
+        jsonResponse(res, { ok: false, error: 'No entwine path configured' }, 400);
+        return;
+    }
+    const dir = cfg.path.replace(/^~/, os.homedir());
+    try {
+        if (!fs.existsSync(dir)) {
+            jsonResponse(res, { ok: false, error: 'Path does not exist: ' + dir }, 404);
+            return;
+        }
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        const datasets = [];
+        for (const e of entries) {
+            if (!e.isDirectory()) continue;
+            const eptFile = path.join(dir, e.name, 'ept.json');
+            if (fs.existsSync(eptFile)) {
+                datasets.push({ name: e.name, url: (cfg.url || '').replace(/\/$/, '') + '/' + e.name });
+            }
+        }
+        jsonResponse(res, { ok: true, datasets });
+    } catch(e) {
+        jsonResponse(res, { ok: false, error: e.message }, 500);
+    }
+}
+
+// ── Entwine server process management ────────────────────────────────────────
+const { spawn } = require('child_process');
+let _entwineProcess = null;
+let _entwineLog = [];
+
+function _entwineRunning() { return _entwineProcess && !_entwineProcess.killed; }
+
+function handleEntwineStatus(req, res) {
+    const cfg = _loadEntwineConfig();
+    if (!cfg || !cfg.url) { jsonResponse(res, { running: false, log: _entwineLog.slice(-10) }); return; }
+    const urlObj = new URL(cfg.url);
+    const mod = urlObj.protocol === 'https:' ? require('https') : require('http');
+    // Use GET so entwine (which may ignore HEAD) still responds
+    const opts = { hostname: urlObj.hostname, port: urlObj.port || 80, path: '/', method: 'GET', timeout: 2000 };
+    const probe = mod.request(opts, r => {
+        r.resume(); // consume body
+        jsonResponse(res, { running: true, processOwned: _entwineRunning(), log: _entwineLog.slice(-10) });
+    });
+    probe.on('error', () => { jsonResponse(res, { running: false, processOwned: _entwineRunning(), log: _entwineLog.slice(-10) }); });
+    probe.on('timeout', () => { probe.destroy(); jsonResponse(res, { running: false, processOwned: _entwineRunning(), log: _entwineLog.slice(-10) }); });
+    probe.end();
+}
+
+function handleEntwineStart(req, res) {
+    if (_entwineRunning()) { jsonResponse(res, { ok: true, msg: 'already running' }); return; }
+    const cfg = _loadEntwineConfig();
+    if (!cfg || !cfg.path) { jsonResponse(res, { ok: false, error: 'Not configured' }, 400); return; }
+    const dir = cfg.path.replace(/^~/, os.homedir());
+    let port = 8080;
+    try { port = parseInt(new URL(cfg.url).port) || 8080; } catch(e) {}
+    _entwineLog = [];
+    // entwine 3.x removed "serve" — use Node's http to serve the EPT directory as static files
+    try {
+        const http = require('http');
+        const fsNode = require('fs');
+        const pathNode = require('path');
+        const mimeMap = { '.json':'application/json', '.bin':'application/octet-stream', '.laz':'application/octet-stream', '.gz':'application/octet-stream' };
+        const srv = http.createServer((rq, rs) => {
+            rs.setHeader('Access-Control-Allow-Origin', '*');
+            rs.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+            if (rq.method === 'OPTIONS') { rs.writeHead(204); rs.end(); return; }
+            const safePath = pathNode.normalize(rq.url.split('?')[0]);
+            const filePath = pathNode.join(dir, safePath);
+            if (!filePath.startsWith(pathNode.resolve(dir))) { rs.writeHead(403); rs.end(); return; }
+            fsNode.stat(filePath, (err, stat) => {
+                if (err || !stat.isFile()) { rs.writeHead(404); rs.end('Not found'); return; }
+                const ext = pathNode.extname(filePath).toLowerCase();
+                rs.writeHead(200, { 'Content-Type': mimeMap[ext] || 'application/octet-stream', 'Content-Length': stat.size });
+                if (rq.method === 'HEAD') { rs.end(); return; }
+                fsNode.createReadStream(filePath).pipe(rs);
+            });
+        });
+        srv.listen(port, () => { _entwineLog.push('EPT static server listening on port ' + port); console.log('[ept-srv] listening on', port); });
+        srv.on('error', err => { _entwineLog.push('server error: ' + err.message); console.error('[ept-srv]', err.message); });
+        _entwineProcess = { killed: false, kill: () => { srv.close(); _entwineProcess.killed = true; _entwineProcess = null; } };
+        srv.on('close', () => { if (_entwineProcess) { _entwineProcess.killed = true; _entwineProcess = null; } });
+        jsonResponse(res, { ok: true, msg: 'started', port });
+    } catch(e) {
+        jsonResponse(res, { ok: false, error: e.message }, 500);
+    }
+}
+
+function handleEntwineStop(req, res) {
+    if (!_entwineRunning()) { jsonResponse(res, { ok: true, msg: 'not running' }); return; }
+    try { _entwineProcess.kill('SIGTERM'); } catch(e) {}
+    jsonResponse(res, { ok: true, msg: 'stopped' });
 }
 
 // ── Git update handlers ───────────────────────────────────────────────────────

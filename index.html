@@ -1010,6 +1010,7 @@
                 <div id="lp-pc-status" style="font-size:10px; color:#aaa; min-height:14px; padding:2px 0;"></div>
                 <div style="margin-top:4px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
                   <button class="btn btn-sm btn-primary lp-add-btn" onclick="addEPT()">+ Add EPT link</button>
+                  <button id="entwine-btn" class="btn btn-sm lp-add-btn" onclick="window._entwineBtn()" style="font-size:11px;background:rgba(80,180,120,0.15);border:1px solid rgba(80,180,120,0.35);color:#8ecfa8;">🗄 Link Entwine</button>
                   <label class="lp-row" style="margin:0; cursor:pointer;">
                     <input type="checkbox" data-bind="checked: usgsRef" style="margin:0;">
                     <span style="font-size:10px; opacity:0.7;">USGS Ref Fix</span>
@@ -1426,6 +1427,44 @@
 
 
 <script type="module" src="flex.js"></script>
+
+
+  <!-- ══ Entwine link dialog ══════════════════════════════════════════════════ -->
+  <div id="entwine-link-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;">
+    <div style="background:#1a1a1a;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:20px;width:340px;font-size:13px;color:#ddd;">
+      <div style="font-weight:600;margin-bottom:14px;font-size:14px;">🗄 Link Local Entwine Server</div>
+      <label style="display:block;margin-bottom:4px;font-size:11px;opacity:0.6;">Entwine output folder (where ept.json files live)</label>
+      <input id="entwine-path-input" type="text" placeholder="~/entwine"
+        style="width:100%;box-sizing:border-box;background:#111;border:1px solid rgba(255,255,255,0.2);border-radius:4px;padding:6px 8px;color:#ddd;font-size:12px;margin-bottom:10px;">
+      <label style="display:block;margin-bottom:4px;font-size:11px;opacity:0.6;">Entwine HTTP server URL</label>
+      <input id="entwine-url-input" type="text" placeholder="http://localhost:8083"
+        style="width:100%;box-sizing:border-box;background:#111;border:1px solid rgba(255,255,255,0.2);border-radius:4px;padding:6px 8px;color:#ddd;font-size:12px;margin-bottom:10px;">
+      <label style="display:block;margin-bottom:4px;font-size:11px;opacity:0.6;">Entwine executable path (optional, if not in PATH)</label>
+      <input id="entwine-exe-input" type="text" placeholder="entwine"
+        style="width:100%;box-sizing:border-box;background:#111;border:1px solid rgba(255,255,255,0.2);border-radius:4px;padding:6px 8px;color:#ddd;font-size:12px;margin-bottom:16px;">
+      <div id="entwine-link-error" style="font-size:11px;color:#f88;margin-bottom:8px;display:none;"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button onclick="document.getElementById('entwine-link-overlay').style.display='none'"
+          style="padding:5px 14px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:4px;color:#aaa;cursor:pointer;font-size:12px;">Cancel</button>
+        <button onclick="window._entwineConfirmLink()"
+          style="padding:5px 14px;background:rgba(80,180,120,0.25);border:1px solid rgba(80,180,120,0.45);border-radius:4px;color:#8ecfa8;cursor:pointer;font-size:12px;font-weight:600;">Link</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ Entwine dataset picker ═══════════════════════════════════════════════ -->
+  <div id="entwine-picker-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;">
+    <div style="background:#1a1a1a;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:20px;width:360px;max-height:480px;display:flex;flex-direction:column;font-size:13px;color:#ddd;">
+      <div style="font-weight:600;margin-bottom:4px;font-size:14px;">📂 Local Entwine Datasets</div>
+      <div id="entwine-picker-url" style="font-size:10px;opacity:0.4;margin-bottom:12px;word-break:break-all;"></div>
+      <div id="entwine-picker-list" style="overflow-y:auto;flex:1;min-height:60px;"></div>
+      <div style="margin-top:14px;display:flex;gap:8px;justify-content:space-between;align-items:center;">
+        <button onclick="window._entwineUnlink()" style="padding:4px 10px;background:rgba(255,80,80,0.1);border:1px solid rgba(255,80,80,0.3);border-radius:4px;color:#f88;cursor:pointer;font-size:11px;">Unlink</button>
+        <button onclick="document.getElementById('entwine-picker-overlay').style.display='none'"
+          style="padding:5px 14px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:4px;color:#aaa;cursor:pointer;font-size:12px;">Close</button>
+      </div>
+    </div>
+  </div>
 
 </body>
 </html>
