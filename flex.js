@@ -5299,6 +5299,32 @@ window._importCavePLT = function() {
     }
   };
 
+  // Screen-center quick-fill
+  document.getElementById('cwiz-pick-screen-center').onclick = async () => {
+    const canvas = cesiumViewer.canvas;
+    const center = new Cesium.Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
+    const ray = cesiumViewer.camera.getPickRay(center);
+    let cart = ray ? cesiumViewer.scene.globe.pick(ray, cesiumViewer.scene) : null;
+    if (!cart) cart = cesiumViewer.camera.pickEllipsoid(center, cesiumViewer.scene.globe.ellipsoid);
+    if (!cart) { alert('Could not determine globe position at screen center.'); return; }
+    const carto = Cesium.Cartographic.fromCartesian(cart);
+    const lat  = Cesium.Math.toDegrees(carto.latitude);
+    const lon  = Cesium.Math.toDegrees(carto.longitude);
+    const elev = carto.height ?? 0;
+    document.getElementById('cwiz-anc-lat').value  = lat.toFixed(6);
+    document.getElementById('cwiz-anc-lon').value  = lon.toFixed(6);
+    document.getElementById('cwiz-anc-elev').value = elev.toFixed(1);
+    // Auto-select __first__ anchor station if none chosen
+    const sel = document.getElementById('cwiz-station-select');
+    if (!sel.value) {
+      // pick the first real option
+      for (const opt of sel.options) { if (opt.value) { sel.value = opt.value; break; } }
+    }
+    // Switch to anchor radio if not already
+    document.getElementById('cwiz-radio-anchor').checked = true;
+    updateModeUI();
+  };
+
   document.getElementById('cwiz-cancel').onclick = () => {
     overlay.style.display = 'none';
     _cwizParsed = null;
@@ -7502,6 +7528,7 @@ let _rectifyIdx      = null;   // which _caveImports entry we're editing
 let _rectifyPending  = null;   // {station, lat, lon, elev} being positioned
 let _rectifyMarker   = null;   // temporary Cesium entity
 let _rectifyPickMode = false;  // waiting for globe click
+let _rectifyStationPickMode = false;  // waiting for station entity click
 
 // Open the rectify panel for survey i
 window._openRectifyPanel = function(i) {
@@ -7581,6 +7608,21 @@ window._rectifyRemoveCP = function(ci) {
   _sessionSave && _sessionSave();
 };
 
+window._rectifyPickStationOnMap = function() {
+  document.getElementById('rectify-panel-overlay').style.display = 'none';
+  _rectifyStationPickMode = true;
+  const banner = document.getElementById('rectify-station-pick-banner');
+  if (banner) banner.style.display = 'block';
+  cesiumViewer.canvas.style.cursor = 'pointer';
+};
+
+function _rectifyExitStationPickMode() {
+  _rectifyStationPickMode = false;
+  const banner = document.getElementById('rectify-station-pick-banner');
+  if (banner) banner.style.display = 'none';
+  cesiumViewer.canvas.style.cursor = '';
+}
+
 function _rectifyEnterPickMode() {
   _rectifyPickMode = true;
   const banner = document.getElementById('rectify-pick-banner');
@@ -7601,6 +7643,7 @@ window._rectifyCancelAdjust = function() {
   const adj = document.getElementById('rectify-adjust-overlay');
   if (adj) adj.style.display = 'none';
   _rectifyExitPickMode();
+  _rectifyExitStationPickMode();
   _rectifyRemoveMarker();
   _rectifyPending = null;
   if (_rectifyIdx !== null) {
@@ -7698,6 +7741,29 @@ window._rectifyReset = function() {
 (function() {
   const handler = new Cesium.ScreenSpaceEventHandler(cesiumViewer.canvas);
   handler.setInputAction(function(click) {
+    // Station-pick mode: user clicks a station entity to select it
+    if (_rectifyStationPickMode) {
+      const picked = cesiumViewer.scene.pick(click.position);
+      if (picked && picked.id) {
+        const entity = picked.id;
+        const imp = _caveImports[_rectifyIdx];
+        if (imp && entity.properties && entity.properties.surveyName &&
+            entity.properties.surveyName.getValue() === imp.name) {
+          const stName = entity.name;
+          if (imp.parsed.stations.find(s => s.name === stName)) {
+            _rectifyExitStationPickMode();
+            // Also pre-select in dropdown for reference
+            const sel = document.getElementById('rectify-station-select');
+            if (sel) sel.value = stName;
+            _rectifyPending = { station: stName };
+            _rectifyEnterPickMode();
+            return;
+          }
+        }
+      }
+      // Clicked terrain or wrong survey — ignore (user can click again or Esc)
+      return;
+    }
     if (!_rectifyPickMode) return;
     const ray = cesiumViewer.camera.getPickRay(click.position);
     if (!ray) return;
@@ -7710,7 +7776,7 @@ window._rectifyReset = function() {
     _rectifyHandleGlobeClick(lon, lat, elev);
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && _rectifyPickMode) { window._rectifyCancelAdjust(); }
+    if (e.key === 'Escape' && (_rectifyPickMode || _rectifyStationPickMode)) { window._rectifyCancelAdjust(); }
   });
 })();
 

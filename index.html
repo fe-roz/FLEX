@@ -1394,6 +1394,12 @@
 
           <div style="font-size:10px; color:rgba(255,255,255,0.6); margin-bottom:4px;">Pick location by:</div>
           <div style="display:flex; gap:5px; flex-wrap:wrap;">
+            <button id="cwiz-pick-screen-center" class="btn btn-sm" style="
+              font-size:11px; padding:4px 10px; background:rgba(0,220,150,0.2);
+              border:1px solid rgba(0,220,150,0.5); color:#5fb; border-radius:4px; cursor:pointer;"
+              title="Place the first station at the center of the current view (terrain elevation auto-sampled)">
+              📍 Screen center
+            </button>
             <button id="cwiz-pick-cesium" class="btn btn-sm" style="
               font-size:11px; padding:4px 10px; background:rgba(0,140,255,0.2);
               border:1px solid rgba(0,140,255,0.5); color:#7cf; border-radius:4px; cursor:pointer;">
@@ -1478,6 +1484,7 @@
         <select id="rectify-station-select" style="flex:1;background:#111;border:1px solid rgba(255,255,255,0.2);border-radius:4px;padding:5px 8px;color:#ddd;font-size:12px;">
           <option value="">-- Select station --</option>
         </select>
+        <button onclick="window._rectifyPickStationOnMap()" title="Click a station dot directly on the 3D globe" style="padding:5px 10px;background:rgba(80,150,255,0.18);border:1px solid rgba(80,150,255,0.4);border-radius:4px;color:#8af;cursor:pointer;font-size:12px;">🗺</button>
         <button onclick="window._rectifyStartPick()" style="padding:5px 12px;background:rgba(80,180,120,0.2);border:1px solid rgba(80,180,120,0.4);border-radius:4px;color:#8ecfa8;cursor:pointer;font-size:12px;">+ Add</button>
       </div>
       <div id="rectify-panel-error" style="font-size:11px;color:#f88;margin-bottom:8px;display:none;"></div>
@@ -1523,6 +1530,10 @@
   </div>
 
   <!-- ── Rectify pick-mode banner ──────────────────────────────────────────── -->
+  <!-- Station-pick banner -->
+  <div id="rectify-station-pick-banner" style="display:none;position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:10001;background:rgba(60,130,255,0.93);color:#fff;padding:10px 24px;border-radius:8px;font-size:14px;font-weight:600;box-shadow:0 2px 16px rgba(0,0,0,0.5);pointer-events:none;text-align:center;">
+    🗺 Click a station dot on the map &nbsp;·&nbsp; <span style="opacity:0.8;font-size:12px;">Esc to cancel</span>
+  </div>
   <div id="rectify-pick-banner" style="display:none;position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:10000;background:rgba(80,180,120,0.9);border-radius:6px;padding:8px 20px;font-size:13px;color:#fff;font-weight:600;pointer-events:none;">
     Click on the globe to place <span id="rectify-pick-station-name"></span> — Esc to cancel
   </div>
