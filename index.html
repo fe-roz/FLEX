@@ -1466,5 +1466,66 @@
     </div>
   </div>
 
+
+  <!-- ── Georectify panel ──────────────────────────────────────────────────── -->
+  <div id="rectify-panel-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;">
+    <div style="background:#1a1a1a;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:20px;width:420px;max-height:80vh;display:flex;flex-direction:column;font-size:13px;color:#ddd;">
+      <div style="font-weight:600;margin-bottom:6px;font-size:14px;">🎯 Georectify Survey</div>
+      <div id="rectify-survey-name" style="font-size:11px;opacity:0.5;margin-bottom:14px;"></div>
+      <div style="font-size:11px;opacity:0.6;margin-bottom:10px;">Control points: pin a station to a known world position. The survey warps to fit.</div>
+      <div id="rectify-cp-list" style="flex:1;overflow-y:auto;max-height:300px;margin-bottom:12px;"></div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <select id="rectify-station-select" style="flex:1;background:#111;border:1px solid rgba(255,255,255,0.2);border-radius:4px;padding:5px 8px;color:#ddd;font-size:12px;">
+          <option value="">-- Select station --</option>
+        </select>
+        <button onclick="window._rectifyStartPick()" style="padding:5px 12px;background:rgba(80,180,120,0.2);border:1px solid rgba(80,180,120,0.4);border-radius:4px;color:#8ecfa8;cursor:pointer;font-size:12px;">+ Add</button>
+      </div>
+      <div id="rectify-panel-error" style="font-size:11px;color:#f88;margin-bottom:8px;display:none;"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button onclick="window._rectifyReset()" style="padding:5px 14px;background:rgba(255,100,100,0.1);border:1px solid rgba(255,100,100,0.3);border-radius:4px;color:#f88;cursor:pointer;font-size:12px;">Reset Warp</button>
+        <button onclick="window._rectifyClose()" style="padding:5px 14px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:4px;color:#aaa;cursor:pointer;font-size:12px;">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Georectify adjust overlay (shown after globe click) ───────────────── -->
+  <div id="rectify-adjust-overlay" style="display:none;position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:10000;background:#1a1a1a;border:1px solid rgba(80,180,120,0.4);border-radius:8px;padding:14px 18px;font-size:12px;color:#ddd;min-width:340px;">
+    <div style="font-weight:600;margin-bottom:10px;font-size:13px;">📍 <span id="rectify-adj-station"></span> → Place on globe</div>
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;align-items:center;margin-bottom:12px;">
+      <span style="opacity:0.55;">Lat</span><span id="rectify-adj-lat" style="font-family:monospace;font-size:11px;"></span>
+      <span style="opacity:0.55;">Lon</span><span id="rectify-adj-lon" style="font-family:monospace;font-size:11px;"></span>
+      <span style="opacity:0.55;">Elev</span><span id="rectify-adj-elev" style="font-family:monospace;font-size:11px;"></span>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">
+      <span style="opacity:0.55;font-size:11px;">Step:</span>
+      <select id="rectify-step-select" style="background:#111;border:1px solid rgba(255,255,255,0.2);border-radius:3px;padding:2px 5px;color:#ddd;font-size:11px;">
+        <option value="0.1">0.1 m</option>
+        <option value="1" selected>1 m</option>
+        <option value="10">10 m</option>
+        <option value="100">100 m</option>
+      </select>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:6px;">
+      <div></div>
+      <button onclick="window._rectifyNudge(0,1,0)" style="padding:4px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:3px;color:#ddd;cursor:pointer;font-size:11px;">▲ N</button>
+      <button onclick="window._rectifyNudge(0,0,1)" style="padding:4px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:3px;color:#ddd;cursor:pointer;font-size:11px;">↑ Up</button>
+      <button onclick="window._rectifyNudge(-1,0,0)" style="padding:4px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:3px;color:#ddd;cursor:pointer;font-size:11px;">◄ W</button>
+      <div></div>
+      <button onclick="window._rectifyNudge(1,0,0)" style="padding:4px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:3px;color:#ddd;cursor:pointer;font-size:11px;">E ►</button>
+      <div></div>
+      <button onclick="window._rectifyNudge(0,-1,0)" style="padding:4px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:3px;color:#ddd;cursor:pointer;font-size:11px;">▼ S</button>
+      <button onclick="window._rectifyNudge(0,0,-1)" style="padding:4px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:3px;color:#ddd;cursor:pointer;font-size:11px;">↓ Down</button>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px;">
+      <button onclick="window._rectifyCancelAdjust()" style="padding:4px 12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:4px;color:#aaa;cursor:pointer;font-size:12px;">Cancel</button>
+      <button onclick="window._rectifyConfirmCP()" style="padding:4px 14px;background:rgba(80,180,120,0.25);border:1px solid rgba(80,180,120,0.5);border-radius:4px;color:#8ecfa8;cursor:pointer;font-size:12px;font-weight:600;">✓ Confirm</button>
+    </div>
+  </div>
+
+  <!-- ── Rectify pick-mode banner ──────────────────────────────────────────── -->
+  <div id="rectify-pick-banner" style="display:none;position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:10000;background:rgba(80,180,120,0.9);border-radius:6px;padding:8px 20px;font-size:13px;color:#fff;font-weight:600;pointer-events:none;">
+    Click on the globe to place <span id="rectify-pick-station-name"></span> — Esc to cancel
+  </div>
+
 </body>
 </html>

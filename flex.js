@@ -4515,9 +4515,8 @@ function parsePLT(text) {
         let ti = 3;
         while (ti < parts.length) {
           const tok = parts[ti];
-          if (tok.length > 1 && tok[0] === 'S' && !/^[A-Z]{2,}/.test(tok.slice(1))) {
-            // Inline station name: S<name> (e.g. S0, SA1, SDA11, SC2a)
-            // Skip multi-capital tokens that look like survey codes (e.g. SBIGFOOT)
+          if (tok.length > 1 && tok[0] === 'S') {
+            // Inline station name: S<name> (e.g. S0, SA1, SDA11, SBC2, SC2a)
             pt.name = tok.slice(1).trim();
           } else if (tok === 'P' && ti + 4 < parts.length) {
             // Inline LRUD dimensions
@@ -4652,6 +4651,9 @@ function _renderCaveList() {
               <button onclick="window._rerenderCave(${i})" style="font-size:10px;padding:2px 8px;background:rgba(0,200,100,0.12);border:1px solid rgba(0,200,100,0.3);color:#8f8;border-radius:3px;cursor:pointer;">
                 ↺ Apply
               </button>
+              <button onclick="window._openRectifyPanel(${i})" style="font-size:10px;padding:2px 8px;background:rgba(255,200,50,0.12);border:1px solid rgba(255,200,50,0.3);color:#fd8;border-radius:3px;cursor:pointer;" title="Georeference by pinning stations to known positions">
+                🎯 Rectify${(g.controlPoints && g.controlPoints.length) ? ' ('+g.controlPoints.length+')' : ''}
+              </button>
             </div>
             <div style="margin-top:4px; opacity:0.45; font-size:9px;">
               ${imp.parsed.segments.length} segments · ${imp.parsed.stations.length} stations
@@ -4758,8 +4760,28 @@ window._rerenderCave = function(i) {
         Cesium.Matrix3.fromRotationZ(declRad), Cesium.Cartesian3.ZERO);
       enuMatrix = Cesium.Matrix4.multiply(enuMatrix, rotZ, new Cesium.Matrix4());
     }
+    // Build control-point pairs in survey-ENU space (for warp)
+    const controlPairsENU = [];
+    if (g.controlPoints && g.controlPoints.length) {
+      const invENU = Cesium.Matrix4.inverseTransformation(enuMatrix, new Cesium.Matrix4());
+      for (const cp of g.controlPoints) {
+        const stn = imp.parsed.stations.find(s => s.name === cp.station);
+        if (!stn) continue;
+        const src = { e: stn.e - anchorLocal.e, n: stn.n - anchorLocal.n, v: stn.v - anchorLocal.v };
+        const cpCart = Cesium.Cartesian3.fromDegrees(cp.lon, cp.lat, cp.elev);
+        const cpOff  = Cesium.Cartesian3.subtract(cpCart, anchorCart, new Cesium.Cartesian3());
+        const cpENU  = Cesium.Matrix4.multiplyByPointAsVector(invENU, cpOff, new Cesium.Cartesian3());
+        const dst = { e: cpENU.x, n: cpENU.y, v: cpENU.z };
+        controlPairsENU.push({ src, dst });
+      }
+    }
     const convertFn  = (n, e, v) => {
-      const off = new Cesium.Cartesian4(e - anchorLocal.e, n - anchorLocal.n, v - anchorLocal.v, 0);
+      let dE = e - anchorLocal.e, dN = n - anchorLocal.n, dV = v - anchorLocal.v;
+      if (controlPairsENU.length) {
+        const warped = _computeWarpedOffset(dE, dN, dV, controlPairsENU);
+        dE = warped.e; dN = warped.n; dV = warped.v;
+      }
+      const off = new Cesium.Cartesian4(dE, dN, dV, 0);
       const w   = Cesium.Matrix4.multiplyByVector(enuMatrix, off, new Cesium.Cartesian4());
       return new Cesium.Cartesian3(anchorCart.x + w.x, anchorCart.y + w.y, anchorCart.z + w.z);
     };
@@ -7473,4 +7495,290 @@ window._entwineUnlink = async function() {
 _loadRecents();        // populate EPT + PLT recent lists
 _initPltRestoreInput(); // wire the hidden PLT cache-miss file picker
 _loadEntwineConfig();   // restore local Entwine server state
+
+// ── Georectification ─────────────────────────────────────────────────────────
+// State
+let _rectifyIdx      = null;   // which _caveImports entry we're editing
+let _rectifyPending  = null;   // {station, lat, lon, elev} being positioned
+let _rectifyMarker   = null;   // temporary Cesium entity
+let _rectifyPickMode = false;  // waiting for globe click
+
+// Open the rectify panel for survey i
+window._openRectifyPanel = function(i) {
+  const imp = _caveImports[i];
+  if (!imp) return;
+  if (!imp.georef) { alert('This survey has no anchor set yet. Set an anchor first.'); return; }
+  _rectifyIdx = i;
+  document.getElementById('rectify-survey-name').textContent = imp.name;
+  // Populate station dropdown
+  const sel = document.getElementById('rectify-station-select');
+  sel.innerHTML = '<option value="">-- Select station --</option>';
+  (imp.parsed.stations || []).forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.name;
+    opt.textContent = s.name + (imp.georef.station === s.name ? ' (anchor)' : '');
+    sel.appendChild(opt);
+  });
+  _rectifyRenderCPList();
+  document.getElementById('rectify-panel-overlay').style.display = 'flex';
+};
+
+window._rectifyClose = function() {
+  document.getElementById('rectify-panel-overlay').style.display = 'none';
+  _rectifyIdx = null;
+};
+
+// Render the control point list inside the panel
+function _rectifyRenderCPList() {
+  const imp = _caveImports[_rectifyIdx];
+  const list = document.getElementById('rectify-cp-list');
+  if (!list || !imp) return;
+  const cps = imp.georef.controlPoints || [];
+  if (!cps.length) {
+    list.innerHTML = '<div style="color:rgba(255,255,255,0.3);font-size:11px;padding:8px 0;">No control points yet. Select a station and click + Add.</div>';
+    return;
+  }
+  list.innerHTML = cps.map((cp, ci) => `
+    <div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
+      <span style="font-size:11px;color:#8ecfa8;min-width:50px;font-weight:600;">${cp.station}</span>
+      <span style="font-size:10px;color:#aaa;flex:1;font-family:monospace;">${cp.lat.toFixed(6)}, ${cp.lon.toFixed(6)}, ${cp.elev.toFixed(1)}m</span>
+      <button onclick="window._rectifyEditCP(${ci})" style="font-size:10px;padding:1px 7px;background:rgba(80,150,255,0.15);border:1px solid rgba(80,150,255,0.3);border-radius:3px;color:#8af;cursor:pointer;">Move</button>
+      <button onclick="window._rectifyRemoveCP(${ci})" style="font-size:10px;padding:1px 7px;background:rgba(255,80,80,0.12);border:1px solid rgba(255,80,80,0.25);border-radius:3px;color:#f88;cursor:pointer;">✕</button>
+    </div>`).join('');
+}
+
+// Start picking — hide panel, show banner, wait for globe click
+window._rectifyStartPick = function() {
+  const sel = document.getElementById('rectify-station-select');
+  const station = sel.value;
+  if (!station) {
+    const err = document.getElementById('rectify-panel-error');
+    if (err) { err.textContent = 'Select a station first.'; err.style.display = 'block'; }
+    return;
+  }
+  document.getElementById('rectify-panel-error').style.display = 'none';
+  _rectifyPending = { station };
+  document.getElementById('rectify-panel-overlay').style.display = 'none';
+  _rectifyEnterPickMode();
+};
+
+window._rectifyEditCP = function(ci) {
+  const imp = _caveImports[_rectifyIdx];
+  const cp = (imp.georef.controlPoints || [])[ci];
+  if (!cp) return;
+  imp.georef.controlPoints.splice(ci, 1);
+  _rectifyPending = { station: cp.station };
+  document.getElementById('rectify-panel-overlay').style.display = 'none';
+  _rectifyEnterPickMode();
+};
+
+window._rectifyRemoveCP = function(ci) {
+  const imp = _caveImports[_rectifyIdx];
+  if (!imp.georef.controlPoints) return;
+  imp.georef.controlPoints.splice(ci, 1);
+  _rectifyRenderCPList();
+  _rerenderCave(_rectifyIdx);
+  _sessionSave && _sessionSave();
+};
+
+function _rectifyEnterPickMode() {
+  _rectifyPickMode = true;
+  const banner = document.getElementById('rectify-pick-banner');
+  const nameEl = document.getElementById('rectify-pick-station-name');
+  if (nameEl) nameEl.textContent = _rectifyPending.station;
+  if (banner) banner.style.display = 'block';
+  cesiumViewer.canvas.style.cursor = 'crosshair';
+}
+
+function _rectifyExitPickMode() {
+  _rectifyPickMode = false;
+  const banner = document.getElementById('rectify-pick-banner');
+  if (banner) banner.style.display = 'none';
+  cesiumViewer.canvas.style.cursor = '';
+}
+
+window._rectifyCancelAdjust = function() {
+  const adj = document.getElementById('rectify-adjust-overlay');
+  if (adj) adj.style.display = 'none';
+  _rectifyExitPickMode();
+  _rectifyRemoveMarker();
+  _rectifyPending = null;
+  if (_rectifyIdx !== null) {
+    document.getElementById('rectify-panel-overlay').style.display = 'flex';
+  }
+};
+
+// Called by the globe click handler (see below)
+function _rectifyHandleGlobeClick(lon, lat, elev) {
+  _rectifyExitPickMode();
+  _rectifyPending.lat  = lat;
+  _rectifyPending.lon  = lon;
+  _rectifyPending.elev = elev;
+  _rectifyPlaceMarker(lat, lon, elev);
+  _rectifyShowAdjust();
+}
+
+function _rectifyShowAdjust() {
+  const p = _rectifyPending;
+  document.getElementById('rectify-adj-station').textContent = p.station;
+  document.getElementById('rectify-adj-lat').textContent  = p.lat.toFixed(7);
+  document.getElementById('rectify-adj-lon').textContent  = p.lon.toFixed(7);
+  document.getElementById('rectify-adj-elev').textContent = p.elev.toFixed(2) + ' m';
+  document.getElementById('rectify-adjust-overlay').style.display = 'block';
+}
+
+function _rectifyPlaceMarker(lat, lon, elev) {
+  _rectifyRemoveMarker();
+  _rectifyMarker = cesiumViewer.entities.add({
+    position: Cesium.Cartesian3.fromDegrees(lon, lat, elev),
+    point: { pixelSize: 14, color: Cesium.Color.fromCssColorString('#ff6e00'),
+      outlineColor: Cesium.Color.WHITE, outlineWidth: 2, disableDepthTestDistance: Infinity },
+    label: {
+      text: _rectifyPending.station,
+      font: 'bold 12px sans-serif',
+      fillColor: Cesium.Color.fromCssColorString('#ff6e00'),
+      outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+      style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+      pixelOffset: new Cesium.Cartesian2(0, -20),
+      disableDepthTestDistance: Infinity,
+    }
+  });
+}
+
+function _rectifyRemoveMarker() {
+  if (_rectifyMarker) { cesiumViewer.entities.remove(_rectifyMarker); _rectifyMarker = null; }
+}
+
+// dE/dN/dV in metres, applied in ENU at current position
+window._rectifyNudge = function(dE, dN, dV) {
+  if (!_rectifyPending) return;
+  const step = parseFloat(document.getElementById('rectify-step-select')?.value || 1);
+  const p = _rectifyPending;
+  const cart = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.elev);
+  const enu  = Cesium.Transforms.eastNorthUpToFixedFrame(cart);
+  const nudgeECEF = Cesium.Matrix4.multiplyByPoint(enu,
+    new Cesium.Cartesian3(dE * step, dN * step, dV * step), new Cesium.Cartesian3());
+  const carto = Cesium.Cartographic.fromCartesian(nudgeECEF);
+  p.lat  = Cesium.Math.toDegrees(carto.latitude);
+  p.lon  = Cesium.Math.toDegrees(carto.longitude);
+  p.elev += dV * step;
+  _rectifyPlaceMarker(p.lat, p.lon, p.elev);
+  _rectifyShowAdjust();
+};
+
+window._rectifyConfirmCP = function() {
+  const p = _rectifyPending;
+  if (!p || p.lat == null) return;
+  const imp = _caveImports[_rectifyIdx];
+  if (!imp.georef.controlPoints) imp.georef.controlPoints = [];
+  imp.georef.controlPoints = imp.georef.controlPoints.filter(c => c.station !== p.station);
+  imp.georef.controlPoints.push({ station: p.station, lat: p.lat, lon: p.lon, elev: p.elev });
+  _rectifyRemoveMarker();
+  _rectifyPending = null;
+  document.getElementById('rectify-adjust-overlay').style.display = 'none';
+  _rerenderCave(_rectifyIdx);
+  _renderCaveList();
+  _sessionSave && _sessionSave();
+  document.getElementById('rectify-panel-overlay').style.display = 'flex';
+  _rectifyRenderCPList();
+};
+
+window._rectifyReset = function() {
+  const imp = _caveImports[_rectifyIdx];
+  if (!imp) return;
+  if (!confirm('Remove all control points for this survey?')) return;
+  imp.georef.controlPoints = [];
+  _rectifyRenderCPList();
+  _rerenderCave(_rectifyIdx);
+  _renderCaveList();
+  _sessionSave && _sessionSave();
+};
+
+// Wire globe click for pick mode
+(function() {
+  const handler = new Cesium.ScreenSpaceEventHandler(cesiumViewer.canvas);
+  handler.setInputAction(function(click) {
+    if (!_rectifyPickMode) return;
+    const ray = cesiumViewer.camera.getPickRay(click.position);
+    if (!ray) return;
+    const cart = cesiumViewer.scene.globe.pick(ray, cesiumViewer.scene);
+    if (!cart) return;
+    const carto = Cesium.Cartographic.fromCartesian(cart);
+    const lat  = Cesium.Math.toDegrees(carto.latitude);
+    const lon  = Cesium.Math.toDegrees(carto.longitude);
+    const elev = carto.height;
+    _rectifyHandleGlobeClick(lon, lat, elev);
+  }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && _rectifyPickMode) { window._rectifyCancelAdjust(); }
+  });
+})();
+
+// ── Warp algorithm ────────────────────────────────────────────────────────────
+function _computeWarpedOffset(dE, dN, dV, controlPairsENU) {
+  const N = controlPairsENU.length;
+  if (N === 0) return { e: dE, n: dN, v: dV };
+
+  if (N === 1) {
+    const t = { e: controlPairsENU[0].dst.e - controlPairsENU[0].src.e,
+                n: controlPairsENU[0].dst.n - controlPairsENU[0].src.n,
+                v: controlPairsENU[0].dst.v - controlPairsENU[0].src.v };
+    return { e: dE + t.e, n: dN + t.n, v: dV + t.v };
+  }
+
+  const srcs = controlPairsENU.map(p => p.src);
+  const dsts = controlPairsENU.map(p => p.dst);
+  let cx_s = 0, cy_s = 0, cx_d = 0, cy_d = 0;
+  srcs.forEach(p => { cx_s += p.e; cy_s += p.n; });
+  dsts.forEach(p => { cx_d += p.e; cy_d += p.n; });
+  cx_s /= N; cy_s /= N; cx_d /= N; cy_d /= N;
+  let ss = 0, dot = 0, cross = 0;
+  for (let i = 0; i < N; i++) {
+    const ax = srcs[i].e - cx_s, ay = srcs[i].n - cy_s;
+    const bx = dsts[i].e - cx_d, by = dsts[i].n - cy_d;
+    ss += ax*ax + ay*ay;
+    dot   += ax*bx + ay*by;
+    cross += ax*by - ay*bx;
+  }
+  const mag = Math.sqrt(dot*dot + cross*cross);
+  const scale = ss > 1e-6 ? mag / ss : 1;
+  const cos_t = mag > 1e-10 ? dot / mag : 1;
+  const sin_t = mag > 1e-10 ? cross / mag : 0;
+  const tx = cx_d - scale * (cos_t * cx_s - sin_t * cy_s);
+  const ty = cy_d - scale * (sin_t * cx_s + cos_t * cy_s);
+
+  const re = scale * (cos_t * dE - sin_t * dN) + tx;
+  const rn = scale * (sin_t * dE + cos_t * dN) + ty;
+
+  let sumWv = 0, dvv = 0;
+  for (let i = 0; i < N; i++) {
+    const de = dE - srcs[i].e, dn = dN - srcs[i].n;
+    const d2 = de*de + dn*dn;
+    if (d2 < 1e-6) { dvv = dsts[i].v - srcs[i].v; sumWv = 1; break; }
+    const w = 1 / d2;
+    sumWv += w;
+    dvv += w * (dsts[i].v - srcs[i].v);
+  }
+  const rv = dV + (sumWv > 0 ? dvv / sumWv : 0);
+
+  if (N < 3) return { e: re, n: rn, v: rv };
+
+  const rigidSrcs = srcs.map(p => ({
+    e: scale * (cos_t * p.e - sin_t * p.n) + tx,
+    n: scale * (sin_t * p.e + cos_t * p.n) + ty,
+  }));
+  const residuals = dsts.map((d, i) => ({ e: d.e - rigidSrcs[i].e, n: d.n - rigidSrcs[i].n }));
+  let sumW = 0, corrE = 0, corrN = 0;
+  for (let i = 0; i < N; i++) {
+    const de = re - rigidSrcs[i].e, dn = rn - rigidSrcs[i].n;
+    const d2 = de*de + dn*dn;
+    if (d2 < 1e-6) { corrE = residuals[i].e; corrN = residuals[i].n; sumW = 1; break; }
+    const w = 1 / d2;
+    sumW += w;
+    corrE += w * residuals[i].e;
+    corrN += w * residuals[i].n;
+  }
+  return { e: re + (sumW > 0 ? corrE/sumW : 0), n: rn + (sumW > 0 ? corrN/sumW : 0), v: rv };
+}
+
 requestAnimationFrame(loop);
