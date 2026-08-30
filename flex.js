@@ -4208,12 +4208,12 @@ function _addEptRecent(url, name) {
   _renderEptRecents();
 }
 
-function _addPltRecent(name, rawText, georef) {
+function _addPltRecent(name, rawText, georef, displayOptions) {
   // Save raw text to its own server-side file, not into recents.json
   _savePltCache(name, rawText);
   // Only lightweight metadata goes into recents index
   _recents.plt = _recents.plt.filter(r => r.name !== name);
-  _recents.plt.unshift({ name, georef, lastUsed: new Date().toISOString() });
+  _recents.plt.unshift({ name, georef, displayOptions: displayOptions || null, lastUsed: new Date().toISOString() });
   if (_recents.plt.length > RECENTS_MAX) _recents.plt.length = RECENTS_MAX;
   _saveRecents();
   _renderPltRecents();
@@ -4383,6 +4383,17 @@ window._loadPltRecent = async function(i) {
   let entry;
   if (r.georef.mode === 'anchor') {
     entry = renderCaveSurveyAnchored(r.name, parsed, r.georef.station, r.georef.lat, r.georef.lon, r.georef.elev, r.georef.survey || '', r.georef.declination ?? null);
+    // Restore saved control points and re-warp
+    if (entry && r.georef.controlPoints && r.georef.controlPoints.length) {
+      entry.georef.controlPoints = r.georef.controlPoints;
+    }
+    // Restore saved display options
+    if (entry && r.displayOptions) {
+      entry.displayOptions = r.displayOptions;
+    } else if (entry) {
+      entry.displayOptions = _defaultDisplayOptions(entry.parsed);
+    }
+    if (entry) _rerenderCave(_caveImports.indexOf(entry));
   } else {
     entry = renderCaveSurveyUTM(r.name, parsed, r.georef.zone, r.georef.south);
   }
@@ -4490,7 +4501,9 @@ function parsePLT(text) {
       result.utmSouth = z < 0;
     } else if (cmd === 'M' || cmd === 'D' || cmd === 'd') {
       // Strip trailing quoted comment ("...") then tokenize
-      const stripped = rest.replace(/"[^"]*"$/, '').trim();
+      const _commentMatch = rest.match(/"([^"]*)"$/);
+      const stripped = _commentMatch ? rest.slice(0, _commentMatch.index).trim() : rest.trim();
+      const _lineComment = _commentMatch ? _commentMatch[1].trim() : null;
       const parts = stripped.split(/\s+/);
       if (parts.length >= 3) {
         const pt = {
@@ -4498,9 +4511,10 @@ function parsePLT(text) {
           e:        parseFloat(parts[1]) * 0.3048,
           v:        parseFloat(parts[2]) * 0.3048,
           excluded: cmd === 'd',
+          comment:  _lineComment || null,
         };
         if (cmd === 'M') {
-          currentSeg = { points: [pt], survey: currentSurvey?.code || '' };
+          currentSeg = { points: [pt], survey: currentSurvey?.code || '', surveyDesc: currentSurvey?.desc || '' };
           result.segments.push(currentSeg);
         } else if (currentSeg) {
           currentSeg.points.push(pt);
@@ -4531,8 +4545,13 @@ function parsePLT(text) {
             // Inline distance from entrance
             pt.dist = parseFloat(parts[ti+1]) * 0.3048;
             ti += 1;
+          } else if (tok[0] === 'F') {
+            pt.flags = tok.slice(1);  // e.g. 'S'=surface, 'L'=loop, 'P'=passage
+            if (pt.flags.includes('S')) {
+              if (currentSeg) currentSeg.isSurface = true;
+              pt.isSurface = true;
+            }
           }
-          // 'F', 'FLP', etc. → flags, skip
           ti++;
         }
         // If station name found inline, add to stations list
@@ -4562,6 +4581,24 @@ function parsePLT(text) {
       // Standalone I line for distance (only if not already set inline)
       lastPt.dist = parseFloat(rest) * 0.3048;
     }
+  }
+
+  // Post-parse: mark stations as surface if:
+  //   1. Their coordinates appear in a surface-flagged segment (FS flag), OR
+  //   2. Their survey has no shots at all (station-only surveys = surface benchmarks)
+  const _surveyHasShots = new Set(result.segments.map(s => s.survey));
+  const _surfaceKeys = new Set();
+  for (const seg of result.segments) {
+    if (seg.isSurface) {
+      for (const pt of seg.points) {
+        _surfaceKeys.add(`${pt.e.toFixed(2)},${pt.n.toFixed(2)},${pt.v.toFixed(2)}`);
+      }
+    }
+  }
+  for (const stn of result.stations) {
+    if (!_surveyHasShots.has(stn.survey)) { stn.isSurface = true; continue; }
+    const key = `${stn.e.toFixed(2)},${stn.n.toFixed(2)},${stn.v.toFixed(2)}`;
+    if (_surfaceKeys.has(key)) stn.isSurface = true;
   }
 
   return result;
@@ -4622,41 +4659,19 @@ function _renderCaveList() {
     let infoHtml = '';
     if (g) {
       if (g.mode === 'anchor') {
-        const stLbl = g.station === '__first__' ? 'First point' : g.station;
+        const cpCount = (g.controlPoints && g.controlPoints.length) || 0;
         infoHtml = `
           <div style="font-size:10px; color:rgba(255,255,255,0.55); padding:5px 0 3px; border-top:1px solid rgba(255,255,255,0.08); margin-top:3px;">
-            <div style="margin-bottom:3px;">Anchor: <b>${stLbl}</b></div>
-            <div style="display:grid; grid-template-columns:auto 1fr; gap:2px 6px; align-items:center;">
-              <span style="opacity:0.6;">Lat</span>
-              <input type="number" step="any" value="${g.lat.toFixed(7)}" onchange="window._editCaveAnchor(${i},'lat',+this.value)"
-                style="background:#111;border:1px solid rgba(255,255,255,0.2);border-radius:3px;padding:1px 4px;color:#ddd;font-size:10px;width:100%;box-sizing:border-box;">
-              <span style="opacity:0.6;">Lon</span>
-              <input type="number" step="any" value="${g.lon.toFixed(7)}" onchange="window._editCaveAnchor(${i},'lon',+this.value)"
-                style="background:#111;border:1px solid rgba(255,255,255,0.2);border-radius:3px;padding:1px 4px;color:#ddd;font-size:10px;width:100%;box-sizing:border-box;">
-              <span style="opacity:0.6;">Elev&nbsp;m</span>
-              <input type="number" step="any" value="${g.elev.toFixed(1)}" onchange="window._editCaveAnchor(${i},'elev',+this.value)"
-                style="background:#111;border:1px solid rgba(255,255,255,0.2);border-radius:3px;padding:1px 4px;color:#ddd;font-size:10px;width:100%;box-sizing:border-box;">
-              <span style="opacity:0.6;">Decl&nbsp;°</span>
-              <div style="display:flex;gap:3px;align-items:center;">
-                <input type="number" step="0.01" value="${(g.declination != null ? g.declination : 0).toFixed(2)}" onchange="window._editCaveAnchor(${i},'declination',+this.value)"
-                  id="cave-decl-input-${i}"
-                  style="background:#111;border:1px solid rgba(255,255,255,0.2);border-radius:3px;padding:1px 4px;color:#ddd;font-size:10px;width:100%;box-sizing:border-box;">
-                <button onclick="window._fetchCaveDecl(${i})" title="Auto-fetch from NOAA" style="font-size:11px;padding:1px 4px;background:rgba(255,200,0,0.12);border:1px solid rgba(255,200,0,0.3);color:#fd8;border-radius:3px;cursor:pointer;white-space:nowrap;">&#x1F9ED;</button>
-              </div>
+            <div style="opacity:0.45; font-size:9px; margin-bottom:6px;">
+              ${imp.parsed.segments.length} segs · ${imp.parsed.stations.length} stations${cpCount ? ' · <b style="color:#fd8;">' + cpCount + ' CPs</b>' : ''}
             </div>
-            <div style="margin-top:5px; display:flex; gap:5px;">
-              <button onclick="window._reanchorCave(${i})" style="font-size:10px;padding:2px 8px;background:rgba(0,140,255,0.2);border:1px solid rgba(0,140,255,0.4);color:#7cf;border-radius:3px;cursor:pointer;">
-                🌐 Re-pick on globe
+            <div style="display:flex; gap:5px;">
+              <button onclick="window._openRectifyPanel(${i})" style="font-size:11px;padding:4px 10px;background:rgba(255,200,50,0.15);border:1px solid rgba(255,200,50,0.4);color:#fd8;border-radius:4px;cursor:pointer;flex:1;" title="Georeference by pinning stations to known positions">
+                🎯 Rectify${cpCount ? ' (' + cpCount + ')' : ''}
               </button>
-              <button onclick="window._rerenderCave(${i})" style="font-size:10px;padding:2px 8px;background:rgba(0,200,100,0.12);border:1px solid rgba(0,200,100,0.3);color:#8f8;border-radius:3px;cursor:pointer;">
-                ↺ Apply
+              <button onclick="window._openStylePanel(${i})" style="font-size:11px;padding:4px 10px;background:rgba(180,100,255,0.15);border:1px solid rgba(180,100,255,0.4);color:#c8a0ff;border-radius:4px;cursor:pointer;flex:1;" title="Survey display options">
+                🎨 Style
               </button>
-              <button onclick="window._openRectifyPanel(${i})" style="font-size:10px;padding:2px 8px;background:rgba(255,200,50,0.12);border:1px solid rgba(255,200,50,0.3);color:#fd8;border-radius:3px;cursor:pointer;" title="Georeference by pinning stations to known positions">
-                🎯 Rectify${(g.controlPoints && g.controlPoints.length) ? ' ('+g.controlPoints.length+')' : ''}
-              </button>
-            </div>
-            <div style="margin-top:4px; opacity:0.45; font-size:9px;">
-              ${imp.parsed.segments.length} segments · ${imp.parsed.stations.length} stations
             </div>
           </div>`;
       } else if (g.mode === 'utm') {
@@ -4689,6 +4704,40 @@ window._toggleCaveInfo = function(i) {
   const panel = document.getElementById(`cave-info-${i}`);
   if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
 };
+
+// When a cave entity is selected on the globe, expand and highlight its survey in the list
+cesiumViewer.selectedEntityChanged.addEventListener(function(entity) {
+  if (!entity) return;
+  const props = entity.properties;
+  if (!props) return;
+  const isCave = props.isCaveSurvey && props.isCaveSurvey.getValue();
+  if (!isCave) return;
+  const surveyName = props.surveyName && props.surveyName.getValue();
+  if (!surveyName) return;
+
+  const idx = _caveImports.findIndex(imp => imp.name === surveyName);
+  if (idx < 0) return;
+
+  const surveyCode = props.surveyCode ? props.surveyCode.getValue() : '';
+
+  // Open style panel for this import (or refresh if already open for it)
+  window._openStylePanel(idx);
+
+  // After the panel renders, find and highlight the matching survey color row
+  requestAnimationFrame(() => {
+    const list = document.getElementById('style-survey-list');
+    if (!list) return;
+    const rows = list.querySelectorAll('[data-survey-code]');
+    rows.forEach(r => r.style.background = '');
+    const target = list.querySelector(`[data-survey-code="${CSS.escape(surveyCode)}"]`);
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      target.style.transition = 'background 0.15s';
+      target.style.background = 'rgba(255,220,80,0.25)';
+      setTimeout(() => { target.style.background = ''; }, 1400);
+    }
+  });
+});
 
 window._editCaveAnchor = function(i, field, val) {
   const imp = _caveImports[i];
@@ -4734,6 +4783,23 @@ window._reanchorCave = async function(i) {
   imp.georef.elev = result.elev;
   window._rerenderCave(i);
 };
+
+// ── Cave display options ─────────────────────────────────────────────────────
+const SURVEY_PALETTE = [
+  '#00e5ff','#ff6b6b','#ffd93d','#6bcb77','#ff922b',
+  '#cc5de8','#74c0fc','#f783ac','#a9e34b','#ffa94d',
+  '#66d9e8','#d9480f','#e64980','#2f9e44','#1971c2',
+];
+
+function _defaultDisplayOptions(parsed) {
+  const opts = { surveyColors: {}, hiddenSurveys: {}, surfaceSurveys: {}, showSurface: false, showLabels: false, showStations: true, stationColor: '#ffeb3b', stationSize: 5 };
+  (parsed.surveys || []).forEach((sv, i) => {
+    opts.surveyColors[sv.code] = SURVEY_PALETTE[i % SURVEY_PALETTE.length];
+  });
+  // Default: no surveys parsed → single color
+  if (!parsed.surveys || !parsed.surveys.length) opts.surveyColors[''] = '#00e5ff';
+  return opts;
+}
 
 window._rerenderCave = function(i) {
   const imp = _caveImports[i];
@@ -4785,20 +4851,76 @@ window._rerenderCave = function(i) {
       const w   = Cesium.Matrix4.multiplyByVector(enuMatrix, off, new Cesium.Cartesian4());
       return new Cesium.Cartesian3(anchorCart.x + w.x, anchorCart.y + w.y, anchorCart.z + w.z);
     };
-    // Build entities inline (can't call _buildCaveEntities cleanly since it pushes to _caveImports)
-    const color = Cesium.Color.fromCssColorString('#00e5ff').withAlpha(0.9);
-    const stationColor = Cesium.Color.fromCssColorString('#ffeb3b');
+    // Build entities inline — uses displayOptions for per-survey colors, surface, labels
+    const dopt = imp.displayOptions || _defaultDisplayOptions(imp.parsed);
+    const stationCesiumColor = Cesium.Color.fromCssColorString(dopt.stationColor || '#ffeb3b');
     for (const seg of imp.parsed.segments) {
-      const positions = seg.points.filter(p => !p.excluded).map(p => convertFn(p.n, p.e, p.v)).filter(Boolean);
-      if (positions.length < 2) continue;
-      const e = cesiumViewer.entities.add({ name: imp.name, polyline: { positions, width: 1.5, arcType: Cesium.ArcType.NONE, material: new Cesium.ColorMaterialProperty(color), clampToGround: false }, properties: { isCaveSurvey: true, surveyName: imp.name } });
-      imp.cesiumIds.push(e.id);
+      if (dopt.hiddenSurveys && dopt.hiddenSurveys[seg.survey]) continue;
+      const _segSurface = seg.isSurface || !!(dopt.surfaceSurveys && dopt.surfaceSurveys[seg.survey]);
+      if (_segSurface && !dopt.showSurface) continue;
+      const _activePts = seg.points.filter(p => !p.excluded);
+      if (_activePts.length < 2) continue;
+      const hexColor = dopt.surveyColors[seg.survey] || dopt.surveyColors[''] || '#00e5ff';
+      const segColor = Cesium.Color.fromCssColorString(hexColor).withAlpha(_segSurface ? 0.45 : 0.9);
+      const _segLabel = seg.survey ? (seg.survey + (seg.surveyDesc ? ' — ' + seg.surveyDesc : '')) : imp.name;
+      for (let _si = 0; _si < _activePts.length - 1; _si++) {
+        const _ptA = _activePts[_si], _ptB = _activePts[_si + 1];
+        const _posA = convertFn(_ptA.n, _ptA.e, _ptA.v), _posB = convertFn(_ptB.n, _ptB.e, _ptB.v);
+        if (!_posA || !_posB) continue;
+        const _dx = _ptB.e - _ptA.e, _dy = _ptB.n - _ptA.n, _dz = _ptB.v - _ptA.v;
+        const _shotLen = Math.sqrt(_dx*_dx + _dy*_dy + _dz*_dz);
+        const _fromName = _ptA.name || '';
+        const _toName = _ptB.name || '';
+        const _shotLabel = (_fromName && _toName) ? `${_fromName} → ${_toName}` : _segLabel;
+        const _shotDesc = [
+          (_fromName || _toName) ? `<b>${_fromName || '?'} → ${_toName || '?'}</b>` : null,
+          `<b>Survey: ${_segLabel}</b>`,
+          _segSurface ? `<span style='color:#ffd93d'>▲ Surface shot</span>` : null,
+          `Length: ${_shotLen.toFixed(2)} m`,
+          _ptB.dist != null ? `Distance from entrance: ${_ptB.dist.toFixed(1)} m` : null,
+          _ptB.lrud ? `Passage L/R/U/D: ${[_ptB.lrud.l, _ptB.lrud.r, _ptB.lrud.u, _ptB.lrud.d].map(v => v.toFixed(1)).join(' / ')} m` : null,
+          _ptB.comment ? `<i>${_ptB.comment}</i>` : null,
+          `File: ${imp.name}`,
+        ].filter(Boolean).join('<br>');
+        const e = cesiumViewer.entities.add({
+          name: _shotLabel,
+          polyline: { positions: [_posA, _posB], width: _segSurface ? 1 : 1.5, arcType: Cesium.ArcType.NONE,
+            material: new Cesium.ColorMaterialProperty(segColor), clampToGround: false },
+          description: _shotDesc,
+          properties: { isCaveSurvey: true, surveyName: imp.name, surveyCode: seg.survey || '', isSurface: _segSurface || false },
+        });
+        imp.cesiumIds.push(e.id);
+      }
     }
-    for (const s of imp.parsed.stations) {
-      const pos = convertFn(s.n, s.e, s.v);
-      if (!pos) continue;
-      const e = cesiumViewer.entities.add({ name: s.name || imp.name, position: pos, point: { pixelSize: 5, color: stationColor, outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: 5000 }, label: { text: s.name || '', show: false, font: '10px sans-serif', fillColor: Cesium.Color.WHITE, style: Cesium.LabelStyle.FILL, pixelOffset: new Cesium.Cartesian2(0, -14), disableDepthTestDistance: 5000 }, description: s.dist != null ? `<b>${s.name}</b><br>Distance from entrance: ${s.dist.toFixed(1)} m` : `<b>${s.name}</b>`, properties: { isCaveSurvey: true, surveyName: imp.name } });
-      imp.cesiumIds.push(e.id);
+    const _surveysWithShots = new Set(imp.parsed.segments.map(sg => sg.survey));
+    if (dopt.showStations !== false) {
+      for (const s of imp.parsed.stations) {
+        if (dopt.hiddenSurveys && dopt.hiddenSurveys[s.survey]) continue;
+        const _stnSurface = s.isSurface
+          || !!(dopt.surfaceSurveys && dopt.surfaceSurveys[s.survey])
+          || !_surveysWithShots.has(s.survey);   // survey has no shots → surface landmark
+        if (_stnSurface && !dopt.showSurface) continue;
+        const pos = convertFn(s.n, s.e, s.v);
+        if (!pos) continue;
+        const desc = [
+          `<b>${s.name}</b>`,
+          s.isSurface ? `<span style='color:#ffd93d'>&#9650; Surface shot</span>` : null,
+          s.dist != null ? `Distance from entrance: ${s.dist.toFixed(1)} m` : null,
+          s.comment ? `<i>${s.comment}</i>` : null,
+          s.lrud ? `Passage L/R/U/D: ${Object.values(s.lrud).map(v=>v.toFixed(1)).join(' / ')} m` : null,
+          s.survey ? `Survey: ${s.survey}${s.surveyDesc ? ' — ' + s.surveyDesc : ''}` : null,
+        ].filter(Boolean).join('<br>');
+        const e = cesiumViewer.entities.add({
+          name: s.name || imp.name, position: pos,
+          point: { pixelSize: dopt.stationSize || 5, color: stationCesiumColor, outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: 5000 },
+          label: { text: s.name || '', show: dopt.showLabels, font: '10px sans-serif',
+            fillColor: Cesium.Color.WHITE, style: Cesium.LabelStyle.FILL,
+            pixelOffset: new Cesium.Cartesian2(0, -14), disableDepthTestDistance: 5000 },
+          description: desc,
+          properties: { isCaveSurvey: true, surveyName: imp.name, surveyCode: s.survey || '' },
+        });
+        imp.cesiumIds.push(e.id);
+      }
     }
   }
   _renderCaveList();
@@ -5008,6 +5130,7 @@ function renderCaveSurveyAnchored(name, parsed, anchorStationName, anchorLat, an
       elev: anchorElevM,
       declination: declinationDeg,
     };
+    if (!entry.displayOptions) entry.displayOptions = _defaultDisplayOptions(entry.parsed);
     _renderCaveList();
   }
   return entry;
@@ -5398,7 +5521,7 @@ function _finishCaveLoad(entry) {
   }
   // Persist to PLT recents (raw text stored in parsed._rawText)
   if (entry.parsed && entry.parsed._rawText) {
-    _addPltRecent(entry.name, entry.parsed?._rawText || '', entry.georef || null);
+    _addPltRecent(entry.name, entry.parsed?._rawText || '', entry.georef || null, entry.displayOptions || null);
   }
 }
 
@@ -7522,6 +7645,164 @@ _loadRecents();        // populate EPT + PLT recent lists
 _initPltRestoreInput(); // wire the hidden PLT cache-miss file picker
 _loadEntwineConfig();   // restore local Entwine server state
 
+
+// ── Cave style panel ─────────────────────────────────────────────────────────
+let _styleIdx = null;
+
+window._openStylePanel = function(i) {
+  const imp = _caveImports[i];
+  if (!imp) return;
+  _styleIdx = i;
+  if (!imp.displayOptions) imp.displayOptions = _defaultDisplayOptions(imp.parsed);
+  const dopt = imp.displayOptions;
+  // Ensure inline panel content is in the DOM
+  const _ip = document.getElementById('cave-inline-panel');
+  if (_ip && !document.getElementById('cave-inline-style')) {
+    const t1 = document.getElementById('tmpl-style-panel');
+    if (t1) _ip.appendChild(t1.content.cloneNode(true));
+    const t2 = document.getElementById('tmpl-rectify-panel');
+    if (t2) _ip.appendChild(t2.content.cloneNode(true));
+  }
+
+  document.getElementById('style-survey-name').textContent = imp.name;
+
+  // Surface toggle
+  document.getElementById('style-surface-toggle').checked = dopt.showSurface;
+
+  // Labels toggle
+  document.getElementById('style-labels-toggle').checked = dopt.showLabels;
+
+  // Station controls
+  document.getElementById('style-stations-toggle').checked = dopt.showStations !== false;
+  document.getElementById('style-station-color').value = dopt.stationColor || '#ffeb3b';
+  document.getElementById('style-station-size').value = dopt.stationSize || 5;
+  document.getElementById('style-station-size-val').textContent = (dopt.stationSize || 5) + 'px';
+
+  // Survey color list
+  const list = document.getElementById('style-survey-list');
+  const surveys = imp.parsed.surveys && imp.parsed.surveys.length
+    ? imp.parsed.surveys
+    : [{ code: '', desc: 'All segments' }];
+
+  list.innerHTML = surveys.map((sv, si) => {
+    const col = dopt.surveyColors[sv.code] || SURVEY_PALETTE[si % SURVEY_PALETTE.length];
+    const label = sv.code && sv.desc ? `${sv.code} — ${sv.desc}` : sv.code || '(default)';
+    const hasSurface = imp.parsed.segments.some(s => s.survey === sv.code && s.isSurface);
+    const isHidden = !!(dopt.hiddenSurveys && dopt.hiddenSurveys[sv.code]);
+    const isMarkedSurface = !!(dopt.surfaceSurveys && dopt.surfaceSurveys[sv.code]);
+    const rowStyle = isHidden ? 'opacity:0.4;' : '';
+    return `<div data-survey-code="${sv.code}" style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.05);${rowStyle}">
+      <button onclick="window._styleSurveyToggle('${sv.code}')" title="${isHidden ? 'Show' : 'Hide'} this survey"
+        style="background:none;border:none;cursor:pointer;font-size:13px;padding:0;flex-shrink:0;line-height:1;">${isHidden ? '🙈' : '👁'}</button>
+      <button onclick="window._styleSurveyMarkSurface('${sv.code}')" title="${isMarkedSurface ? 'Unmark as surface' : 'Mark as surface (hides with surface toggle)'}"
+        style="background:none;border:none;cursor:pointer;font-size:12px;padding:0;flex-shrink:0;line-height:1;opacity:${isMarkedSurface ? '1' : '0.3'};">☀</button>
+      <input type="color" value="${col}" data-survey="${sv.code}"
+        onchange="window._styleColorChange(this)"
+        style="width:26px;height:20px;border:none;background:none;cursor:pointer;padding:0;border-radius:3px;flex-shrink:0;">
+      <span style="font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${isMarkedSurface ? '#ffd93d' : '#ccc'};" title="${label}">${label}</span>
+      ${hasSurface ? '<span style="font-size:9px;color:rgba(255,200,80,0.6);padding:1px 4px;border:1px solid rgba(255,200,80,0.3);border-radius:2px;flex-shrink:0;">FS</span>' : ''}
+    </div>`;
+  }).join('');
+
+  const _sip = document.getElementById('cave-inline-panel');
+  const _sis = document.getElementById('cave-inline-style');
+  const _sir = document.getElementById('cave-inline-rectify');
+  if (_sip) _sip.style.display = 'block';
+  if (_sis) _sis.style.display = 'block';
+  if (_sir) _sir.style.display = 'none';
+  if (_sip) _sip.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+};
+
+window._styleColorChange = function(input) {
+  const imp = _caveImports[_styleIdx];
+  if (!imp) return;
+  imp.displayOptions.surveyColors[input.dataset.survey] = input.value;
+  _rerenderCave(_styleIdx);
+  _displayUpdateRecent(imp);
+};
+
+window._styleToggleSurface = function(chk) {
+  const imp = _caveImports[_styleIdx];
+  if (!imp) return;
+  imp.displayOptions.showSurface = chk.checked;
+  _rerenderCave(_styleIdx);
+  _displayUpdateRecent(imp);
+};
+
+window._styleToggleLabels = function(chk) {
+  const imp = _caveImports[_styleIdx];
+  if (!imp) return;
+  imp.displayOptions.showLabels = chk.checked;
+  // Update label visibility live without full re-render
+  for (const id of imp.cesiumIds) {
+    const e = cesiumViewer.entities.getById(id);
+    if (e && e.label) e.label.show = chk.checked;
+  }
+  _displayUpdateRecent(imp);
+};
+
+window._styleToggleStations = function(chk) {
+  const imp = _caveImports[_styleIdx];
+  if (!imp) return;
+  imp.displayOptions.showStations = chk.checked;
+  _rerenderCave(_styleIdx);
+  _displayUpdateRecent(imp);
+};
+
+window._styleStationColor = function(input) {
+  const imp = _caveImports[_styleIdx];
+  if (!imp) return;
+  imp.displayOptions.stationColor = input.value;
+  _rerenderCave(_styleIdx);
+  _displayUpdateRecent(imp);
+};
+
+window._styleStationSize = function(input) {
+  const imp = _caveImports[_styleIdx];
+  if (!imp) return;
+  imp.displayOptions.stationSize = parseInt(input.value);
+  document.getElementById('style-station-size-val').textContent = input.value + 'px';
+  _rerenderCave(_styleIdx);
+  _displayUpdateRecent(imp);
+};
+
+window._styleSurveyToggle = function(code) {
+  const imp = _caveImports[_styleIdx];
+  if (!imp) return;
+  if (!imp.displayOptions.hiddenSurveys) imp.displayOptions.hiddenSurveys = {};
+  imp.displayOptions.hiddenSurveys[code] = !imp.displayOptions.hiddenSurveys[code];
+  _rerenderCave(_styleIdx);
+  _displayUpdateRecent(imp);
+  window._openStylePanel(_styleIdx);  // refresh eye icons
+};
+
+window._styleSurveyMarkSurface = function(code) {
+  const imp = _caveImports[_styleIdx];
+  if (!imp) return;
+  if (!imp.displayOptions.surfaceSurveys) imp.displayOptions.surfaceSurveys = {};
+  imp.displayOptions.surfaceSurveys[code] = !imp.displayOptions.surfaceSurveys[code];
+  _rerenderCave(_styleIdx);
+  _displayUpdateRecent(imp);
+  window._openStylePanel(_styleIdx);
+};
+
+window._styleResetColors = function() {
+  const imp = _caveImports[_styleIdx];
+  if (!imp) return;
+  imp.displayOptions = _defaultDisplayOptions(imp.parsed);
+  _rerenderCave(_styleIdx);
+  _displayUpdateRecent(imp);
+  window._openStylePanel(_styleIdx);  // refresh panel
+};
+
+window._styleClose = function() {
+  const _sc = document.getElementById('cave-inline-style');
+  if (_sc) _sc.style.display = 'none';
+  const _sr = document.getElementById('cave-inline-rectify');
+  if (!_sr || _sr.style.display === 'none') { const _sp = document.getElementById('cave-inline-panel'); if (_sp) _sp.style.display = 'none'; }
+  _styleIdx = null;
+};
+
 // ── Georectification ─────────────────────────────────────────────────────────
 // State
 let _rectifyIdx      = null;   // which _caveImports entry we're editing
@@ -7536,6 +7817,15 @@ window._openRectifyPanel = function(i) {
   if (!imp) return;
   if (!imp.georef) { alert('This survey has no anchor set yet. Set an anchor first.'); return; }
   _rectifyIdx = i;
+  // Ensure inline panel content is in the DOM
+  const _ip = document.getElementById('cave-inline-panel');
+  if (_ip && !document.getElementById('cave-inline-style')) {
+    const t1 = document.getElementById('tmpl-style-panel');
+    if (t1) _ip.appendChild(t1.content.cloneNode(true));
+    const t2 = document.getElementById('tmpl-rectify-panel');
+    if (t2) _ip.appendChild(t2.content.cloneNode(true));
+  }
+
   document.getElementById('rectify-survey-name').textContent = imp.name;
   // Populate station dropdown
   const sel = document.getElementById('rectify-station-select');
@@ -7547,11 +7837,20 @@ window._openRectifyPanel = function(i) {
     sel.appendChild(opt);
   });
   _rectifyRenderCPList();
-  document.getElementById('rectify-panel-overlay').style.display = 'flex';
+  const _rip = document.getElementById('cave-inline-panel');
+  const _rir = document.getElementById('cave-inline-rectify');
+  const _ris = document.getElementById('cave-inline-style');
+  if (_rip) _rip.style.display = 'block';
+  if (_rir) _rir.style.display = 'block';
+  if (_ris) _ris.style.display = 'none';
+  if (_rip) _rip.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 };
 
 window._rectifyClose = function() {
-  document.getElementById('rectify-panel-overlay').style.display = 'none';
+  const _rc = document.getElementById('cave-inline-rectify');
+  if (_rc) _rc.style.display = 'none';
+  const _rs = document.getElementById('cave-inline-style');
+  if (!_rs || _rs.style.display === 'none') { const _rp = document.getElementById('cave-inline-panel'); if (_rp) _rp.style.display = 'none'; }
   _rectifyIdx = null;
 };
 
@@ -7585,7 +7884,7 @@ window._rectifyStartPick = function() {
   }
   document.getElementById('rectify-panel-error').style.display = 'none';
   _rectifyPending = { station };
-  document.getElementById('rectify-panel-overlay').style.display = 'none';
+  { const _xr=document.getElementById('cave-inline-rectify'); if(_xr)_xr.style.display='none'; const _xs=document.getElementById('cave-inline-style'); if(!_xs||_xs.style.display==='none'){const _xp=document.getElementById('cave-inline-panel');if(_xp)_xp.style.display='none';} }
   _rectifyEnterPickMode();
 };
 
@@ -7595,7 +7894,7 @@ window._rectifyEditCP = function(ci) {
   if (!cp) return;
   imp.georef.controlPoints.splice(ci, 1);
   _rectifyPending = { station: cp.station };
-  document.getElementById('rectify-panel-overlay').style.display = 'none';
+  { const _xr=document.getElementById('cave-inline-rectify'); if(_xr)_xr.style.display='none'; const _xs=document.getElementById('cave-inline-style'); if(!_xs||_xs.style.display==='none'){const _xp=document.getElementById('cave-inline-panel');if(_xp)_xp.style.display='none';} }
   _rectifyEnterPickMode();
 };
 
@@ -7606,10 +7905,11 @@ window._rectifyRemoveCP = function(ci) {
   _rectifyRenderCPList();
   _rerenderCave(_rectifyIdx);
   _sessionSave && _sessionSave();
+  _rectifyUpdateRecent(_rectifyIdx);
 };
 
 window._rectifyPickStationOnMap = function() {
-  document.getElementById('rectify-panel-overlay').style.display = 'none';
+  { const _xr=document.getElementById('cave-inline-rectify'); if(_xr)_xr.style.display='none'; const _xs=document.getElementById('cave-inline-style'); if(!_xs||_xs.style.display==='none'){const _xp=document.getElementById('cave-inline-panel');if(_xp)_xp.style.display='none';} }
   _rectifyStationPickMode = true;
   const banner = document.getElementById('rectify-station-pick-banner');
   if (banner) banner.style.display = 'block';
@@ -7647,7 +7947,7 @@ window._rectifyCancelAdjust = function() {
   _rectifyRemoveMarker();
   _rectifyPending = null;
   if (_rectifyIdx !== null) {
-    document.getElementById('rectify-panel-overlay').style.display = 'flex';
+    { const _yr=document.getElementById('cave-inline-panel'); const _yrr=document.getElementById('cave-inline-rectify'); if(_yr)_yr.style.display='block'; if(_yrr)_yrr.style.display='block'; }
   }
 };
 
@@ -7709,6 +8009,26 @@ window._rectifyNudge = function(dE, dN, dV) {
   _rectifyShowAdjust();
 };
 
+function _rectifyUpdateRecent(idx) {
+  const imp = _caveImports[idx != null ? idx : _rectifyIdx];
+  if (imp && imp.parsed && imp.parsed._rawText && imp.georef) {
+    _addPltRecent(imp.name, imp.parsed._rawText, imp.georef, imp.displayOptions);
+  }
+}
+
+// Save displayOptions changes to recent
+function _displayUpdateRecent(imp) {
+  if (imp && imp.parsed && imp.parsed._rawText && imp.georef) {
+    _addPltRecent(imp.name, imp.parsed._rawText, imp.georef, imp.displayOptions);
+  }
+}
+
+window._rectifySaveToRecent = function() {
+  _rectifyUpdateRecent(_rectifyIdx);
+  const err = document.getElementById('rectify-panel-error');
+  if (err) { err.style.color = '#8fa'; err.textContent = '✓ Rectification saved to recent files.'; err.style.display = 'block'; setTimeout(() => { err.style.display = 'none'; err.style.color = '#f88'; }, 2500); }
+};
+
 window._rectifyConfirmCP = function() {
   const p = _rectifyPending;
   if (!p || p.lat == null) return;
@@ -7722,7 +8042,8 @@ window._rectifyConfirmCP = function() {
   _rerenderCave(_rectifyIdx);
   _renderCaveList();
   _sessionSave && _sessionSave();
-  document.getElementById('rectify-panel-overlay').style.display = 'flex';
+  _rectifyUpdateRecent(_rectifyIdx);
+  { const _yr=document.getElementById('cave-inline-panel'); const _yrr=document.getElementById('cave-inline-rectify'); if(_yr)_yr.style.display='block'; if(_yrr)_yrr.style.display='block'; }
   _rectifyRenderCPList();
 };
 
@@ -7735,6 +8056,7 @@ window._rectifyReset = function() {
   _rerenderCave(_rectifyIdx);
   _renderCaveList();
   _sessionSave && _sessionSave();
+  _rectifyUpdateRecent(_rectifyIdx);
 };
 
 // Wire globe click for pick mode

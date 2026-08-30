@@ -982,6 +982,7 @@
               </div>
               <div class="lp-section-body open">
                 <div id="lp-cave-list" style="margin-bottom:4px;"></div>
+                <div id="cave-inline-panel" style="display:none;margin:4px 0 8px;"></div>
                 <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:2px;">
                   <button class="btn btn-sm btn-primary lp-add-btn" onclick="window._importCavePLT()" style="font-size:11px;">+ Import PLT</button>
                   <label class="lp-row" style="margin:0; cursor:pointer;">
@@ -1473,27 +1474,87 @@
   </div>
 
 
-  <!-- ── Georectify panel ──────────────────────────────────────────────────── -->
-  <div id="rectify-panel-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;">
-    <div style="background:#1a1a1a;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:20px;width:420px;max-height:80vh;display:flex;flex-direction:column;font-size:13px;color:#ddd;">
-      <div style="font-weight:600;margin-bottom:6px;font-size:14px;">🎯 Georectify Survey</div>
-      <div id="rectify-survey-name" style="font-size:11px;opacity:0.5;margin-bottom:14px;"></div>
-      <div style="font-size:11px;opacity:0.6;margin-bottom:10px;">Control points: pin a station to a known world position. The survey warps to fit.</div>
-      <div id="rectify-cp-list" style="flex:1;overflow-y:auto;max-height:300px;margin-bottom:12px;"></div>
-      <div style="display:flex;gap:8px;margin-bottom:12px;">
-        <select id="rectify-station-select" style="flex:1;background:#111;border:1px solid rgba(255,255,255,0.2);border-radius:4px;padding:5px 8px;color:#ddd;font-size:12px;">
-          <option value="">-- Select station --</option>
-        </select>
-        <button onclick="window._rectifyPickStationOnMap()" title="Click a station dot directly on the 3D globe" style="padding:5px 10px;background:rgba(80,150,255,0.18);border:1px solid rgba(80,150,255,0.4);border-radius:4px;color:#8af;cursor:pointer;font-size:12px;">🗺</button>
-        <button onclick="window._rectifyStartPick()" style="padding:5px 12px;background:rgba(80,180,120,0.2);border:1px solid rgba(80,180,120,0.4);border-radius:4px;color:#8ecfa8;cursor:pointer;font-size:12px;">+ Add</button>
+
+  <!-- ── Cave style panel ──────────────────────────────────────────────────── -->
+  <!-- Style panel lives inline in sidebar via #cave-inline-panel -->
+  <template id="tmpl-style-panel">
+    <div id="cave-inline-style" style="background:#1a1a2a;border:1px solid rgba(180,100,255,0.25);border-radius:6px;padding:12px;font-size:13px;color:#ddd;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+        <div style="font-weight:600;font-size:13px;">🎨 Survey Style</div>
+        <button onclick="window._styleClose()" style="background:none;border:none;color:#888;cursor:pointer;font-size:14px;padding:0 2px;">✕</button>
       </div>
-      <div id="rectify-panel-error" style="font-size:11px;color:#f88;margin-bottom:8px;display:none;"></div>
+      <div id="style-survey-name" style="font-size:11px;opacity:0.5;margin-bottom:10px;"></div>
+
+      <!-- Toggles -->
+      <div style="display:flex;gap:14px;margin-bottom:10px;flex-wrap:wrap;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
+          <input type="checkbox" id="style-surface-toggle" onchange="window._styleToggleSurface(this)">
+          Show surface (shots &amp; stations)
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
+          <input type="checkbox" id="style-labels-toggle" onchange="window._styleToggleLabels(this)">
+          Station labels
+        </label>
+      </div>
+
+      <!-- Station appearance -->
+      <div style="font-size:10px;color:rgba(255,255,255,0.45);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em;">Stations</div>
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:7px 9px;background:rgba(255,255,255,0.04);border-radius:6px;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
+          <input type="checkbox" id="style-stations-toggle" onchange="window._styleToggleStations(this)">
+          Show stations
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
+          Color
+          <input type="color" id="style-station-color" onchange="window._styleStationColor(this)"
+            style="width:26px;height:20px;border:none;background:none;cursor:pointer;padding:0;border-radius:3px;">
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
+          Size
+          <input type="range" id="style-station-size" min="2" max="14" step="1"
+            oninput="window._styleStationSize(this)"
+            style="width:70px;accent-color:#00e5ff;">
+          <span id="style-station-size-val" style="font-size:11px;color:#aaa;min-width:24px;">5px</span>
+        </label>
+      </div>
+
+      <!-- Survey color list -->
+      <div style="font-size:10px;color:rgba(255,255,255,0.45);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em;">Survey colors</div>
+      <div id="style-survey-list" style="max-height:220px;overflow-y:auto;margin-bottom:10px;"></div>
+
+      <!-- Buttons -->
       <div style="display:flex;gap:8px;justify-content:flex-end;">
-        <button onclick="window._rectifyReset()" style="padding:5px 14px;background:rgba(255,100,100,0.1);border:1px solid rgba(255,100,100,0.3);border-radius:4px;color:#f88;cursor:pointer;font-size:12px;">Reset Warp</button>
-        <button onclick="window._rectifyClose()" style="padding:5px 14px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:4px;color:#aaa;cursor:pointer;font-size:12px;">Close</button>
+        <button onclick="window._styleResetColors()" style="padding:4px 12px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:4px;color:rgba(255,255,255,0.5);cursor:pointer;font-size:12px;">Reset Colors</button>
       </div>
     </div>
-  </div>
+  </template>
+
+    <!-- ── Georectify panel ──────────────────────────────────────────────────── -->
+  <!-- Rectify panel lives inline in sidebar via #cave-inline-panel -->
+  <template id="tmpl-rectify-panel">
+    <div id="cave-inline-rectify" style="background:#1a1a1a;border:1px solid rgba(255,200,50,0.2);border-radius:6px;padding:12px;font-size:13px;color:#ddd;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+        <div style="font-weight:600;font-size:13px;">🎯 Georectify Survey</div>
+        <button onclick="window._rectifyClose()" style="background:none;border:none;color:#888;cursor:pointer;font-size:14px;padding:0 2px;">✕</button>
+      </div>
+      <div id="rectify-survey-name" style="font-size:11px;opacity:0.5;margin-bottom:8px;"></div>
+      <div style="font-size:11px;opacity:0.55;margin-bottom:8px;">Pin a station to a known world position — the survey warps to fit.</div>
+      <div id="rectify-cp-list" style="max-height:200px;overflow-y:auto;margin-bottom:10px;"></div>
+      <div style="display:flex;gap:6px;margin-bottom:8px;">
+        <select id="rectify-station-select" style="flex:1;background:#111;border:1px solid rgba(255,255,255,0.2);border-radius:4px;padding:4px 6px;color:#ddd;font-size:12px;">
+          <option value="">-- Select station --</option>
+        </select>
+        <button onclick="window._rectifyPickStationOnMap()" title="Click a station dot on the 3D globe" style="padding:4px 8px;background:rgba(80,150,255,0.18);border:1px solid rgba(80,150,255,0.4);border-radius:4px;color:#8af;cursor:pointer;font-size:12px;">🗺</button>
+        <button onclick="window._rectifyStartPick()" style="padding:4px 10px;background:rgba(80,180,120,0.2);border:1px solid rgba(80,180,120,0.4);border-radius:4px;color:#8ecfa8;cursor:pointer;font-size:12px;">+ Add</button>
+      </div>
+      <div id="rectify-panel-error" style="font-size:11px;color:#f88;margin-bottom:6px;display:none;"></div>
+      <div style="display:flex;gap:6px;justify-content:flex-end;">
+        <button onclick="window._rectifySaveToRecent()" title="Save control points so they reload with this PLT" style="padding:4px 12px;background:rgba(0,200,120,0.12);border:1px solid rgba(0,200,120,0.3);border-radius:4px;color:#8fa;cursor:pointer;font-size:12px;">💾 Save</button>
+        <button onclick="window._rectifyReset()" style="padding:4px 12px;background:rgba(255,100,100,0.1);border:1px solid rgba(255,100,100,0.3);border-radius:4px;color:#f88;cursor:pointer;font-size:12px;">Reset</button>
+      </div>
+    </div>
+  </template>
+
 
   <!-- ── Georectify adjust overlay (shown after globe click) ───────────────── -->
   <div id="rectify-adjust-overlay" style="display:none;position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:10000;background:#1a1a1a;border:1px solid rgba(80,180,120,0.4);border-radius:8px;padding:14px 18px;font-size:12px;color:#ddd;min-width:340px;">
