@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>FLEX Cave Viewer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0f; color: #eee; font-family: system-ui, sans-serif; overflow: hidden; }
+  #canvas-wrap { width: 100vw; height: 100vh; }
+  canvas { display: block; touch-action: none; }
+
+  #loading {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; z-index: 99;
+    background: #0a0a0f; transition: opacity .5s;
+  }
+  #loading.hidden { opacity: 0; pointer-events: none; }
+  #loading svg { opacity: .8; }
+  #loading-bar-wrap { width: 220px; height: 4px; background: rgba(255,255,255,.12); border-radius: 2px; margin-top: 18px; }
+  #loading-bar { height: 4px; width: 0; background: #00e5ff; border-radius: 2px; transition: width .25s; }
+  #loading-text { font-size: 12px; opacity: .5; margin-top: 10px; }
+
+  #hud { position: fixed; top: 0; left: 0; right: 0; pointer-events: none; z-index: 10; }
+  #title-bar {
+    background: linear-gradient(to bottom, rgba(0,0,0,.65) 0%, transparent 100%);
+    padding: 14px 16px 30px;
+  }
+  #title-bar h1 { font-size: 16px; font-weight: 600; }
+  #title-bar .sub { font-size: 11px; opacity: .45; margin-top: 2px; }
+
+  #toolbar {
+    position: fixed; right: 12px; top: 50%; transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 8px; pointer-events: all;
+  }
+  .tb-btn {
+    width: 42px; height: 42px; border-radius: 9px;
+    background: rgba(10,10,15,.7); border: 1px solid rgba(255,255,255,.13);
+    color: #eee; font-size: 19px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+    transition: background .12s;
+  }
+  .tb-btn:active { background: rgba(0,229,255,.18); }
+  .tb-btn.off { opacity: .3; }
+  .tb-btn.active { background: rgba(33,150,243,.35); border-color: #2196F3; }
+
+  #legend {
+    position: fixed; bottom: 24px; right: 12px;
+    background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.1);
+    border-radius: 8px; padding: 8px 12px; font-size: 11px;
+    max-width: 180px; pointer-events: none;
+  }
+  #legend h3 { font-size: 9px; text-transform: uppercase; letter-spacing: .8px; opacity: .4; margin-bottom: 6px; }
+  .leg-row { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0; }
+  .leg-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; margin-top: 2px; }
+  .leg-info { flex: 1; min-width: 0; }
+  .leg-nm { opacity: .85; font-size: 11px; line-height: 1.35; word-break: break-word; }
+  .leg-shots { font-size: 9px; opacity: .4; margin-top: 1px; }
+  #legend.empty { display: none; }
+
+  #hint {
+    position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+    font-size: 11px; opacity: .3; pointer-events: none; transition: opacity 1s;
+    white-space: nowrap;
+  }
+  #hint.gone { opacity: 0; }
+
+  /* GPS status badge */
+  #gps-badge {
+    position: fixed; top: 14px; right: 12px;
+    background: rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.13);
+    border-radius: 6px; padding: 4px 8px; font-size: 10px;
+    display: none; align-items: center; gap: 5px; pointer-events: none;
+  }
+  #gps-badge.show { display: flex; }
+  #gps-dot { width: 7px; height: 7px; border-radius: 50%; background: #666; }
+  #gps-dot.fix { background: #4CAF50; animation: gpsPulse 1.8s infinite; }
+  @keyframes gpsPulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  /* Info panel */
+  #info-panel {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: rgba(10,10,20,.92); border-top: 1px solid rgba(255,255,255,.12);
+    border-radius: 16px 16px 0 0; padding: 16px 18px 28px;
+    transform: translateY(100%); transition: transform .28s ease;
+    z-index: 20; pointer-events: all;
+    max-height: 45vh; overflow-y: auto;
+  }
+  #info-panel.open { transform: translateY(0); }
+  #info-close {
+    position: absolute; top: 12px; right: 14px;
+    background: none; border: none; color: #aaa; font-size: 20px;
+    cursor: pointer; line-height: 1;
+  }
+  #info-title { font-size: 17px; font-weight: 700; margin-bottom: 2px; color: #00e5ff; }
+  #info-subtitle { font-size: 10px; opacity: .4; margin-bottom: 10px; font-family: monospace; }
+  .fx-row { font-size: 12px; padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,.06); line-height: 1.5; }
+  .fx-row:last-child { border-bottom: none; }
+  .fx-row .lbl { opacity: .45; }
+  .fx-row .val { font-weight: 600; }
+  .fx-divider { font-size: 9px; text-transform: uppercase; letter-spacing: .7px; opacity: .3; margin: 8px 0 4px; }
+  .fx-shot { font-size: 11px; padding: 2px 0; opacity: .7; font-family: monospace; }
+
+  /* Compass needle */
+  #compass {
+    position: fixed; bottom: 80px; left: 14px;
+    width: 36px; height: 36px; display: none;
+    pointer-events: none;
+  }
+  #compass.show { display: block; }
+  #compass svg { transform-origin: center; }
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <svg width="52" height="52" viewBox="0 0 52 52" fill="none">
+    <path d="M26 5 L44 40 L8 40 Z" stroke="#00e5ff" stroke-width="1.8" fill="none"/>
+    <path d="M26 15 L37 35 L15 35 Z" fill="#00e5ff" opacity=".2"/>
+  </svg>
+  <div id="loading-bar-wrap"><div id="loading-bar"></div></div>
+  <div id="loading-text">Decoding terrain…</div>
+</div>
+
+<div id="canvas-wrap"></div>
+
+<div id="hud">
+  <div id="title-bar">
+    <h1>FLEX Cave Viewer</h1>
+    <div class="sub" id="area-label"></div>
+  </div>
+</div>
+
+<div id="gps-badge">
+  <div id="gps-dot"></div>
+  <span id="gps-text">GPS…</span>
+</div>
+
+<div id="toolbar">
+  <button class="tb-btn" id="btn-reset"  title="Reset view">⌂</button>
+  <button class="tb-btn" id="btn-top"    title="Top-down view">⊙</button>
+  <button class="tb-btn" id="btn-cave"   title="Toggle cave lines">◎</button>
+  <button class="tb-btn" id="btn-gps"    title="Toggle GPS pin">📍</button>
+  <button class="tb-btn" id="btn-follow" title="Follow GPS (3rd person)" style="font-size:15px">🧭 FLW</button>
+  <button class="tb-btn" id="btn-kml"    title="Import KML/KMZ">📂</button>
+  <button class="tb-btn" id="btn-opacity" title="Terrain opacity">🗺️</button>
+</div>
+
+<div id="opacity-panel" style="
+  display:none; position:fixed; right:62px; top:50%; transform:translateY(-50%);
+  background:rgba(10,10,20,.85); border:1px solid rgba(255,255,255,.13);
+  border-radius:10px; padding:10px 14px; z-index:15; pointer-events:all;">
+  <div style="font-size:10px; opacity:.45; margin-bottom:6px; text-align:center">TERRAIN</div>
+  <input type="range" id="terrain-opacity-slider" min="0" max="100" value="50"
+    style="width:100px; accent-color:#00e5ff;">
+  <div id="terrain-opacity-label" style="font-size:10px; opacity:.55; text-align:center; margin-top:4px">50%</div>
+</div>
+
+<div id="legend" class="empty"><h3>Surveys</h3></div>
+<div id="hint">Drag · Pinch zoom · Two-finger pan</div>
+
+<div id="compass">
+  <svg width="36" height="36" viewBox="0 0 36 36" id="compass-svg">
+    <circle cx="18" cy="18" r="17" fill="rgba(0,0,0,.5)" stroke="rgba(255,255,255,.2)" stroke-width="1"/>
+    <polygon points="18,4 21,18 18,22 15,18" fill="#e53935"/>
+    <polygon points="18,32 21,18 18,22 15,18" fill="#aaa"/>
+    <text x="18" y="7" text-anchor="middle" font-size="6" fill="#e53935" font-family="system-ui">N</text>
+  </svg>
+</div>
+
+<!-- Hidden KML file picker -->
+<input type="file" id="kml-input" accept=".kml,.kmz" style="display:none">
+
+<div id="info-panel">
+  <button id="info-close">✕</button>
+  <div id="info-title">—</div>
+  <div id="info-subtitle">—</div>
+  <div id="info-rows"></div>
+</div>
+
+<!-- ═══ EMBEDDED DATA (injected by export_terrain.py) ═══════════════════════ -->
+<script id="terrain-data">
+// TERRAIN_GLB_B64 and CAVES_DATA are injected here by the export script.
+// Do not edit this block manually.
+const TERRAIN_GLB_B64 = "PLACEHOLDER_GLB_B64";
+const CAVES_DATA = PLACEHOLDER_CAVES_JSON;
+</script>
+<!-- ═══ THREE.JS LIBS (injected by export_terrain.py) ══════════════════════ -->
+<script src="libs/three.min.js"></script>
+<script src="libs/OrbitControls.js"></script>
+<script src="libs/GLTFLoader.js"></script>
+<script src="libs/jszip.min.js"></script>
+
+<script>
+'use strict';
+
+// ── Loading bar ───────────────────────────────────────────────────────────────
+const bar  = document.getElementById('loading-bar');
+const ltxt = document.getElementById('loading-text');
+function setP(pct, msg) { bar.style.width = pct + '%'; if (msg) ltxt.textContent = msg; }
+function hideLoading() {
+  const el = document.getElementById('loading');
+  el.classList.add('hidden');
+  setTimeout(() => el.remove(), 600);
+}
+
+// ── Renderer ──────────────────────────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.getElementById('canvas-wrap').appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0a0f);
+scene.fog = new THREE.FogExp2(0x0a0a0f, 0.00035);
+
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 60000);
+camera.up.set(0, 0, 1);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 5;
+controls.maxDistance = 25000;
+controls.maxPolarAngle = Math.PI * 0.88;
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+const sun = new THREE.DirectionalLight(0xffffff, 1.1);
+sun.position.set(1, 0.8, 2);
+scene.add(sun);
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ── Coordinate conversion (mirrors Python latlon_to_utm) ─────────────────────
+const META = (CAVES_DATA && CAVES_DATA.meta) || {};
+
+function latlonToUTM(lat, lon) {
+  const zone   = Math.floor((lon + 180) / 6) + 1;
+  const lonRad = lon * Math.PI / 180;
+  const latRad = lat * Math.PI / 180;
+  const lon0   = ((zone - 1) * 6 - 180 + 3) * Math.PI / 180;
+  const a = 6378137.0, f = 1 / 298.257223563;
+  const b = a * (1 - f);
+  const e2  = 1 - (b / a) ** 2;
+  const ep2 = e2 / (1 - e2);
+  const N = a / Math.sqrt(1 - e2 * Math.sin(latRad) ** 2);
+  const T = Math.tan(latRad) ** 2;
+  const C = ep2 * Math.cos(latRad) ** 2;
+  const A = Math.cos(latRad) * (lonRad - lon0);
+  const M = a * (
+    (1 - e2/4 - 3*e2**2/64 - 5*e2**3/256) * latRad
+    - (3*e2/8 + 3*e2**2/32 + 45*e2**3/1024) * Math.sin(2*latRad)
+    + (15*e2**2/64 + 45*e2**3/256) * Math.sin(4*latRad)
+    - (35*e2**3/1024) * Math.sin(6*latRad)
+  );
+  const easting = 500000 + 0.9996 * N * (
+    A + (1 - T + C) * A**3 / 6
+    + (5 - 18*T + T**2 + 72*C - 58*ep2) * A**5 / 120
+  );
+  let northing = 0.9996 * (M + N * Math.tan(latRad) * (
+    A**2 / 2
+    + (5 - T + 9*C + 4*C**2) * A**4 / 24
+    + (61 - 58*T + T**2 + 600*C - 330*ep2) * A**6 / 720
+  ));
+  if (lat < 0) northing += 10000000;
+  return { easting, northing };
+}
+
+function gpsToScene(lat, lon) {
+  const { easting, northing } = latlonToUTM(lat, lon);
+  return {
+    x: easting  - (META.utm_center_e || 0),
+    y: northing - (META.utm_center_n || 0),
+  };
+}
+
+// ── Terrain surface raycaster (find Z at XY) ──────────────────────────────────
+let terrainGroup    = null;
+const terrainMaterials = [];   // refs to all terrain mesh materials (for opacity control)
+const _downRay = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, 0, -1));
+
+function terrainZAt(x, y) {
+  if (!terrainGroup) return null;
+  _downRay.ray.origin.set(x, y, 99999);
+  const hits = _downRay.intersectObject(terrainGroup, true);
+  return hits.length ? hits[0].point.z : null;
+}
+
+// ── GPS state ─────────────────────────────────────────────────────────────────
+let gpsMarker    = null;
+let gpsActive    = false;
+let gpsWatchId   = null;
+let gpsScenePos  = null;   // {x, y, z} current position in scene
+let followMode   = false;
+let compassHeading = null;
+let terrainScale = 200;    // updated after terrain loads
+
+function createGpsMarker(scale) {
+  const g = new THREE.Group();
+  const r = scale;
+  // Outer pulsing ring
+  const ringGeo = new THREE.RingGeometry(r * 1.1, r * 1.6, 40);
+  const ringMat = new THREE.MeshBasicMaterial({
+    color: 0x2196F3, transparent: true, opacity: 0.75, side: THREE.DoubleSide
+  });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  g.add(ring);
+  g._ring = ring;
+  // Inner solid dot
+  const dotGeo = new THREE.CircleGeometry(r, 32);
+  const dotMat = new THREE.MeshBasicMaterial({
+    color: 0x42A5F5, transparent: true, opacity: 0.9, side: THREE.DoubleSide
+  });
+  const dot = new THREE.Mesh(dotGeo, dotMat);
+  dot.position.z = 0.5;
+  g.add(dot);
+  // Accuracy halo (very faint, larger)
+  const haloGeo = new THREE.CircleGeometry(r * 5, 40);
+  const haloMat = new THREE.MeshBasicMaterial({
+    color: 0x2196F3, transparent: true, opacity: 0.08, side: THREE.DoubleSide
+  });
+  g.add(new THREE.Mesh(haloGeo, haloMat));
+  return g;
+}
+
+function updateGpsMarker(lat, lon, accuracy) {
+  const { x, y } = gpsToScene(lat, lon);
+  const z = terrainZAt(x, y);
+  if (z === null) return;
+  gpsScenePos = { x, y, z };
+  if (!gpsMarker) {
+    gpsMarker = createGpsMarker(terrainScale * 0.004);
+    scene.add(gpsMarker);
+  }
+  gpsMarker.position.set(x, y, z + terrainScale * 0.001);
+  if (followMode) {
+    controls.target.set(x, y, z);
+    controls.update();
+  }
+  // Update GPS badge
+  const dot = document.getElementById('gps-dot');
+  dot.classList.add('fix');
+  document.getElementById('gps-text').textContent =
+    `${lat.toFixed(5)}, ${lon.toFixed(5)}` + (accuracy ? ` ±${Math.round(accuracy)}m` : '');
+}
+
+function startGps() {
+  if (!navigator.geolocation) { alert('Geolocation not supported'); return; }
+  document.getElementById('gps-badge').classList.add('show');
+  document.getElementById('gps-text').textContent = 'Acquiring…';
+  gpsWatchId = navigator.geolocation.watchPosition(
+    pos => updateGpsMarker(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy),
+    err => { document.getElementById('gps-text').textContent = 'GPS error: ' + err.message; },
+    { enableHighAccuracy: true, timeout: 30000, maximumAge: 3000 }
+  );
+}
+
+function stopGps() {
+  if (gpsWatchId !== null) { navigator.geolocation.clearWatch(gpsWatchId); gpsWatchId = null; }
+  if (gpsMarker) { scene.remove(gpsMarker); gpsMarker = null; }
+  gpsScenePos = null;
+  document.getElementById('gps-badge').classList.remove('show');
+  document.getElementById('gps-dot').classList.remove('fix');
+}
+
+// ── Compass ───────────────────────────────────────────────────────────────────
+function handleOrientation(e) {
+  let h = null;
+  if (e.webkitCompassHeading !== undefined && e.webkitCompassHeading !== null) {
+    h = e.webkitCompassHeading;                 // iOS: 0=north, clockwise
+  } else if (e.absolute && e.alpha !== null) {
+    h = (360 - e.alpha) % 360;                  // Android absolute
+  } else if (e.alpha !== null) {
+    h = (360 - e.alpha) % 360;                  // fallback
+  }
+  if (h !== null) {
+    compassHeading = h;
+    document.getElementById('compass-svg').style.transform = `rotate(${h}deg)`;
+  }
+}
+
+function startCompass() {
+  document.getElementById('compass').classList.add('show');
+  if (typeof DeviceOrientationEvent !== 'undefined' && DeviceOrientationEvent.requestPermission) {
+    DeviceOrientationEvent.requestPermission().then(r => {
+      if (r === 'granted') {
+        window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+        window.addEventListener('deviceorientation', handleOrientation, true);
+      }
+    }).catch(() => {
+      window.addEventListener('deviceorientation', handleOrientation, true);
+    });
+  } else {
+    window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+    window.addEventListener('deviceorientation', handleOrientation, true);
+  }
+}
+
+function stopCompass() {
+  document.getElementById('compass').classList.remove('show');
+  window.removeEventListener('deviceorientationabsolute', handleOrientation, true);
+  window.removeEventListener('deviceorientation', handleOrientation, true);
+}
+
+// ── Load terrain from embedded base64 ─────────────────────────────────────────
+setP(5, 'Decoding terrain...');
+
+function b64ToArrayBuffer(b64) {
+  const bin = atob(b64);
+  const buf = new ArrayBuffer(bin.length);
+  const u8  = new Uint8Array(buf);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return buf;
+}
+
+const loader = new THREE.GLTFLoader();
+
+setTimeout(() => {
+  setP(15, 'Parsing GLB...');
+  const buf = b64ToArrayBuffer(TERRAIN_GLB_B64);
+  setP(40, 'Building scene...');
+  // loader.parse — texture is a data: URI inside the GLB JSON chunk, so no
+  // network/file:// request is ever made; works fully offline.
+  loader.parse(buf, '', (gltf) => {
+    terrainGroup = gltf.scene;
+    scene.add(terrainGroup);
+
+    // Collect all terrain materials so we can control opacity later.
+    // Default opacity 0.5 (50%) on startup so cave lines are easier to see.
+    terrainGroup.traverse(obj => {
+      if (!obj.isMesh) return;
+      (Array.isArray(obj.material) ? obj.material : [obj.material]).forEach(m => {
+        m.transparent = true;
+        m.depthWrite  = true;
+        m.opacity     = 0.5;
+        terrainMaterials.push(m);
+      });
+    });
+
+    const box  = new THREE.Box3().setFromObject(terrainGroup);
+    const size = box.getSize(new THREE.Vector3());
+    const ctr  = box.getCenter(new THREE.Vector3());
+    const dim  = Math.max(size.x, size.y);
+    terrainScale = dim;
+    controls.target.copy(ctr);
+    camera.position.set(ctr.x, ctr.y - dim * 0.55, ctr.z + dim * 0.3);
+    controls.update();
+
+    document.getElementById('area-label').textContent =
+      `${(dim / 1000).toFixed(1)} km across`;
+
+    setP(80, 'Loading cave lines...');
+    buildCaveLines();
+    setP(100, 'Ready');
+    setTimeout(hideLoading, 300);
+  }, (err) => {
+    console.error('GLB load error:', err);
+    setP(80, 'Terrain error — loading caves...');
+    buildCaveLines();
+    setTimeout(hideLoading, 400);
+  });
+}, 50);
+
+// ── Cave lines + stations from embedded JSON ───────────────────────────────────
+const caveGroup    = new THREE.Group();   // survey lines (always visible)
+const stationGroup = new THREE.Group();   // station dots + labels (toggleable)
+scene.add(caveGroup);
+scene.add(stationGroup);
+let labelsVisible = true;
+
+// Station meshes (spheres) — used for raycasting
+const stationMeshes = [];
+
+// Track currently selected station mesh + sprite for highlight/restore
+let _selMesh = null, _selSprite = null, _selBaseScale = null;
+
+/** Render text label as a always-facing sprite. */
+function makeTextSprite(text, hexColor) {
+  const canvas = document.createElement('canvas');
+  const ctx    = canvas.getContext('2d', {willReadFrequently: false});
+  const fs = 22;
+  ctx.font = `600 ${fs}px system-ui, sans-serif`;
+  const tw = Math.ceil(ctx.measureText(text).width);
+  canvas.width  = tw + 14;
+  canvas.height = fs + 10;
+  ctx.font = `600 ${fs}px system-ui, sans-serif`;
+  ctx.strokeStyle = 'rgba(0,0,0,.85)';
+  ctx.lineWidth = 4;
+  ctx.strokeText(text, 7, fs);
+  ctx.fillStyle = hexColor;
+  ctx.fillText(text, 7, fs);
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+  mat.renderOrder = 2;
+  const sp  = new THREE.Sprite(mat);
+  sp._isLabel = true;
+  return { sprite: sp, aspect: canvas.width / canvas.height };
+}
+
+function buildCaveLines() {
+  const surveys = (CAVES_DATA && CAVES_DATA.surveys) || [];
+  const legendEl = document.getElementById('legend');
+  if (!surveys.length) return;
+
+  const stR  = terrainScale * 0.000375;  // station sphere radius
+  const lblH = terrainScale * 0.001;   // label height in world units (tiny)
+
+  // Deduplicate stations by name (or by rounded position if unnamed)
+  // Map: stationKey → { pos, name, surveyName, hexColor, shots[] }
+  const stationMap = new Map();
+
+  surveys.forEach(sv => {
+    let hexColor = sv.color || '#00e5ff';
+    if (/^#[0-9a-f]{8}$/i.test(hexColor)) hexColor = hexColor.slice(0, 7);
+    const col = new THREE.Color(hexColor);
+
+    // Shot lines
+    const lineMat = new THREE.LineBasicMaterial({ color: col, linewidth: 1.5, depthTest: false });
+    lineMat.renderOrder = 1;
+    let drawn = false;
+
+    (sv.lines || []).forEach((line, li) => {
+      if (line.length < 2) return;
+      const pts = line.map(([x,y,z]) => new THREE.Vector3(x, y, z));
+      caveGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lineMat));
+      drawn = true;
+
+      const shot = (sv.shots && sv.shots[li]) || null;
+
+      // Register from station (fallback: derive from shot endpoint)
+      const fromName = shot && shot.from_name;
+      const fromKey  = fromName || `${Math.round(pts[0].x)},${Math.round(pts[0].y)},${Math.round(pts[0].z)}`;
+      if (!stationMap.has(fromKey)) {
+        stationMap.set(fromKey, { pos: pts[0].clone(), name: fromName || '', surveyName: sv.name || 'Survey', hexColor, shots: [], lrud: null, dist: null });
+      }
+      if (shot) stationMap.get(fromKey).shots.push({ ...shot, _role: 'from' });
+
+      // Register to station (fallback: derive from shot endpoint)
+      const toName = shot && shot.to_name;
+      const toKey  = toName || `${Math.round(pts[1].x)},${Math.round(pts[1].y)},${Math.round(pts[1].z)}`;
+      if (!stationMap.has(toKey)) {
+        stationMap.set(toKey, { pos: pts[1].clone(), name: toName || '', surveyName: sv.name || 'Survey', hexColor, shots: [], lrud: null, dist: null });
+      }
+      if (shot) stationMap.get(toKey).shots.push({ ...shot, _role: 'to' });
+    });
+
+    // Overlay proper station data (name, lrud, dist) from sv.stations if present
+    (sv.stations || []).forEach(st => {
+      const pos = new THREE.Vector3(st.xyz[0], st.xyz[1], st.xyz[2]);
+      // Try to find by name first, then by coordinate proximity
+      let key = st.name || null;
+      if (!key || !stationMap.has(key)) {
+        const ck = `${Math.round(pos.x)},${Math.round(pos.y)},${Math.round(pos.z)}`;
+        key = stationMap.has(ck) ? ck : (st.name || ck);
+      }
+      if (!stationMap.has(key)) {
+        stationMap.set(key, { pos, name: st.name || '', surveyName: sv.name || 'Survey', hexColor, shots: [], lrud: null, dist: null });
+      }
+      const entry = stationMap.get(key);
+      entry.name = st.name || entry.name;
+      entry.pos  = pos;
+      if (st.lrud  !== undefined) entry.lrud = st.lrud;
+      if (st.dist  !== undefined) entry.dist = st.dist;
+    });
+
+    if (drawn) {
+      legendEl.classList.remove('empty');
+      const shotCount = (sv.shots || sv.lines || []).length;
+      const row = document.createElement('div');
+      row.className = 'leg-row';
+      row.innerHTML = `<div class="leg-dot" style="background:${hexColor}"></div>`
+                    + `<div class="leg-info">`
+                    + `<div class="leg-nm">${sv.name || 'Survey'}</div>`
+                    + `<div class="leg-shots">${shotCount} shots</div>`
+                    + `</div>`;
+      legendEl.appendChild(row);
+    }
+  });
+
+  // Build sphere + label for each unique station (in stationGroup, toggleable)
+  const stGeo = new THREE.SphereGeometry(stR, 8, 8);
+  stationMap.forEach((st, key) => {
+    const stMat = new THREE.MeshBasicMaterial({ color: st.hexColor, depthTest: false });
+    stMat.renderOrder = 2;
+    const mesh = new THREE.Mesh(stGeo, stMat);
+    mesh.position.copy(st.pos);
+    mesh._station = st;
+    stationGroup.add(mesh);
+    stationMeshes.push(mesh);
+
+    // Label (only if station has a name)
+    let sprite = null;
+    if (st.name) {
+      const { sprite: sp, aspect } = makeTextSprite(st.name, st.hexColor);
+      sprite = sp;
+      sprite.position.copy(st.pos);
+      sprite.position.z += stR + lblH * 0.6;   // tight — just above the dot
+      sprite.scale.set(lblH * aspect, lblH, 1);
+      stationGroup.add(sprite);
+    }
+
+    // Store refs on station for highlight/restore
+    st._mesh   = mesh;
+    st._sprite = sprite;
+    st._baseScale = new THREE.Vector3(1, 1, 1);
+  });
+}
+
+// ── KML / KMZ import ──────────────────────────────────────────────────────────
+const importGroup = new THREE.Group();
+scene.add(importGroup);
+const KML_COLORS = ['#FFD600','#FF6D00','#00E676','#E040FB','#FF4081','#40C4FF'];
+let kmlColorIdx = 0;
+
+function parseKMLCoords(text, colHex) {
+  const parser = new DOMParser();
+  const dom    = parser.parseFromString(text, 'application/xml');
+  const color  = new THREE.Color(colHex);
+  const mat    = new THREE.LineBasicMaterial({ color, linewidth: 1.5, depthTest: false });
+  mat.renderOrder = 1;
+  let count    = 0;
+
+  // LineStrings
+  dom.querySelectorAll('LineString coordinates, MultiGeometry LineString coordinates').forEach(el => {
+    const pts = el.textContent.trim().split(/\s+/).map(c => {
+      const [lon, lat, alt] = c.split(',').map(Number);
+      if (isNaN(lon) || isNaN(lat)) return null;
+      const { x, y } = gpsToScene(lat, lon);
+      const z = terrainZAt(x, y) ?? (alt + (META.z_offset || 0));
+      return new THREE.Vector3(x, y, z + 1);
+    }).filter(Boolean);
+    if (pts.length >= 2) {
+      importGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+      count++;
+    }
+  });
+
+  // Points → small sphere markers
+  dom.querySelectorAll('Point coordinates').forEach(el => {
+    const parts = el.textContent.trim().split(',').map(Number);
+    if (parts.length < 2) return;
+    const [lon, lat] = parts;
+    const { x, y } = gpsToScene(lat, lon);
+    const z = terrainZAt(x, y) ?? 0;
+    const sp = new THREE.Mesh(
+      new THREE.SphereGeometry(terrainScale * 0.002, 8, 8),
+      new THREE.MeshBasicMaterial({ color })
+    );
+    sp.position.set(x, y, z + terrainScale * 0.003);
+    importGroup.add(sp);
+    count++;
+  });
+
+  return count;
+}
+
+async function handleKMLFile(file) {
+  const colHex = KML_COLORS[kmlColorIdx % KML_COLORS.length];
+  kmlColorIdx++;
+  let kmlText;
+  if (file.name.toLowerCase().endsWith('.kmz')) {
+    if (typeof JSZip === 'undefined') { alert('JSZip not loaded — KMZ not supported'); return; }
+    const zip = await JSZip.loadAsync(file);
+    const kmlFile = Object.values(zip.files).find(f => f.name.endsWith('.kml'));
+    if (!kmlFile) { alert('No .kml found inside KMZ'); return; }
+    kmlText = await kmlFile.async('string');
+  } else {
+    kmlText = await file.text();
+  }
+  const count = parseKMLCoords(kmlText, colHex);
+  alert(`Imported ${count} feature(s) from ${file.name}`);
+}
+
+document.getElementById('kml-input').addEventListener('change', function() {
+  if (!this.files.length) return;
+  handleKMLFile(this.files[0]);
+  this.value = '';
+});
+
+// ── Station tap → info panel ──────────────────────────────────────────────────
+const infoPanel = document.getElementById('info-panel');
+const _tapRay   = new THREE.Raycaster();
+const _tmp3     = new THREE.Vector3();
+// Expand raycaster sphere hit threshold so small dots are easy to tap
+_tapRay.params.Mesh = {};
+
+function showInfo(title, subtitle, rows) {
+  document.getElementById('info-title').textContent    = title;
+  document.getElementById('info-subtitle').textContent = subtitle;
+  const rowsEl = document.getElementById('info-rows');
+  rowsEl.innerHTML = rows.map(([label, val]) =>
+    `<div class="fx-row"><span class="lbl">${label}:</span> <span class="val">${val}</span></div>`
+  ).join('');
+  infoPanel.classList.add('open');
+}
+
+document.getElementById('info-close').addEventListener('click', () => {
+  infoPanel.classList.remove('open');
+  clearStationHighlight();
+});
+
+function clearStationHighlight() {
+  if (_selMesh) {
+    _selMesh.scale.set(1, 1, 1);
+    _selMesh.material.color.set(_selMesh._station.hexColor);
+  }
+  if (_selSprite) {
+    _selSprite.scale.copy(_selSprite._baseScale);
+    _selSprite.material.color.set(0xffffff);  // SpriteMaterial color multiplies texture
+    _selSprite.material.opacity = 1;
+  }
+  _selMesh = null; _selSprite = null;
+}
+
+function selectStation(st) {
+  // Restore previous selection
+  clearStationHighlight();
+
+  // Highlight: 2× scale + white tint
+  if (st._mesh) {
+    st._mesh.scale.set(2, 2, 2);
+    st._mesh.material.color.set(0xffffff);
+    _selMesh = st._mesh;
+  }
+  if (st._sprite) {
+    if (!st._sprite._baseScale) st._sprite._baseScale = st._sprite.scale.clone();
+    st._sprite.scale.copy(st._sprite._baseScale).multiplyScalar(2);
+    st._sprite.material.color.set(0xffffff);
+    _selSprite = st._sprite;
+  }
+
+  // LRUD: prefer station-level (from PLT), fall back to adjacent shots
+  let bestLrud = st.lrud || null;
+  if (!bestLrud) {
+    for (const s of st.shots) {
+      if (s.lrud && (s._role === 'to' || !bestLrud)) {
+        bestLrud = s.lrud;
+        if (s._role === 'to') break;
+      }
+    }
+  }
+
+  // Build FLEX-style HTML
+  let html = '';
+
+  // Distance from entrance
+  if (st.dist !== null && st.dist !== undefined) {
+    html += `<div class="fx-row"><span class="lbl">Distance from entrance:</span> <span class="val">${st.dist.toFixed(1)} m</span></div>`;
+  }
+
+  // Elevation
+  html += `<div class="fx-row"><span class="lbl">Elevation:</span> <span class="val">${st.pos.z.toFixed(1)} m</span></div>`;
+
+  // Passage dimensions (LRUD)
+  if (bestLrud) {
+    const lr = (Array.isArray(bestLrud) ? bestLrud : [bestLrud.l, bestLrud.r, bestLrud.u, bestLrud.d])
+                .map(v => (typeof v === 'number' ? v.toFixed(1) : v));
+    html += `<div class="fx-row"><span class="lbl">Passage L/R/U/D:</span> <span class="val">${lr[0]} / ${lr[1]} / ${lr[2]} / ${lr[3]} m</span></div>`;
+  }
+
+  // Survey name
+  html += `<div class="fx-row"><span class="lbl">Survey:</span> <span class="val">${st.surveyName || '—'}</span></div>`;
+
+  // Adjacent shots
+  if (st.shots.length) {
+    html += `<div class="fx-divider">Adjacent shots</div>`;
+    st.shots.forEach(s => {
+      const other = (s._role === 'from' ? s.to_name : s.from_name) || '?';
+      const dir   = s._role === 'from' ? '→' : '←';
+      let line = `${dir} ${other}`;
+      if (s.length    !== undefined) line += `   ${s.length.toFixed(2)} m`;
+      if (s.azimuth   !== undefined) line += `   ${s.azimuth.toFixed(1)}°`;
+      if (s.inclination !== undefined) line += `   ${s.inclination.toFixed(1)}°`;
+      html += `<div class="fx-shot">${line}</div>`;
+    });
+  }
+
+  const titleEl2 = document.getElementById('info-title');
+  titleEl2.textContent  = st.name || '(unnamed)';
+  titleEl2.style.color  = st.hexColor || '#00e5ff';
+  document.getElementById('info-subtitle').textContent = st.surveyName || '';
+  document.getElementById('info-rows').innerHTML       = html;
+  infoPanel.classList.add('open');
+}
+
+function onPointerTap(e) {
+  const rect    = renderer.domElement.getBoundingClientRect();
+  const clientX = e.clientX ?? (e.changedTouches && e.changedTouches[0].clientX);
+  const clientY = e.clientY ?? (e.changedTouches && e.changedTouches[0].clientY);
+  if (clientX === undefined) return;
+
+  const ndc = new THREE.Vector2(
+     ((clientX - rect.left) / rect.width)  * 2 - 1,
+    -((clientY - rect.top)  / rect.height) * 2 + 1
+  );
+  _tapRay.setFromCamera(ndc, camera);
+
+  // GPS marker check (screen-space)
+  if (gpsMarker && gpsScenePos) {
+    _tmp3.copy(gpsMarker.position).project(camera);
+    if (Math.hypot(_tmp3.x - ndc.x, _tmp3.y - ndc.y) < 0.07) {
+      showInfo('GPS Position', 'Your current location', [
+        ['Easting',   gpsScenePos.x.toFixed(1) + ' m'],
+        ['Northing',  gpsScenePos.y.toFixed(1) + ' m'],
+        ['Elevation', gpsScenePos.z.toFixed(1) + ' m'],
+        ['Compass',   compassHeading !== null ? Math.round(compassHeading) + '°' : 'N/A'],
+      ]);
+      hlRing.visible = false;
+      return;
+    }
+  }
+
+  // Raycast against station sphere meshes
+  const hits = _tapRay.intersectObjects(stationMeshes, false);
+  if (hits.length) {
+    selectStation(hits[0].object._station);
+  } else {
+    infoPanel.classList.remove('open');
+    clearStationHighlight();
+  }
+}
+
+// Drag detection
+let _tapStart = null;
+renderer.domElement.addEventListener('pointerdown', e => { _tapStart = {x: e.clientX, y: e.clientY}; });
+renderer.domElement.addEventListener('pointerup',   e => {
+  if (!_tapStart) return;
+  const moved = Math.hypot(e.clientX - _tapStart.x, e.clientY - _tapStart.y);
+  if (moved < 8) onPointerTap(e);
+  _tapStart = null;
+});
+
+// ── Toolbar ───────────────────────────────────────────────────────────────────
+function fitCamera() {
+  if (!terrainGroup) return;
+  const box = new THREE.Box3().setFromObject(terrainGroup);
+  const ctr = box.getCenter(new THREE.Vector3());
+  const sz  = box.getSize(new THREE.Vector3());
+  controls.target.copy(ctr);
+  camera.position.set(ctr.x, ctr.y - Math.max(sz.x,sz.y)*0.55, ctr.z + Math.max(sz.x,sz.y)*0.3);
+  controls.update();
+}
+document.getElementById('btn-reset').addEventListener('click', fitCamera);
+
+document.getElementById('btn-top').addEventListener('click', () => {
+  if (!terrainGroup) return;
+  const box = new THREE.Box3().setFromObject(terrainGroup);
+  const ctr = box.getCenter(new THREE.Vector3());
+  const sz  = box.getSize(new THREE.Vector3());
+  controls.target.copy(ctr);
+  camera.position.set(ctr.x, ctr.y, ctr.z + Math.max(sz.x,sz.y)*0.75);
+  controls.update();
+});
+
+document.getElementById('btn-cave').addEventListener('click', function() {
+  labelsVisible = !labelsVisible;
+  stationGroup.visible = labelsVisible;
+  this.classList.toggle('off', !labelsVisible);
+  if (!labelsVisible) clearStationHighlight();
+});
+
+document.getElementById('btn-gps').addEventListener('click', function() {
+  gpsActive = !gpsActive;
+  this.classList.toggle('active', gpsActive);
+  if (gpsActive) startGps(); else stopGps();
+});
+
+document.getElementById('btn-follow').addEventListener('click', function() {
+  followMode = !followMode;
+  this.classList.toggle('active', followMode);
+  if (followMode) {
+    startCompass();
+    if (!gpsActive) {
+      gpsActive = true;
+      document.getElementById('btn-gps').classList.add('active');
+      startGps();
+    }
+    // Position camera: ~200m behind GPS point at current zoom
+    if (gpsScenePos) {
+      const { x, y, z } = gpsScenePos;
+      const dist = Math.max(terrainScale * 0.08, 80);
+      controls.target.set(x, y, z);
+      camera.position.set(x, y - dist, z + dist * 0.4);
+      controls.update();
+    }
+  } else {
+    stopCompass();
+  }
+});
+
+document.getElementById('btn-kml').addEventListener('click', () => {
+  document.getElementById('kml-input').click();
+});
+
+// ── Terrain opacity ──────────────────────────────────────────────────────────
+const opacityPanel  = document.getElementById('opacity-panel');
+const opacitySlider = document.getElementById('terrain-opacity-slider');
+const opacityLabel  = document.getElementById('terrain-opacity-label');
+
+document.getElementById('btn-opacity').addEventListener('click', () => {
+  opacityPanel.style.display = opacityPanel.style.display === 'none' ? 'block' : 'none';
+});
+
+opacitySlider.addEventListener('input', () => {
+  const v = parseInt(opacitySlider.value) / 100;
+  opacityLabel.textContent = opacitySlider.value + '%';
+  terrainMaterials.forEach(m => { m.opacity = v; m.needsUpdate = true; });
+});
+
+// ── Hint fade ─────────────────────────────────────────────────────────────────
+const hintEl = document.getElementById('hint');
+setTimeout(() => hintEl.classList.add('gone'), 3500);
+renderer.domElement.addEventListener('pointerdown', () => hintEl.classList.add('gone'), { once: true });
+
+// ── Render loop ───────────────────────────────────────────────────────────────
+let _t = 0;
+(function animate() {
+  requestAnimationFrame(animate);
+  _t += 0.016;
+
+  // GPS marker pulse
+  if (gpsMarker && gpsMarker._ring) {
+    const pulse = 0.85 + 0.15 * Math.sin(_t * 3);
+    gpsMarker._ring.scale.setScalar(pulse);
+  }
+
+  // Follow mode: keep orbit target on GPS
+  if (followMode && gpsScenePos) {
+    controls.target.set(gpsScenePos.x, gpsScenePos.y, gpsScenePos.z);
+  }
+
+  controls.update();
+  renderer.render(scene, camera);
+})();
+</script>
+</body>
+</html>

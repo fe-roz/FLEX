@@ -814,6 +814,7 @@
           <button class="btn btn-primary" type="button" data-target="#caveCollapsible">🕳 Cave</button>
           <button class="btn btn-primary" type="button" data-target="#lidarCollapsible">☁ LiDAR</button>
           <button class="btn btn-primary" type="button" data-target="#toolsCollapsible">🔧 Tools</button>
+          <button class="btn btn-primary" type="button" data-target="#exportCollapsible">📦 Export</button>
           <button class="btn btn-primary" type="button" data-target="#helpCollapsible">❓ Help</button>
         </div>
 
@@ -1105,6 +1106,91 @@
           </div>
         </div>
 
+        <!-- ══════════════ EXPORT ═══════════════════════════════════════════ -->
+        <div class="collapse" id="exportCollapsible">
+          <div class="lp-panel-wrap">
+
+            <!-- BBox draw -->
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▾</span> Area to Export
+              </div>
+              <div class="lp-section-body open" id="lp-export-bbox-body">
+                <div style="padding:2px 0; font-size:11px; color:rgba(255,255,255,0.7);">
+                  Draw a rectangle on the globe, then click Export.
+                </div>
+                <button id="export_draw_btn" class="btn btn-sm btn-primary" style="margin-top:6px; width:100%;"
+                  onclick="window._exportStartDraw()">✏ Draw BBox</button>
+                <div id="export_bbox_display" style="margin-top:6px; font-size:10px; color:rgba(255,255,255,0.5); display:none;">
+                  <span id="export_bbox_text">—</span>
+                  <button class="btn btn-sm btn-secondary" style="font-size:9px;padding:1px 5px;margin-left:4px;"
+                    onclick="window._exportClearBbox()">✕</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Settings -->
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▸</span> Settings
+              </div>
+              <div class="lp-section-body" id="lp-export-settings-body">
+                <div style="padding:2px 0;">
+                  <label style="display:block; margin-bottom:5px;">
+                    Resolution:
+                    <select id="export_resolution" style="margin-left:4px; background:#222; color:#eee; border:1px solid #444; border-radius:3px; padding:2px 4px;">
+                      <option value="0.5">0.5 m (highest)</option>
+                      <option value="1.0" selected>1.0 m (recommended)</option>
+                      <option value="2.0">2.0 m (faster)</option>
+                      <option value="5.0">5.0 m (overview)</option>
+                    </select>
+                  </label>
+                  <label style="display:block; margin-bottom:5px;">
+                    Max triangles:
+                    <select id="export_max_tri" style="margin-left:4px; background:#222; color:#eee; border:1px solid #444; border-radius:3px; padding:2px 4px;">
+                      <option value="200000">200k (fastest)</option>
+                      <option value="500000" selected>500k (recommended)</option>
+                      <option value="1000000">1M (high detail)</option>
+                      <option value="2000000">2M (no limit)</option>
+                    </select>
+                  </label>
+                  <label style="display:block; margin-bottom:5px;">
+                    Texture size:
+                    <select id="export_tex_size" style="margin-left:4px; background:#222; color:#eee; border:1px solid #444; border-radius:3px; padding:2px 4px;">
+                      <option value="1024">1024×1024</option>
+                      <option value="2048" selected>2048×2048</option>
+                      <option value="4096">4096×4096</option>
+                    </select>
+                  </label>
+                  <label style="display:block;">
+                    <input type="checkbox" id="export_include_caves" checked>
+                    Include cave survey lines
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <!-- Export button + progress -->
+            <div style="padding:6px 0;">
+              <button id="export_run_btn" class="btn btn-primary" style="width:100%; font-size:13px;"
+                onclick="window._exportRun()" disabled>
+                📦 Export ZIP
+              </button>
+              <div id="export_progress_wrap" style="display:none; margin-top:8px;">
+                <div style="height:4px; background:rgba(255,255,255,.12); border-radius:2px;">
+                  <div id="export_progress_bar" style="height:4px; width:0; background:#00e5ff; border-radius:2px; transition:width .4s;"></div>
+                </div>
+                <div id="export_status_text" style="font-size:10px; color:rgba(255,255,255,0.55); margin-top:4px;">Starting…</div>
+              </div>
+              <div id="export_download_wrap" style="display:none; margin-top:8px;">
+                <a id="export_download_link" class="btn btn-primary" style="width:100%; text-align:center; display:block; font-size:12px;"
+                  href="#" download>⬇ Download ZIP</a>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
         <!-- ══════════════ HELP ════════════════════════════════════════════ -->
         <div class="collapse" id="helpCollapsible">
           <div class="lp-panel-wrap">
@@ -1241,6 +1327,7 @@
             '#caveCollapsible',
             '#lidarCollapsible',
             '#toolsCollapsible',
+            '#exportCollapsible',
             '#helpCollapsible',
           ];
 
@@ -1592,6 +1679,284 @@
 
   <!-- ── Rectify pick-mode banner ──────────────────────────────────────────── -->
   <!-- Station-pick banner -->
+  <!-- ── Export bbox draw banner ──────────────────────────────────────────── -->
+  <div id="export-draw-banner" style="display:none;position:fixed;top:60px;left:50%;transform:translateX(-50%);
+    z-index:10002;background:rgba(0,150,255,0.92);color:#fff;padding:10px 24px;border-radius:8px;
+    font-size:14px;font-weight:600;box-shadow:0 2px 16px rgba(0,0,0,0.5);text-align:center;cursor:default;">
+    ✏ Click first corner &nbsp;·&nbsp; <span style="opacity:0.75;font-size:12px;">Esc to cancel</span>
+  </div>
+
+  <script>
+  // ── FLEX Export UI ──────────────────────────────────────────────────────────
+  (function() {
+    'use strict';
+    let _bboxCorner1 = null, _bboxCorner2 = null;
+    let _drawHandler = null, _drawEntity = null;
+    let _exportJobId = null, _pollTimer = null;
+
+    // ── Draw bbox ────────────────────────────────────────────────────────────
+    window._exportStartDraw = function() {
+      if (_drawHandler) return;
+      _exportClearBbox();
+      const banner = document.getElementById('export-draw-banner');
+      banner.style.display = 'block';
+      banner.textContent = '✏ Click first corner  ·  Esc to cancel';
+
+      // Esc handler
+      const onKey = (e) => { if (e.key === 'Escape') { _stopDraw(); } };
+      document.addEventListener('keydown', onKey);
+
+      let step = 0;
+      _drawHandler = new Cesium.ScreenSpaceEventHandler(cesiumViewer.canvas);
+
+      _drawHandler.setInputAction((mv) => {
+        const pos = _pickPos(mv.position);
+        if (!pos) return;
+        const carto = Cesium.Cartographic.fromCartesian(pos);
+        const lon = Cesium.Math.toDegrees(carto.longitude);
+        const lat = Cesium.Math.toDegrees(carto.latitude);
+
+        if (step === 0) {
+          _bboxCorner1 = [lon, lat];
+          step = 1;
+          banner.textContent = '✏ Click opposite corner  ·  Esc to cancel';
+        } else {
+          _bboxCorner2 = [lon, lat];
+          _drawRectEntity();
+          _stopDraw();
+          document.removeEventListener('keydown', onKey);
+          _updateBboxDisplay();
+          document.getElementById('export_run_btn').disabled = false;
+        }
+      }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+      _drawHandler.setInputAction(() => {
+        _stopDraw();
+        document.removeEventListener('keydown', onKey);
+      }, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
+    };
+
+    function _pickPos(windowPos) {
+      try {
+        const ray = cesiumViewer.camera.getPickRay(windowPos);
+        const pos = cesiumViewer.scene.globe.pick(ray, cesiumViewer.scene);
+        return pos || null;
+      } catch (e) { return null; }
+    }
+
+    function _stopDraw() {
+      if (_drawHandler) { _drawHandler.destroy(); _drawHandler = null; }
+      document.getElementById('export-draw-banner').style.display = 'none';
+    }
+
+    function _drawRectEntity() {
+      if (_drawEntity) { try { cesiumViewer.entities.remove(_drawEntity); } catch(e){} }
+      if (!_bboxCorner1 || !_bboxCorner2) return;
+      const [w, s] = [Math.min(_bboxCorner1[0], _bboxCorner2[0]), Math.min(_bboxCorner1[1], _bboxCorner2[1])];
+      const [e, n] = [Math.max(_bboxCorner1[0], _bboxCorner2[0]), Math.max(_bboxCorner1[1], _bboxCorner2[1])];
+      _drawEntity = cesiumViewer.entities.add({
+        rectangle: {
+          coordinates: Cesium.Rectangle.fromDegrees(w, s, e, n),
+          material: Cesium.Color.fromCssColorString('#0099ff').withAlpha(0.18),
+          outline: true, outlineColor: Cesium.Color.fromCssColorString('#00aaff'), outlineWidth: 2
+        }
+      });
+    }
+
+    window._exportClearBbox = function() {
+      _bboxCorner1 = _bboxCorner2 = null;
+      if (_drawEntity) { try { cesiumViewer.entities.remove(_drawEntity); } catch(e){} _drawEntity = null; }
+      document.getElementById('export_bbox_display').style.display = 'none';
+      document.getElementById('export_run_btn').disabled = true;
+      document.getElementById('export_download_wrap').style.display = 'none';
+    };
+
+    function _updateBboxDisplay() {
+      if (!_bboxCorner1 || !_bboxCorner2) return;
+      const [w, s] = [Math.min(_bboxCorner1[0], _bboxCorner2[0]), Math.min(_bboxCorner1[1], _bboxCorner2[1])];
+      const [e, n] = [Math.max(_bboxCorner1[0], _bboxCorner2[0]), Math.max(_bboxCorner1[1], _bboxCorner2[1])];
+      document.getElementById('export_bbox_text').textContent =
+        `${s.toFixed(4)}°N, ${w.toFixed(4)}°W → ${n.toFixed(4)}°N, ${e.toFixed(4)}°W`;
+      document.getElementById('export_bbox_display').style.display = 'block';
+    }
+
+    // ── Collect cave shots within bbox ───────────────────────────────────────
+    function _collectCavesInBbox(minLon, minLat, maxLon, maxLat) {
+      // Access the global cave import state from flex.js
+      const surveys = [];
+      const surveyMap = {};
+
+      try {
+        // Iterate all Cesium entities with isCaveSurvey property
+        cesiumViewer.entities.values.forEach(entity => {
+          if (!entity.properties || !entity.properties.isCaveSurvey || !entity.properties.isCaveSurvey.getValue()) return;
+          if (!entity.polyline) return;
+          const positions = entity.polyline.positions.getValue(Cesium.JulianDate.now());
+          if (!positions || positions.length < 2) return;
+
+          const pts = positions.map(p => {
+            const c = Cesium.Cartographic.fromCartesian(p);
+            return [Cesium.Math.toDegrees(c.longitude), Cesium.Math.toDegrees(c.latitude), c.height];
+          });
+
+          // Check if shot midpoint is within bbox
+          const midLon = (pts[0][0] + pts[1][0]) / 2;
+          const midLat = (pts[0][1] + pts[1][1]) / 2;
+          if (midLon < minLon || midLon > maxLon || midLat < minLat || midLat > maxLat) return;
+
+          const code  = entity.properties.surveyCode ? entity.properties.surveyCode.getValue() : '';
+          // Initial name is just the code — 3rd pass enriches it with the real per-survey description
+          const name  = code || 'Unknown';
+          const color = entity.polyline.material ?
+            (entity.polyline.material.color ? entity.polyline.material.color.getValue(Cesium.JulianDate.now()).toCssHexString() : '#00e5ff') : '#00e5ff';
+          const key   = code || name;
+
+          if (!surveyMap[key]) {
+            surveyMap[key] = { name, color, shots: [] };
+            surveys.push(surveyMap[key]);
+          }
+          surveyMap[key].shots.push({ from: pts[0], to: pts[1] });
+        });
+      } catch(e) { console.warn('Cave export collection error:', e); }
+
+      // Second pass: collect station point-entities (name + lon/lat/elev)
+      try {
+        cesiumViewer.entities.values.forEach(entity => {
+          if (!entity.properties || !entity.properties.isCaveSurvey || !entity.properties.isCaveSurvey.getValue()) return;
+          if (!entity.point || !entity.position) return;
+          const cart = entity.position.getValue(Cesium.JulianDate.now());
+          if (!cart) return;
+          const c = Cesium.Cartographic.fromCartesian(cart);
+          const lon = Cesium.Math.toDegrees(c.longitude);
+          const lat = Cesium.Math.toDegrees(c.latitude);
+          if (lon < minLon || lon > maxLon || lat < minLat || lat > maxLat) return;
+          const code  = entity.properties.surveyCode ? entity.properties.surveyCode.getValue() : '';
+          const sname = entity.properties.surveyName ? entity.properties.surveyName.getValue() : '';
+          const key   = code || sname;
+          if (!surveyMap[key]) return; // only attach to surveys already collected via shots
+          if (!surveyMap[key].stations) surveyMap[key].stations = [];
+          surveyMap[key].stations.push({ name: entity.name || '', lon, lat, elev: c.height });
+        });
+      } catch(e) { console.warn('Cave station export error:', e); }
+
+      // Third pass: enrich stations with lrud/dist AND survey names from _caveImports (flex.js global)
+      try {
+        const imports = typeof _caveImports !== 'undefined' ? _caveImports : [];
+        imports.forEach(imp => {
+          if (!imp || !imp.parsed) return;
+          // Build surveyCode → description map.
+          // Try imp.parsed.surveys[] first (most PLT parsers put descriptions there),
+          // then fall back to station-level surveyDesc.
+          const descMap = {};
+          if (imp.parsed.surveys) {
+            imp.parsed.surveys.forEach(sv => {
+              const c = sv.code || sv.survey || sv.name;
+              const d = sv.description || sv.desc || sv.surveyName || sv.title;
+              if (c && d && !descMap[c]) descMap[c] = d;
+            });
+          }
+          if (imp.parsed.stations) {
+            imp.parsed.stations.forEach(s => {
+              if (s.survey && s.surveyDesc && !descMap[s.survey]) descMap[s.survey] = s.surveyDesc;
+            });
+          }
+          // Apply full survey name (code — description)
+          Object.entries(descMap).forEach(([code, desc]) => {
+            if (surveyMap[code] && desc) surveyMap[code].name = `${code} — ${desc}`;
+          });
+          // Enrich station lrud/dist by name match
+          (imp.parsed.stations || []).forEach(s => {
+            const key = s.survey || '';
+            if (!surveyMap[key] || !surveyMap[key].stations) return;
+            const match = surveyMap[key].stations.find(st => st.name === s.name);
+            if (!match) return;
+            if (s.lrud) match.lrud = [s.lrud.l, s.lrud.r, s.lrud.u, s.lrud.d];
+            if (s.dist !== undefined) match.dist = s.dist;
+          });
+        });
+      } catch(e) { console.warn('Cave LRUD/dist enrichment error:', e); }
+
+      return { surveys };
+    }
+
+    // ── Run export ───────────────────────────────────────────────────────────
+    window._exportRun = function() {
+      if (!_bboxCorner1 || !_bboxCorner2) { alert('Draw a bbox first.'); return; }
+
+      const [w, s] = [Math.min(_bboxCorner1[0], _bboxCorner2[0]), Math.min(_bboxCorner1[1], _bboxCorner2[1])];
+      const [e, n] = [Math.max(_bboxCorner1[0], _bboxCorner2[0]), Math.max(_bboxCorner1[1], _bboxCorner2[1])];
+
+      const resolution  = parseFloat(document.getElementById('export_resolution').value);
+      const maxTri      = parseInt(document.getElementById('export_max_tri').value);
+      const texSize     = parseInt(document.getElementById('export_tex_size').value);
+      const includeCaves = document.getElementById('export_include_caves').checked;
+
+      const caves = includeCaves ? _collectCavesInBbox(w, s, e, n) : { surveys: [] };
+
+      const body = {
+        bbox: [w, s, e, n],
+        resolution,
+        max_triangles: maxTri,
+        tex_size: texSize,
+        caves,
+      };
+
+      document.getElementById('export_run_btn').disabled = true;
+      document.getElementById('export_progress_wrap').style.display = 'block';
+      document.getElementById('export_download_wrap').style.display = 'none';
+      _setProgress(0, 'Submitting…');
+
+      fetch('/api/export/terrain', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) throw new Error(data.error);
+        _exportJobId = data.jobId;
+        _pollProgress();
+      })
+      .catch(err => {
+        _setProgress(0, '❌ ' + err.message);
+        document.getElementById('export_run_btn').disabled = false;
+      });
+    };
+
+    function _setProgress(pct, msg) {
+      document.getElementById('export_progress_bar').style.width = pct + '%';
+      document.getElementById('export_status_text').textContent = msg;
+    }
+
+    function _pollProgress() {
+      if (!_exportJobId) return;
+      clearTimeout(_pollTimer);
+      fetch('/api/export/status/' + _exportJobId)
+      .then(r => r.json())
+      .then(data => {
+        _setProgress(data.progress || 0, data.message || data.status || '…');
+        if (data.status === 'done') {
+          _setProgress(100, '✅ Done!');
+          const dl = document.getElementById('export_download_link');
+          dl.href = '/api/export/download/' + _exportJobId;
+          dl.download = 'flex_export.zip';
+          document.getElementById('export_download_wrap').style.display = 'block';
+          document.getElementById('export_run_btn').disabled = false;
+        } else if (data.status === 'error') {
+          _setProgress(0, '❌ ' + (data.error || 'Export failed'));
+          document.getElementById('export_run_btn').disabled = false;
+        } else {
+          _pollTimer = setTimeout(_pollProgress, 1500);
+        }
+      })
+      .catch(() => {
+        _pollTimer = setTimeout(_pollProgress, 2000);
+      });
+    }
+
+  })(); // end export UI
+  </script>
+
   <div id="rectify-station-pick-banner" style="display:none;position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:10001;background:rgba(60,130,255,0.93);color:#fff;padding:10px 24px;border-radius:8px;font-size:14px;font-weight:600;box-shadow:0 2px 16px rgba(0,0,0,0.5);pointer-events:none;text-align:center;">
     🗺 Click a station dot on the map &nbsp;·&nbsp; <span style="opacity:0.8;font-size:12px;">Esc to cancel</span>
   </div>
