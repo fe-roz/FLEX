@@ -1,5 +1,5 @@
 @echo test
-chdir /d C:\FLEX
+chdir /d C:\Users\feroz\FLEX
 START "" node server.js
 START chrome http://localhost:8081/index.html
 pause

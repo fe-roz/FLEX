@@ -89,6 +89,12 @@ const server = http.createServer((req, res) => {
         handleEntwineStart(req, res);
     } else if (sanitizedPath === '/api/entwine/stop' && req.method === 'POST') {
         handleEntwineStop(req, res);
+    } else if (sanitizedPath === '/api/export/terrain' && req.method === 'POST') {
+        handleExportTerrain(req, res);
+    } else if (sanitizedPath.startsWith('/api/export/status/') && req.method === 'GET') {
+        handleExportStatus(req, res, sanitizedPath.slice('/api/export/status/'.length));
+    } else if (sanitizedPath.startsWith('/api/export/download/') && req.method === 'GET') {
+        handleExportDownload(req, res, sanitizedPath.slice('/api/export/download/'.length));
     // ── CORS preflight ────────────────────────────────────────────────────────
     } else if (req.method === 'OPTIONS') {
         res.writeHead(204, {
@@ -642,4 +648,122 @@ function handleRecentsPost(req, res) {
             jsonResponse(res, { ok: false, error: e.message }, 400);
         }
     });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Terrain Export  (/api/export/*)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const _exportJobs = {};  // jobId → { status, progress, outPath, error }
+
+const CONDA_PYTHON = 'C:\\Users\\feroz\\miniconda3\\envs\\entwine\\python.exe';
+const EXPORT_SCRIPT = path.join(__dirname, 'export_terrain.py');
+const EXPORT_OUT_DIR = path.join(__dirname, 'user_files', 'exports');
+
+function handleExportTerrain(req, res) {
+    let body = '';
+    req.on('data', c => { body += c; });
+    req.on('end', () => {
+        let params;
+        try { params = JSON.parse(body); } catch(e) {
+            return jsonResponse(res, { ok: false, error: 'Invalid JSON' }, 400);
+        }
+        const {
+            bbox,
+            eptPath,
+            caves,           // JSON object from FLEX (surveys with lon/lat/alt shots)
+            resolution  = 1.0,
+            max_triangles = 500000,
+            tex_size    = 2048,
+        } = params;
+        if (!bbox || bbox.length !== 4) return jsonResponse(res, { ok: false, error: 'bbox required: [minLon,minLat,maxLon,maxLat]' }, 400);
+
+        const jobId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        if (!fs.existsSync(EXPORT_OUT_DIR)) fs.mkdirSync(EXPORT_OUT_DIR, { recursive: true });
+        const outZip = path.join(EXPORT_OUT_DIR, `export_${jobId}.zip`);
+        const ept = eptPath || path.join(require('os').homedir(), 'entwine', 'marbles', 'ept.json');
+
+        _exportJobs[jobId] = { status: 'running', progress: [], outPath: outZip, error: null };
+        jsonResponse(res, { ok: true, jobId });
+
+        // Write caves JSON to a temp file so Python can read it
+        let cavesFilePath = null;
+        if (caves && caves.surveys && caves.surveys.length > 0) {
+            cavesFilePath = path.join(EXPORT_OUT_DIR, `caves_${jobId}.json`);
+            fs.writeFileSync(cavesFilePath, JSON.stringify(caves));
+        }
+
+        const args = [
+            EXPORT_SCRIPT,
+            '--ept',           ept,
+            '--bbox',          ...bbox.map(String),
+            '--out',           outZip,
+            '--resolution',    String(resolution),
+            '--max-triangles', String(max_triangles),
+            '--tex-size',      String(tex_size),
+        ];
+        if (cavesFilePath) args.push('--caves', cavesFilePath);
+
+        const proc = spawn(CONDA_PYTHON, args);
+        proc.stdout.on('data', d => {
+            d.toString().split('\n').forEach(line => {
+                line = line.trim();
+                if (!line) return;
+                console.log('[export]', line);
+                _exportJobs[jobId].progress.push(line);
+            });
+        });
+        proc.stderr.on('data', d => {
+            d.toString().split('\n').forEach(line => {
+                line = line.trim();
+                if (!line) return;
+                console.warn('[export-err]', line);
+                _exportJobs[jobId].progress.push('⚠ ' + line);
+            });
+        });
+        proc.on('close', code => {
+            // Clean up temp caves file
+            if (cavesFilePath && fs.existsSync(cavesFilePath)) {
+                try { fs.unlinkSync(cavesFilePath); } catch(_) {}
+            }
+            if (code === 0 && fs.existsSync(outZip)) {
+                _exportJobs[jobId].status = 'done';
+                console.log('[export] done:', jobId);
+            } else {
+                _exportJobs[jobId].status = 'error';
+                _exportJobs[jobId].error = `Process exited with code ${code}`;
+                console.error('[export] failed:', jobId, code);
+            }
+        });
+    });
+}
+
+function handleExportStatus(req, res, jobId) {
+    const job = _exportJobs[jobId];
+    if (!job) return jsonResponse(res, { ok: false, error: 'Unknown job' }, 404);
+    // Return last progress line as 'message' and a rough progress % based on step markers
+    const lines = job.progress;
+    const last = lines[lines.length - 1] || '';
+    let pct = 5;
+    if      (last.includes('[1/') || last.includes('Fetching')) pct = 15;
+    else if (last.includes('[2/') || last.includes('Building CSF')) pct = 40;
+    else if (last.includes('[3/') || last.includes('Triangul')) pct = 55;
+    else if (last.includes('[4/') || last.includes('satellite')) pct = 70;
+    else if (last.includes('[5/') || last.includes('Packaging GLB')) pct = 85;
+    else if (last.includes('[6/') || last.includes('Writing')) pct = 95;
+    if (job.status === 'done') pct = 100;
+    jsonResponse(res, { status: job.status, progress: pct, message: last, error: job.error });
+}
+
+function handleExportDownload(req, res, jobId) {
+    const job = _exportJobs[jobId];
+    if (!job || job.status !== 'done') return jsonResponse(res, { ok: false, error: 'Not ready' }, 404);
+    const stat = fs.statSync(job.outPath);
+    res.writeHead(200, {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': `attachment; filename="flex_export_${jobId}.zip"`,
+        'Content-Length': stat.size,
+        'Access-Control-Allow-Origin': '*',
+    });
+    fs.createReadStream(job.outPath).pipe(res);
 }
