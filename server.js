@@ -672,16 +672,19 @@ function handleExportTerrain(req, res) {
             bbox,
             eptPath,
             caves,           // JSON object from FLEX (surveys with lon/lat/alt shots)
-            resolution  = 1.0,
-            max_triangles = 500000,
-            tex_size    = 2048,
+            resolution        = 1.0,
+            max_triangles     = 2000000,
+            tex_size          = 16384,
+            satellite_source  = 'bing',
+            hillshade_url     = '',
         } = params;
         if (!bbox || bbox.length !== 4) return jsonResponse(res, { ok: false, error: 'bbox required: [minLon,minLat,maxLon,maxLat]' }, 400);
+        if (!eptPath) return jsonResponse(res, { ok: false, error: 'eptPath is required — select a dataset in the export panel' }, 400);
 
         const jobId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
         if (!fs.existsSync(EXPORT_OUT_DIR)) fs.mkdirSync(EXPORT_OUT_DIR, { recursive: true });
         const outZip = path.join(EXPORT_OUT_DIR, `export_${jobId}.zip`);
-        const ept = eptPath || path.join(require('os').homedir(), 'entwine', 'marbles', 'ept.json');
+        const ept = eptPath;
 
         _exportJobs[jobId] = { status: 'running', progress: [], outPath: outZip, error: null };
         jsonResponse(res, { ok: true, jobId });
@@ -695,13 +698,15 @@ function handleExportTerrain(req, res) {
 
         const args = [
             EXPORT_SCRIPT,
-            '--ept',           ept,
-            '--bbox',          ...bbox.map(String),
-            '--out',           outZip,
-            '--resolution',    String(resolution),
-            '--max-triangles', String(max_triangles),
-            '--tex-size',      String(tex_size),
+            '--ept',               ept,
+            '--bbox',              ...bbox.map(String),
+            '--out',               outZip,
+            '--resolution',        String(resolution),
+            '--max-triangles',     String(max_triangles),
+            '--tex-size',          String(tex_size),
+            '--satellite-source',  satellite_source,
         ];
+        if (hillshade_url) args.push('--hillshade-url', hillshade_url);
         if (cavesFilePath) args.push('--caves', cavesFilePath);
 
         const proc = spawn(CONDA_PYTHON, args);

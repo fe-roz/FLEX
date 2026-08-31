@@ -1129,6 +1129,28 @@
               </div>
             </div>
 
+            <!-- EPT source -->
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▾</span> Point Cloud
+              </div>
+              <div class="lp-section-body open" id="lp-export-ept-body">
+                <div style="padding:2px 0;">
+                  <label style="display:block; margin-bottom:4px; font-size:11px; color:rgba(255,255,255,0.7);">
+                    Dataset:
+                  </label>
+                  <div style="display:flex; gap:5px; align-items:center;">
+                    <select id="export_ept_select" style="flex:1; min-width:0; background:#222; color:#eee; border:1px solid #444; border-radius:3px; padding:4px 6px; font-size:11px;">
+                      <option value="">— open panel to load —</option>
+                    </select>
+                    <button onclick="window._refreshEptDatasets && window._refreshEptDatasets()"
+                      style="flex-shrink:0; background:#222; border:1px solid #444; border-radius:3px; color:#eee; font-size:13px; padding:3px 7px; cursor:pointer;" title="Refresh list">↺</button>
+                  </div>
+                  <div id="export_ept_hint" style="font-size:10px; color:rgba(255,255,255,0.35); margin-top:3px;"></div>
+                </div>
+              </div>
+            </div>
+
             <!-- Settings -->
             <div class="lp-section">
               <div class="lp-section-header" onclick="window._lpToggle(this)">
@@ -1139,8 +1161,8 @@
                   <label style="display:block; margin-bottom:5px;">
                     Resolution:
                     <select id="export_resolution" style="margin-left:4px; background:#222; color:#eee; border:1px solid #444; border-radius:3px; padding:2px 4px;">
-                      <option value="0.5">0.5 m (highest)</option>
-                      <option value="1.0" selected>1.0 m (recommended)</option>
+                      <option value="0.5" selected>0.5 m (highest)</option>
+                      <option value="1.0">1.0 m</option>
                       <option value="2.0">2.0 m (faster)</option>
                       <option value="5.0">5.0 m (overview)</option>
                     </select>
@@ -1149,23 +1171,52 @@
                     Max triangles:
                     <select id="export_max_tri" style="margin-left:4px; background:#222; color:#eee; border:1px solid #444; border-radius:3px; padding:2px 4px;">
                       <option value="200000">200k (fastest)</option>
-                      <option value="500000" selected>500k (recommended)</option>
+                      <option value="500000">500k</option>
                       <option value="1000000">1M (high detail)</option>
-                      <option value="2000000">2M (no limit)</option>
+                      <option value="2000000" selected>2M (recommended)</option>
                     </select>
                   </label>
                   <label style="display:block; margin-bottom:5px;">
                     Texture size:
                     <select id="export_tex_size" style="margin-left:4px; background:#222; color:#eee; border:1px solid #444; border-radius:3px; padding:2px 4px;">
                       <option value="1024">1024×1024</option>
-                      <option value="2048" selected>2048×2048</option>
+                      <option value="2048">2048×2048</option>
                       <option value="4096">4096×4096</option>
+                      <option value="8192">8192×8192</option>
+                      <option value="16384" selected>16384×16384</option>
                     </select>
                   </label>
                   <label style="display:block;">
                     <input type="checkbox" id="export_include_caves" checked>
                     Include cave survey lines
                   </label>
+                </div>
+              </div>
+            </div>
+
+            <!-- Maps -->
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▸</span> Maps
+              </div>
+              <div class="lp-section-body" id="lp-export-maps-body">
+                <div style="padding:2px 0;">
+                  <label style="display:block; margin-bottom:5px;">
+                    Satellite source:
+                    <select id="export_satellite_source" style="margin-left:4px; background:#222; color:#eee; border:1px solid #444; border-radius:3px; padding:2px 4px;">
+                      <option value="esri">ESRI</option>
+                      <option value="bing" selected>Bing (default)</option>
+                    </select>
+                  </label>
+                  <label style="display:block; margin-bottom:3px; font-size:11px; color:rgba(255,255,255,0.8);">
+                    Hillshade URL (optional):
+                  </label>
+                  <input type="text" id="export_hillshade_url"
+                    placeholder="https://api.mapbox.com/…"
+                    style="width:100%; box-sizing:border-box; background:#1a1a1a; color:#eee; border:1px solid #444; border-radius:3px; padding:4px 6px; font-size:11px; font-family:monospace;" />
+                  <div style="font-size:10px; color:rgba(255,255,255,0.4); margin-top:3px;">
+                    Leave blank to skip hillshade overlay.
+                  </div>
                 </div>
               </div>
             </div>
@@ -1694,6 +1745,71 @@
     let _drawHandler = null, _drawEntity = null;
     let _exportJobId = null, _pollTimer = null;
 
+    // ── EPT dataset loader — reads directly from loaded Potree point clouds ───
+    window._refreshEptDatasets = function _refreshEptDatasets() {
+      const sel  = document.getElementById('export_ept_select');
+      const hint = document.getElementById('export_ept_hint');
+      if (!sel) return;
+      try {
+        const pcs = window.potreeViewer && window.potreeViewer.scene && window.potreeViewer.scene.pointclouds;
+        if (!pcs || !pcs.length) {
+          sel.innerHTML = '<option value="">— no point clouds loaded —</option>';
+          hint.textContent = 'Load a point cloud in the LiDAR panel first.';
+          return;
+        }
+        sel.innerHTML = '';
+        pcs.forEach(pc => {
+          const name = pc.name || '';
+          // Prefer the original URL we captured in the addPC hook (has scheme + ept.json)
+          // Fall back to pcoGeometry.url and ensure it ends with ept.json
+          let url = _eptOriginalUrls[name] || (pc.pcoGeometry && pc.pcoGeometry.url) || '';
+          if (url && !url.endsWith('ept.json')) url = url.replace(/\/$/, '') + '/ept.json';
+          const opt = document.createElement('option');
+          opt.value       = url;
+          opt.textContent = name || url;
+          sel.appendChild(opt);
+        });
+        hint.textContent = pcs.length === 1 ? 'Auto-selected.' : pcs.length + ' datasets loaded.';
+      } catch(e) {
+        sel.innerHTML = '<option value="">— error reading viewer —</option>';
+        hint.textContent = e.message;
+      }
+    }
+
+    // Refresh whenever the export panel is opened
+    const _exportCollapsible = document.getElementById('exportCollapsible');
+    if (_exportCollapsible) {
+      new MutationObserver(() => {
+        if (_exportCollapsible.classList.contains('show')) _refreshEptDatasets();
+      }).observe(_exportCollapsible, { attributes: true, attributeFilter: ['class'] });
+    }
+
+    // Track original URLs passed to addPC (pcoGeometry.url strips the scheme)
+    const _eptOriginalUrls = {}; // pcName -> original full URL with ept.json
+
+    // Also refresh when a PC is added — wrap window.addPC once it exists
+    function _hookAddPC() {
+      if (window.addPC && !window.addPC._eptRefreshHooked) {
+        const _orig = window.addPC;
+        window.addPC = function(url) {
+          // Capture original URL, keyed by the same name flex.js derives
+          if (url) {
+            try {
+              const name = url.replace(/\/ept\.json.*$/i, '').split('/').filter(Boolean).pop() || url;
+              _eptOriginalUrls[name] = url.endsWith('ept.json') ? url : url.replace(/\/$/, '') + '/ept.json';
+            } catch(_) {}
+          }
+          const result = _orig.apply(this, arguments);
+          setTimeout(_refreshEptDatasets, 1500);
+          return result;
+        };
+        window.addPC._eptRefreshHooked = true;
+      }
+    }
+    // Try immediately, then keep trying until addPC exists
+    _hookAddPC();
+    const _hookInterval = setInterval(() => { _hookAddPC(); if (window.addPC && window.addPC._eptRefreshHooked) clearInterval(_hookInterval); }, 500);
+
     // ── Draw bbox ────────────────────────────────────────────────────────────
     window._exportStartDraw = function() {
       if (_drawHandler) return;
@@ -1886,18 +2002,25 @@
       const [w, s] = [Math.min(_bboxCorner1[0], _bboxCorner2[0]), Math.min(_bboxCorner1[1], _bboxCorner2[1])];
       const [e, n] = [Math.max(_bboxCorner1[0], _bboxCorner2[0]), Math.max(_bboxCorner1[1], _bboxCorner2[1])];
 
-      const resolution  = parseFloat(document.getElementById('export_resolution').value);
-      const maxTri      = parseInt(document.getElementById('export_max_tri').value);
-      const texSize     = parseInt(document.getElementById('export_tex_size').value);
-      const includeCaves = document.getElementById('export_include_caves').checked;
+      const eptPath          = document.getElementById('export_ept_select').value;
+      const resolution       = parseFloat(document.getElementById('export_resolution').value);
+      const maxTri           = parseInt(document.getElementById('export_max_tri').value);
+      const texSize          = parseInt(document.getElementById('export_tex_size').value);
+      const includeCaves     = document.getElementById('export_include_caves').checked;
+      const satelliteSource  = document.getElementById('export_satellite_source').value;
+      const hillshadeUrl     = document.getElementById('export_hillshade_url').value.trim();
+      if (!eptPath) { alert('Select a point cloud dataset first.'); document.getElementById('export_run_btn').disabled = false; return; }
 
       const caves = includeCaves ? _collectCavesInBbox(w, s, e, n) : { surveys: [] };
 
       const body = {
         bbox: [w, s, e, n],
+        eptPath,
         resolution,
         max_triangles: maxTri,
         tex_size: texSize,
+        satellite_source: satelliteSource,
+        hillshade_url: hillshadeUrl,
         caves,
       };
 

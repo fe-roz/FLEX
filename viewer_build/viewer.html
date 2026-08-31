@@ -3,7 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>FLEX Cave Viewer</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<title>FLEX Portable Viewer</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: #0a0a0f; color: #eee; font-family: system-ui, sans-serif; overflow: hidden; }
@@ -32,6 +35,7 @@
   #toolbar {
     position: fixed; right: 12px; top: 50%; transform: translateY(-50%);
     display: flex; flex-direction: column; gap: 8px; pointer-events: all;
+    z-index: 30;
   }
   .tb-btn {
     width: 42px; height: 42px; border-radius: 9px;
@@ -44,20 +48,48 @@
   .tb-btn:active { background: rgba(0,229,255,.18); }
   .tb-btn.off { opacity: .3; }
   .tb-btn.active { background: rgba(33,150,243,.35); border-color: #2196F3; }
+  .tb-btn.follow-active { background: rgba(102,187,106,.25); border-color: #66bb6a; }
 
-  #legend {
-    position: fixed; bottom: 24px; right: 12px;
-    background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.1);
-    border-radius: 8px; padding: 8px 12px; font-size: 11px;
-    max-width: 180px; pointer-events: none;
+  /* Combined map panel */
+  #map-panel {
+    display:none; position:fixed; right:62px; top:50%; transform:translateY(-50%);
+    background:rgba(10,10,20,.9); border:1px solid rgba(255,255,255,.13);
+    border-radius:10px; padding:12px 14px; z-index:15; pointer-events:all;
+    min-width:130px;
   }
-  #legend h3 { font-size: 9px; text-transform: uppercase; letter-spacing: .8px; opacity: .4; margin-bottom: 6px; }
-  .leg-row { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0; }
-  .leg-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; margin-top: 2px; }
-  .leg-info { flex: 1; min-width: 0; }
-  .leg-nm { opacity: .85; font-size: 11px; line-height: 1.35; word-break: break-word; }
-  .leg-shots { font-size: 9px; opacity: .4; margin-top: 1px; }
-  #legend.empty { display: none; }
+  #map-panel-section { margin-bottom:10px; }
+  #map-panel-section:last-child { margin-bottom:0; }
+  .map-section-label {
+    font-size:10px; opacity:.45; margin-bottom:6px; text-align:center; letter-spacing:.06em;
+  }
+  .layer-btns { display:flex; gap:6px; justify-content:center; }
+  .layer-btn {
+    flex:1; padding:5px 0; border-radius:6px; border:1px solid rgba(255,255,255,.15);
+    background:rgba(255,255,255,.06); color:#eee; font-size:11px; cursor:pointer;
+    -webkit-tap-highlight-color:transparent; transition:background .12s;
+  }
+  .layer-btn.active { background:rgba(33,150,243,.35); border-color:#2196F3; }
+
+  /* Help overlay */
+  #help-overlay {
+    position:fixed; inset:0; background:rgba(0,0,0,.78); z-index:90;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:24px; cursor:pointer; transition:opacity .4s;
+  }
+  #help-overlay.hidden { opacity:0; pointer-events:none; }
+  #help-box {
+    background:rgba(15,15,25,.95); border:1px solid rgba(255,255,255,.13);
+    border-radius:14px; padding:20px 22px; max-width:340px; width:100%;
+    pointer-events:none;
+  }
+  #help-box h2 { font-size:15px; font-weight:600; margin-bottom:14px; opacity:.9; text-align:center; }
+  .help-row { display:flex; align-items:baseline; gap:10px; margin-bottom:9px; font-size:13px; }
+  .help-icon { font-size:17px; width:26px; text-align:center; flex-shrink:0; }
+  .help-desc { opacity:.75; line-height:1.4; }
+  .help-section { font-size:10px; opacity:.38; letter-spacing:.07em; margin:12px 0 8px; }
+  #help-dismiss { margin-top:16px; font-size:11px; opacity:.35; text-align:center; }
+
+  #legend { display: none; }
 
   #hint {
     position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
@@ -84,7 +116,7 @@
     background: rgba(10,10,20,.92); border-top: 1px solid rgba(255,255,255,.12);
     border-radius: 16px 16px 0 0; padding: 16px 18px 28px;
     transform: translateY(100%); transition: transform .28s ease;
-    z-index: 20; pointer-events: all;
+    z-index: 30; pointer-events: all;
     max-height: 45vh; overflow-y: auto;
   }
   #info-panel.open { transform: translateY(0); }
@@ -110,6 +142,30 @@
   }
   #compass.show { display: block; }
   #compass svg { transform-origin: center; }
+
+  /* North arrow — always visible, shows camera heading */
+  #north-canvas {
+    position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+    width: 44px; height: 44px; pointer-events: none; z-index: 12;
+  }
+
+  /* Mode toast */
+  #mode-toast {
+    position: fixed; bottom: 88px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,.72); border: 1px solid rgba(255,255,255,.15);
+    border-radius: 20px; padding: 6px 16px; font-size: 12px; color: #eee;
+    pointer-events: none; z-index: 40;
+    opacity: 0; transition: opacity .2s;
+  }
+  #mode-toast.show { opacity: 1; }
+
+  /* Fly-mode joystick overlay — purely visual, never blocks input */
+  #joy-canvas {
+    position: fixed; inset: 0; z-index: 22;
+    display: none; pointer-events: none;
+  }
+  #joy-canvas.active { display: block; }
+  .tb-btn.fly-active { background: rgba(255,160,0,.35); border-color: #ffa000; }
 </style>
 </head>
 <body>
@@ -127,7 +183,7 @@
 
 <div id="hud">
   <div id="title-bar">
-    <h1>FLEX Cave Viewer</h1>
+    <h1>FLEX Portable Viewer</h1>
     <div class="sub" id="area-label"></div>
   </div>
 </div>
@@ -137,28 +193,56 @@
   <span id="gps-text">GPS…</span>
 </div>
 
+<canvas id="joy-canvas"></canvas>
+
 <div id="toolbar">
-  <button class="tb-btn" id="btn-reset"  title="Reset view">⌂</button>
-  <button class="tb-btn" id="btn-top"    title="Top-down view">⊙</button>
-  <button class="tb-btn" id="btn-cave"   title="Toggle cave lines">◎</button>
-  <button class="tb-btn" id="btn-gps"    title="Toggle GPS pin">📍</button>
-  <button class="tb-btn" id="btn-follow" title="Follow GPS (3rd person)" style="font-size:15px">🧭 FLW</button>
-  <button class="tb-btn" id="btn-kml"    title="Import KML/KMZ">📂</button>
-  <button class="tb-btn" id="btn-opacity" title="Terrain opacity">🗺️</button>
+  <button class="tb-btn" id="btn-fullscreen" title="Fullscreen">⛶</button>
+  <button class="tb-btn" id="btn-fly"   title="Fly / Crane mode" style="font-size:14px">🕹️</button>
+  <button class="tb-btn" id="btn-cave"  title="Station display">◎</button>
+  <button class="tb-btn" id="btn-gps"   title="GPS: off → pin → follow">📍</button>
+  <button class="tb-btn" id="btn-kml"   title="Import KML/KMZ">📂</button>
+  <button class="tb-btn" id="btn-map"   title="Map layer &amp; opacity">🗺️</button>
+  <button class="tb-btn" id="btn-help"  title="Help" style="font-size:15px">?</button>
 </div>
 
-<div id="opacity-panel" style="
-  display:none; position:fixed; right:62px; top:50%; transform:translateY(-50%);
-  background:rgba(10,10,20,.85); border:1px solid rgba(255,255,255,.13);
-  border-radius:10px; padding:10px 14px; z-index:15; pointer-events:all;">
-  <div style="font-size:10px; opacity:.45; margin-bottom:6px; text-align:center">TERRAIN</div>
-  <input type="range" id="terrain-opacity-slider" min="0" max="100" value="50"
-    style="width:100px; accent-color:#00e5ff;">
-  <div id="terrain-opacity-label" style="font-size:10px; opacity:.55; text-align:center; margin-top:4px">50%</div>
+<div id="map-panel">
+  <!-- Imagery layer toggle — revealed by JS when hillshade is available -->
+  <div id="map-panel-layer" class="map-section-section" style="display:none; margin-bottom:12px;">
+    <div class="map-section-label">IMAGERY</div>
+    <div class="layer-btns">
+      <button class="layer-btn active" id="btn-layer-sat">🛰️ SAT</button>
+      <button class="layer-btn"        id="btn-layer-hs">🏔️ SHAD</button>
+    </div>
+  </div>
+  <div class="map-section-label">OPACITY</div>
+  <input type="range" id="terrain-opacity-slider" min="0" max="100" value="70"
+    style="width:110px; accent-color:#00e5ff; display:block;">
+  <div id="terrain-opacity-label" style="font-size:10px; opacity:.55; text-align:center; margin-top:4px">70%</div>
+</div>
+
+<!-- Help overlay -->
+<div id="help-overlay">
+  <div id="help-box">
+    <h2>FLEX Portable Viewer</h2>
+    <div class="help-section">GESTURES</div>
+    <div class="help-row"><span class="help-icon">☝️</span><span class="help-desc">Drag to orbit · Two-finger drag to pan</span></div>
+    <div class="help-row"><span class="help-icon">🤏</span><span class="help-desc">Pinch to zoom</span></div>
+    <div class="help-section">TOOLBAR</div>
+    <div class="help-row"><span class="help-icon">🕹️</span><span class="help-desc">Fly mode (tap again for Crane; again to exit)</span></div>
+    <div class="help-row"><span class="help-icon">◎</span><span class="help-desc">Stations: end-only → all → hidden</span></div>
+    <div class="help-row"><span class="help-icon">📍</span><span class="help-desc">GPS: tap → show pin → tap → follow lock → tap → off</span></div>
+    <div class="help-row"><span class="help-icon">📂</span><span class="help-desc">Import KML / KMZ route file</span></div>
+    <div class="help-row"><span class="help-icon">🗺️</span><span class="help-desc">Terrain opacity &amp; imagery layer</span></div>
+    <div class="help-row"><span class="help-icon">⛶</span><span class="help-desc">Toggle fullscreen</span></div>
+  </div>
+  <div id="help-dismiss">Tap anywhere to dismiss</div>
 </div>
 
 <div id="legend" class="empty"><h3>Surveys</h3></div>
 <div id="hint">Drag · Pinch zoom · Two-finger pan</div>
+
+<canvas id="north-canvas"></canvas>
+<div id="mode-toast"></div>
 
 <div id="compass">
   <svg width="36" height="36" viewBox="0 0 36 36" id="compass-svg">
@@ -180,11 +264,13 @@
 </div>
 
 <!-- ═══ EMBEDDED DATA (injected by export_terrain.py) ═══════════════════════ -->
-<script id="terrain-data">
-// TERRAIN_GLB_B64 and CAVES_DATA are injected here by the export script.
-// Do not edit this block manually.
-const TERRAIN_GLB_B64 = "PLACEHOLDER_GLB_B64";
-const CAVES_DATA = PLACEHOLDER_CAVES_JSON;
+<!-- Each in its own block so a huge string can't kill the others -->
+<script>const TERRAIN_GLB_B64 = "PLACEHOLDER_GLB_B64";</script>
+<script>const TERRAIN_TEX_B64 = "PLACEHOLDER_TEX_B64";</script>
+<script>const TERRAIN_HS_B64  = "PLACEHOLDER_HS_B64";</script>
+<script>
+try { window.CAVES_DATA = PLACEHOLDER_CAVES_JSON; }
+catch(e) { console.error('CAVES_DATA parse error:', e); window.CAVES_DATA = {surveys:[]}; }
 </script>
 <!-- ═══ THREE.JS LIBS (injected by export_terrain.py) ══════════════════════ -->
 <script src="libs/three.min.js"></script>
@@ -226,8 +312,8 @@ controls.minDistance = 5;
 controls.maxDistance = 25000;
 controls.maxPolarAngle = Math.PI * 0.88;
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-const sun = new THREE.DirectionalLight(0xffffff, 1.1);
+scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+const sun = new THREE.DirectionalLight(0xffffff, 0.5);
 sun.position.set(1, 0.8, 2);
 scene.add(sun);
 
@@ -283,6 +369,32 @@ function gpsToScene(lat, lon) {
 // ── Terrain surface raycaster (find Z at XY) ──────────────────────────────────
 let terrainGroup    = null;
 const terrainMaterials = [];   // refs to all terrain mesh materials (for opacity control)
+
+// Two-texture system — hoisted so imagery toggle event listeners can reach them
+let terrainTexSat = null;
+let terrainTexHs  = null;
+let texMode = 'sat'; // 'sat' or 'hs'
+
+function applyTerrainTexture(tex) {
+  if (!terrainGroup) return;
+  terrainGroup.traverse(obj => {
+    if (!obj.isMesh) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    mats.forEach(m => { m.map = tex; m.color.set(0xffffff); m.needsUpdate = true; });
+  });
+}
+
+function loadB64Texture(b64, onLoad) {
+  const img = new Image();
+  img.onload = () => {
+    const tex = new THREE.Texture(img);
+    tex.flipY = false;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.needsUpdate = true;
+    onLoad(tex);
+  };
+  img.src = 'data:image/jpeg;base64,' + b64;
+}
 const _downRay = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, 0, -1));
 
 function terrainZAt(x, y) {
@@ -351,13 +463,52 @@ function updateGpsMarker(lat, lon, accuracy) {
 }
 
 function startGps() {
-  if (!navigator.geolocation) { alert('Geolocation not supported'); return; }
-  document.getElementById('gps-badge').classList.add('show');
-  document.getElementById('gps-text').textContent = 'Acquiring…';
-  gpsWatchId = navigator.geolocation.watchPosition(
-    pos => updateGpsMarker(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy),
-    err => { document.getElementById('gps-text').textContent = 'GPS error: ' + err.message; },
-    { enableHighAccuracy: true, timeout: 30000, maximumAge: 3000 }
+  if (!navigator.geolocation) {
+    showToast('Geolocation not supported by this browser');
+    return;
+  }
+  // Geolocation requires a secure context (HTTPS or localhost) on modern mobile browsers.
+  if (window.isSecureContext === false) {
+    showToast('Location requires HTTPS — open this page over https://');
+    return;
+  }
+
+  const badge = document.getElementById('gps-badge');
+  const gpsText = document.getElementById('gps-text');
+  badge.classList.add('show');
+  gpsText.textContent = 'Requesting…';
+
+  const opts = { enableHighAccuracy: true, timeout: 30000, maximumAge: 3000 };
+
+  function onSuccess(pos) {
+    updateGpsMarker(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy);
+  }
+  function onError(err) {
+    let msg;
+    if (err.code === 1) {
+      // PERMISSION_DENIED — give the user actionable guidance
+      msg = 'Location denied — enable in browser site settings';
+    } else if (err.code === 2) {
+      msg = 'Location unavailable';
+    } else {
+      msg = 'Location timeout — move outdoors';
+    }
+    gpsText.textContent = msg;
+    showToast(msg);
+  }
+
+  // Call getCurrentPosition first — this is what actually triggers the
+  // browser permission prompt on many mobile browsers. Once we get a fix
+  // (or learn the permission was granted), start the continuous watch.
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      onSuccess(pos);
+      // Permission granted; start the ongoing watch
+      if (gpsWatchId !== null) navigator.geolocation.clearWatch(gpsWatchId);
+      gpsWatchId = navigator.geolocation.watchPosition(onSuccess, onError, opts);
+    },
+    onError,
+    opts
   );
 }
 
@@ -431,6 +582,26 @@ setTimeout(() => {
     terrainGroup = gltf.scene;
     scene.add(terrainGroup);
 
+    // Two-texture system: satellite (ESRI) + hillshade (Mapbox/custom XYZ).
+    // flipY=false is critical: our UVs have V=0 at north, matching glTF convention.
+    // (terrainTexSat, terrainTexHs, texMode, applyTerrainTexture, loadB64Texture
+    //  are declared at top level so imagery toggle buttons can reach them.)
+
+    if (TERRAIN_TEX_B64 && TERRAIN_TEX_B64 !== 'PLACEHOLDER_TEX_B64') {
+      loadB64Texture(TERRAIN_TEX_B64, tex => {
+        terrainTexSat = tex;
+        applyTerrainTexture(tex); // satellite is the default
+      });
+    }
+    if (TERRAIN_HS_B64 && TERRAIN_HS_B64 !== 'PLACEHOLDER_HS_B64') {
+      loadB64Texture(TERRAIN_HS_B64, tex => {
+        terrainTexHs = tex;
+        // Reveal the imagery toggle section inside the map panel
+        const layerSection = document.getElementById('map-panel-layer');
+        if (layerSection) layerSection.style.display = 'block';
+      });
+    }
+
     // Collect all terrain materials so we can control opacity later.
     // Default opacity 0.5 (50%) on startup so cave lines are easier to see.
     terrainGroup.traverse(obj => {
@@ -438,7 +609,7 @@ setTimeout(() => {
       (Array.isArray(obj.material) ? obj.material : [obj.material]).forEach(m => {
         m.transparent = true;
         m.depthWrite  = true;
-        m.opacity     = 0.5;
+        m.opacity     = 0.7;
         terrainMaterials.push(m);
       });
     });
@@ -469,12 +640,19 @@ setTimeout(() => {
 
 // ── Cave lines + stations from embedded JSON ───────────────────────────────────
 const caveGroup    = new THREE.Group();   // survey lines (always visible)
-const stationGroup = new THREE.Group();   // station dots + labels (toggleable)
+const stationGroup = new THREE.Group();   // station dots + labels (toggleable visibility)
+const stationHitGroup = new THREE.Group(); // invisible hit volumes — ALWAYS in scene, always raycastable
 scene.add(caveGroup);
 scene.add(stationGroup);
-let labelsVisible = true;
+scene.add(stationHitGroup);
 
-// Station meshes (spheres) — used for raycasting
+// Station display mode: 0=none  1=end-stations only (default)  2=all
+let stationMode = 1;
+
+// Station data — populated by buildCaveLines(), read by applyStationMode()
+let stationMap = new Map();
+
+// Station meshes (invisible hit spheres in stationHitGroup) — used for raycasting
 const stationMeshes = [];
 
 // Track currently selected station mesh + sprite for highlight/restore
@@ -508,12 +686,14 @@ function buildCaveLines() {
   const legendEl = document.getElementById('legend');
   if (!surveys.length) return;
 
-  const stR  = terrainScale * 0.000375;  // station sphere radius
-  const lblH = terrainScale * 0.001;   // label height in world units (tiny)
+  // Fixed physical sizes (metres) — independent of map extent.
+  // Tuned for the ~0.8 km reference map; looks consistent at any scale.
+  const stR  = 0.3;   // station sphere radius (m)
+  const lblH = 0.8;   // label height in world units (m)
 
   // Deduplicate stations by name (or by rounded position if unnamed)
   // Map: stationKey → { pos, name, surveyName, hexColor, shots[] }
-  const stationMap = new Map();
+  stationMap = new Map();  // assigned to outer let — visible to applyStationMode()
 
   surveys.forEach(sv => {
     let hexColor = sv.color || '#00e5ff';
@@ -583,8 +763,13 @@ function buildCaveLines() {
     }
   });
 
+  // Mark end stations (only one connecting shot = survey terminus / splay end)
+  stationMap.forEach(st => { st._isEnd = st.shots.length <= 1; });
+
   // Build sphere + label for each unique station (in stationGroup, toggleable)
-  const stGeo = new THREE.SphereGeometry(stR, 8, 8);
+  const stGeo    = new THREE.SphereGeometry(stR, 8, 8);
+  const hitGeo   = new THREE.SphereGeometry(stR * 4, 6, 6);   // 4× radius — easy finger tap
+  const hitMat   = new THREE.MeshBasicMaterial({ visible: false });  // invisible hit volume
   stationMap.forEach((st, key) => {
     const stMat = new THREE.MeshBasicMaterial({ color: st.hexColor, depthTest: false });
     stMat.renderOrder = 2;
@@ -592,7 +777,14 @@ function buildCaveLines() {
     mesh.position.copy(st.pos);
     mesh._station = st;
     stationGroup.add(mesh);
-    stationMeshes.push(mesh);
+
+    // Invisible larger hit sphere — lives in stationHitGroup (always in scene,
+    // never toggled off) so raycasting always works regardless of display mode
+    const hitMesh = new THREE.Mesh(hitGeo, hitMat);
+    hitMesh.position.copy(st.pos);
+    hitMesh._station = st;
+    stationHitGroup.add(hitMesh);
+    stationMeshes.push(hitMesh);
 
     // Label (only if station has a name)
     let sprite = null;
@@ -602,6 +794,7 @@ function buildCaveLines() {
       sprite.position.copy(st.pos);
       sprite.position.z += stR + lblH * 0.6;   // tight — just above the dot
       sprite.scale.set(lblH * aspect, lblH, 1);
+      sprite._baseScale = sprite.scale.clone();  // store for mode/highlight scaling
       stationGroup.add(sprite);
     }
 
@@ -610,6 +803,9 @@ function buildCaveLines() {
     st._sprite = sprite;
     st._baseScale = new THREE.Vector3(1, 1, 1);
   });
+
+  // Apply initial display mode (ends only)
+  applyStationMode();
 }
 
 // ── KML / KMZ import ──────────────────────────────────────────────────────────
@@ -705,15 +901,44 @@ document.getElementById('info-close').addEventListener('click', () => {
   clearStationHighlight();
 });
 
+// ── Station display mode helpers ──────────────────────────────────────────────
+function isStationVisible(st) {
+  return stationMode === 2 || (stationMode === 1 && st._isEnd);
+}
+
+function applyStationMode() {
+  stationMap.forEach(st => {
+    const show = isStationVisible(st);
+    if (st._mesh)   st._mesh.visible   = show;
+    if (st._sprite) {
+      st._sprite.visible = show;
+      if (show && st._sprite._baseScale) {
+        // In ends-only mode labels are 2× bigger
+        const factor = (stationMode === 1) ? 2 : 1;
+        st._sprite.scale.copy(st._sprite._baseScale).multiplyScalar(factor);
+      }
+    }
+  });
+}
+
 function clearStationHighlight() {
   if (_selMesh) {
+    const st = _selMesh._station;
     _selMesh.scale.set(1, 1, 1);
-    _selMesh.material.color.set(_selMesh._station.hexColor);
+    _selMesh.material.color.set(st.hexColor);
+    _selMesh.visible = isStationVisible(st);
   }
   if (_selSprite) {
-    _selSprite.scale.copy(_selSprite._baseScale);
-    _selSprite.material.color.set(0xffffff);  // SpriteMaterial color multiplies texture
+    const st = _selMesh ? _selMesh._station : null;
+    if (st && st._sprite && st._sprite._baseScale) {
+      const factor = (stationMode === 1 && st._isEnd) ? 2 : 1;
+      st._sprite.scale.copy(st._sprite._baseScale).multiplyScalar(factor);
+    } else {
+      _selSprite.scale.copy(_selSprite._baseScale);
+    }
+    _selSprite.material.color.set(0xffffff);
     _selSprite.material.opacity = 1;
+    _selSprite.visible = st ? isStationVisible(st) : false;
   }
   _selMesh = null; _selSprite = null;
 }
@@ -722,15 +947,19 @@ function selectStation(st) {
   // Restore previous selection
   clearStationHighlight();
 
-  // Highlight: 2× scale + white tint
+  // Highlight: 2× scale + white tint; always force-visible regardless of display mode
   if (st._mesh) {
+    st._mesh.visible = true;
     st._mesh.scale.set(2, 2, 2);
     st._mesh.material.color.set(0xffffff);
     _selMesh = st._mesh;
   }
   if (st._sprite) {
+    st._sprite.visible = true;
     if (!st._sprite._baseScale) st._sprite._baseScale = st._sprite.scale.clone();
-    st._sprite.scale.copy(st._sprite._baseScale).multiplyScalar(2);
+    // Highlight at 2× the mode-adjusted base scale
+    const factor = (stationMode === 1 && st._isEnd) ? 2 : 1;
+    st._sprite.scale.copy(st._sprite._baseScale).multiplyScalar(factor * 2);
     st._sprite.material.color.set(0xffffff);
     _selSprite = st._sprite;
   }
@@ -767,8 +996,8 @@ function selectStation(st) {
   // Survey name
   html += `<div class="fx-row"><span class="lbl">Survey:</span> <span class="val">${st.surveyName || '—'}</span></div>`;
 
-  // Adjacent shots
-  if (st.shots.length) {
+  // (Adjacent shots removed — not needed in station panel)
+  if (false && st.shots.length) {
     html += `<div class="fx-divider">Adjacent shots</div>`;
     st.shots.forEach(s => {
       const other = (s._role === 'from' ? s.to_name : s.from_name) || '?';
@@ -846,42 +1075,45 @@ function fitCamera() {
   camera.position.set(ctr.x, ctr.y - Math.max(sz.x,sz.y)*0.55, ctr.z + Math.max(sz.x,sz.y)*0.3);
   controls.update();
 }
-document.getElementById('btn-reset').addEventListener('click', fitCamera);
-
-document.getElementById('btn-top').addEventListener('click', () => {
-  if (!terrainGroup) return;
-  const box = new THREE.Box3().setFromObject(terrainGroup);
-  const ctr = box.getCenter(new THREE.Vector3());
-  const sz  = box.getSize(new THREE.Vector3());
-  controls.target.copy(ctr);
-  camera.position.set(ctr.x, ctr.y, ctr.z + Math.max(sz.x,sz.y)*0.75);
-  controls.update();
-});
 
 document.getElementById('btn-cave').addEventListener('click', function() {
-  labelsVisible = !labelsVisible;
-  stationGroup.visible = labelsVisible;
-  this.classList.toggle('off', !labelsVisible);
-  if (!labelsVisible) clearStationHighlight();
+  // Cycle: ends-only(1) → all(2) → none(0) → ends-only(1) …
+  stationMode = (stationMode + 1) % 3;
+  applyStationMode();
+  // Button appearance: off = none, normal = ends, active = all
+  this.classList.toggle('off',    stationMode === 0);
+  this.classList.toggle('active', stationMode === 2);
+  if (stationMode === 0) clearStationHighlight();
 });
 
+// GPS 3-state: 0=off, 1=pin, 2=follow
+let gpsState = 0;
 document.getElementById('btn-gps').addEventListener('click', function() {
-  gpsActive = !gpsActive;
-  this.classList.toggle('active', gpsActive);
-  if (gpsActive) startGps(); else stopGps();
-});
-
-document.getElementById('btn-follow').addEventListener('click', function() {
-  followMode = !followMode;
-  this.classList.toggle('active', followMode);
-  if (followMode) {
-    startCompass();
-    if (!gpsActive) {
-      gpsActive = true;
-      document.getElementById('btn-gps').classList.add('active');
-      startGps();
+  gpsState = (gpsState + 1) % 3;
+  this.classList.remove('active', 'follow-active');
+  if (gpsState === 0) {
+    // Off
+    gpsActive = false; followMode = false;
+    stopGps(); stopCompass();
+    this.textContent = '📍';
+  } else if (gpsState === 1) {
+    // Pin only
+    gpsActive = true; followMode = false;
+    stopCompass();
+    startGps();
+    this.classList.add('active');
+    this.textContent = '📍';
+  } else {
+    // Follow lock — incompatible with fly/crane
+    gpsActive = true; followMode = true;
+    if (flyMode || craneMode) {
+      exitFlyMode();
+      document.getElementById('btn-fly').classList.remove('fly-active');
+      document.getElementById('btn-fly').style.borderColor = '';
     }
-    // Position camera: ~200m behind GPS point at current zoom
+    startGps(); startCompass();
+    this.classList.add('follow-active');
+    this.textContent = '🧭';
     if (gpsScenePos) {
       const { x, y, z } = gpsScenePos;
       const dist = Math.max(terrainScale * 0.08, 80);
@@ -889,8 +1121,6 @@ document.getElementById('btn-follow').addEventListener('click', function() {
       camera.position.set(x, y - dist, z + dist * 0.4);
       controls.update();
     }
-  } else {
-    stopCompass();
   }
 });
 
@@ -898,14 +1128,19 @@ document.getElementById('btn-kml').addEventListener('click', () => {
   document.getElementById('kml-input').click();
 });
 
-// ── Terrain opacity ──────────────────────────────────────────────────────────
-const opacityPanel  = document.getElementById('opacity-panel');
+// ── Map panel (opacity + imagery) ────────────────────────────────────────────
+const mapPanel     = document.getElementById('map-panel');
 const opacitySlider = document.getElementById('terrain-opacity-slider');
 const opacityLabel  = document.getElementById('terrain-opacity-label');
 
-document.getElementById('btn-opacity').addEventListener('click', () => {
-  opacityPanel.style.display = opacityPanel.style.display === 'none' ? 'block' : 'none';
+document.getElementById('btn-map').addEventListener('click', () => {
+  mapPanel.style.display = mapPanel.style.display === 'none' ? 'block' : 'none';
 });
+// Close panel when tapping outside
+document.addEventListener('pointerdown', e => {
+  if (!mapPanel.contains(e.target) && e.target.id !== 'btn-map')
+    mapPanel.style.display = 'none';
+}, { capture: true, passive: true });
 
 opacitySlider.addEventListener('input', () => {
   const v = parseInt(opacitySlider.value) / 100;
@@ -913,16 +1148,431 @@ opacitySlider.addEventListener('input', () => {
   terrainMaterials.forEach(m => { m.opacity = v; m.needsUpdate = true; });
 });
 
+// Imagery layer buttons (revealed when hillshade loads)
+document.getElementById('btn-layer-sat').addEventListener('click', function() {
+  if (!terrainTexSat) return;
+  texMode = 'sat'; applyTerrainTexture(terrainTexSat);
+  document.getElementById('btn-layer-sat').classList.add('active');
+  document.getElementById('btn-layer-hs').classList.remove('active');
+});
+document.getElementById('btn-layer-hs').addEventListener('click', function() {
+  if (!terrainTexHs) return;
+  texMode = 'hs'; applyTerrainTexture(terrainTexHs);
+  document.getElementById('btn-layer-hs').classList.add('active');
+  document.getElementById('btn-layer-sat').classList.remove('active');
+});
+
+// ── Help overlay ─────────────────────────────────────────────────────────────
+const helpOverlay = document.getElementById('help-overlay');
+function dismissHelp() {
+  helpOverlay.classList.add('hidden');
+  setTimeout(() => helpOverlay.remove(), 450);
+}
+helpOverlay.addEventListener('click', dismissHelp);
+// Auto-dismiss after 12 s
+setTimeout(dismissHelp, 12000);
+
+document.getElementById('btn-help').addEventListener('click', () => {
+  // Re-create if removed, otherwise just show
+  document.body.appendChild(helpOverlay);
+  helpOverlay.classList.remove('hidden');
+  helpOverlay.style.display = 'flex';
+  helpOverlay.addEventListener('click', dismissHelp, { once: true });
+  setTimeout(dismissHelp, 12000);
+});
+
+// ── Fullscreen ────────────────────────────────────────────────────────────────
+document.getElementById('btn-fullscreen').addEventListener('click', () => {
+  const el = document.documentElement;
+  if (!document.fullscreenElement) {
+    (el.requestFullscreen || el.webkitRequestFullscreen ||
+     el.mozRequestFullScreen || el.msRequestFullscreen || function(){}).call(el);
+  } else {
+    (document.exitFullscreen || document.webkitExitFullscreen ||
+     document.mozCancelFullScreen || document.msExitFullscreen ||
+     function(){}).call(document);
+  }
+});
+
+// ── Fly mode (dual virtual joystick) ─────────────────────────────────────────
+const joyCanvas = document.getElementById('joy-canvas');
+const joyCtx    = joyCanvas.getContext('2d');
+let   flyMode   = false;
+
+const FLY_SPEED_BASE = 0.000015; // terrainScale fraction per frame per px offset
+const LOOK_SPEED     = 0.0001;   // radians per px
+const JOY_RADIUS     = 58;
+const JOY_DEAD       = 8;
+const HOLD_MS        = 250;      // ms before touch becomes a joystick
+
+let flySpeedMult    = 1.0;   // adjusted by two-finger scroll / wheel
+let _speedChangedAt = 0;    // timestamp of last speed change (for auto-hide bar)
+let craneMode       = false; // true = right joystick lifts/lowers, false = looks around
+let flyModeType     = 0;    // 0=orbit, 1=fly, 2=crane
+
+// Toast
+let _toastTimer = null;
+function showToast(msg) {
+  const t = document.getElementById('mode-toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => t.classList.remove('show'), 1800);
+}
+
+const joy = {
+  L: { id: null, ox: 0, oy: 0, dx: 0, dy: 0 },  // left  → move
+  R: { id: null, ox: 0, oy: 0, dx: 0, dy: 0 },  // right → look
+};
+
+// Per-touch tracking: id → { x0,y0,x,y, timer, spawned }
+const _touches = new Map();
+
+// Two-finger speed-scroll state
+const ss = { active: false, ids: null, y0: 0, mult0: 1 };
+
+const flyYaw   = { v: 0 };
+const flyPitch = { v: 0 };
+
+function enterFlyMode(type) {
+  flyMode = true; craneMode = (type === 2); flyModeType = type;
+  flySpeedMult = 1.0;
+  controls.enabled = false;
+  joyCanvas.classList.add('active');
+  resizeJoyCanvas();
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+  flyYaw.v   = Math.atan2(dir.x, dir.y);
+  flyPitch.v = Math.asin(Math.max(-0.99, Math.min(0.99, dir.z)));
+}
+
+// ── 3-D North Compass ─────────────────────────────────────────────────────
+(function initNorthCanvas() {
+  const c = document.getElementById('north-canvas');
+  if (!c) return;
+  const dpr = window.devicePixelRatio || 1;
+  c.width  = Math.round(44 * dpr);
+  c.height = Math.round(44 * dpr);
+})();
+
+function drawNorthArrow3D(northAngle, pitch) {
+  const c = document.getElementById('north-canvas');
+  if (!c) return;
+  const ctx = c.getContext('2d');
+  const W = c.width, H = c.height;
+  const dpr = window.devicePixelRatio || 1;
+  ctx.clearRect(0, 0, W, H);
+
+  const cx = W / 2, cy = H / 2;
+  const rx = W * 0.40;
+  // Foreshorten vertical axis by camera pitch:
+  // pitch = -π/2 → looking straight down → face-on circle (ry = rx)
+  // pitch =  0   → looking horizontal    → edge-on sliver (ry → 0)
+  const ry = rx * Math.max(0.10, Math.abs(Math.sin(pitch)));
+
+  // Helper: map disc angle φ to screen coords at radial fraction r
+  const proj = (φ, r) => ({
+    x: cx + rx * r * Math.sin(φ),
+    y: cy - ry * r * Math.cos(φ)
+  });
+
+  // Outer filled disc
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.62)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+  ctx.lineWidth = 1.2 * dpr;
+  ctx.stroke();
+
+  // Inner ring
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, rx * 0.80, ry * 0.80, 0, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+  ctx.lineWidth = 1.0 * dpr;
+  ctx.stroke();
+
+  // Cardinal ticks (N red, S/E/W dim)
+  ctx.lineCap = 'round';
+  const ticks = [
+    { φ: northAngle,              color: '#ef5350', w: 2.0 },
+    { φ: northAngle + Math.PI,    color: 'rgba(255,255,255,0.28)', w: 1.2 },
+    { φ: northAngle + Math.PI/2,  color: 'rgba(255,255,255,0.28)', w: 1.2 },
+    { φ: northAngle - Math.PI/2,  color: 'rgba(255,255,255,0.28)', w: 1.2 },
+  ];
+  for (const t of ticks) {
+    const a = proj(t.φ, 0.74), b = proj(t.φ, 1.0);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+    ctx.strokeStyle = t.color; ctx.lineWidth = t.w * dpr; ctx.stroke();
+  }
+
+  // Needle — diamond shape split N (red) / S (grey)
+  const tip   = proj(northAngle,           0.66);
+  const base  = proj(northAngle + Math.PI, 0.66);
+  const lpt   = proj(northAngle - Math.PI/2, 0.18);
+  const rpt   = proj(northAngle + Math.PI/2, 0.18);
+  const inner = proj(northAngle,           0.12);
+
+  // North half
+  ctx.beginPath();
+  ctx.moveTo(tip.x, tip.y); ctx.lineTo(lpt.x, lpt.y);
+  ctx.lineTo(inner.x, inner.y); ctx.lineTo(rpt.x, rpt.y);
+  ctx.closePath();
+  ctx.fillStyle = '#ef5350'; ctx.fill();
+
+  // South half
+  ctx.beginPath();
+  ctx.moveTo(base.x, base.y); ctx.lineTo(lpt.x, lpt.y);
+  ctx.lineTo(inner.x, inner.y); ctx.lineTo(rpt.x, rpt.y);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(210,210,210,0.65)'; ctx.fill();
+
+  // Center pivot
+  ctx.beginPath(); ctx.arc(cx, cy, 2.8 * dpr, 0, Math.PI * 2);
+  ctx.fillStyle = '#111'; ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 0.8 * dpr; ctx.stroke();
+
+  // "N" label — only when disc is visible enough
+  if (Math.abs(Math.sin(pitch)) > 0.18) {
+    const nPos = proj(northAngle, 1.28);
+    ctx.save();
+    ctx.font = `800 ${Math.round(6.5 * dpr)}px system-ui,sans-serif`;
+    ctx.fillStyle = '#ef5350';
+    ctx.globalAlpha = 0.88;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('N', nPos.x, nPos.y);
+    ctx.restore();
+  }
+}
+// ────────────────────────────────────────────────────────────────────────────
+
+function exitFlyMode() {
+  flyMode = false; craneMode = false; flyModeType = 0;
+  controls.enabled = true;
+  joyCanvas.classList.remove('active');
+  _touches.clear();
+  joy.L.id = joy.R.id = null;
+  joy.L.dx = joy.L.dy = joy.R.dx = joy.R.dy = 0;
+  ss.active = false; ss.ids = null;
+  _craneRightAfterLeft = false;
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+  controls.target.copy(camera.position).addScaledVector(dir, terrainScale * 0.1);
+  controls.update();
+}
+
+function resizeJoyCanvas() {
+  joyCanvas.width  = window.innerWidth;
+  joyCanvas.height = window.innerHeight;
+}
+window.addEventListener('resize', () => { if (flyMode) resizeJoyCanvas(); });
+
+// In crane mode, tracks whether right stick spawned while left was already active.
+// true  → right Y = world-Z lift, right X = yaw only
+// false → right stick behaves like fly mode (full look: yaw + pitch)
+let _craneRightAfterLeft = false;
+
+function spawnJoy(id, x, y) {
+  const isRight = x >= window.innerWidth / 2;
+  const side = isRight ? joy.R : joy.L;
+  if (side.id === null) {
+    side.id = id; side.ox = x; side.oy = y; side.dx = 0; side.dy = 0;
+    // Record crane context: did right spawn while left was already live?
+    if (isRight && craneMode) {
+      _craneRightAfterLeft = joy.L.id !== null;
+    }
+  }
+}
+function releaseJoy(id) {
+  for (const s of [joy.L, joy.R])
+    if (s.id === id) { s.id = null; s.dx = 0; s.dy = 0; }
+}
+
+// Treat a point as a tap on the 3D scene below the joystick canvas
+function passTap(x, y) { onPointerTap({ clientX: x, clientY: y }); }
+
+// ── Touch events (on window — joy canvas is pointer-events:none so taps fall through naturally) ──
+window.addEventListener('touchstart', e => {
+  if (!flyMode) return;
+  for (const t of e.changedTouches) {
+    const timer = setTimeout(() => {
+      const info = _touches.get(t.identifier);
+      if (info && !info.spawned) { info.spawned = true; spawnJoy(t.identifier, info.x, info.y); }
+    }, HOLD_MS);
+    _touches.set(t.identifier, {
+      x0: t.clientX, y0: t.clientY, x: t.clientX, y: t.clientY,
+      timer, spawned: false
+    });
+  }
+  // 2 un-spawned touches simultaneously → two-finger speed scroll
+  const pending = [..._touches.entries()].filter(([,i]) => !i.spawned);
+  if (pending.length === 2 && !ss.active) {
+    ss.active = true;
+    ss.ids    = pending.map(([id]) => id);
+    ss.y0     = (pending[0][1].y + pending[1][1].y) / 2;
+    ss.mult0  = flySpeedMult;
+    for (const [, info] of pending) { clearTimeout(info.timer); info.timer = null; }
+    e.preventDefault();   // prevent page scroll during speed gesture
+  }
+}, { passive: false });
+
+window.addEventListener('touchmove', e => {
+  if (!flyMode) return;
+  const hasActiveJoy = joy.L.id !== null || joy.R.id !== null;
+  if (hasActiveJoy || ss.active) e.preventDefault();   // prevent scroll while joystick active
+  for (const t of e.changedTouches) {
+    const info = _touches.get(t.identifier);
+    if (!info) continue;
+    info.x = t.clientX; info.y = t.clientY;
+    if (ss.active && ss.ids && ss.ids.includes(t.identifier)) {
+      const otherId   = ss.ids.find(id => id !== t.identifier);
+      const otherInfo = _touches.get(otherId);
+      const avgY = otherInfo ? (t.clientY + otherInfo.y) / 2 : t.clientY;
+      flySpeedMult = Math.max(0.05, Math.min(20, ss.mult0 * Math.pow(2, -(avgY - ss.y0) / 130)));
+      _speedChangedAt = Date.now();
+    } else if (info.spawned) {
+      for (const s of [joy.L, joy.R])
+        if (s.id === t.identifier) { s.dx = t.clientX - s.ox; s.dy = t.clientY - s.oy; }
+    }
+  }
+}, { passive: false });
+
+window.addEventListener('touchend', e => {
+  if (!flyMode) return;
+  for (const t of e.changedTouches) {
+    const info = _touches.get(t.identifier);
+    if (!info) continue;
+    clearTimeout(info.timer);
+    if (ss.active && ss.ids && ss.ids.includes(t.identifier)) {
+      ss.active = false; ss.ids = null;
+    } else if (info.spawned) {
+      e.preventDefault();   // only block default for actual joystick releases
+      releaseJoy(t.identifier);
+    }
+    // Quick tap (not spawned): DON'T preventDefault — browser fires a real click naturally
+    _touches.delete(t.identifier);
+  }
+}, { passive: false });
+
+// ── Mouse (desktop testing) + wheel speed ─────────────────────────────────────
+let _mouseJoySide = null;
+window.addEventListener('mousedown', e => {
+  if (!flyMode) return;
+  // Don't intercept toolbar / panel clicks
+  if (e.target.closest('#toolbar, #info-panel, #map-panel')) return;
+  _mouseJoySide = e.clientX < window.innerWidth / 2 ? joy.L : joy.R;
+  _mouseJoySide.id = 'mouse';
+  _mouseJoySide.ox = e.clientX; _mouseJoySide.oy = e.clientY;
+  _mouseJoySide.dx = 0; _mouseJoySide.dy = 0;
+});
+window.addEventListener('mousemove', e => {
+  if (!flyMode || !_mouseJoySide) return;
+  _mouseJoySide.dx = e.clientX - _mouseJoySide.ox;
+  _mouseJoySide.dy = e.clientY - _mouseJoySide.oy;
+});
+window.addEventListener('mouseup', e => {
+  if (!flyMode) return;
+  if (_mouseJoySide) { _mouseJoySide.id = null; _mouseJoySide.dx = 0; _mouseJoySide.dy = 0; _mouseJoySide = null; }
+});
+window.addEventListener('wheel', e => {
+  if (!flyMode) return;
+  e.preventDefault();
+  flySpeedMult = Math.max(0.05, Math.min(20, flySpeedMult * Math.pow(0.85, e.deltaY / 50)));
+  _speedChangedAt = Date.now();
+}, { passive: false });
+
+document.getElementById('btn-fly').addEventListener('click', function() {
+  const next = (flyModeType + 1) % 3;
+  if (next === 0) {
+    exitFlyMode();
+    this.classList.remove('fly-active');
+    this.style.borderColor = '';
+    showToast('Orbit mode');
+  } else {
+    // Entering fly/crane — drop GPS follow back to pin mode
+    if (gpsState === 2) {
+      gpsState = 1; followMode = false;
+      stopCompass();
+      const gb = document.getElementById('btn-gps');
+      gb.classList.remove('follow-active'); gb.classList.add('active');
+      gb.textContent = '📍';
+    }
+    enterFlyMode(next);
+    this.classList.add('fly-active');
+    if (next === 2) {
+      this.style.borderColor = '#26c6da'; // teal tint for crane
+      showToast('Crane mode — left: move · right: up/down');
+    } else {
+      this.style.borderColor = '';
+      showToast('Fly mode — left: move · right: look');
+    }
+  }
+});
+
+// ── Joystick drawing ──────────────────────────────────────────────────────────
+function drawJoystick(ctx, ox, oy, dx, dy, label) {
+  const clamped = Math.min(JOY_RADIUS * 0.82, Math.hypot(dx, dy));
+  const angle   = Math.atan2(dy, dx);
+  const kx = ox + Math.cos(angle) * clamped;
+  const ky = oy + Math.sin(angle) * clamped;
+  ctx.beginPath(); ctx.arc(ox, oy, JOY_RADIUS, 0, Math.PI*2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.10)'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.fillStyle   = 'rgba(255,255,255,0.03)';  ctx.fill();
+  ctx.beginPath(); ctx.arc(kx, ky, JOY_RADIUS * 0.36, 0, Math.PI*2);
+  ctx.fillStyle   = 'rgba(255,255,255,0.18)';  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.font = '11px system-ui';
+  ctx.textAlign = 'center';
+  ctx.fillText(label, ox, oy + JOY_RADIUS + 16);
+}
+
+function drawSpeedBar(ctx, mult) {
+  const W = 150, H = 6;
+  const x = (ctx.canvas.width - W) / 2, y = ctx.canvas.height - 32;
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx.fillRect(x, y, W, H);
+  const t = (Math.log(mult) - Math.log(0.05)) / (Math.log(20) - Math.log(0.05));
+  ctx.fillStyle = mult > 1.05 ? 'rgba(255,160,0,0.85)' : 'rgba(0,229,255,0.85)';
+  ctx.fillRect(x, y, W * Math.max(0, Math.min(1, t)), H);
+  ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.font = '10px system-ui';
+  ctx.textAlign = 'center';
+  ctx.fillText('speed ×' + (mult < 1 ? mult.toFixed(2) : mult.toFixed(1)),
+               ctx.canvas.width / 2, y - 6);
+}
+
+function updateJoyCanvas() {
+  if (!flyMode) return;
+  joyCtx.clearRect(0, 0, joyCanvas.width, joyCanvas.height);
+  if (joy.L.id !== null) drawJoystick(joyCtx, joy.L.ox, joy.L.oy, joy.L.dx, joy.L.dy, 'MOVE');
+  if (joy.R.id !== null) drawJoystick(joyCtx, joy.R.ox, joy.R.oy, joy.R.dx, joy.R.dy, 'LOOK');
+  const speedVisible = (Date.now() - _speedChangedAt) < 3000;
+  if (speedVisible) drawSpeedBar(joyCtx, flySpeedMult);
+}
+
 // ── Hint fade ─────────────────────────────────────────────────────────────────
 const hintEl = document.getElementById('hint');
 setTimeout(() => hintEl.classList.add('gone'), 3500);
 renderer.domElement.addEventListener('pointerdown', () => hintEl.classList.add('gone'), { once: true });
 
 // ── Render loop ───────────────────────────────────────────────────────────────
+const _fwd   = new THREE.Vector3();
+const _right = new THREE.Vector3();
+const _up3   = new THREE.Vector3(0, 0, 1);
 let _t = 0;
+
 (function animate() {
   requestAnimationFrame(animate);
   _t += 0.016;
+
+  // North arrow — 3D tilted compass disc
+  {
+    const el = camera.matrixWorld.elements;
+    // Project world +Y (north) onto camera screen plane
+    const northAngle = Math.atan2(el[1], el[5]);
+    // Camera pitch from forward direction
+    const _fd = new THREE.Vector3();
+    camera.getWorldDirection(_fd);
+    const pitch = Math.asin(Math.max(-0.99, Math.min(0.99, _fd.z)));
+    drawNorthArrow3D(northAngle, pitch);
+  }
 
   // GPS marker pulse
   if (gpsMarker && gpsMarker._ring) {
@@ -930,12 +1580,65 @@ let _t = 0;
     gpsMarker._ring.scale.setScalar(pulse);
   }
 
-  // Follow mode: keep orbit target on GPS
-  if (followMode && gpsScenePos) {
-    controls.target.set(gpsScenePos.x, gpsScenePos.y, gpsScenePos.z);
+  if (flyMode) {
+    if (craneMode) {
+      if (_craneRightAfterLeft) {
+        // ── Crane sub-mode: left already active when right spawned ───────────
+        // Right Y → world-Z lift/lower at move speed
+        // Right X → yaw (look left/right), no pitch change
+        if (joy.R.id !== null) {
+          if (Math.abs(joy.R.dy) > JOY_DEAD) {
+            const speed = terrainScale * FLY_SPEED_BASE * flySpeedMult;
+            camera.position.z += -joy.R.dy * speed;
+          }
+          if (Math.abs(joy.R.dx) > JOY_DEAD) {
+            flyYaw.v += joy.R.dx * LOOK_SPEED;
+          }
+        }
+      } else {
+        // ── Crane free-look: right spawned first → full look like fly mode ───
+        if (joy.R.id !== null && Math.hypot(joy.R.dx, joy.R.dy) > JOY_DEAD) {
+          flyYaw.v   += joy.R.dx * LOOK_SPEED;
+          flyPitch.v  = Math.max(-Math.PI * 0.48,
+                        Math.min( Math.PI * 0.48, flyPitch.v - joy.R.dy * LOOK_SPEED));
+        }
+      }
+      // Apply look direction (always)
+      const cy = Math.cos(flyYaw.v), sy = Math.sin(flyYaw.v);
+      const cp = Math.cos(flyPitch.v), sp = Math.sin(flyPitch.v);
+      _fwd.set(sy * cp, cy * cp, sp).normalize();
+      camera.lookAt(camera.position.clone().add(_fwd));
+    } else {
+      // ── Fly mode: right joystick looks (yaw + pitch) ─────────────────────
+      if (joy.R.id !== null && Math.hypot(joy.R.dx, joy.R.dy) > JOY_DEAD) {
+        flyYaw.v   += joy.R.dx * LOOK_SPEED;   // + = look right ✓
+        flyPitch.v  = Math.max(-Math.PI * 0.48,
+                      Math.min( Math.PI * 0.48, flyPitch.v - joy.R.dy * LOOK_SPEED));
+      }
+      // Apply look to camera
+      const cy = Math.cos(flyYaw.v), sy = Math.sin(flyYaw.v);
+      const cp = Math.cos(flyPitch.v), sp = Math.sin(flyPitch.v);
+      _fwd.set(sy * cp, cy * cp, sp).normalize();
+      camera.lookAt(camera.position.clone().add(_fwd));
+    }
+
+    // ── Left joystick: move (relative to camera direction, both modes) ───
+    if (joy.L.id !== null && Math.hypot(joy.L.dx, joy.L.dy) > JOY_DEAD) {
+      const speed = terrainScale * FLY_SPEED_BASE * flySpeedMult;
+      _right.crossVectors(_fwd, _up3).normalize();
+      camera.position.addScaledVector(_fwd,   -joy.L.dy * speed);
+      camera.position.addScaledVector(_right,   joy.L.dx * speed);
+    }
+
+    updateJoyCanvas();
+  } else {
+    // Follow mode: keep orbit target on GPS
+    if (followMode && gpsScenePos) {
+      controls.target.set(gpsScenePos.x, gpsScenePos.y, gpsScenePos.z);
+    }
+    controls.update();
   }
 
-  controls.update();
   renderer.render(scene, camera);
 })();
 </script>

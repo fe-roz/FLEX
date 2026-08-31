@@ -69,34 +69,141 @@ def latlon_to_utm(lat, lon):
 # Step 1 — Read points from EPT
 # ──────────────────────────────────────────────────────────────────────────────
 
-def fetch_ept_points(ept_path, utm_bbox, progress=print):
-    """Read all points from an EPT dataset within a UTM bounding box."""
+def fetch_ept_points(ept_path, utm_bbox, bbox_latlon=None, progress=print):
+    """Read ground-classified points from an EPT dataset within a UTM bounding box.
+
+    Automatically detects the EPT dataset's native CRS by reading its ept.json,
+    converts the query bbox to that CRS, and reprojects the output to UTM so
+    downstream code always works in metres regardless of the source dataset.
+
+    Ground classification strategy (in priority order):
+      1. If the dataset already has ground labels (Classification == 2), use them.
+      2. Otherwise run PDAL's SMRF filter to classify on the fly.
+      3. If both fail, fall back to all returns (CSF cloth applied later).
+    """
     try:
         import pdal
     except ImportError:
         sys.exit("ERROR: pdal not installed. Run: conda install -c conda-forge python-pdal")
 
+    MIN_GROUND_PTS = 1000
     minE, minN, maxE, maxN = utm_bbox
-    pipeline_json = json.dumps({
-        "pipeline": [
-            {
-                "type": "readers.ept",
-                "filename": str(ept_path),
-                "bounds": f"([{minE},{maxE}],[{minN},{maxN}])"
-            }
-        ]
-    })
-    progress("  Fetching EPT points...")
-    p = pdal.Pipeline(pipeline_json)
-    p.execute()
-    arrays = p.arrays
-    if not arrays:
-        sys.exit("ERROR: No points returned from EPT for this bbox")
-    arr = arrays[0]
+
+    # ── Detect native CRS from ept.json ──────────────────────────────────────
+    native_epsg = None
+    utm_epsg    = None   # filled in below
+    try:
+        import urllib.request as _ur
+        ept_str = str(ept_path)
+        if ept_str.startswith('http'):
+            with _ur.urlopen(ept_str, timeout=30) as _r:
+                _meta = json.loads(_r.read())
+        else:
+            with open(ept_str) as _f:
+                _meta = json.load(_f)
+        _srs = _meta.get('srs', {})
+        _h   = str(_srs.get('horizontal', '') or '')
+        if _h.isdigit():
+            native_epsg = int(_h)
+        progress(f"  EPT native CRS: EPSG:{native_epsg or '?'}")
+    except Exception as _e:
+        progress(f"  Warning: could not read ept.json ({_e}); assuming native CRS == UTM")
+
+    # Derive the UTM EPSG from our bbox (WGS84 UTM)
+    if bbox_latlon:
+        _lon0 = (bbox_latlon[0] + bbox_latlon[2]) / 2
+        _lat0 = (bbox_latlon[1] + bbox_latlon[3]) / 2
+        _zone = int((_lon0 + 180) / 6) + 1
+        utm_epsg = (32600 + _zone) if _lat0 >= 0 else (32700 + _zone)
+
+    # Convert bbox to native CRS if different from UTM.
+    # Uses pure math for common CRSs so pyproj is not required.
+    def _latlon_to_native(epsg, ll_bbox):
+        """Convert (minLon,minLat,maxLon,maxLat) to the target EPSG bbox."""
+        import math
+        minLon, minLat, maxLon, maxLat = ll_bbox
+        R = 6378137.0
+        if epsg in (4326, 4269, 4167, 4283, 4019):  # geographic (degrees)
+            return minLon, maxLon, minLat, maxLat
+        elif epsg == 3857:                             # Web Mercator
+            def _m(lon, lat):
+                x = math.radians(lon) * R
+                y = math.log(math.tan(math.pi/4 + math.radians(lat)/2)) * R
+                return x, y
+            x0, y0 = _m(minLon, minLat);  x1, y1 = _m(maxLon, maxLat)
+            return min(x0,x1), max(x0,x1), min(y0,y1), max(y0,y1)
+        else:
+            return None  # unknown — will fall back
+
+    if native_epsg and utm_epsg and native_epsg != utm_epsg:
+        _converted = _latlon_to_native(native_epsg, bbox_latlon) if bbox_latlon else None
+        if _converted:
+            _bx0, _bx1, _by0, _by1 = _converted
+            progress(f"  Converted bbox to EPSG:{native_epsg}: "
+                     f"X [{_bx0:.1f},{_bx1:.1f}] Y [{_by0:.1f},{_by1:.1f}]")
+        else:
+            # Try pyproj as last resort
+            try:
+                from pyproj import Transformer
+                _t = Transformer.from_crs(f"EPSG:{utm_epsg}", f"EPSG:{native_epsg}", always_xy=True)
+                _x0, _y0 = _t.transform(minE, minN)
+                _x1, _y1 = _t.transform(maxE, maxN)
+                _bx0, _bx1 = min(_x0,_x1), max(_x0,_x1)
+                _by0, _by1 = min(_y0,_y1), max(_y0,_y1)
+                progress(f"  Converted bbox via pyproj to EPSG:{native_epsg}")
+            except Exception as _e:
+                progress(f"  Warning: bbox conversion unsupported for EPSG:{native_epsg} ({_e}); using UTM bounds")
+                _bx0, _bx1, _by0, _by1 = minE, maxE, minN, maxN
+                native_epsg = utm_epsg
+    else:
+        _bx0, _bx1, _by0, _by1 = minE, maxE, minN, maxN
+
+    bounds_str = f"([{_bx0},{_bx1}],[{_by0},{_by1}])"
+
+    # Reprojection step — added to every pipeline if native CRS != UTM
+    reproj_step = []
+    if native_epsg and utm_epsg and native_epsg != utm_epsg:
+        reproj_step = [{"type": "filters.reprojection",
+                        "in_srs":  f"EPSG:{native_epsg}",
+                        "out_srs": f"EPSG:{utm_epsg}"}]
+
+    def _run(extra_filters):
+        pipeline = [{"type": "readers.ept", "filename": str(ept_path),
+                     "bounds": bounds_str}] + reproj_step + extra_filters
+        p = pdal.Pipeline(json.dumps({"pipeline": pipeline}))
+        p.execute()
+        return p.arrays[0] if p.arrays else None
+
+    # ── Step A: try existing Classification==2 labels ────────────────────────
+    progress("  Fetching EPT points (attempting pre-classified ground)...")
+    arr = _run([{"type": "filters.range", "limits": "Classification[2:2]"}])
+    if arr is not None and len(arr) >= MIN_GROUND_PTS:
+        progress(f"  Using pre-classified ground: {len(arr):,} points")
+    else:
+        # ── Step B: run SMRF to classify ground on the fly ───────────────────
+        progress("  No pre-classified ground found — running SMRF ground filter...")
+        try:
+            arr = _run([
+                {"type": "filters.smrf",
+                 "ignore": "Classification[7:7]",
+                 "slope": 0.2, "window": 18, "threshold": 0.5, "scalar": 1.2},
+                {"type": "filters.range", "limits": "Classification[2:2]"}
+            ])
+            if arr is not None and len(arr) >= MIN_GROUND_PTS:
+                progress(f"  SMRF ground classification: {len(arr):,} ground points")
+            else:
+                raise RuntimeError("Too few ground points after SMRF")
+        except Exception as e:
+            # ── Step C: fallback — all returns, cloth handles it ─────────────
+            progress(f"  WARNING: SMRF failed ({e}) — using all returns (cloth fallback)")
+            arr = _run([])
+            if arr is None or len(arr) == 0:
+                sys.exit("ERROR: No points returned from EPT for this bbox")
+            progress(f"  Fallback: {len(arr):,} points (all returns)")
+
     x = arr['X'].astype(np.float64)
     y = arr['Y'].astype(np.float64)
     z = arr['Z'].astype(np.float64)
-    # Try to get RGB if available
     try:
         r = (arr['Red']   / 256).astype(np.uint8)
         g = (arr['Green'] / 256).astype(np.uint8)
@@ -110,7 +217,7 @@ def fetch_ept_points(ept_path, utm_bbox, progress=print):
 # Step 2 — Minimum-surface DEM (2nd percentile per cell)
 # ──────────────────────────────────────────────────────────────────────────────
 
-def build_dem(x, y, z, resolution, csf_iterations=80, progress=print):
+def build_dem(x, y, z, resolution, csf_iterations=500, progress=print):
     """
     Build a ground DEM using cloth-simulation-from-below (CSF).
 
@@ -162,33 +269,120 @@ def build_dem(x, y, z, resolution, csf_iterations=80, progress=print):
     progress(f"  DEM grid: {rows}×{cols} ({rows*cols:,} cells)")
     return cloth, x_bins, y_bins, x_min, y_min
 
+
+def filter_spikes(dem, resolution, radius_m=10.0, threshold_m=1.5, progress=print):
+    """
+    One-sided spike filter: removes upward outliers (trees, buildings) while
+    leaving downward features (caves, sinkholes, depressions) completely untouched.
+
+    For each cell, compute the local median over a window of radius_m metres.
+    Cells that are more than threshold_m ABOVE the local median are replaced
+    with the local median.  Cells at or below the median are never touched.
+    """
+    from scipy.ndimage import median_filter
+    window = max(3, int(round(radius_m / resolution)) * 2 + 1)
+    progress(f"  Spike filter: radius={radius_m}m ({window}-cell window), "
+             f"threshold={threshold_m}m...")
+    ref = median_filter(dem.astype(np.float32), size=window)
+    delta = dem - ref
+    spikes = delta > threshold_m
+    n_spikes = int(spikes.sum())
+    dem_clean = dem.copy()
+    dem_clean[spikes] = ref[spikes]
+    progress(f"  Spike filter: replaced {n_spikes:,} upward outlier cells "
+             f"({n_spikes * 100.0 / dem.size:.1f}% of grid)")
+    return dem_clean
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Step 3 — Build TIN mesh from DEM grid
 # ──────────────────────────────────────────────────────────────────────────────
 
 def build_mesh(dem, x_bins, y_bins, x_origin, y_origin, max_triangles=2_000_000, progress=print):
-    """Convert DEM grid to a triangle mesh, decimate if needed."""
-    progress("  Triangulating DEM...")
+    """
+    Build a curvature-adaptive TIN mesh from a DEM grid.
+
+    Flat areas get a coarse background subgrid; high-curvature areas (ridges,
+    sinkholes, cave entrances, rock outcrops) keep full resolution.  The result
+    is a Delaunay triangulation of this importance-sampled point set, so flat
+    terrain never wastes triangles.
+
+    Algorithm
+    ---------
+    1. Compute |Laplacian| curvature of the smoothed DEM.
+    2. Select a background subgrid at `flat_step` spacing (controls max triangle
+       size in flat areas).
+    3. Separately budget ~half of max_triangles for high-curvature vertices
+       (those with the top-N curvature scores).
+    4. Delaunay-triangulate the union of both sets.
+    5. Quadric-decimate if still over max_triangles (trimesh, optional).
+    """
+    from scipy.ndimage import laplace, uniform_filter
+    from scipy.spatial import Delaunay
+
     rows, cols = dem.shape
-    # Build vertex grid
-    xi, yi = np.meshgrid(np.arange(rows), np.arange(cols), indexing='ij')
-    vx = (xi.ravel() * (x_bins[1] - x_bins[0])).astype(np.float32)
-    vy = (yi.ravel() * (y_bins[1] - y_bins[0])).astype(np.float32)
-    vz = dem.ravel().astype(np.float32)
-    # Centre on origin
-    vx -= vx.mean(); vy -= vy.mean()
+    dx = float(x_bins[1] - x_bins[0])
+    dy = float(y_bins[1] - y_bins[0])
+    n_cells = rows * cols
+
+    # ── 1. Curvature map ──────────────────────────────────────────────────────
+    # Smooth the DEM slightly to kill per-point noise before computing Laplacian
+    smoothed = uniform_filter(dem.astype(np.float32), size=5)
+    curv = np.abs(laplace(smoothed)).ravel()   # flat → ~0, ridges/sinkholes → large
+    # Normalise against robust max (99th pct) to ignore extreme outliers
+    curv_scale = float(np.percentile(curv, 99)) + 1e-9
+    curv_norm = np.clip(curv / curv_scale, 0.0, 1.0)
+
+    # ── 2. Background subgrid (flat areas) ───────────────────────────────────
+    # flat_step: coarse spacing for genuinely flat cells.
+    # Chosen so the subgrid alone produces roughly max_triangles/4 triangles.
+    flat_step = max(2, int(math.sqrt(n_cells / (max_triangles / 4))))
+    flat_step = min(flat_step, 32)   # never coarser than 32 cells
+
+    sub_r = np.zeros(rows, dtype=bool); sub_r[::flat_step] = True
+    sub_c = np.zeros(cols, dtype=bool); sub_c[::flat_step] = True
+    subgrid_mask = (np.outer(sub_r, sub_c)).ravel()
+
+    # ── 3. High-curvature vertices ────────────────────────────────────────────
+    # Budget for curvature vertices: fill up to max_triangles/2 total vertices
+    # (Delaunay produces ~2× as many triangles as vertices for a dense set)
+    n_subgrid = int(subgrid_mask.sum())
+    n_border  = 2 * rows + 2 * (cols - 2)   # rough border count
+    n_curv_budget = max(0, max_triangles // 2 - n_subgrid - n_border)
+
+    if n_curv_budget > 0 and n_curv_budget < n_cells:
+        # Select top-N cells by curvature score
+        threshold = float(np.partition(curv_norm, n_cells - n_curv_budget)
+                          [n_cells - n_curv_budget])
+        curv_mask = curv_norm >= threshold
+    else:
+        curv_mask = np.zeros(n_cells, dtype=bool)
+
+    # ── 4. Union + border ─────────────────────────────────────────────────────
+    keep = (subgrid_mask | curv_mask).reshape(rows, cols)
+    keep[0, :] = keep[-1, :] = keep[:, 0] = keep[:, -1] = True   # always keep border
+
+    r_idx, c_idx = np.where(keep)
+    n_verts = len(r_idx)
+    pct = n_verts * 100.0 / n_cells
+    progress(f"  Adaptive sampling: {n_verts:,} vertices "
+             f"({pct:.1f}% of {n_cells:,} grid cells, "
+             f"flat step={flat_step}×{dx:.1f}m = {flat_step*dx:.0f}m triangles in flat areas)")
+
+    # ── 5. Physical positions (centred on grid centre) ────────────────────────
+    # dem.shape = (n_x_bins, n_y_bins): rows → easting (X), cols → northing (Y)
+    vx = (r_idx * dx - (rows - 1) * dx / 2.0).astype(np.float32)   # row  → easting
+    vy = (c_idx * dy - (cols - 1) * dy / 2.0).astype(np.float32)   # col  → northing
+    vz = dem[r_idx, c_idx].astype(np.float32)
     vertices = np.column_stack([vx, vy, vz])
-    # Build quads → 2 triangles each
-    def idx(r, c): return r * cols + c
-    faces = []
-    for r in range(rows - 1):
-        for c in range(cols - 1):
-            a, b, c_, d = idx(r,c), idx(r+1,c), idx(r+1,c+1), idx(r,c+1)
-            faces.append([a, b, c_])
-            faces.append([a, c_, d])
-    faces = np.array(faces, dtype=np.uint32)
-    progress(f"  Raw mesh: {len(vertices):,} vertices, {len(faces):,} triangles")
-    # Decimate if too large
+
+    # ── 6. 2-D Delaunay triangulation ─────────────────────────────────────────
+    progress("  Delaunay triangulation...")
+    tri = Delaunay(np.column_stack([vx.astype(np.float64),
+                                     vy.astype(np.float64)]))
+    faces = tri.simplices.astype(np.uint32)
+    progress(f"  Adaptive mesh: {len(vertices):,} verts, {len(faces):,} tris")
+
+    # ── 7. Optional quadric decimation if still over budget ───────────────────
     if len(faces) > max_triangles:
         try:
             import trimesh
@@ -196,36 +390,323 @@ def build_mesh(dem, x_bins, y_bins, x_origin, y_origin, max_triangles=2_000_000,
             ratio = max_triangles / len(faces)
             mesh = mesh.simplify_quadric_decimation(int(len(faces) * ratio))
             vertices = np.array(mesh.vertices, dtype=np.float32)
-            faces = np.array(mesh.faces, dtype=np.uint32)
-            progress(f"  Decimated: {len(vertices):,} vertices, {len(faces):,} triangles")
+            faces    = np.array(mesh.faces,    dtype=np.uint32)
+            progress(f"  Decimated: {len(vertices):,} verts, {len(faces):,} tris")
         except ImportError:
-            progress("  WARNING: trimesh not installed, skipping decimation")
+            progress("  WARNING: trimesh not installed — cannot further reduce triangle count")
+
     return vertices, faces
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Step 4 — Fetch satellite texture
 # ──────────────────────────────────────────────────────────────────────────────
 
-def fetch_satellite_texture(bbox_latlon, size=(2048, 2048), progress=print):
-    """Download satellite imagery from ESRI World Imagery for the bbox."""
+def _physical_tex_dims(minLon, minLat, maxLon, maxLat, tex_size):
+    """Return (tex_w, tex_h) matching the physical aspect ratio of the bbox."""
+    lat_mid = (minLat + maxLat) / 2
+    km_ew = (maxLon - minLon) * 111.32 * math.cos(math.radians(lat_mid))
+    km_ns = (maxLat - minLat) * 111.32
+    if km_ew >= km_ns:
+        return tex_size, max(64, round(tex_size * km_ns / km_ew)), km_ew, km_ns
+    else:
+        return max(64, round(tex_size * km_ew / km_ns)), tex_size, km_ew, km_ns
+
+
+def _fetch_esri(bbox_latlon, tex_size, progress):
+    """
+    Fetch ESRI World Imagery tiles and stitch — same source FLEX uses for its
+    'Bing Maps Aerial' minimap layer (tile/{z}/{y}/{x} endpoint, no key needed).
+
+    Zoom is chosen so native tile pixels exceed tex_size on the long axis.
+    The stitched canvas is cropped to the precise geographic bbox then
+    downsampled to tex_size (preserving aspect ratio).
+    """
+    import io as _io
+    from PIL import Image as _PILImage
+    _PILImage.MAX_IMAGE_PIXELS = None   # we build this canvas ourselves; no bomb risk
     minLon, minLat, maxLon, maxLat = bbox_latlon
-    progress("  Fetching satellite texture from ESRI World Imagery...")
-    url = (
-        "https://services.arcgisonline.com/arcgis/rest/services/"
-        "World_Imagery/MapServer/export"
-        f"?bbox={minLon},{minLat},{maxLon},{maxLat}"
-        f"&bboxSR=4326&size={size[0]},{size[1]}&imageSR=4326"
-        "&format=jpg&f=image"
-    )
+    lat_mid = (minLat + maxLat) / 2
+
+    # ── helpers (Web Mercator tile math) ─────────────────────────────────────
+    def _tile_xy(lon, lat, z):
+        n = 2 ** z
+        tx = int((lon + 180) / 360 * n)
+        lat_r = math.radians(lat)
+        ty = int((1 - math.log(math.tan(lat_r) + 1.0 / math.cos(lat_r)) / math.pi) / 2 * n)
+        return tx, max(0, min(ty, n - 1))
+
+    def _px(lon, lat, z, tile_size=256):
+        n = 2 ** z
+        wx = (lon + 180) / 360 * n * tile_size
+        lat_r = math.radians(lat)
+        wy = (1 - math.log(math.tan(lat_r) + 1.0 / math.cos(lat_r)) / math.pi) / 2 * n * tile_size
+        return wx, wy
+
+    # ── choose zoom ───────────────────────────────────────────────────────────
+    km_ew = (maxLon - minLon) * 111.32 * math.cos(math.radians(lat_mid))
+    km_ns = (maxLat - minLat) * 111.32
+    extent_m = max(km_ew, km_ns) * 1000
+    zoom = max(10, min(19, math.ceil(
+        math.log2(tex_size * 156543.034 * math.cos(math.radians(lat_mid)) / extent_m)
+    )))
+
+    # ── tile range ────────────────────────────────────────────────────────────
+    tx_nw, ty_nw = _tile_xy(minLon, maxLat, zoom)
+    tx_se, ty_se = _tile_xy(maxLon, minLat, zoom)
+    n_tx = tx_se - tx_nw + 1
+    n_ty = ty_se - ty_nw + 1
+    progress(f"  ESRI tiles zoom={zoom}, {n_tx}×{n_ty}={n_tx*n_ty} tiles "
+             f"({km_ew:.1f}×{km_ns:.1f} km)...")
+
+    TILE = 256
+    BASE = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile"
+    canvas = Image.new('RGB', (n_tx * TILE, n_ty * TILE), (120, 120, 120))
+    fetched = 0
+    for ty in range(ty_nw, ty_se + 1):
+        for tx in range(tx_nw, tx_se + 1):
+            url = f"{BASE}/{zoom}/{ty}/{tx}"
+            try:
+                r = requests.get(url, timeout=15,
+                                 headers={'User-Agent': 'Mozilla/5.0 (compatible; FLEX/1.0)'})
+                r.raise_for_status()
+                tile_img = Image.open(_io.BytesIO(r.content)).convert('RGB')
+                canvas.paste(tile_img, ((tx - tx_nw) * TILE, (ty - ty_nw) * TILE))
+                fetched += 1
+            except Exception as e:
+                progress(f"  WARNING: tile z={zoom}/{ty}/{tx} failed: {e}")
+
+    if fetched == 0:
+        raise RuntimeError("All ESRI tiles failed — no imagery fetched")
+    progress(f"  Fetched {fetched}/{n_tx*n_ty} tiles")
+
+    # ── crop to exact bbox ───────────────────────────────────────────────────
+    wx0, wy0 = _px(minLon, maxLat, zoom)
+    wx1, wy1 = _px(maxLon, minLat, zoom)
+    ox = (tx_nw * TILE)
+    oy = (ty_nw * TILE)
+    box = (int(wx0 - ox), int(wy0 - oy), int(wx1 - ox), int(wy1 - oy))
+    box = (max(0, box[0]), max(0, box[1]),
+           min(canvas.width,  box[2]), min(canvas.height, box[3]))
+    canvas = canvas.crop(box)
+
+    # ── resize to requested tex_size (preserve aspect) ───────────────────────
+    tex_w, tex_h = _physical_tex_dims(minLon, minLat, maxLon, maxLat, tex_size)[:2]
+    canvas = canvas.resize((tex_w, tex_h), Image.LANCZOS)
+    progress(f"  ESRI texture: {canvas.size[0]}×{canvas.size[1]} px")
+    return canvas
+
+
+def _fetch_bing(bbox_latlon, tex_size, progress):
+    """
+    Fetch Bing Maps Aerial tiles, stitch and crop to exact bbox.
+
+    Uses the standard Bing quadkey tile system.  Tiles are 256×256 JPEG.
+    Zoom level is chosen automatically to exceed tex_size native pixels on the
+    long axis.  The stitched canvas is cropped to the precise geographic bbox
+    then downsampled to the requested tex_size (physical-aspect-ratio output).
+    """
+    import io as _io, random as _rand
+    from PIL import Image as _PILImage
+    _PILImage.MAX_IMAGE_PIXELS = None   # we build this canvas ourselves; no bomb risk
+    minLon, minLat, maxLon, maxLat = bbox_latlon
+    lat_mid = (minLat + maxLat) / 2
+
+    # ── helper functions ──────────────────────────────────────────────────────
+    def _tile_xy(lon, lat, z):
+        n = 2 ** z
+        tx = int((lon + 180) / 360 * n)
+        lat_r = math.radians(lat)
+        ty = int((1 - math.log(math.tan(lat_r) + 1.0 / math.cos(lat_r)) / math.pi) / 2 * n)
+        return tx, max(0, min(ty, n - 1))
+
+    def _quadkey(tx, ty, z):
+        key = []
+        for i in range(z, 0, -1):
+            d = 0
+            mask = 1 << (i - 1)
+            if tx & mask: d |= 1
+            if ty & mask: d |= 2
+            key.append(str(d))
+        return ''.join(key)
+
+    def _px(lon, lat, z, tile_size=256):
+        """World-pixel coordinates at zoom z (y=0 at north)."""
+        n = 2 ** z
+        wx = (lon + 180) / 360 * n * tile_size
+        lat_r = math.radians(lat)
+        wy = (1 - math.log(math.tan(lat_r) + 1.0 / math.cos(lat_r)) / math.pi) / 2 * n * tile_size
+        return wx, wy
+
+    # ── choose zoom ───────────────────────────────────────────────────────────
+    km_ew = (maxLon - minLon) * 111.32 * math.cos(math.radians(lat_mid))
+    km_ns = (maxLat - minLat) * 111.32
+    extent_m = max(km_ew, km_ns) * 1000
+    # native m/px at zoom z = 156543.034 * cos(lat_mid_rad) / 2^z
+    # we want m/px <= extent_m / tex_size  →  zoom >= log2(tex_size * 156543 * cos / extent_m)
+    zoom = max(10, min(19, math.ceil(
+        math.log2(tex_size * 156543.034 * math.cos(math.radians(lat_mid)) / extent_m)
+    )))
+
+    # ── tile range ────────────────────────────────────────────────────────────
+    tx_nw, ty_nw = _tile_xy(minLon, maxLat, zoom)
+    tx_se, ty_se = _tile_xy(maxLon, minLat, zoom)
+    n_tx = tx_se - tx_nw + 1
+    n_ty = ty_se - ty_nw + 1
+    progress(f"  Bing zoom={zoom}, {n_tx}×{n_ty}={n_tx*n_ty} tiles "
+             f"({km_ew:.1f}×{km_ns:.1f} km)...")
+
+    TILE = 256
+    canvas = Image.new('RGB', (n_tx * TILE, n_ty * TILE), (120, 120, 120))
+    fetched = 0
+    for ty in range(ty_nw, ty_se + 1):
+        for tx in range(tx_nw, tx_se + 1):
+            qk  = _quadkey(tx, ty, zoom)
+            srv = _rand.randint(0, 3)
+            url = f'https://ecn.t{srv}.tiles.virtualearth.net/tiles/a{qk}.jpeg?g=1'
+            try:
+                r = requests.get(url, timeout=15,
+                                 headers={'User-Agent': 'FLEX-CaveViewer/1.0'})
+                r.raise_for_status()
+                tile_img = Image.open(_io.BytesIO(r.content)).convert('RGB')
+                canvas.paste(tile_img, ((tx - tx_nw) * TILE, (ty - ty_nw) * TILE))
+                fetched += 1
+            except Exception as e:
+                progress(f"  WARNING: tile {qk} failed: {e}")
+
+    progress(f"  Fetched {fetched}/{n_tx*n_ty} tiles")
+
+    # ── crop to exact bbox ───────────────────────────────────────────────────
+    wx0, wy0 = _px(minLon, maxLat, zoom)   # north-west corner (top-left)
+    wx1, wy1 = _px(maxLon, minLat, zoom)   # south-east corner (bottom-right)
+    ox = tx_nw * TILE
+    oy = ty_nw * TILE
+    box = (max(0, int(wx0 - ox)),  max(0, int(wy0 - oy)),
+           min(canvas.width,  math.ceil(wx1 - ox)),
+           min(canvas.height, math.ceil(wy1 - oy)))
+    cropped = canvas.crop(box)
+
+    # ── resize to physical-aspect-ratio output ────────────────────────────────
+    tex_w, tex_h, _, _ = _physical_tex_dims(minLon, minLat, maxLon, maxLat, tex_size)
+    result = cropped.resize((tex_w, tex_h), Image.LANCZOS)
+    progress(f"  Bing texture: {result.size[0]}×{result.size[1]} px")
+    return result
+
+
+def _fetch_xyz_tiles(bbox_latlon, tex_size, url_template, tile_px=256, progress=print):
+    """
+    Generic XYZ slippy-map tile fetcher.
+
+    url_template: string with {z}, {x}, {y} placeholders.
+    tile_px:      actual pixel size of each fetched tile (256 or 512 for @2x).
+    URL order is {z}/{x}/{y} (standard XYZ / Mapbox / OpenStreetMap).
+    """
+    import io as _io
+    from PIL import Image as _PILImage
+    _PILImage.MAX_IMAGE_PIXELS = None   # we build this canvas ourselves; no bomb risk
+    minLon, minLat, maxLon, maxLat = bbox_latlon
+    lat_mid = (minLat + maxLat) / 2
+
+    def _tile_xy(lon, lat, z):
+        n = 2 ** z
+        tx = int((lon + 180) / 360 * n)
+        lat_r = math.radians(lat)
+        ty = int((1 - math.log(math.tan(lat_r) + 1.0 / math.cos(lat_r)) / math.pi) / 2 * n)
+        return tx, max(0, min(ty, n - 1))
+
+    def _px(lon, lat, z):
+        """World-pixel coords at zoom z (y=0 at north), tile_px per tile."""
+        n = 2 ** z
+        wx = (lon + 180) / 360 * n * tile_px
+        lat_r = math.radians(lat)
+        wy = (1 - math.log(math.tan(lat_r) + 1.0 / math.cos(lat_r)) / math.pi) / 2 * n * tile_px
+        return wx, wy
+
+    # Choose zoom: want native coverage >= tex_size on long axis
+    km_ew = (maxLon - minLon) * 111.32 * math.cos(math.radians(lat_mid))
+    km_ns = (maxLat - minLat) * 111.32
+    extent_m = max(km_ew, km_ns) * 1000
+    # m/px at zoom z = 156543.034 * cos(lat) / 2^z  (for 256-px tiles)
+    # for tile_px tiles, scale: 156543.034 * (tile_px/256) * cos / 2^z
+    zoom = max(10, min(19, math.ceil(
+        math.log2(tex_size * 156543.034 * (tile_px / 256) *
+                  math.cos(math.radians(lat_mid)) / extent_m)
+    )))
+
+    tx_nw, ty_nw = _tile_xy(minLon, maxLat, zoom)
+    tx_se, ty_se = _tile_xy(maxLon, minLat, zoom)
+    n_tx = tx_se - tx_nw + 1
+    n_ty = ty_se - ty_nw + 1
+    progress(f"  XYZ zoom={zoom}, {n_tx}×{n_ty}={n_tx*n_ty} tiles "
+             f"({km_ew:.1f}×{km_ns:.1f} km), tile_px={tile_px}...")
+
+    canvas = Image.new('RGB', (n_tx * tile_px, n_ty * tile_px), (120, 120, 120))
+    fetched = 0
+    for ty in range(ty_nw, ty_se + 1):
+        for tx in range(tx_nw, tx_se + 1):
+            url = url_template.replace('{z}', str(zoom)) \
+                               .replace('{x}', str(tx)) \
+                               .replace('{y}', str(ty))
+            try:
+                r = requests.get(url, timeout=20,
+                                 headers={'User-Agent': 'FLEX-CaveViewer/1.0'})
+                r.raise_for_status()
+                tile_img = Image.open(_io.BytesIO(r.content)).convert('RGB')
+                # Resize to tile_px if server returned different size
+                if tile_img.size != (tile_px, tile_px):
+                    tile_img = tile_img.resize((tile_px, tile_px), Image.LANCZOS)
+                canvas.paste(tile_img, ((tx - tx_nw) * tile_px, (ty - ty_nw) * tile_px))
+                fetched += 1
+            except Exception as e:
+                progress(f"  WARNING: tile {zoom}/{tx}/{ty} failed: {e}")
+
+    progress(f"  Fetched {fetched}/{n_tx*n_ty} tiles")
+    if fetched == 0:
+        raise RuntimeError("All tiles failed")
+
+    # Crop to exact bbox
+    wx0, wy0 = _px(minLon, maxLat, zoom)
+    wx1, wy1 = _px(maxLon, minLat, zoom)
+    ox = tx_nw * tile_px
+    oy = ty_nw * tile_px
+    box = (max(0, int(wx0 - ox)), max(0, int(wy0 - oy)),
+           min(canvas.width,  math.ceil(wx1 - ox)),
+           min(canvas.height, math.ceil(wy1 - oy)))
+    cropped = canvas.crop(box)
+
+    tex_w, tex_h, _, _ = _physical_tex_dims(minLon, minLat, maxLon, maxLat, tex_size)
+    result = cropped.resize((tex_w, tex_h), Image.LANCZOS)
+    progress(f"  XYZ texture: {result.size[0]}×{result.size[1]} px")
+    return result
+
+
+def _fetch_mapbox(bbox_latlon, tex_size, url_template, progress=print):
+    """
+    Fetch tiles from a Mapbox Styles tile endpoint.
+    The URL template uses {z}/{x}/{y} with @2x suffix (512 px tiles).
+    """
+    return _fetch_xyz_tiles(bbox_latlon, tex_size, url_template,
+                            tile_px=512, progress=progress)
+
+
+def fetch_satellite_texture(bbox_latlon, tex_size=8192, source='esri', progress=print):
+    """Download satellite imagery.
+    source='esri' (default) — tile-stitched ESRI World Imagery (same as FLEX)
+    source='bing'            — Bing Maps Aerial tile-stitched
+    """
+    minLon, minLat, maxLon, maxLat = bbox_latlon
+    fallback_size = _physical_tex_dims(minLon, minLat, maxLon, maxLat, tex_size)[:2]
     try:
-        r = requests.get(url, timeout=30)
-        r.raise_for_status()
-        img = Image.open(__import__('io').BytesIO(r.content)).convert('RGB')
-        progress(f"  Texture downloaded: {img.size[0]}×{img.size[1]} px")
-        return img
+        if source == 'bing':
+            return _fetch_bing(bbox_latlon, tex_size, progress)
+        else:
+            return _fetch_esri(bbox_latlon, tex_size, progress)
     except Exception as e:
-        progress(f"  WARNING: Could not fetch satellite texture ({e}). Using grey.")
-        return Image.new('RGB', size, (160, 160, 160))
+        progress(f"  WARNING: {source} imagery failed ({e}), trying Bing fallback...")
+        try:
+            return _fetch_bing(bbox_latlon, tex_size, progress)
+        except Exception as e2:
+            progress(f"  WARNING: Bing also failed ({e2}). Using grey.")
+            return Image.new('RGB', fallback_size, (160, 160, 160))
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Step 5 — Compute UV coordinates
@@ -251,23 +732,19 @@ def compute_uvs(vertices, dem_shape, x_bins, y_bins):
 # Step 6 — Export GLB
 # ──────────────────────────────────────────────────────────────────────────────
 
-def export_glb(vertices, faces, uvs, texture_img, out_path, progress=print):
-    """Package vertices + faces + UVs + texture into a GLB.
+def export_glb(vertices, faces, uvs, out_path, progress=print):
+    """Package vertices + faces + UVs into a geometry-only GLB (no embedded texture).
 
-    The texture is stored as a data: URI in the glTF JSON chunk so THREE.js
-    never makes a network / file:// request — works offline in any browser.
+    The texture is handled separately as TERRAIN_TEX_B64 in the viewer HTML,
+    applied via THREE.js with explicit flipY=false.  This avoids the flipY
+    mismatch that occurs when GLTFLoader loads a data: URI texture from the
+    GLB JSON chunk — in that code path THREE r128 cannot have its flipY
+    overridden, which stretches/mirrors the satellite image.
     """
-    import io as _io, base64 as _b64
-    progress("  Packaging GLB...")
+    progress("  Packaging GLB (geometry only)...")
     vert_bytes = vertices.astype(np.float32).tobytes()
     face_bytes = faces.astype(np.uint32).tobytes()
     uv_bytes   = uvs.astype(np.float32).tobytes()
-
-    # Encode texture as data URI — lives in the JSON chunk, zero network fetches
-    tex_buf = _io.BytesIO()
-    texture_img.save(tex_buf, format='JPEG', quality=85)
-    tex_data_uri = 'data:image/jpeg;base64,' + _b64.b64encode(tex_buf.getvalue()).decode('ascii')
-    progress(f"  Texture data URI: {len(tex_data_uri)//1024} KB")
 
     def pad4(b): return b + b'\x00' * ((4 - len(b) % 4) % 4)
     vert_off  = 0
@@ -287,15 +764,13 @@ def export_glb(vertices, faces, uvs, texture_img, out_path, progress=print):
             attributes=pygltflib.Attributes(POSITION=0, TEXCOORD_0=2),
             indices=1, material=0
         )])],
+        # Plain white material — the viewer replaces it with the satellite texture
         materials=[pygltflib.Material(
             pbrMetallicRoughness=pygltflib.PbrMetallicRoughness(
-                baseColorTexture=pygltflib.TextureInfo(index=0),
                 metallicFactor=0.0, roughnessFactor=1.0
             ),
             doubleSided=True
         )],
-        textures=[pygltflib.Texture(source=0)],
-        images=[pygltflib.Image(uri=tex_data_uri)],   # data: URI → no network fetch
         accessors=[
             pygltflib.Accessor(bufferView=0, componentType=pygltflib.FLOAT,
                 count=len(vertices), type=pygltflib.VEC3, min=v_min, max=v_max),
@@ -347,11 +822,14 @@ def get_viewer_libs(progress=print):
     return result
 
 
-def build_inline_viewer(glb_path, caves_data, viewer_libs, progress=print):
+def build_inline_viewer(glb_path, tex_b64, caves_data, viewer_libs, progress=print,
+                        hs_b64=None):
     """
     Build a fully self-contained HTML file:
       - Three.js libs inlined as <script> blocks
-      - terrain.glb embedded as base64 in a JS variable
+      - terrain.glb (geometry only) embedded as base64
+      - satellite texture embedded as separate base64 (flipY=false in viewer)
+      - optional hillshade texture embedded as TERRAIN_HS_B64
       - caves_data embedded as a JSON literal
 
     The result opens directly in any mobile browser with no server needed.
@@ -385,7 +863,17 @@ def build_inline_viewer(glb_path, caves_data, viewer_libs, progress=print):
     progress(f"  GLB base64: {len(glb_b64)//1024} KB")
     html = html.replace('"PLACEHOLDER_GLB_B64"', f'"{glb_b64}"')
 
-    # 3. Embed caves data as JSON literal
+    # 3. Embed satellite texture as separate base64 (viewer applies with flipY=false)
+    progress(f"  Embedding satellite texture ({len(tex_b64)//1024} KB)...")
+    html = html.replace('"PLACEHOLDER_TEX_B64"', f'"{tex_b64}"')
+
+    # 4. Embed hillshade texture if provided
+    if hs_b64:
+        progress(f"  Embedding hillshade texture ({len(hs_b64)//1024} KB)...")
+        html = html.replace('"PLACEHOLDER_HS_B64"', f'"{hs_b64}"')
+    # (if not provided the placeholder stays, viewer JS will detect and hide the toggle)
+
+    # 5. Embed caves data as JSON literal
     caves_json = json.dumps(caves_data, separators=(',', ':'))
     html = html.replace('PLACEHOLDER_CAVES_JSON', caves_json)
 
@@ -488,7 +976,15 @@ def main():
     ap.add_argument('--resolution',  type=float, default=0.5, help='DEM cell size in metres')
     ap.add_argument('--percentile',  type=float, default=2,   help='Ground percentile (2=very low)')
     ap.add_argument('--max-triangles', type=int, default=2_000_000)
-    ap.add_argument('--tex-size',    type=int, default=2048)
+    ap.add_argument('--tex-size',      type=int,   default=8192)
+    ap.add_argument('--spike-threshold', type=float, default=1.5,
+                    help='Remove upward spikes > this many metres above local median '
+                         '(10m radius window). Set to 0 to disable. Default: 1.5')
+    ap.add_argument('--satellite-source', default='bing', choices=['esri', 'bing'],
+                    help='Satellite imagery source: esri (default) or bing')
+    ap.add_argument('--hillshade-url', default='',
+        help='XYZ tile URL template for hillshade layer (use {z}/{x}/{y}). '
+             'Leave empty to skip hillshade export.')
     args = ap.parse_args()
 
     minLon, minLat, maxLon, maxLat = args.bbox
@@ -509,7 +1005,9 @@ def main():
 
         # 1. Fetch points
         x, y, z, r, g, b = fetch_ept_points(
-            args.ept, (minE, minN, maxE, maxN), progress=lambda m: print(f"[1/6] {m}")
+            args.ept, (minE, minN, maxE, maxN),
+            bbox_latlon=(minLon, minLat, maxLon, maxLat),
+            progress=lambda m: print(f"[1/6] {m}")
         )
 
         # 2. Build DEM
@@ -517,6 +1015,15 @@ def main():
             x, y, z, args.resolution,
             progress=lambda m: print(f"[2/6] {m}")
         )
+
+        # Spike filter: remove upward outliers (trees/buildings) while preserving
+        # downward features (caves, sinkholes).
+        if args.spike_threshold > 0:
+            dem = filter_spikes(
+                dem, args.resolution,
+                radius_m=10.0, threshold_m=args.spike_threshold,
+                progress=lambda m: print(f"[2/7] {m}")
+            )
 
         # Apply the same Z correction FLEX applies to Potree point clouds.
         # Default (both usgsRef and egm96 OFF): -32 * 0.766 ~ -24.5 m.
@@ -536,20 +1043,49 @@ def main():
             progress=lambda m: print(f"[3/6] {m}")
         )
 
-        # 4. Satellite texture
+        # 4. Satellite texture (proportional pixel dimensions)
+        print(f"[4/7] Fetching satellite texture ({args.satellite_source.upper()})...")
         texture = fetch_satellite_texture(
-            (minLon, minLat, maxLon, maxLat), (args.tex_size, args.tex_size),
-            progress=lambda m: print(f"[4/6] {m}")
+            (minLon, minLat, maxLon, maxLat), tex_size=args.tex_size,
+            source=args.satellite_source,
+            progress=lambda m: print(f"[4/7] {m}")
         )
 
-        # 5. UVs + GLB (texture embedded as data: URI inside the GLB JSON chunk)
+        # 4b. Hillshade texture (Mapbox or custom XYZ)
+        hs_b64 = None
+        if args.hillshade_url:
+            print("[4b/7] Fetching hillshade texture (Mapbox/XYZ)...")
+            try:
+                hs_img = _fetch_mapbox(
+                    (minLon, minLat, maxLon, maxLat), args.tex_size,
+                    args.hillshade_url,
+                    progress=lambda m: print(f"[4b/7] {m}")
+                )
+                import io as _hs_io, base64 as _hs_b64m
+                hs_buf = _hs_io.BytesIO()
+                hs_img.save(hs_buf, format='JPEG', quality=85)
+                hs_b64 = _hs_b64m.b64encode(hs_buf.getvalue()).decode('ascii')
+                print(f"[4b/7] Hillshade base64: {len(hs_b64)//1024} KB")
+            except Exception as e:
+                print(f"[4b/7] WARNING: hillshade fetch failed ({e}) — skipping")
+        else:
+            print("[4b/7] --hillshade-url is empty, skipping hillshade")
+
+        # 5. UVs + GLB (geometry only) + separate texture encoding
         uvs = compute_uvs(vertices, dem.shape, x_bins, y_bins)
         glb_path = tmp / 'terrain.glb'
-        export_glb(vertices, faces, uvs, texture, glb_path,
-                   progress=lambda m: print(f"[5/6] {m}"))
+        export_glb(vertices, faces, uvs, glb_path,
+                   progress=lambda m: print(f"[5/7] {m}"))
+
+        # Encode satellite texture as plain base64 — viewer applies it with flipY=false
+        import io as _tex_io, base64 as _tex_b64
+        tex_buf = _tex_io.BytesIO()
+        texture.save(tex_buf, format='JPEG', quality=85)
+        tex_b64 = _tex_b64.b64encode(tex_buf.getvalue()).decode('ascii')
+        print(f"[5/7] Satellite texture base64: {len(tex_b64)//1024} KB")
 
         # 6. Package ZIP
-        print(f"[6/6] Writing {args.out}...")
+        print(f"[6/7] Writing {args.out}...")
         with zipfile.ZipFile(args.out, 'w', zipfile.ZIP_DEFLATED) as zf:
             zf.write(glb_path, 'terrain.glb')
 
@@ -576,10 +1112,11 @@ def main():
             }
             zf.writestr('caves.json', json.dumps(caves_out))
 
-            # Viewer HTML: fully self-contained (Three.js + GLB + caves all inline)
+            # Viewer HTML: fully self-contained (Three.js + GLB + textures + caves all inline)
             inline_html = build_inline_viewer(
-                glb_path, caves_out, viewer_libs,
-                progress=lambda m: print(f"[6/6] {m}"))
+                glb_path, tex_b64, caves_out, viewer_libs,
+                progress=lambda m: print(f"[6/7] {m}"),
+                hs_b64=hs_b64)
             zf.writestr('viewer.html', inline_html.encode('utf-8'))
 
             # serve.bat (Windows) — double-click to start local HTTP server
@@ -600,6 +1137,7 @@ def main():
                 'python3 -m http.server 8090\n')
 
     sz = os.path.getsize(args.out) / 1e6
+    print(f"[7/7] Done.")
     print(f"[done] {args.out} ({sz:.1f} MB)")
 
 if __name__ == '__main__':
