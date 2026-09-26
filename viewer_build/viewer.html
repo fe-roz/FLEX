@@ -49,6 +49,7 @@
   .tb-btn.off { opacity: .3; }
   .tb-btn.active { background: rgba(33,150,243,.35); border-color: #2196F3; }
   .tb-btn.follow-active { background: rgba(102,187,106,.25); border-color: #66bb6a; }
+  .tb-btn.heading-active { background: rgba(255,167,38,.28); border-color: #ffa726; }
 
   /* Combined map panel */
   #map-panel {
@@ -135,18 +136,11 @@
   .fx-shot { font-size: 11px; padding: 2px 0; opacity: .7; font-family: monospace; }
 
   /* Compass needle */
-  #compass {
-    position: fixed; bottom: 80px; left: 14px;
-    width: 36px; height: 36px; display: none;
-    pointer-events: none;
-  }
-  #compass.show { display: block; }
-  #compass svg { transform-origin: center; }
 
   /* North arrow — always visible, shows camera heading */
   #north-canvas {
-    position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
-    width: 44px; height: 44px; pointer-events: none; z-index: 12;
+    position: fixed; bottom: 16px; left: 14px;
+    width: 48px; height: 48px; pointer-events: none; z-index: 12;
   }
 
   /* Mode toast */
@@ -214,10 +208,20 @@
       <button class="layer-btn"        id="btn-layer-hs">🏔️ SHAD</button>
     </div>
   </div>
-  <div class="map-section-label">OPACITY</div>
+  <div class="map-section-label">BRIGHTNESS</div>
+  <input type="range" id="terrain-bright-slider" min="50" max="300" value="150"
+    style="width:110px; accent-color:#00e5ff; display:block;">
+  <div id="terrain-bright-label" style="font-size:10px; opacity:.55; text-align:center; margin-top:4px 
+    ">150%</div>
+  <div class="map-section-label" style="margin-top:12px">HAZE</div>
+  <input type="range" id="terrain-fog-slider" min="0" max="200" value="0"
+    style="width:110px; accent-color:#00e5ff; display:block;">
+  <div id="terrain-fog-label" style="font-size:10px; opacity:.55; text-align:center; margin-top:4px">off</div>
+  <div class="map-section-label" style="margin-top:12px">OPACITY</div>
   <input type="range" id="terrain-opacity-slider" min="0" max="100" value="70"
     style="width:110px; accent-color:#00e5ff; display:block;">
   <div id="terrain-opacity-label" style="font-size:10px; opacity:.55; text-align:center; margin-top:4px">70%</div>
+
 </div>
 
 <!-- Help overlay -->
@@ -230,7 +234,8 @@
     <div class="help-section">TOOLBAR</div>
     <div class="help-row"><span class="help-icon">🕹️</span><span class="help-desc">Fly mode (tap again for Crane; again to exit)</span></div>
     <div class="help-row"><span class="help-icon">◎</span><span class="help-desc">Stations: end-only → all → hidden</span></div>
-    <div class="help-row"><span class="help-icon">📍</span><span class="help-desc">GPS: tap → show pin → tap → follow lock → tap → off</span></div>
+    <div class="help-row"><span class="help-icon">📍</span><span class="help-desc">GPS: tap → pin → follow → heading-up → off</span></div>
+    <div class="help-row"><span class="help-icon">⏱️</span><span class="help-desc">Long-press 📍 → test mode: centres the terrain on you</span></div>
     <div class="help-row"><span class="help-icon">📂</span><span class="help-desc">Import KML / KMZ route file</span></div>
     <div class="help-row"><span class="help-icon">🗺️</span><span class="help-desc">Terrain opacity &amp; imagery layer</span></div>
     <div class="help-row"><span class="help-icon">⛶</span><span class="help-desc">Toggle fullscreen</span></div>
@@ -244,14 +249,7 @@
 <canvas id="north-canvas"></canvas>
 <div id="mode-toast"></div>
 
-<div id="compass">
-  <svg width="36" height="36" viewBox="0 0 36 36" id="compass-svg">
-    <circle cx="18" cy="18" r="17" fill="rgba(0,0,0,.5)" stroke="rgba(255,255,255,.2)" stroke-width="1"/>
-    <polygon points="18,4 21,18 18,22 15,18" fill="#e53935"/>
-    <polygon points="18,32 21,18 18,22 15,18" fill="#aaa"/>
-    <text x="18" y="7" text-anchor="middle" font-size="6" fill="#e53935" font-family="system-ui">N</text>
-  </svg>
-</div>
+
 
 <!-- Hidden KML file picker -->
 <input type="file" id="kml-input" accept=".kml,.kmz" style="display:none">
@@ -300,7 +298,14 @@ document.getElementById('canvas-wrap').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0a0f);
-scene.fog = new THREE.FogExp2(0x0a0a0f, 0.00035);
+// FogExp2 falls off as exp(-(d*density)^2), so a fixed density is only ever
+// right for one terrain size: the old hardcoded 0.00035 left a 5 km view ~95%
+// blended into the background and the scene vanished on zoom-out. The baseline
+// is recomputed from the terrain's own extent once the GLB loads, and the HAZE
+// slider is a multiplier on it. Default 0 -- density 0 makes exp(0)=1, so the
+// fog term is a no-op until you actually ask for haze.
+let fogBaseDensity = 0.00035;
+scene.fog = new THREE.FogExp2(0x0a0a0f, 0);
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 60000);
 camera.up.set(0, 0, 1);
@@ -312,8 +317,13 @@ controls.minDistance = 5;
 controls.maxDistance = 25000;
 controls.maxPolarAngle = Math.PI * 0.88;
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.25));
-const sun = new THREE.DirectionalLight(0xffffff, 0.5);
+// Base intensities. The brightness control scales BOTH by the same factor,
+// which raises the overall level while leaving the ambient:directional ratio
+// untouched -- so relief shading keeps exactly the same contrast.
+const AMBIENT_BASE = 0.25, SUN_BASE = 0.5;
+const ambientLight = new THREE.AmbientLight(0xffffff, AMBIENT_BASE);
+scene.add(ambientLight);
+const sun = new THREE.DirectionalLight(0xffffff, SUN_BASE);
 sun.position.set(1, 0.8, 2);
 scene.add(sun);
 
@@ -358,12 +368,24 @@ function latlonToUTM(lat, lon) {
   return { easting, northing };
 }
 
+// Test mode: pretend the terrain is centred wherever you are standing, so the
+// GPS path can be exercised without travelling to the cave. Both the fix and
+// the origin go through the same projection, so the offset stays true to life
+// -- walk 50 m north and the marker moves 50 m north across the terrain.
+// (Only valid within one UTM zone, which any walking test trivially satisfies.)
+let gpsOriginOverride = null;   // {lat, lon} or null
+let gpsLastLatLon     = null;   // most recent fix, for re-anchoring
+
 function gpsToScene(lat, lon) {
   const { easting, northing } = latlonToUTM(lat, lon);
-  return {
-    x: easting  - (META.utm_center_e || 0),
-    y: northing - (META.utm_center_n || 0),
-  };
+  let originE = META.utm_center_e || 0;
+  let originN = META.utm_center_n || 0;
+  if (gpsOriginOverride) {
+    const o = latlonToUTM(gpsOriginOverride.lat, gpsOriginOverride.lon);
+    originE = o.easting;
+    originN = o.northing;
+  }
+  return { x: easting - originE, y: northing - originN };
 }
 
 // ── Terrain surface raycaster (find Z at XY) ──────────────────────────────────
@@ -382,18 +404,52 @@ function applyTerrainTexture(tex) {
     const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
     mats.forEach(m => { m.map = tex; m.color.set(0xffffff); m.needsUpdate = true; });
   });
+  // Texture arrives asynchronously — force a frame even if the scene is idle.
+  if (typeof requestRender === 'function') { requestRender(); wakeRender(); }
 }
 
-function loadB64Texture(b64, onLoad) {
+// A 16384-wide texture is larger than many mobile GPUs will accept, and an
+// over-size texImage2D fails as a silently black terrain rather than an error.
+// Query the real limit once and downscale only when we actually exceed it, so
+// a capable device still gets the full-resolution export.
+let _maxTexSize = 4096;
+try {
+  const _gl = renderer.getContext();
+  _maxTexSize = _gl.getParameter(_gl.MAX_TEXTURE_SIZE) || 4096;
+} catch (e) { console.warn('MAX_TEXTURE_SIZE query failed; assuming 4096'); }
+
+function fitTextureToGpu(img) {
+  const w = img.naturalWidth || img.width;
+  const h = img.naturalHeight || img.height;
+  const longest = Math.max(w, h);
+  if (longest <= _maxTexSize) return img;
+  const scale = _maxTexSize / longest;
+  const cw = Math.max(1, Math.round(w * scale));
+  const ch = Math.max(1, Math.round(h * scale));
+  const cv = document.createElement('canvas');
+  cv.width = cw; cv.height = ch;
+  cv.getContext('2d').drawImage(img, 0, 0, cw, ch);
+  console.info('terrain texture ' + w + 'x' + h + ' exceeds GPU limit ' +
+               _maxTexSize + '; downscaled to ' + cw + 'x' + ch);
+  return cv;
+}
+
+function loadB64Texture(src, onLoad) {
   const img = new Image();
   img.onload = () => {
-    const tex = new THREE.Texture(img);
+    const tex = new THREE.Texture(fitTextureToGpu(img));
     tex.flipY = false;
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.needsUpdate = true;
     onLoad(tex);
+    if (typeof requestRender === 'function') { requestRender(); wakeRender(); }
   };
-  img.src = 'data:image/jpeg;base64,' + b64;
+  img.onerror = () => console.warn('texture failed to load:', String(src).slice(0, 64));
+  // Accepts a bare base64 payload (the inline export), a full data: URI, or a
+  // relative file name — the APK build extracts the textures to sidecar files
+  // so the WebView never has to parse a 180 MB HTML document.
+  img.src = /^(data:|https?:|\.{0,2}\/)/.test(src) ? src
+          : (/^[A-Za-z0-9+/=\s]+$/.test(src.slice(0, 120)) ? 'data:image/jpeg;base64,' + src : src);
 }
 const _downRay = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, 0, -1));
 
@@ -402,6 +458,149 @@ function terrainZAt(x, y) {
   _downRay.ray.origin.set(x, y, 99999);
   const hits = _downRay.intersectObject(terrainGroup, true);
   return hits.length ? hits[0].point.z : null;
+}
+
+// ── Terrain height lookup ────────────────────────────────────────────────────
+// Three.js raycasting is a linear scan over every triangle -- there is no BVH --
+// so one terrainZAt against a 2 M-triangle export costs tens to hundreds of
+// milliseconds. Caching the last answer only helped while standing still;
+// walking blows the cache every few seconds and the hitch comes straight back.
+//
+// The terrain is a heightfield, so it does not need ray casting at all. One
+// pass over the vertex buffer at load time bins every vertex into a coarse
+// grid, after which a height query is a handful of array reads. Build cost is
+// paid once; lookup goes from O(triangles) to O(1).
+// Sized from a hold-out test against the real Marbles mesh (991,569 vertices
+// over 3353 x 3214 m): grid built from 90% of vertices, error measured on the
+// other 10%. Accuracy improves monotonically with resolution --
+//    498 cells (6.7 m): 1.77 m mean, 5.1 m p95
+//    995 cells (3.4 m): 1.32 m mean, 4.3 m p95
+//   2048 cells (1.6 m): 0.94 m mean, 3.0 m p95
+// -- even though only 14% of cells hold a vertex at the finest level. That is
+// the decimation working for us: a simplifier puts vertices where the ground is
+// rough, so the fine grid resolves exactly the places that need it, and the
+// cells it leaves empty are flat ground the pyramid interpolates exactly.
+const HGRID_MIN = 256, HGRID_MAX = 2048;
+let _hgrid = null;
+
+function chooseGridN(group) {
+  let v = 0;
+  group.traverse(function (o) {
+    if (o.isMesh && o.geometry && o.geometry.attributes.position)
+      v += o.geometry.attributes.position.count;
+  });
+  return Math.max(HGRID_MIN, Math.min(HGRID_MAX, Math.round(Math.sqrt(v) * 2)));
+}
+
+const _IDENT = new THREE.Matrix4();
+function _isIdentity(m) {
+  const a = m.elements, b = _IDENT.elements;
+  for (let i = 0; i < 16; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+// ── Terrain height lookup ────────────────────────────────────────────────────
+// Three.js raycasting is a linear scan over every triangle -- there is no BVH --
+// so one query against a 2 M-triangle mesh costs tens to hundreds of ms. The
+// terrain is a heightfield, so it does not need ray casting at all: bin every
+// vertex once at load, then a query is a few array reads.
+//
+// Empty cells are handled with a pyramid rather than by dilating neighbours.
+// Dilation needs one pass per cell of reach, which at this resolution is
+// hundreds of millions of operations; halving the grid repeatedly fills any
+// hole in log(N) passes and costs a third of the base array in memory.
+function buildHeightGrid(group, N) {
+  const box = new THREE.Box3().setFromObject(group);
+  const minX = box.min.x, minY = box.min.y;
+  const spanX = Math.max(1e-6, box.max.x - minX);
+  const spanY = Math.max(1e-6, box.max.y - minY);
+
+  // Sum + count, then average. Taking the max per cell biases every reading up
+  // by the relief within one cell, which is what left the marker hovering.
+  const zs = new Float32Array(N * N);
+  const zc = new Uint32Array(N * N);
+  const v = new THREE.Vector3();
+  group.updateMatrixWorld(true);
+  let seen = 0;
+  group.traverse(function (o) {
+    if (!o.isMesh || !o.geometry || !o.geometry.attributes.position) return;
+    const pos = o.geometry.attributes.position, m = o.matrixWorld;
+    // Raw array access, and skip the matrix entirely when it is identity: at a
+    // million vertices that is the difference between ~100 ms and over a second.
+    const arr = pos.array, ident = _isIdentity(m);
+    const sx = (N - 1) / spanX, sy = (N - 1) / spanY;
+    for (let i = 0, o3 = 0; i < pos.count; i++, o3 += 3) {
+      let px = arr[o3], py = arr[o3 + 1], pz = arr[o3 + 2];
+      if (!ident) { v.set(px, py, pz).applyMatrix4(m); px = v.x; py = v.y; pz = v.z; }
+      let ix = ((px - minX) * sx) | 0;
+      let iy = ((py - minY) * sy) | 0;
+      if (ix < 0) ix = 0; else if (ix > N - 1) ix = N - 1;
+      if (iy < 0) iy = 0; else if (iy > N - 1) iy = N - 1;
+      const k = iy * N + ix;
+      zs[k] += pz; zc[k]++;
+      seen++;
+    }
+  });
+
+  let filled = 0;
+  for (let k = 0; k < zs.length; k++) {
+    if (zc[k]) { zs[k] = zs[k] / zc[k]; filled++; } else { zs[k] = NaN; }
+  }
+  const base = zs;   // reuse rather than allocate a third N*N array
+
+  // Mip pyramid: each level averages the valid cells of the level below, so a
+  // query that lands in a hole simply reads a coarser level.
+  const levels = [{ n: N, z: base }];
+  let cur = base, n = N;
+  while (n > 4) {
+    const hn = n >> 1;
+    const hz = new Float32Array(hn * hn);
+    for (let y = 0; y < hn; y++) {
+      for (let x = 0; x < hn; x++) {
+        let sum = 0, c = 0;
+        const r0 = (y * 2) * n, r1 = (y * 2 + 1) * n, c0 = x * 2, c1 = x * 2 + 1;
+        const w0 = cur[r0 + c0], w1 = cur[r0 + c1], w2 = cur[r1 + c0], w3 = cur[r1 + c1];
+        if (!isNaN(w0)) { sum += w0; c++; }
+        if (!isNaN(w1)) { sum += w1; c++; }
+        if (!isNaN(w2)) { sum += w2; c++; }
+        if (!isNaN(w3)) { sum += w3; c++; }
+        hz[y * hn + x] = c ? sum / c : NaN;
+      }
+    }
+    levels.push({ n: hn, z: hz });
+    cur = hz; n = hn;
+  }
+
+  return { minX: minX, minY: minY, spanX: spanX, spanY: spanY,
+           levels: levels, verts: seen, occupancy: filled / (N * N) };
+}
+
+// Bilinear sample, dropping to a coarser level if this one has a hole.
+function gridZAt(x, y) {
+  const g = _hgrid;
+  if (!g) return null;
+  const u = (x - g.minX) / g.spanX, w = (y - g.minY) / g.spanY;
+  if (!(u >= 0 && w >= 0 && u <= 1 && w <= 1)) return null;
+  for (let l = 0; l < g.levels.length; l++) {
+    const L = g.levels[l], n = L.n, z = L.z;
+    const fx = u * (n - 1), fy = w * (n - 1);
+    const x0 = fx | 0, y0 = fy | 0;
+    const x1 = x0 < n - 1 ? x0 + 1 : x0, y1 = y0 < n - 1 ? y0 + 1 : y0;
+    const a = z[y0 * n + x0], b = z[y0 * n + x1];
+    const c = z[y1 * n + x0], d = z[y1 * n + x1];
+    if (isNaN(a) || isNaN(b) || isNaN(c) || isNaN(d)) continue;
+    const tx = fx - x0, ty = fy - y0;
+    return (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty;
+  }
+  return null;
+}
+
+// Grid first, ray cast only if the grid could not answer (before it is built,
+// or off the mesh edge).
+function terrainZCached(x, y) {
+  const g = gridZAt(x, y);
+  if (g !== null && !isNaN(g)) return g;
+  return terrainZAt(x, y);
 }
 
 // ── GPS state ─────────────────────────────────────────────────────────────────
@@ -413,44 +612,285 @@ let followMode   = false;
 let compassHeading = null;
 let terrainScale = 200;    // updated after terrain loads
 
-function createGpsMarker(scale) {
-  const g = new THREE.Group();
-  const r = scale;
-  // Outer pulsing ring
-  const ringGeo = new THREE.RingGeometry(r * 1.1, r * 1.6, 40);
-  const ringMat = new THREE.MeshBasicMaterial({
-    color: 0x2196F3, transparent: true, opacity: 0.75, side: THREE.DoubleSide
-  });
-  const ring = new THREE.Mesh(ringGeo, ringMat);
-  g.add(ring);
-  g._ring = ring;
-  // Inner solid dot
-  const dotGeo = new THREE.CircleGeometry(r, 32);
-  const dotMat = new THREE.MeshBasicMaterial({
-    color: 0x42A5F5, transparent: true, opacity: 0.9, side: THREE.DoubleSide
-  });
-  const dot = new THREE.Mesh(dotGeo, dotMat);
-  dot.position.z = 0.5;
-  g.add(dot);
-  // Accuracy halo (very faint, larger)
-  const haloGeo = new THREE.CircleGeometry(r * 5, 40);
-  const haloMat = new THREE.MeshBasicMaterial({
-    color: 0x2196F3, transparent: true, opacity: 0.08, side: THREE.DoubleSide
-  });
-  g.add(new THREE.Mesh(haloGeo, haloMat));
+// ── Caver marker ─────────────────────────────────────────────────────────────
+// A 1.78 m figure built from primitives, so the APK needs no model loader and
+// no extra asset. Two tessellations are built once and swapped by projected
+// size: past ~32 px the detail is simply not resolvable, so drawing it is
+// wasted GPU on a device where that costs battery.
+const CAVER_H      = 1.78;   // metres, helmet included
+const CAVER_MIN_PX = 26;     // on-screen floor, below which it stops shrinking
+const CAVER_LOD_PX = 32;     // at or below this, draw the minimal mesh
+
+let _cq = 1.0;
+const _cs = (n, min) => Math.max(min, Math.round(n * _cq));
+const _V  = (x,y,z) => new THREE.Vector3(x,y,z);
+const _cY = new THREE.Vector3(0,1,0);
+
+// MeshLambertMaterial is the cheapest lit material in r128 -- lighting is
+// evaluated per vertex rather than per pixel -- but for that same reason it has
+// no flatShading flag. Faceting is baked into the geometry instead, which gives
+// the flat look for free and keeps the cheap material.
+const _cv = (c) => {
+  const m = new THREE.MeshLambertMaterial({ color: c });
+  m.emissive = new THREE.Color(c).multiplyScalar(0.26);
+  return m;
+};
+// De-index, then recompute: with no shared vertices every triangle gets its own
+// face normal, so shading goes flat.
+function _cFlat(geo) {
+  const g = geo.index ? geo.toNonIndexed() : geo;
+  g.computeVertexNormals();
   return g;
+}
+function _cBone(g,a,b,r1,r2,m,seg){
+  const d=new THREE.Vector3().subVectors(b,a), len=d.length();
+  const me=new THREE.Mesh(new THREE.CylinderGeometry(r2,r1,len,_cs(seg||8,4)),m);
+  me.position.copy(a).addScaledVector(d,0.5);
+  me.quaternion.setFromUnitVectors(_cY,d.clone().normalize());
+  g.add(me); return me;
+}
+function _cBall(g,p,r,m,seg){
+  const w=_cs(seg||10,4), h=_cs((seg||10)-2,3);
+  const me=new THREE.Mesh(new THREE.SphereGeometry(r,w,h),m);
+  me.position.copy(p); g.add(me); return me;
+}
+
+function buildCaverMesh(quality) {
+  _cq = quality;
+  const g = new THREE.Group();
+  const suit=_cv(0xcf4526), suitD=_cv(0xa8351d), skin=_cv(0xe0a882),
+        web=_cv(0x1e1e26),  boot=_cv(0x16161c),  helm=_cv(0xffc21f),
+        helmD=_cv(0xcf9c05),metal=_cv(0xcdd2da), gold=_cv(0xffd24a),
+        rope=_cv(0xe4dccb);
+
+  const J={
+    ankL:_V(-0.108,0.020,0.075), ankR:_V(0.108,0.020,0.075),
+    kneeL:_V(-0.104,0.030,0.495),kneeR:_V(0.104,0.030,0.495),
+    hipL:_V(-0.093,0.004,0.930), hipR:_V(0.093,0.004,0.930),
+    neck:_V(0,0.004,1.455),
+    shoL:_V(-0.196,0,1.432),     shoR:_V(0.196,0,1.432),
+    elbL:_V(-0.258,0.066,1.150), elbR:_V(0.258,0.066,1.150),
+    hndL:_V(-0.218,0.204,0.960), hndR:_V(0.218,0.204,0.960),
+    head:_V(0,0.006,1.605),      helmC:_V(0,0.004,1.638),
+  };
+
+  // Torso: a lathe profile squashed front-to-back. A revolved circle is the
+  // strongest "stack of cylinders" tell there is.
+  const prof=[[0.150,0.895],[0.163,0.960],[0.150,1.075],[0.142,1.140],
+              [0.166,1.235],[0.183,1.330],[0.186,1.400],[0.150,1.452],[0.088,1.470]];
+  const tg=new THREE.LatheGeometry(prof.map(q=>new THREE.Vector2(q[0],q[1])),_cs(16,6));
+  tg.rotateX(Math.PI/2);
+  const torso=new THREE.Mesh(tg,suit); torso.scale.set(1,0.70,1); g.add(torso);
+  _cBall(g,J.shoL,0.088,suit); _cBall(g,J.shoR,0.088,suit);
+
+  [[J.hipL,J.kneeL,J.ankL],[J.hipR,J.kneeR,J.ankR]].forEach(function(L){
+    _cBone(g,L[0],L[1],0.086,0.066,suit);
+    _cBone(g,L[1],L[2],0.064,0.049,suitD);
+    _cBall(g,L[1],0.062,_cv(0x1a1a21),8);
+    const bt=new THREE.Mesh(new THREE.BoxGeometry(0.098,0.255,0.085),boot);
+    bt.position.set(L[2].x,L[2].y+0.058,0.0425); g.add(bt);
+  });
+  [[J.shoL,J.elbL,J.hndL],[J.shoR,J.elbR,J.hndR]].forEach(function(A){
+    _cBone(g,A[0],A[1],0.062,0.050,suit); _cBone(g,A[1],A[2],0.049,0.040,suitD);
+    _cBall(g,A[1],0.048,suit,8); _cBall(g,A[2],0.049,skin,8);
+  });
+  _cBone(g,J.neck,_V(0,0.004,1.520),0.052,0.049,skin);
+  _cBall(g,J.head,0.098,skin).scale.set(1,1.10,1.16);
+
+  const hs=0.118;
+  const dome=new THREE.Mesh(
+    new THREE.SphereGeometry(hs,_cs(16,6),_cs(11,4),0,Math.PI*2,0,Math.PI*0.56),helm);
+  dome.position.copy(J.helmC); dome.rotation.x=Math.PI/2; dome.scale.set(1.06,1.14,1); g.add(dome);
+  const brim=new THREE.Mesh(new THREE.TorusGeometry(hs,hs*0.115,_cs(7,3),_cs(18,6)),helmD);
+  brim.position.set(0,J.helmC.y,J.helmC.z+0.004); g.add(brim);
+  const peak=new THREE.Mesh(new THREE.BoxGeometry(hs*1.05,hs*0.62,hs*0.14),helmD);
+  peak.position.set(0,J.helmC.y+hs*0.92,J.helmC.z+0.010); peak.rotation.x=-0.20; g.add(peak);
+  const cs2=new THREE.Mesh(new THREE.TorusGeometry(hs*0.80,hs*0.055,_cs(6,3),_cs(14,5)),web);
+  cs2.position.set(0,J.helmC.y,J.helmC.z-0.075); cs2.rotation.x=Math.PI/2;
+  cs2.scale.set(1,0.82,1); g.add(cs2);
+
+  // Headlamp: the only cue for which way the caver is facing.
+  const lz=J.helmC.z+hs*0.30;
+  const hh=new THREE.Mesh(new THREE.CylinderGeometry(hs*0.32,hs*0.36,hs*0.30,_cs(10,4)),metal);
+  hh.position.set(0,hs*0.92,lz); hh.rotation.x=Math.PI/2; g.add(hh);
+  const lamp=new THREE.Mesh(new THREE.SphereGeometry(hs*0.22,_cs(8,4),_cs(6,3)),
+                            new THREE.MeshBasicMaterial({color:0xfff4cc}));
+  lamp.position.set(0,hs*1.06,lz); g.add(lamp);
+  // Open-ended cone, additive, no depth write: it brightens whatever is behind
+  // it instead of occluding, so the terrain still reads through the beam.
+  const beam=new THREE.Mesh(new THREE.ConeGeometry(0.34,1.55,_cs(14,5),1,true),
+    new THREE.MeshBasicMaterial({color:0xfff4cc,transparent:true,opacity:0.13,
+      side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending}));
+  beam.position.set(0,hs*1.06+0.775,lz); beam.rotation.x=Math.PI; g.add(beam);
+
+  // ── SRT kit ───────────────────────────────────────────────────────────────
+  const belt=new THREE.Mesh(new THREE.TorusGeometry(0.152,0.026,_cs(7,3),_cs(18,6)),web);
+  belt.position.set(0,0,0.925); belt.scale.set(1,0.72,1); g.add(belt);
+  [J.hipL,J.hipR].forEach(function(hp){
+    const ll=new THREE.Mesh(new THREE.TorusGeometry(0.088,0.019,_cs(6,3),_cs(12,5)),web);
+    ll.position.set(hp.x,hp.y+0.005,0.855); ll.rotation.set(0.32,0,0);
+    ll.scale.set(1,0.8,1); g.add(ll);
+  });
+  // Chest harness as webbing: a V to the sternum in front, an X across the back.
+  const stern=_V(0,0.112,1.145);
+  const fL=_V(-0.150,0.070,1.408), fR=_V(0.150,0.070,1.408);
+  const bL=_V(-0.150,-0.062,1.408), bR=_V(0.150,-0.062,1.408);
+  const wL=_V(-0.132,-0.052,0.960), wR=_V(0.132,-0.052,0.960);
+  _cBone(g,fL,stern,0.017,0.017,web,6); _cBone(g,fR,stern,0.017,0.017,web,6);
+  _cBone(g,bL,wR,0.017,0.017,web,6);    _cBone(g,bR,wL,0.017,0.017,web,6);
+  _cBone(g,fL,bL,0.017,0.017,web,6);    _cBone(g,fR,bR,0.017,0.017,web,6);
+  _cBone(g,stern,_V(0,0.118,0.965),0.015,0.015,web,6);
+  const ml=new THREE.Mesh(new THREE.TorusGeometry(0.036,0.011,_cs(6,3),_cs(12,5)),metal);
+  ml.position.set(0,0.118,0.938); ml.rotation.x=Math.PI/2; g.add(ml);
+  const dsc=new THREE.Mesh(new THREE.BoxGeometry(0.088,0.046,0.115),metal);
+  dsc.position.set(0,0.146,0.872); dsc.rotation.x=0.13; g.add(dsc);
+  const asc=new THREE.Mesh(new THREE.BoxGeometry(0.066,0.042,0.098),gold);
+  asc.position.set(0,0.140,1.222); g.add(asc);
+
+  // Rope hank worn crossbody: a closed loop ENCIRCLING the torso on a tilted
+  // plane -- over the left shoulder, across the chest, under the right arm. The
+  // loop plane is spanned by the shoulder-to-hip diagonal and the body's
+  // front-back axis, so its normal stays in XZ and the orientation reduces to a
+  // single rotation about Y.
+  (function(){
+    const d=new THREE.Vector3().subVectors(J.hipR,J.shoL);
+    const ctr=new THREE.Vector3().addVectors(J.shoL,J.hipR).multiplyScalar(0.5);
+    const halfLong=d.length()*0.5+0.055, halfWide=0.185, R=0.30;
+    const N=Math.max(3,Math.round(9*_cq));
+    const coil=new THREE.Group();
+    for(let i=0;i<N;i++){
+      const t=(i-(N-1)/2)/((N-1)/2||1);
+      const ring=new THREE.Mesh(
+        new THREE.TorusGeometry(R*(1-0.035*t*t),0.0265,_cs(7,3),_cs(26,8)),rope);
+      ring.position.z=t*0.048; ring.rotation.z=t*0.045;
+      coil.add(ring);
+    }
+    coil.scale.set(halfLong/R,halfWide/R,1);
+    coil.rotation.y=Math.atan2(-d.z,d.x);
+    coil.position.copy(ctr);
+    g.add(coil);
+  })();
+
+  // Faint ground ring: still gives a position when the figure is a few pixels.
+  const ring=new THREE.Mesh(new THREE.RingGeometry(0.44,0.58,_cs(18,8)),
+    new THREE.MeshBasicMaterial({color:0x00e5ff,transparent:true,opacity:0.5,side:THREE.DoubleSide}));
+  ring.position.z=0.02; g.add(ring);
+
+  // One flattening pass at the end rather than wrapping every call site.
+  g.traverse(function(o){
+    if (o.isMesh && o.material && o.material.isMeshLambertMaterial) {
+      o.geometry = _cFlat(o.geometry);
+    }
+  });
+  _cq = 1.0;
+  return g;
+}
+
+let caverHi = null, caverLo = null;
+
+// GPS fixes arrive as discrete jumps a few metres apart; snapping to each one
+// looks broken. The drawn position is animated between fixes on a fixed-length
+// curve rather than chased exponentially: an exponential ease leaves at full
+// speed and only decelerates, so every fix begins with a visible lurch. A
+// smootherstep has zero velocity AND zero acceleration at both ends, so the
+// marker rolls away and rolls to a stop.
+let gpsTargetPos = null;   // latest fix
+let gpsShownPos  = null;   // where the marker is drawn
+let gpsShownHead = null;   // eased heading, degrees
+let _gpsFrom = null;       // position the current move started from
+let _gpsT0   = -1e9;       // when it started
+const GPS_MOVE_MS  = 1600; // travel time per fix; fixes are ~4.5 s apart
+const GPS_HEAD_TAU = 0.55; // heading is continuous, so it stays exponential
+
+// 6t^5 - 15t^4 + 10t^3: zero first and second derivative at t=0 and t=1.
+function smootherstep(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+
+function markerMoveU() {
+  if (_gpsT0 < 0) return 1;
+  return Math.min(1, (performance.now() - _gpsT0) / GPS_MOVE_MS);
+}
+
+function markerNeedsEase() {
+  if (!gpsMarker || !gpsShownPos) return false;
+  if (markerMoveU() < 1) return true;
+  return compassHeading !== null && gpsShownHead !== null &&
+         Math.abs(angleDelta(compassHeading, gpsShownHead)) > 0.5;
+}
+
+// Start a new move from wherever the marker currently is, so a fix arriving
+// mid-flight is picked up smoothly instead of teleporting.
+function startMarkerMove(x, y, z) {
+  if (!gpsShownPos) { gpsShownPos = { x: x, y: y, z: z }; }
+  _gpsFrom = { x: gpsShownPos.x, y: gpsShownPos.y, z: gpsShownPos.z };
+  gpsTargetPos = { x: x, y: y, z: z };
+  _gpsT0 = performance.now();
+}
+
+function easeMarker(dt) {
+  if (!gpsMarker || !gpsShownPos) return;
+  if (_gpsFrom && gpsTargetPos) {
+    const e = smootherstep(markerMoveU());
+    gpsShownPos.x = _gpsFrom.x + (gpsTargetPos.x - _gpsFrom.x) * e;
+    gpsShownPos.y = _gpsFrom.y + (gpsTargetPos.y - _gpsFrom.y) * e;
+    gpsShownPos.z = _gpsFrom.z + (gpsTargetPos.z - _gpsFrom.z) * e;
+    gpsMarker.position.set(gpsShownPos.x, gpsShownPos.y, gpsShownPos.z);
+  }
+  if (compassHeading !== null) {
+    if (gpsShownHead === null) gpsShownHead = compassHeading;
+    const k = 1 - Math.exp(-dt / GPS_HEAD_TAU);
+    gpsShownHead = (gpsShownHead + angleDelta(compassHeading, gpsShownHead) * k + 360) % 360;
+    // Rotating +Z by a maps +Y to (-sin a, cos a); we want (sin h, cos h).
+    gpsMarker.rotation.z = -gpsShownHead * Math.PI / 180;
+  }
+}
+
+function createGpsMarker() {
+  const g = new THREE.Group();
+  caverHi = buildCaverMesh(0.60);   // "Reduced"
+  caverLo = buildCaverMesh(0.22);   // "Minimal"
+  caverLo.visible = false;
+  g.add(caverHi); g.add(caverLo);
+  return g;
+}
+
+// True scale with a floor: close in, the figure is a real 1.78 m and gives the
+// terrain genuine scale; pulled back it stops shrinking and holds as a legible
+// glyph. Runs only on frames we actually draw, and the camera moving is what
+// wakes the renderer anyway.
+function updateCaverScale() {
+  if (!gpsMarker) return;
+  const dist = camera.position.distanceTo(gpsMarker.position);
+  const h = renderer.domElement.clientHeight || 1;
+  const worldPerPx = 2 * Math.tan(camera.fov * Math.PI / 360) * dist / h;
+  const truePx = CAVER_H / worldPerPx;
+  gpsMarker.scale.setScalar(Math.max(1, CAVER_MIN_PX / truePx));
+
+  // Swap tessellation on the size actually rendered, not on camera distance --
+  // the floor above means those two stop agreeing once it clamps.
+  const shownPx = Math.max(truePx, CAVER_MIN_PX);
+  const wantLo  = shownPx <= CAVER_LOD_PX;
+  if (caverLo && caverLo.visible !== wantLo) {
+    caverLo.visible = wantLo;
+    caverHi.visible = !wantLo;
+  }
 }
 
 function updateGpsMarker(lat, lon, accuracy) {
   const { x, y } = gpsToScene(lat, lon);
-  const z = terrainZAt(x, y);
-  if (z === null) return;
-  gpsScenePos = { x, y, z };
+  // Outside the terrain footprint there is no ground to sample; sea level is a
+  // better answer than refusing to show the marker at all.
+  const z = terrainZCached(x, y) ?? 0;
+  gpsScenePos = { x, y, z };       // truth: info panel and station readouts
   if (!gpsMarker) {
-    gpsMarker = createGpsMarker(terrainScale * 0.004);
+    gpsMarker = createGpsMarker();
     scene.add(gpsMarker);
+    gpsShownPos  = { x: x, y: y, z: z };  // first fix lands without a slide
+    gpsTargetPos = { x: x, y: y, z: z };
+    _gpsFrom = null; _gpsT0 = -1e9;
+    gpsMarker.position.set(x, y, z);
+  } else {
+    startMarkerMove(x, y, z);
   }
-  gpsMarker.position.set(x, y, z + terrainScale * 0.001);
   if (followMode) {
     controls.target.set(x, y, z);
     controls.update();
@@ -459,7 +899,104 @@ function updateGpsMarker(lat, lon, accuracy) {
   const dot = document.getElementById('gps-dot');
   dot.classList.add('fix');
   document.getElementById('gps-text').textContent =
+    (gpsOriginOverride ? 'TEST ' : '') +
     `${lat.toFixed(5)}, ${lon.toFixed(5)}` + (accuracy ? ` ±${Math.round(accuracy)}m` : '');
+}
+
+// ── GPS power management ──────────────────────────────────────────────────────
+// A GPS receiver hunting for a fix it will never get — which is exactly what
+// happens underground — is one of the largest battery drains on the device,
+// often exceeding the 3D rendering. Rather than hunt forever at full power we
+// back off progressively: fine accuracy first, coarse after a few minutes with
+// no fix, then suspend entirely. Any successful fix resets us to fine.
+const GPS_OPTS_FINE   = { enableHighAccuracy: true,  timeout: 30000, maximumAge: 3000  };
+const GPS_OPTS_COARSE = { enableHighAccuracy: false, timeout: 60000, maximumAge: 60000 };
+const GPS_COARSE_AFTER_MS  = 3 * 60 * 1000;   // 3 min with no fix  -> coarse
+const GPS_SUSPEND_AFTER_MS = 8 * 60 * 1000;   // 8 min with no fix  -> stop
+const GPS_HUNT_CHECK_MS    = 30 * 1000;
+
+let gpsMode      = 'fine';
+let gpsLastFix   = 0;
+let gpsStartedAt = 0;
+let gpsSuspended = false;
+let gpsHuntTimer = null;
+
+function _gpsText(msg) {
+  const el = document.getElementById('gps-text');
+  if (el) el.textContent = msg;
+}
+
+// A fix every ~5 s is plenty at walking pace, and each accepted one costs a
+// marker update and a render wake. The receiver reports faster than that; we
+// simply ignore the extras rather than asking it to slow down, which the
+// Geolocation API gives us no way to do.
+const GPS_MIN_INTERVAL_MS = 4500;
+let _gpsLastAccepted = 0;
+
+function _gpsOnSuccess(pos) {
+  gpsLastFix = Date.now();
+  gpsLastLatLon = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+  if (gpsMarker && Date.now() - _gpsLastAccepted < GPS_MIN_INTERVAL_MS) return;
+  _gpsLastAccepted = Date.now();
+  if (gpsMode === 'coarse') _gpsSetMode('fine');   // signal came back — go precise
+  gpsSuspended = false;
+  updateGpsMarker(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy);
+  wakeRender();
+}
+
+function _gpsOnError(err) {
+  let msg;
+  if (err.code === 1) {
+    msg = 'Location denied — needs a secure origin';
+    _gpsClearWatch();
+    gpsSuspended = true;
+  } else if (err.code === 2) {
+    msg = 'No signal' + (gpsMode === 'coarse' ? ' (low power)' : '');
+  } else {
+    msg = 'Searching' + (gpsMode === 'coarse' ? ' (low power)' : '') + '…';
+  }
+  _gpsText(msg);
+}
+
+function _gpsClearWatch() {
+  if (gpsWatchId !== null) { navigator.geolocation.clearWatch(gpsWatchId); gpsWatchId = null; }
+}
+
+function _gpsSetMode(mode) {
+  if (mode === gpsMode && gpsWatchId !== null) return;
+  gpsMode = mode;
+  _gpsClearWatch();
+  const opts = (mode === 'coarse') ? GPS_OPTS_COARSE : GPS_OPTS_FINE;
+  gpsWatchId = navigator.geolocation.watchPosition(_gpsOnSuccess, _gpsOnError, opts);
+  if (mode === 'coarse') {
+    _gpsText('Searching (low power)…');
+    showToast('No fix for 3 min — GPS to low power');
+  }
+}
+
+function _gpsSuspend() {
+  _gpsClearWatch();
+  gpsSuspended = true;
+  const dot = document.getElementById('gps-dot');
+  if (dot) dot.classList.remove('fix');
+  _gpsText('GPS paused — tap 📍');
+  showToast('No fix for 8 min — GPS paused to save battery');
+}
+
+function _gpsResume() {
+  gpsSuspended = false;
+  gpsStartedAt = Date.now();
+  gpsLastFix   = 0;
+  _gpsSetMode('fine');
+  _gpsText('Searching…');
+  showToast('GPS resumed');
+}
+
+function _gpsHuntCheck() {
+  if (!gpsActive || gpsSuspended || document.hidden) return;
+  const since = Date.now() - (gpsLastFix || gpsStartedAt);
+  if (since > GPS_SUSPEND_AFTER_MS)                            _gpsSuspend();
+  else if (since > GPS_COARSE_AFTER_MS && gpsMode === 'fine')  _gpsSetMode('coarse');
 }
 
 function startGps() {
@@ -467,58 +1004,63 @@ function startGps() {
     showToast('Geolocation not supported by this browser');
     return;
   }
-  // Geolocation requires a secure context (HTTPS or localhost) on modern mobile browsers.
+  // Geolocation is only available on a "potentially trustworthy" origin:
+  // https://…, http://localhost or http://127.0.0.1. A file://, content://
+  // or LAN-IP origin is refused outright and never shows a prompt.
   if (window.isSecureContext === false) {
-    showToast('Location requires HTTPS — open this page over https://');
+    _gpsText('Needs a secure origin');
+    showToast('Location needs https:// or localhost — not file:// or a LAN IP');
+    document.getElementById('gps-badge').classList.add('show');
     return;
   }
 
-  const badge = document.getElementById('gps-badge');
-  const gpsText = document.getElementById('gps-text');
-  badge.classList.add('show');
-  gpsText.textContent = 'Requesting…';
+  document.getElementById('gps-badge').classList.add('show');
+  _gpsText('Requesting…');
 
-  const opts = { enableHighAccuracy: true, timeout: 30000, maximumAge: 3000 };
+  gpsStartedAt = Date.now();
+  gpsLastFix   = 0;
+  gpsSuspended = false;
+  gpsMode      = 'fine';
 
-  function onSuccess(pos) {
-    updateGpsMarker(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy);
-  }
-  function onError(err) {
-    let msg;
-    if (err.code === 1) {
-      // PERMISSION_DENIED — give the user actionable guidance
-      msg = 'Location denied — enable in browser site settings';
-    } else if (err.code === 2) {
-      msg = 'Location unavailable';
-    } else {
-      msg = 'Location timeout — move outdoors';
-    }
-    gpsText.textContent = msg;
-    showToast(msg);
-  }
+  // Start the continuous watch immediately rather than waiting on the one-shot.
+  // Chaining them meant an indoor cold start sat on "Requesting..." for the full
+  // 30 s timeout before the watch even began; run both and take whichever
+  // reports first.
+  gpsWatchId = navigator.geolocation.watchPosition(_gpsOnSuccess, _gpsOnError, GPS_OPTS_FINE);
 
-  // Call getCurrentPosition first — this is what actually triggers the
-  // browser permission prompt on many mobile browsers. Once we get a fix
-  // (or learn the permission was granted), start the continuous watch.
+  // The one-shot is still what reliably raises the permission prompt on some
+  // browsers. A cached fix is fine for the first placement -- it puts a marker
+  // on screen straight away, and the watch refines it seconds later.
   navigator.geolocation.getCurrentPosition(
-    pos => {
-      onSuccess(pos);
-      // Permission granted; start the ongoing watch
-      if (gpsWatchId !== null) navigator.geolocation.clearWatch(gpsWatchId);
-      gpsWatchId = navigator.geolocation.watchPosition(onSuccess, onError, opts);
-    },
-    onError,
-    opts
+    _gpsOnSuccess,
+    err => { if (err.code === 1) _gpsOnError(err); },   // only a denial matters here
+    { enableHighAccuracy: false, timeout: 15000, maximumAge: 300000 }
   );
+
+  if (gpsHuntTimer === null) gpsHuntTimer = setInterval(_gpsHuntCheck, GPS_HUNT_CHECK_MS);
 }
 
 function stopGps() {
-  if (gpsWatchId !== null) { navigator.geolocation.clearWatch(gpsWatchId); gpsWatchId = null; }
+  _gpsClearWatch();
+  if (gpsHuntTimer !== null) { clearInterval(gpsHuntTimer); gpsHuntTimer = null; }
   if (gpsMarker) { scene.remove(gpsMarker); gpsMarker = null; }
-  gpsScenePos = null;
+  gpsScenePos  = null;
+  gpsSuspended = false;
+  gpsMode      = 'fine';
   document.getElementById('gps-badge').classList.remove('show');
   document.getElementById('gps-dot').classList.remove('fix');
+  wakeRender();
 }
+
+// Suspend the receiver while the app is backgrounded, resume on return.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (gpsActive && !gpsSuspended) _gpsClearWatch();
+  } else {
+    if (gpsActive && !gpsSuspended && gpsWatchId === null) _gpsSetMode(gpsMode);
+    wakeRender();
+  }
+});
 
 // ── Compass ───────────────────────────────────────────────────────────────────
 function handleOrientation(e) {
@@ -531,13 +1073,38 @@ function handleOrientation(e) {
     h = (360 - e.alpha) % 360;                  // fallback
   }
   if (h !== null) {
-    compassHeading = h;
-    document.getElementById('compass-svg').style.transform = `rotate(${h}deg)`;
+    compassHeading = smoothHeading(h);
+    // deviceorientation fires ~60 Hz. Waking the renderer on every event would
+    // undo the idle throttling entirely, so only do it once the heading has
+    // actually moved enough to see.
+    if (Math.abs(angleDelta(compassHeading, _lastWokeHeading)) > 2.0) {
+      _lastWokeHeading = compassHeading;
+      wakeRender(400);
+    }
   }
 }
 
+// Shortest signed angular distance a->b, in degrees, wrapped to [-180, 180].
+function angleDelta(b, a) {
+  let d = b - a;
+  while (d >  180) d -= 360;
+  while (d < -180) d += 360;
+  return d;
+}
+
+let _headingSmooth   = null;
+let _lastWokeHeading = 0;
+
+// Low-pass the compass so the view drifts rather than jitters. Filtering the
+// delta rather than the absolute value is what keeps it sane across the 359->0
+// wrap, where a naive average would swing the camera all the way around.
+function smoothHeading(h) {
+  if (_headingSmooth === null) { _headingSmooth = h; return h; }
+  _headingSmooth = (_headingSmooth + angleDelta(h, _headingSmooth) * 0.07 + 360) % 360;
+  return _headingSmooth;
+}
+
 function startCompass() {
-  document.getElementById('compass').classList.add('show');
   if (typeof DeviceOrientationEvent !== 'undefined' && DeviceOrientationEvent.requestPermission) {
     DeviceOrientationEvent.requestPermission().then(r => {
       if (r === 'granted') {
@@ -554,7 +1121,6 @@ function startCompass() {
 }
 
 function stopCompass() {
-  document.getElementById('compass').classList.remove('show');
   window.removeEventListener('deviceorientationabsolute', handleOrientation, true);
   window.removeEventListener('deviceorientation', handleOrientation, true);
 }
@@ -572,12 +1138,32 @@ function b64ToArrayBuffer(b64) {
 
 const loader = new THREE.GLTFLoader();
 
-setTimeout(() => {
+// A payload constant is either an inline base64 blob (the single-file export)
+// or the name of a sidecar file (the APK build, which splits the assets out so
+// the WebView never parses a 180 MB document). Base64 has no '.', so the
+// extension test is unambiguous.
+function isAssetRef(s) {
+  return typeof s === 'string' && s.length < 512 &&
+         /\.(glb|jpe?g|png|webp|bin)$/i.test(s);
+}
+
+function loadTerrainBuffer(src) {
+  if (isAssetRef(src)) {
+    setP(15, 'Loading terrain...');
+    return fetch(src).then(r => {
+      if (!r.ok) throw new Error('terrain fetch failed: HTTP ' + r.status);
+      return r.arrayBuffer();
+    });
+  }
   setP(15, 'Parsing GLB...');
-  const buf = b64ToArrayBuffer(TERRAIN_GLB_B64);
+  return Promise.resolve(b64ToArrayBuffer(src));
+}
+
+setTimeout(() => {
+  loadTerrainBuffer(TERRAIN_GLB_B64).then(buf => {
   setP(40, 'Building scene...');
-  // loader.parse — texture is a data: URI inside the GLB JSON chunk, so no
-  // network/file:// request is ever made; works fully offline.
+  // Textures are supplied separately (see loadB64Texture); the GLB carries
+  // geometry only, so nothing here reaches for the network on its own.
   loader.parse(buf, '', (gltf) => {
     terrainGroup = gltf.scene;
     scene.add(terrainGroup);
@@ -619,6 +1205,23 @@ setTimeout(() => {
     const ctr  = box.getCenter(new THREE.Vector3());
     const dim  = Math.max(size.x, size.y);
     terrainScale = dim;
+
+    // Build the height lookup before anything asks for a ground elevation.
+    setP(70, 'Indexing terrain heights...');
+    const _t0 = performance.now();
+    const _gn = chooseGridN(terrainGroup);
+    _hgrid = buildHeightGrid(terrainGroup, _gn);
+    console.info('height grid ' + _gn + 'x' + _gn + ' (' +
+                 (dim / _gn).toFixed(2) + ' m/cell, ' +
+                 (_hgrid.occupancy * 100).toFixed(0) + '% cells direct, ' +
+                 _hgrid.levels.length + ' levels) from ' + _hgrid.verts +
+                 ' vertices in ' + Math.round(performance.now() - _t0) + ' ms');
+
+    // Put the 50% haze point at three terrain-widths out, so at 100% the fog
+    // reads as depth near the ground instead of swallowing the whole scene.
+    // exp(-(d*k)^2) = 0.5  ->  k = sqrt(ln 2) / d
+    fogBaseDensity = Math.sqrt(Math.LN2) / (3 * Math.max(dim, 1));
+
     controls.target.copy(ctr);
     camera.position.set(ctr.x, ctr.y - dim * 0.55, ctr.z + dim * 0.3);
     controls.update();
@@ -626,13 +1229,24 @@ setTimeout(() => {
     document.getElementById('area-label').textContent =
       `${(dim / 1000).toFixed(1)} km across`;
 
+    applyBrightness(parseInt(brightSlider.value));
+    applyFog(parseInt(fogSlider.value));
+
     setP(80, 'Loading cave lines...');
     buildCaveLines();
     setP(100, 'Ready');
     setTimeout(hideLoading, 300);
   }, (err) => {
-    console.error('GLB load error:', err);
+    console.error('GLB parse error:', err);
     setP(80, 'Terrain error — loading caves...');
+    buildCaveLines();
+    setTimeout(hideLoading, 400);
+  });
+  }).catch(err => {
+    // Sidecar file missing or unreadable — the cave lines are still useful
+    // on their own, so degrade rather than showing an empty screen.
+    console.error('Terrain load failed:', err);
+    setP(80, 'Terrain unavailable — loading caves...');
     buildCaveLines();
     setTimeout(hideLoading, 400);
   });
@@ -1086,11 +1700,120 @@ document.getElementById('btn-cave').addEventListener('click', function() {
   if (stationMode === 0) clearStationHighlight();
 });
 
-// GPS 3-state: 0=off, 1=pin, 2=follow
+// GPS 4-state: 0=off, 1=pin, 2=follow, 3=follow + heading-up
 let gpsState = 0;
+let headingUp = false;
+let followDist = null;                       // orbit radius held across fixes
+const _fOff = new THREE.Vector3();
+
+// ── Heading-up camera ────────────────────────────────────────────────────────
+// The first attempt at this drove the camera straight from the raw heading and
+// swam visibly: a phone magnetometer is noisy at the degree level, and pushing
+// that into an absolute camera position also fought OrbitControls' damping.
+// Three things fix it.
+//   1. The error is measured against the camera's ACTUAL bearing rather than a
+//      remembered value, so a manual drag is absorbed instead of desyncing.
+//   2. A deadband with hysteresis: it takes a real turn to start moving, and
+//      once moving it runs until nearly aligned. Noise never crosses it.
+//   3. The correction rotates the existing camera offset rather than assigning
+//      a position, so tilt and zoom are untouched and OrbitControls simply
+//      re-derives its spherical from the result.
+const HEADING_DEADBAND_DEG = 5.0;   // must exceed this to start turning
+const HEADING_SETTLE_DEG   = 0.8;   // keep turning until inside this
+const HEADING_TAU          = 0.40;  // seconds to close ~63% of the error
+const HEADING_MAX_DPS      = 80;    // cap, so a big turn sweeps rather than snaps
+let _headingSlewing = false;
+const _hOff = new THREE.Vector3();
+
+function applyHeadingUp(dt) {
+  if (compassHeading === null) return;
+  _hOff.copy(camera.position).sub(controls.target);
+  if (Math.hypot(_hOff.x, _hOff.y) < 1e-4) return;   // straight overhead: no bearing
+
+  // Bearing the camera is looking along: the view direction is -offset.
+  const camBearing = (Math.atan2(-_hOff.x, -_hOff.y) * 180 / Math.PI + 360) % 360;
+  const err = angleDelta(compassHeading, camBearing);
+  const mag = Math.abs(err);
+
+  if (!_headingSlewing && mag > HEADING_DEADBAND_DEG) _headingSlewing = true;
+  else if (_headingSlewing && mag < HEADING_SETTLE_DEG) _headingSlewing = false;
+  if (!_headingSlewing) return;
+
+  let step = err * (1 - Math.exp(-dt / HEADING_TAU));
+  const cap = HEADING_MAX_DPS * dt;
+  if (step >  cap) step =  cap;
+  if (step < -cap) step = -cap;
+
+  // To swing the view bearing by +step, the offset rotates by -step.
+  const a = -step * Math.PI / 180, c = Math.cos(a), sn = Math.sin(a);
+  camera.position.set(
+    controls.target.x + _hOff.x * c - _hOff.y * sn,
+    controls.target.y + _hOff.x * sn + _hOff.y * c,
+    controls.target.z + _hOff.z
+  );
+}
+// ── Long-press 📍: anchor the terrain to where you are standing ──────────────
+// Lets the whole GPS path -- permission, fix, projection, marker, follow lock,
+// compass -- be verified anywhere, without being anywhere near the cave and
+// without rebuilding the APK for a different centre point.
+let _gpsPressTimer   = null;
+let _gpsLongPressHit = false;
+
+function _gpsToggleTestOrigin() {
+  if (gpsOriginOverride) {
+    gpsOriginOverride = null;
+    showToast('Test mode off - real cave coordinates');
+  } else if (gpsLastLatLon) {
+    gpsOriginOverride = { lat: gpsLastLatLon.lat, lon: gpsLastLatLon.lon };
+    showToast('Test mode: terrain centred on you');
+  } else {
+    showToast('Wait for a GPS fix first, then long-press again');
+    return;
+  }
+  // Re-anchor straight away rather than waiting for the next fix.
+  if (gpsLastLatLon) updateGpsMarker(gpsLastLatLon.lat, gpsLastLatLon.lon, null);
+  if (gpsScenePos) {
+    const { x, y, z } = gpsScenePos;
+    controls.target.set(x, y, z);
+    if (!followMode) {
+      const dist = Math.max(terrainScale * 0.05, 60);
+      camera.position.set(x, y - dist, z + dist * 0.5);
+    }
+    controls.update();
+  }
+  requestRender(); wakeRender();
+}
+
+(function bindGpsLongPress() {
+  const btn = document.getElementById('btn-gps');
+  const start = () => {
+    _gpsLongPressHit = false;
+    _gpsPressTimer = setTimeout(() => {
+      _gpsLongPressHit = true;
+      _gpsToggleTestOrigin();
+    }, 650);
+  };
+  const cancel = () => {
+    if (_gpsPressTimer !== null) { clearTimeout(_gpsPressTimer); _gpsPressTimer = null; }
+  };
+  btn.addEventListener('pointerdown', start,  { passive: true });
+  btn.addEventListener('pointerup',   cancel, { passive: true });
+  btn.addEventListener('pointerleave',cancel, { passive: true });
+  btn.addEventListener('pointercancel',cancel,{ passive: true });
+  btn.addEventListener('contextmenu', e => e.preventDefault());
+})();
+
 document.getElementById('btn-gps').addEventListener('click', function() {
-  gpsState = (gpsState + 1) % 3;
-  this.classList.remove('active', 'follow-active');
+  // A long-press already acted; don't also advance the off/pin/follow cycle.
+  if (_gpsLongPressHit) { _gpsLongPressHit = false; return; }
+  // Suspended after a long hunt with no fix: first tap resumes, rather than
+  // silently advancing the mode while the receiver is still off.
+  if (gpsSuspended && gpsState !== 0) { _gpsResume(); return; }
+  gpsState = (gpsState + 1) % 4;
+  this.classList.remove('active', 'follow-active', 'heading-active');
+  headingUp = (gpsState === 3);
+  _headingSlewing = false;
+  followDist = null;              // re-measure on the next follow frame
   if (gpsState === 0) {
     // Off
     gpsActive = false; followMode = false;
@@ -1104,7 +1827,7 @@ document.getElementById('btn-gps').addEventListener('click', function() {
     this.classList.add('active');
     this.textContent = '📍';
   } else {
-    // Follow lock — incompatible with fly/crane
+    // Follow lock (2) and heading-up (3) — both incompatible with fly/crane
     gpsActive = true; followMode = true;
     if (flyMode || craneMode) {
       exitFlyMode();
@@ -1112,9 +1835,16 @@ document.getElementById('btn-gps').addEventListener('click', function() {
       document.getElementById('btn-fly').style.borderColor = '';
     }
     startGps(); startCompass();
-    this.classList.add('follow-active');
-    this.textContent = '🧭';
-    if (gpsScenePos) {
+    if (gpsState === 3) {
+      this.classList.add('heading-active');
+      this.textContent = '🧭';
+      showToast('Heading up - map turns as you turn');
+    } else {
+      this.classList.add('follow-active');
+      this.textContent = '🧭';
+      showToast('Follow - free look');
+    }
+    if (gpsState === 2 && gpsScenePos) {
       const { x, y, z } = gpsScenePos;
       const dist = Math.max(terrainScale * 0.08, 80);
       controls.target.set(x, y, z);
@@ -1146,7 +1876,38 @@ opacitySlider.addEventListener('input', () => {
   const v = parseInt(opacitySlider.value) / 100;
   opacityLabel.textContent = opacitySlider.value + '%';
   terrainMaterials.forEach(m => { m.opacity = v; m.needsUpdate = true; });
+  requestRender(); wakeRender();
 });
+
+// ── Brightness ───────────────────────────────────────────────────────────────
+// Scaling both lights by the same factor is what keeps contrast intact: the
+// ratio between the lit and the shadowed side of a slope never changes, only
+// the overall exposure. Raising ambient alone would flatten the relief.
+const brightSlider = document.getElementById('terrain-bright-slider');
+const brightLabel  = document.getElementById('terrain-bright-label');
+
+function applyBrightness(pct) {
+  const k = pct / 100;
+  ambientLight.intensity = AMBIENT_BASE * k;
+  sun.intensity          = SUN_BASE     * k;
+  brightLabel.textContent = pct + '%';
+  requestRender(); wakeRender();
+}
+brightSlider.addEventListener('input', () => applyBrightness(parseInt(brightSlider.value)));
+
+// ── Haze ─────────────────────────────────────────────────────────────────────
+// A multiplier on the terrain-derived baseline, not an absolute density, so it
+// behaves the same way on any export size. 0 leaves the fog term inert.
+const fogSlider = document.getElementById('terrain-fog-slider');
+const fogLabel  = document.getElementById('terrain-fog-label');
+
+function applyFog(pct) {
+  fogLabel.textContent = pct === 0 ? 'off' : pct + '%';
+  if (scene.fog) scene.fog.density = fogBaseDensity * (pct / 100);
+  requestRender(); wakeRender();
+}
+fogSlider.addEventListener('input', () => applyFog(parseInt(fogSlider.value)));
+
 
 // Imagery layer buttons (revealed when hillshade loads)
 document.getElementById('btn-layer-sat').addEventListener('click', function() {
@@ -1489,11 +2250,12 @@ document.getElementById('btn-fly').addEventListener('click', function() {
     showToast('Orbit mode');
   } else {
     // Entering fly/crane — drop GPS follow back to pin mode
-    if (gpsState === 2) {
-      gpsState = 1; followMode = false;
+    if (gpsState >= 2) {
+      gpsState = 1; followMode = false; headingUp = false;
       stopCompass();
       const gb = document.getElementById('btn-gps');
-      gb.classList.remove('follow-active'); gb.classList.add('active');
+      gb.classList.remove('follow-active', 'heading-active');
+      gb.classList.add('active');
       gb.textContent = '📍';
     }
     enterFlyMode(next);
@@ -1552,6 +2314,55 @@ const hintEl = document.getElementById('hint');
 setTimeout(() => hintEl.classList.add('gone'), 3500);
 renderer.domElement.addEventListener('pointerdown', () => hintEl.classList.add('gone'), { once: true });
 
+// ── Adaptive render scheduling (battery) ─────────────────────────────────────
+// Drawing 60 fps into a scene nobody is touching is the largest battery draw
+// after the screen itself. Instead we render on demand:
+//   * any interaction opens a short full-rate window, so it stays responsive
+//   * slow ambient animation (the GPS pulse) ticks at IDLE_FPS
+//   * a completely static scene issues no GPU work at all
+//   * a backgrounded page draws nothing
+// The rAF chain is deliberately never cancelled — skipping the render call
+// captures nearly all of the saving, and it cannot leave the view frozen the
+// way a missed wake-up event could.
+const ACTIVE_MS = 1200;          // full-rate window after any interaction
+const IDLE_FPS  = 6;             // ambient-animation rate when idle
+const IDLE_MS   = 1000 / IDLE_FPS;
+
+let _activeUntil  = performance.now() + 3000;   // draw freely during startup
+let _lastIdleDraw = 0;
+let _lastFrameT   = performance.now();
+let _needsRender  = true;
+
+function wakeRender(ms) {
+  _activeUntil = Math.max(_activeUntil, performance.now() + (ms || ACTIVE_MS));
+}
+function requestRender() { _needsRender = true; }
+
+// Wake triggers. OrbitControls' 'change' covers orbit/pan/zoom including the
+// damping tail, so the view still eases to a stop after the finger lifts.
+controls.addEventListener('change', () => wakeRender());
+['pointerdown','pointermove','pointerup','wheel','touchstart','touchmove','keydown']
+  .forEach(ev => window.addEventListener(ev, () => wakeRender(), { passive: true }));
+
+// Follow mode needs to know the difference between "the camera moved because
+// the user zoomed" and "the camera moved because we dragged it along with the
+// marker". Anything the user does counts as interaction for a short tail,
+// which also covers OrbitControls' damping settling after a pinch.
+let _userInputUntil = 0;
+let _pointersDown = 0;
+['pointerdown','touchstart'].forEach(ev =>
+  window.addEventListener(ev, () => { _pointersDown++; _userInputUntil = performance.now() + 600; }, { passive: true }));
+['pointerup','pointercancel','touchend','touchcancel'].forEach(ev =>
+  window.addEventListener(ev, () => { _pointersDown = Math.max(0, _pointersDown - 1); _userInputUntil = performance.now() + 600; }, { passive: true }));
+['wheel','pointermove','touchmove'].forEach(ev =>
+  window.addEventListener(ev, () => { if (_pointersDown || ev === 'wheel') _userInputUntil = performance.now() + 600; }, { passive: true }));
+window.addEventListener('wheel', () => { _userInputUntil = performance.now() + 600; }, { passive: true });
+
+function userIsDrivingCamera() {
+  return _pointersDown > 0 || performance.now() < _userInputUntil;
+}
+window.addEventListener('resize', () => { requestRender(); wakeRender(); });
+
 // ── Render loop ───────────────────────────────────────────────────────────────
 const _fwd   = new THREE.Vector3();
 const _right = new THREE.Vector3();
@@ -1560,7 +2371,27 @@ let _t = 0;
 
 (function animate() {
   requestAnimationFrame(animate);
-  _t += 0.016;
+
+  // Backgrounded (screen off, app switched away): no work at all.
+  if (document.hidden) return;
+
+  const _now    = performance.now();
+  const _active = _now < _activeUntil || flyMode;
+  // Ambient animation that must keep ticking even with no interaction.
+  // The only thing that animates on its own is the marker settling onto a new
+  // fix. Once it arrives the scene is static again and the loop stops drawing.
+  const _ambient = markerNeedsEase() || (headingUp && _headingSlewing);
+
+  if (!_active) {
+    if (!_ambient && !_needsRender) return;        // static scene: skip the GPU entirely
+    if (_now - _lastIdleDraw < IDLE_MS) return;    // throttle ambient to IDLE_FPS
+    _lastIdleDraw = _now;
+  }
+
+  // Real elapsed time, so the GPS pulse keeps its period when throttled.
+  const _dt = Math.min(0.1, (_now - _lastFrameT) / 1000);
+  _t += _dt;
+  _lastFrameT = _now;
 
   // North arrow — 3D tilted compass disc
   {
@@ -1574,11 +2405,7 @@ let _t = 0;
     drawNorthArrow3D(northAngle, pitch);
   }
 
-  // GPS marker pulse
-  if (gpsMarker && gpsMarker._ring) {
-    const pulse = 0.85 + 0.15 * Math.sin(_t * 3);
-    gpsMarker._ring.scale.setScalar(pulse);
-  }
+  if (gpsMarker) { easeMarker(_dt); updateCaverScale(); }
 
   if (flyMode) {
     if (craneMode) {
@@ -1632,14 +2459,49 @@ let _t = 0;
 
     updateJoyCanvas();
   } else {
-    // Follow mode: keep orbit target on GPS
-    if (followMode && gpsScenePos) {
-      controls.target.set(gpsScenePos.x, gpsScenePos.y, gpsScenePos.z);
+    // Follow mode keeps the orbit target on the fix and nothing more. Driving
+    // the camera azimuth from the magnetometer was rewritten out: a phone
+    // compass is noisy at the degree level and the camera amplifies that into
+    // visible swim, while fighting OrbitControls' own damping. The compass
+    // badge and the caver's own heading carry the direction instead.
+    // Follow mode has to MOVE the camera, not just re-aim it. OrbitControls
+    // derives its offset from (camera - target) each update, so shifting the
+    // target alone leaves the camera parked and merely swings its aim -- the
+    // view stops travelling with you. Translating the camera by the same delta
+    // preserves distance, tilt and bearing while the pair moves together.
+    if (followMode && (gpsShownPos || gpsScenePos)) {
+      const t = gpsShownPos || gpsScenePos;
+      const dx = t.x - controls.target.x,
+            dy = t.y - controls.target.y,
+            dz = t.z - controls.target.z;
+      controls.target.set(t.x, t.y, t.z);
+      camera.position.x += dx;
+      camera.position.y += dy;
+      camera.position.z += dz;
+      if (headingUp) applyHeadingUp(_dt);
+
+      // Pin the orbit radius. Translating the camera with the target preserves
+      // distance exactly on paper, but OrbitControls re-derives its spherical
+      // every update and folds in residual damping -- pan and dolly momentum
+      // that has not decayed yet -- so the radius creeps and the view appears
+      // to zoom itself whenever a fix lands. Re-normalising the offset to the
+      // remembered distance removes the drift without touching tilt or bearing.
+      if (userIsDrivingCamera() || followDist === null) {
+        followDist = camera.position.distanceTo(controls.target);
+      } else {
+        _fOff.copy(camera.position).sub(controls.target);
+        const d = _fOff.length();
+        if (d > 1e-6 && Math.abs(d - followDist) > 1e-3) {
+          _fOff.multiplyScalar(followDist / d);
+          camera.position.copy(controls.target).add(_fOff);
+        }
+      }
     }
     controls.update();
   }
 
   renderer.render(scene, camera);
+  _needsRender = false;
 })();
 </script>
 </body>

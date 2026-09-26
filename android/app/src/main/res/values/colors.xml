@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches the viewer's own background so there is no flash on launch. -->
+    <color name="flex_bg">#0A0A0F</color>
+    <color name="flex_accent">#00E5FF</color>
+</resources>

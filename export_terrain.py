@@ -1053,6 +1053,7 @@ def main():
 
         # 4b. Hillshade texture (Mapbox or custom XYZ)
         hs_b64 = None
+        hs_bytes = None
         if args.hillshade_url:
             print("[4b/7] Fetching hillshade texture (Mapbox/XYZ)...")
             try:
@@ -1064,8 +1065,10 @@ def main():
                 import io as _hs_io, base64 as _hs_b64m
                 hs_buf = _hs_io.BytesIO()
                 hs_img.save(hs_buf, format='JPEG', quality=85)
-                hs_b64 = _hs_b64m.b64encode(hs_buf.getvalue()).decode('ascii')
-                print(f"[4b/7] Hillshade base64: {len(hs_b64)//1024} KB")
+                hs_bytes = hs_buf.getvalue()
+                hs_b64 = _hs_b64m.b64encode(hs_bytes).decode('ascii')
+                print(f"[4b/7] Hillshade: {len(hs_bytes)//1024} KB "
+                      f"({len(hs_b64)//1024} KB as base64)")
             except Exception as e:
                 print(f"[4b/7] WARNING: hillshade fetch failed ({e}) — skipping")
         else:
@@ -1081,13 +1084,34 @@ def main():
         import io as _tex_io, base64 as _tex_b64
         tex_buf = _tex_io.BytesIO()
         texture.save(tex_buf, format='JPEG', quality=85)
-        tex_b64 = _tex_b64.b64encode(tex_buf.getvalue()).decode('ascii')
-        print(f"[5/7] Satellite texture base64: {len(tex_b64)//1024} KB")
+        tex_bytes = tex_buf.getvalue()
+        tex_b64 = _tex_b64.b64encode(tex_bytes).decode('ascii')
+        print(f"[5/7] Satellite texture: {len(tex_bytes)//1024} KB "
+              f"({len(tex_b64)//1024} KB as base64)")
 
         # 6. Package ZIP
         print(f"[6/7] Writing {args.out}...")
         with zipfile.ZipFile(args.out, 'w', zipfile.ZIP_DEFLATED) as zf:
             zf.write(glb_path, 'terrain.glb')
+
+            # Textures as sidecar files as well as inline base64. The single-file
+            # viewer.html below still carries them for the no-server browser case,
+            # but the app build wants them as plain JPEGs -- and it already has
+            # them right here. Without this, packaging an APK means decoding a
+            # 170 MB HTML back into the very bytes we are holding now.
+            # ZIP_STORED: JPEG is already compressed, deflating it again buys
+            # nothing and costs real time on a 50 MB texture.
+            zf.writestr(zipfile.ZipInfo('tex_sat.jpg'), tex_bytes,
+                        compress_type=zipfile.ZIP_STORED)
+            if hs_bytes:
+                zf.writestr(zipfile.ZipInfo('tex_hs.jpg'), hs_bytes,
+                            compress_type=zipfile.ZIP_STORED)
+
+            # The Three.js libs, so an export is self-sufficient for an app build
+            # without needing the FLEX checkout alongside it.
+            for zip_path, local in viewer_libs.items():
+                if local and local.exists():
+                    zf.write(local, 'libs/' + Path(zip_path).name)
 
             # Caves: convert lon/lat/alt -> terrain-centred XYZ
             # Derive UTM zone from bbox centre longitude
