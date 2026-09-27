@@ -352,8 +352,14 @@ function latlonToUTM(lat, lon) {
   const M = a * (
     (1 - e2/4 - 3*e2**2/64 - 5*e2**3/256) * latRad
     - (3*e2/8 + 3*e2**2/32 + 45*e2**3/1024) * Math.sin(2*latRad)
-    + (15*e2**2/64 + 45*e2**3/256) * Math.sin(4*latRad)
-    - (35*e2**3/1024) * Math.sin(6*latRad)
+    // Snyder's meridional arc series. These three coefficients were wrong --
+    // 15e4/64, 45e6/256 and 35e6/1024, i.e. 4x, 4x and 3x too large -- which
+    // put every GPS fix and every imported KML point about 12 m too far north
+    // at 41 deg latitude (and 25 m at 37 deg; the error tracks sin(4*phi), so
+    // it even flips sign above ~45 deg). export_terrain.py had them right, so
+    // the viewer and the exporter disagreed about where north was.
+    + (15*e2**2/256 + 45*e2**3/1024) * Math.sin(4*latRad)
+    - (35*e2**3/3072) * Math.sin(6*latRad)
   );
   const easting = 500000 + 0.9996 * N * (
     A + (1 - T + C) * A**3 / 6
