@@ -95,6 +95,13 @@ const server = http.createServer((req, res) => {
         handleExportStatus(req, res, sanitizedPath.slice('/api/export/status/'.length));
     } else if (sanitizedPath.startsWith('/api/export/download/') && req.method === 'GET') {
         handleExportDownload(req, res, sanitizedPath.slice('/api/export/download/'.length));
+    // ── LiDAR derivations (vegetation density, voids) ────────────────────────
+    } else if (sanitizedPath === '/api/lidar/derive' && req.method === 'POST') {
+        handleLidarDerive(req, res);
+    } else if (sanitizedPath.startsWith('/api/lidar/status/') && req.method === 'GET') {
+        handleLidarStatus(req, res, sanitizedPath.slice('/api/lidar/status/'.length));
+    } else if (sanitizedPath.startsWith('/api/lidar/result/') && req.method === 'GET') {
+        handleLidarResult(req, res, sanitizedPath.slice('/api/lidar/result/'.length));
     // ── CORS preflight ────────────────────────────────────────────────────────
     } else if (req.method === 'OPTIONS') {
         res.writeHead(204, {
@@ -656,7 +663,12 @@ function handleRecentsPost(req, res) {
 
 const _exportJobs = {};  // jobId → { status, progress, outPath, error }
 
-const CONDA_PYTHON = 'C:\\Users\\feroz\\miniconda3\\envs\\entwine\\python.exe';
+// The interpreter that has PDAL. Machine specific, so it is configuration,
+// not code: set FLEX_PYTHON to point at your own env. The fallback is a
+// stock miniconda layout and keeps no one's home directory in a public repo.
+const CONDA_PYTHON = process.env.FLEX_PYTHON || (process.platform === 'win32'
+  ? path.join(os.homedir(), 'miniconda3', 'envs', 'entwine', 'python.exe')
+  : path.join(os.homedir(), 'miniconda3', 'envs', 'entwine', 'bin', 'python'));
 const EXPORT_SCRIPT = path.join(__dirname, 'export_terrain.py');
 const EXPORT_OUT_DIR = path.join(__dirname, 'user_files', 'exports');
 
@@ -771,4 +783,139 @@ function handleExportDownload(req, res, jobId) {
         'Access-Control-Allow-Origin': '*',
     });
     fs.createReadStream(job.outPath).pipe(res);
+}
+
+// ── LiDAR derivations ────────────────────────────────────────────────────────
+// Vegetation density and void rasters from a bbox, via lidar_derive.py. Same
+// job shape as the terrain export: POST returns a jobId, the client polls
+// status, then fetches the rasters. Kept as its own set of routes rather than
+// folded into the export because the intents differ -- one makes a portable
+// viewer, the other answers a question about an area.
+
+const _lidarJobs = {};   // jobId -> { status, progress, outDir, error }
+const LIDAR_SCRIPT  = path.join(__dirname, 'lidar_derive.py');
+const LIDAR_OUT_DIR = path.join(__dirname, 'user_files', 'lidar');
+
+function handleLidarDerive(req, res) {
+    let body = '';
+    req.on('data', c => { body += c; });
+    req.on('end', () => {
+        let params;
+        try { params = JSON.parse(body); } catch (e) {
+            return jsonResponse(res, { ok: false, error: 'Invalid JSON' }, 400);
+        }
+        const {
+            bbox,
+            eptPath,
+            cell            = null,      // null => chosen from data density
+            veg_band        = [0.30, 1.50],
+            void_depth      = -1.0,
+            void_min_points = 3,
+            // Garbage removal only. Generous on purpose: real voids live below
+            // ground and must survive. Never tighten this to "clean up noise".
+            low_cut         = -20.0,
+            high_cut        = 120.0,
+            stat            = 'median',
+        } = params;
+
+        if (!bbox || bbox.length !== 4)
+            return jsonResponse(res, { ok: false, error: 'bbox required: [minLon,minLat,maxLon,maxLat]' }, 400);
+        if (!eptPath)
+            return jsonResponse(res, { ok: false, error: 'eptPath is required — select a loaded dataset' }, 400);
+
+        const jobId  = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        const outDir = path.join(LIDAR_OUT_DIR, jobId);
+        fs.mkdirSync(outDir, { recursive: true });
+
+        _lidarJobs[jobId] = { status: 'running', progress: [], outDir, error: null };
+        jsonResponse(res, { ok: true, jobId });
+
+        const args = [
+            LIDAR_SCRIPT,
+            '--ept',             eptPath,
+            '--bbox',            ...bbox.map(String),
+            '--out-dir',         outDir,
+            '--veg-band',        String(veg_band[0]), String(veg_band[1]),
+            '--void-depth',      String(void_depth),
+            '--void-min-points', String(void_min_points),
+            '--low-cut',         String(low_cut),
+            '--high-cut',        String(high_cut),
+            '--stat',            stat,
+        ];
+        if (cell) args.push('--cell', String(cell));
+
+        const proc = spawn(CONDA_PYTHON, args);
+        proc.stdout.on('data', d => {
+            d.toString().split('\n').forEach(line => {
+                line = line.trim();
+                if (!line) return;
+                console.log('[lidar]', line);
+                _lidarJobs[jobId].progress.push(line);
+            });
+        });
+        proc.stderr.on('data', d => {
+            d.toString().split('\n').forEach(line => {
+                line = line.trim();
+                if (!line) return;
+                console.warn('[lidar-err]', line);
+                _lidarJobs[jobId].progress.push('! ' + line);
+            });
+        });
+        proc.on('close', code => {
+            const ok = code === 0 && fs.existsSync(path.join(outDir, 'derived.json'));
+            _lidarJobs[jobId].status = ok ? 'done' : 'error';
+            if (!ok) _lidarJobs[jobId].error = `Process exited with code ${code}`;
+            console.log('[lidar]', ok ? 'done: ' + jobId : 'failed: ' + jobId + ' (' + code + ')');
+        });
+    });
+}
+
+function handleLidarStatus(req, res, jobId) {
+    const job = _lidarJobs[jobId];
+    if (!job) return jsonResponse(res, { ok: false, error: 'Unknown job' }, 404);
+    const lines = job.progress;
+    const last  = lines[lines.length - 1] || '';
+    let pct = 5;
+    if      (last.includes('[1/')) pct = 10;
+    else if (last.includes('[2/')) pct = 35;
+    else if (last.includes('[3/')) pct = 75;
+    else if (last.includes('[4/')) pct = 95;
+    if (job.status === 'done')  pct = 100;
+    if (job.status === 'error') pct = 100;
+    let meta = null;
+    if (job.status === 'done') {
+        try { meta = JSON.parse(fs.readFileSync(path.join(job.outDir, 'derived.json'), 'utf8')); }
+        catch (_) {}
+    }
+    jsonResponse(res, { status: job.status, progress: pct, message: last,
+                        error: job.error, meta });
+}
+
+// Serves a file out of a finished job: the PNG overlays, derived.json, or a
+// GeoTIFF for download. Path is <jobId>/<filename>, filename whitelisted.
+function handleLidarResult(req, res, rest) {
+    const parts = rest.split('/');
+    const jobId = parts[0];
+    const name  = parts.slice(1).join('/');
+    const job   = _lidarJobs[jobId];
+    if (!job || job.status !== 'done')
+        return jsonResponse(res, { ok: false, error: 'Not ready' }, 404);
+    if (!/^[A-Za-z0-9_.-]+$/.test(name) || name.includes('..'))
+        return jsonResponse(res, { ok: false, error: 'Bad name' }, 400);
+
+    const file = path.join(job.outDir, name);
+    if (!file.startsWith(job.outDir) || !fs.existsSync(file))
+        return jsonResponse(res, { ok: false, error: 'Not found' }, 404);
+
+    const ext  = path.extname(name).toLowerCase();
+    const type = ext === '.png'  ? 'image/png'
+               : ext === '.json' ? 'application/json'
+               : ext === '.tif'  ? 'image/tiff'
+               : 'application/octet-stream';
+    const head = { 'Content-Type': type,
+                   'Content-Length': fs.statSync(file).size,
+                   'Access-Control-Allow-Origin': '*' };
+    if (ext === '.tif') head['Content-Disposition'] = `attachment; filename="${name}"`;
+    res.writeHead(200, head);
+    fs.createReadStream(file).pipe(res);
 }

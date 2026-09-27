@@ -150,10 +150,33 @@ export class PointCloudMaterial extends THREE.RawShaderMaterial {
 			uFilterPointSourceIDClipRange:	{ type: "fv", value: [0, 65535]},
 
 			// Height-above-ground filter
-			uGroundTex:      { type: "t",   value: null },
+			// Height-above-ground filter. Two grids: uGroundTex* is the detail
+			// grid (the DEM-resolution terrain reference) and uGround*C the coarse
+			// wide-area fallback, read only where the detail grid has no data.
+			// NOTE: adding a uniform here is NOT enough. Potree renders point
+			// clouds with its own renderer, which uploads uniforms BY NAME in
+			// PotreeRenderer.js renderOctree() -- anything not listed there never
+			// reaches the GPU.
+			// type is deliberately NOT "t". Potree's generic uniform loop wraps a
+			// "t" uniform in its WebGLTexture helper, whose upload path is a chain
+			// of "texture instanceof THREE.DataTexture" checks against the three.js
+			// bundled INSIDE potree.js. flex.js builds its textures from the page's
+			// global three.js, a different module instance, so every instanceof
+			// fails, texImage2D is never called, and the sampler reads an
+			// incomplete texture as (0,0,0,1) -- opaque black. These two carry a
+			// plain {width, height, data, version} and are uploaded with raw GL
+			// calls in renderOctree instead.
+			uGroundTex:      { type: "hagtex", value: null },
 			uGroundOrigin:   { type: "2fv", value: [0.0, 0.0] },
 			uGroundCellSize: { type: "f",   value: 1.0 },
 			uGroundTexSize:  { type: "2fv", value: [1.0, 1.0] },
+			uGroundZRange:   { type: "2fv", value: [0.0, 1.0] },
+			uGroundTexC:       { type: "hagtex", value: null },
+			uGroundCellSizeC:  { type: "f",   value: 1.0 },
+			uGroundTexSizeC:   { type: "2fv", value: [1.0, 1.0] },
+			uGroundShiftC:     { type: "2fv", value: [0.0, 0.0] },
+			uGroundFallbackOn: { type: "f",   value: 0.0 },
+			uHagDebug:         { type: "f",   value: 0.0 },
 			uHagRange:       { type: "2fv", value: [-10.0, 100.0] },
 			matcapTextureUniform: 	{ type: "t", value: this.matcapTexture },
 			backfaceCulling: { type: "b", value: false },

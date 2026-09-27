@@ -109,17 +109,45 @@ uniform float uExtraOffset;
 uniform vec3 uShadowColor;
 
 // ── Height-above-ground filter ────────────────────────────────────────────────
-// uGroundTex:      R32F texture; each texel stores the minimum ground Z for that cell.
-//                  Unset cells contain 1e30 (no ground data yet).
-// uGroundOrigin:   local-space XY of the grid's bottom-left corner.
-// uGroundCellSize: side length of each grid cell in local units (metres).
+// uGroundTex:      RGBA8. Ground Z is packed into RGB as a 24-bit fraction of
+//                  uGroundZRange, with A as the has-data flag (0 = unknown).
+//                  NOT a single-channel float texture: Potree's own renderer
+//                  (PotreeRenderer.js paramThreeToGL) has no case for RedFormat,
+//                  so such a texture falls through to the compressed-format
+//                  branch and throws 'RGBA_S3TC_DXT1_Format is not defined'.
+//                  RGBA8 is handled, and needs no float-texture extension.
+// uGroundZRange:   [zMin, zSpan] used to decode RGB back to metres.
+// uGroundModelMatrix: the node's world matrix with the grid origin already
+//                  subtracted from its XY translation, so this transform emits
+//                  coordinates RELATIVE to the grid corner. Doing the subtraction
+//                  on the CPU in float64 matters: point clouds keep their source
+//                  CRS, and at an EPSG:3857 easting of -1.3e7 a single float32
+//                  step is about a metre -- wider than a grid cell. Subtracting
+//                  inside the shader would quantise the lookup and disagree with
+//                  the float64 binning done in JS.
+// uGroundCellSize: side length of each grid cell in metres.
 // uGroundTexSize:  grid dimensions in cells (width, height) — used for UV scaling.
 // uHagRange:       [minHAG, maxHAG] — points outside this band are culled.
 uniform sampler2D uGroundTex;
-uniform vec2      uGroundOrigin;
+uniform mat4      uGroundModelMatrix;
 uniform float     uGroundCellSize;
 uniform vec2      uGroundTexSize;
+uniform vec2      uGroundZRange;
 uniform vec2      uHagRange;
+// Coarse wide-area fallback grid. Same packing, same decode range, its own cell
+// size and dimensions. uGroundShiftC is (detailOrigin - fallbackOrigin), so its
+// XY is reached from the detail grid's without a second model matrix; both
+// origins are known in float64 on the CPU and their difference is at most half
+// the fallback coverage, which casts to float32 to well under a millimetre.
+uniform sampler2D uGroundTexC;
+uniform float     uGroundCellSizeC;
+uniform vec2      uGroundTexSizeC;
+uniform vec2      uGroundShiftC;
+uniform float     uGroundFallbackOn;
+// 1.0 = paint every point by what the filter decided instead of culling it.
+// The GPU cannot be read back, so this is the only way to see what the
+// shader actually computed. See the colour key in the filter block.
+uniform float     uHagDebug;
 
 uniform sampler2D visibleNodes;
 uniform sampler2D gradient;
@@ -816,22 +844,104 @@ void doClipping(){
 
 	#if defined(clip_hag_enabled)
 	{ // height-above-ground filter
-		// Map this point's local XY to a [0,1] UV in the ground texture.
-		vec2 cellF = (position.xy - uGroundOrigin) / uGroundCellSize;
-		vec2 uv    = cellF / uGroundTexSize;
+		// MUST NOT bin by the raw 'position' attribute. Potree sets
+		// sceneNode.position to each node's boundingBox.min (PointCloudOctree.js
+		// ~line 213), so 'position' is relative to that node's own corner -- a
+		// different origin for every node. Binning by it made points from
+		// unrelated nodes collide into the same grid cell, which is why the first
+		// version of this filter was abandoned as "the Z-coordinate mapping could
+		// not be reconciled across EPT datasets". uGroundModelMatrix carries the
+		// node transform AND the grid origin, so xy comes out relative to the
+		// grid corner while z stays in world units, matching the JS accumulator.
+		vec4 hagWorld = uGroundModelMatrix * vec4(position, 1.0);
 
-		// Only filter points that fall inside the grid coverage area.
-		if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
-			float groundZ = texture2D(uGroundTex, clamp(uv, 0.001, 0.999)).r;
+		// FAIL OPEN. Nothing below may blank the cloud, so the uniforms are
+		// sanity-checked first. A mat4 that never reached the GPU is all zeros,
+		// which gives w = 0 where any real affine transform gives 1; and a decode
+		// window narrower than 5 m is PointCloudMaterial's [0, 1] placeholder
+		// rather than a terrain range. Either one would make every height come
+		// out hundreds of metres wrong and cull the entire point cloud. Both have
+		// happened. When the inputs are not trustworthy the filter yields.
+		vec3 hagDbg = vec3(1.0);
+		bool hagUsable = hagWorld.w > 0.5
+		              && uGroundCellSize > 0.0
+		              && uGroundTexSize.x > 1.0
+		              && uGroundZRange.y > 5.0;
+		if (hagUsable) {
 
-			// 1e30 is the sentinel for "no ground data in this cell yet" — let it through.
-			if (groundZ < 1e29) {
-				float hag = position.z - groundZ;
-				if (hag < uHagRange.x || hag > uHagRange.y) {
-					gl_Position = vec4(100.0, 100.0, 100.0, 0.0);
-					return;
-				}
+		// Alpha carries provenance: 1.0 = an actual class-2 return in that cell,
+		// 0.5 = the lowest non-ground return there (an estimate), 0 = nothing.
+		// Both grids are sampled, then ranked: a real ground return ANYWHERE
+		// beats an estimate anywhere. Preferring the finer grid first would let
+		// a canopy-only cell in dense forest report its lowest leaf as the
+		// ground, which reads as 18 m of terrain that is not there.
+		vec4 gsD = vec4(0.0);
+		vec2 uvD = (hagWorld.xy / uGroundCellSize) / uGroundTexSize;
+		if (uvD.x >= 0.0 && uvD.x <= 1.0 && uvD.y >= 0.0 && uvD.y <= 1.0) {
+			vec2 htD = 0.5 / uGroundTexSize;
+			gsD = texture2D(uGroundTex, clamp(uvD, htD, 1.0 - htD));
+		}
+
+		vec4 gsC = vec4(0.0);
+		if (uGroundFallbackOn > 0.5) {
+			vec2 uvC = ((hagWorld.xy + uGroundShiftC) / uGroundCellSizeC) / uGroundTexSizeC;
+			if (uvC.x >= 0.0 && uvC.x <= 1.0 && uvC.y >= 0.0 && uvC.y <= 1.0) {
+				vec2 htC = 0.5 / uGroundTexSizeC;
+				gsC = texture2D(uGroundTexC, clamp(uvC, htC, 1.0 - htC));
 			}
+		}
+
+		float groundZ = 0.0;
+		bool  haveGround = false;
+		bool  fromCoarse = false;
+		vec4  pick = vec4(0.0);
+		if      (gsD.a > 0.75) { pick = gsD; }                      // detail, real ground
+		else if (gsC.a > 0.75) { pick = gsC; fromCoarse = true; }   // coarse, real ground
+		else if (gsD.a > 0.25) { pick = gsD; }                      // detail, estimate
+		else if (gsC.a > 0.25) { pick = gsC; fromCoarse = true; }   // coarse, estimate
+		// The JS side never packs a height as RGB (0,0,0) -- zero is reserved.
+		// So an opaque black texel cannot be real data, and the one thing that
+		// produces it is a texture that was bound but never uploaded, which
+		// WebGL samples as (0,0,0,1). That reads as valid ground at the bottom
+		// of the decode window, which is a silent and very convincing failure:
+		// every point then measures as hundreds of metres above 'ground'.
+		bool texLive = (pick.r + pick.g + pick.b) > 0.001;
+		if (pick.a > 0.25 && texLive) {
+			float gt = dot(pick.rgb, vec3(65536.0, 256.0, 1.0)) * (255.0 / 16777215.0);
+			groundZ = uGroundZRange.x + gt * uGroundZRange.y;
+			haveGround = true;
+		}
+
+		// No ground anywhere means no opinion: the point passes through. Never
+		// hide a point because the ground under it is unknown.
+		float hag = hagWorld.z - groundZ;
+
+		if (uHagDebug > 0.5) {
+			// COLOUR KEY, for diagnosing this from a screenshot:
+			//   magenta      no ground reference anywhere - the point is passed through
+			//   green        inside the band - would be kept
+			//   orange       below the band - would be culled
+			//   blue         above the band - would be culled
+			//   darkened     the reference came from the coarse fallback grid
+			// (white is set outside this block and means the uniforms never arrived)
+			if      (!haveGround)          hagDbg = vec3(1.0, 0.0, 1.0);
+			else if (hag < uHagRange.x)    hagDbg = vec3(1.0, 0.35, 0.0);
+			else if (hag > uHagRange.y)    hagDbg = vec3(0.0, 0.4, 1.0);
+			else                           hagDbg = vec3(0.1, 1.0, 0.2);
+			if (haveGround && fromCoarse)  hagDbg *= 0.45;
+		} else if (haveGround) {
+			if (hag < uHagRange.x || hag > uHagRange.y) {
+				gl_Position = vec4(100.0, 100.0, 100.0, 0.0);
+				return;
+			}
+		}
+
+		} // hagUsable
+
+		// White means hagUsable was false: a uniform did not reach the GPU, so
+		// nothing was filtered. That is a bug in the upload path, not the grid.
+		if (uHagDebug > 0.5) {
+			vColor = hagDbg;
 		}
 	}
 	#endif

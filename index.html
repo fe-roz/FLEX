@@ -815,6 +815,7 @@
           <button class="btn btn-primary" type="button" data-target="#lidarCollapsible">☁ LiDAR</button>
           <button class="btn btn-primary" type="button" data-target="#toolsCollapsible">🔧 Tools</button>
           <button class="btn btn-primary" type="button" data-target="#exportCollapsible">📦 Export</button>
+          <button class="btn btn-primary" type="button" data-target="#lidarDeriveCollapsible">🌿 Analyze</button>
           <button class="btn btn-primary" type="button" data-target="#helpCollapsible">❓ Help</button>
         </div>
 
@@ -1242,6 +1243,233 @@
           </div>
         </div>
 
+        <!-- ══════════════ LiDAR ANALYSIS ══════════════════════════════════ -->
+        <div class="collapse" id="lidarDeriveCollapsible">
+          <div class="lp-panel-wrap">
+
+            <!-- Live height-above-ground filter: no job, works on whatever is
+                 currently streamed in. Restored from bdecc3f0 with the
+                 coordinate-space bug fixed. -->
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▾</span> Live height filter
+              </div>
+              <div class="lp-section-body open">
+                <label style="display:block;">
+                  <input type="checkbox" id="lp-hag-enable"> Filter by height above ground
+                </label>
+                <div id="lp-hag-controls" style="display:none; margin-top:8px;">
+                  <div style="font-size:11px; color:rgba(255,255,255,0.7);">
+                    Keep points between <span id="lp-hag-label">−20.0 m – 20.0 m</span>
+                  </div>
+                  <label style="display:block; margin-top:6px; font-size:11px;">
+                    Min <span id="lp-hag-min-label" style="color:#00e5ff;">−20.0 m</span>
+                    <input id="lp-hag-min" type="range" min="-100" max="10" step="0.25" value="-20" style="width:100%;">
+                  </label>
+                  <label style="display:block; font-size:11px;">
+                    Max <span id="lp-hag-max-label" style="color:#00e5ff;">20.0 m</span>
+                    <input id="lp-hag-max" type="range" min="-10" max="100" step="0.25" value="20" style="width:100%;">
+                  </label>
+                  <div style="border-top:1px solid rgba(255,255,255,0.12); margin:10px 0 6px;"></div>
+
+                  <label style="display:block; font-size:11px;">
+                    <b>Terrain resolution</b> &mdash; detail cell size
+                    <select id="lp-hag-cell" style="width:100%; margin-top:2px;">
+                      <option value="0.25">0.25 m</option>
+                      <option value="0.5">0.5 m</option>
+                      <option value="1" selected>1 m</option>
+                      <option value="2">2 m</option>
+                      <option value="5">5 m</option>
+                      <option value="10">10 m</option>
+                    </select>
+                  </label>
+                  <div style="font-size:10px; color:rgba(255,255,255,0.45); margin-top:3px;">
+                    This is what the filter measures against &mdash; treat it like a
+                    DEM cell size. The grid is always
+                    <span id="lp-hag-window">2048&times;2048 cells</span>, centred on
+                    what the camera is looking at, so the area it covers follows
+                    from the cell size rather than the other way round.
+                  </div>
+
+                  <label style="display:block; font-size:11px; margin-top:8px;">
+                    <input type="checkbox" id="lp-hag-fallback" checked>
+                    <b>Wide-area fallback</b>
+                  </label>
+                  <div style="font-size:10px; color:rgba(255,255,255,0.45); margin-top:3px;">
+                    A separate coarse grid &mdash;
+                    <span id="lp-hag-fallback-note">16 m cells over 16.4 km</span> &mdash;
+                    read <i>only</i> where the detail grid has no ground yet, so
+                    points outside the detail window are still measured instead
+                    of passing through unfiltered. Coarse cells over-estimate
+                    height on steep ground; switch this off if you are working a
+                    tight band on a slope.
+                  </div>
+
+                  <div style="font-size:10px; color:#e8a33d; margin-top:6px;">
+                    Drag Min well below zero to isolate sub-ground returns &mdash;
+                    pits, sinks and fissures. Cells with no ground data in either
+                    grid are never filtered.
+                  </div>
+                  <label style="display:block; font-size:11px; margin-top:8px;">
+                    <input type="checkbox" id="lp-hag-debug">
+                    <b>Show the decision as colour</b> (diagnose)
+                  </label>
+                  <div style="font-size:10px; color:rgba(255,255,255,0.45); margin-top:3px; line-height:1.5;">
+                    Nothing is hidden; every point is painted by what the shader
+                    worked out.
+                    <span style="color:#fff;">&#9632; white</span> the uniforms never
+                    reached the GPU &mdash;
+                    <span style="color:#f0f;">&#9632; magenta</span> no ground
+                    reference, point passed through &mdash;
+                    <span style="color:#1aff33;">&#9632; green</span> inside the band
+                    &mdash; <span style="color:#ff5900;">&#9632; orange</span> below it
+                    &mdash; <span style="color:#0066ff;">&#9632; blue</span> above it.
+                    Darker shades mean the reference came from the coarse grid.
+                  </div>
+                  <div id="lp-hag-stats" style="font-size:10px; color:rgba(255,255,255,0.4); margin-top:5px;">building grids&hellip;</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▾</span> Area
+              </div>
+              <div class="lp-section-body open">
+                <div style="padding:2px 0; font-size:11px; color:rgba(255,255,255,0.7);">
+                  Uses the same drawn rectangle as Export.
+                </div>
+                <button class="btn btn-sm btn-primary" style="margin-top:6px; width:100%;"
+                  onclick="window._exportStartDraw()">✏ Draw BBox</button>
+                <div id="lidar_bbox_text" style="margin-top:6px; font-size:10px; color:rgba(255,255,255,0.5);">— no area drawn —</div>
+              </div>
+            </div>
+
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▾</span> Point Cloud
+              </div>
+              <div class="lp-section-body open">
+                <div style="padding:2px 0; display:flex; gap:5px; align-items:center;">
+                  <select id="lidar_ept_select" style="flex:1; min-width:0; background:#222; color:#eee; border:1px solid #444; border-radius:3px; padding:4px 6px; font-size:11px;">
+                    <option value="">— open panel to load —</option>
+                  </select>
+                  <button onclick="window._refreshEptDatasets && window._refreshEptDatasets()"
+                    style="flex-shrink:0; background:#222; border:1px solid #444; border-radius:3px; color:#eee; font-size:13px; padding:3px 7px; cursor:pointer;" title="Refresh list">↺</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▾</span> Vegetation (bushwhack)
+              </div>
+              <div class="lp-section-body open">
+                <div style="padding:2px 0; font-size:11px; color:rgba(255,255,255,0.7);">
+                  Fraction of returns in an understory band — a proportion, not a
+                  raw count, so it does not just track flight-line density.
+                </div>
+                <label style="display:block; margin-top:6px;">
+                  Band:
+                  <input id="lidar_veg_lo" type="number" step="0.05" value="0.30" style="width:56px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;">
+                  to
+                  <input id="lidar_veg_hi" type="number" step="0.05" value="1.50" style="width:56px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;">
+                  m AGL
+                </label>
+                <div style="font-size:10px; color:rgba(255,255,255,0.35); margin-top:3px;">0.30–1.50 m ≈ 1–5 ft</div>
+              </div>
+            </div>
+
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▾</span> Voids (below ground)
+              </div>
+              <div class="lp-section-body open">
+                <div style="padding:2px 0; font-size:11px; color:rgba(255,255,255,0.7);">
+                  Returns beneath the local ground surface. Classifiers call these
+                  noise; here they are candidate entrances, sinks and pits.
+                </div>
+                <label style="display:block; margin-top:6px;">
+                  Counts below
+                  <input id="lidar_void_depth" type="number" step="0.5" value="-1.0" style="width:60px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;"> m
+                </label>
+                <label style="display:block; margin-top:5px;">
+                  Min returns per cell
+                  <input id="lidar_void_min" type="number" step="1" value="3" style="width:50px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;">
+                </label>
+                <div style="font-size:10px; color:rgba(255,255,255,0.35); margin-top:3px;">One deep return is usually multipath; a cluster is a hole.</div>
+              </div>
+            </div>
+
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▸</span> Advanced
+              </div>
+              <div class="lp-section-body">
+                <label style="display:block; margin-bottom:5px;">
+                  Ground cell size:
+                  <select id="lidar_cell" style="margin-left:4px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;">
+                    <option value="" selected>auto (from density)</option>
+                    <option value="1.0">1.0 m</option>
+                    <option value="2.0">2.0 m</option>
+                    <option value="4.0">4.0 m</option>
+                    <option value="8.0">8.0 m</option>
+                  </select>
+                </label>
+                <div style="font-size:10px; color:rgba(255,255,255,0.35); margin-bottom:6px;">
+                  Smaller cells cut slope bias — about (cell/2)·tan(slope) — but
+                  below ~4 ground returns per cell the estimate turns to noise and
+                  error rises. Auto aims for 8 per cell.
+                </div>
+                <label style="display:block; margin-bottom:5px;">
+                  Ground statistic:
+                  <select id="lidar_stat" style="margin-left:4px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;">
+                    <option value="median" selected>median (robust)</option>
+                    <option value="mean">mean (faster)</option>
+                  </select>
+                </label>
+                <label style="display:block; margin-bottom:3px;">
+                  Discard below
+                  <input id="lidar_low_cut" type="number" step="1" value="-20" style="width:60px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;"> m AGL
+                </label>
+                <div style="font-size:10px; color:#e8a33d; margin-bottom:6px;">
+                  Garbage removal only — multipath and atmospheric returns. Keep it
+                  generous: real voids live down here and must survive.
+                </div>
+              </div>
+            </div>
+
+            <div class="lp-section">
+              <div class="lp-section-body open">
+                <button id="lidar_run_btn" class="btn btn-primary" style="width:100%;"
+                  onclick="window._lidarRun()">🌿 Analyze Area</button>
+                <div id="lidar_progress_wrap" style="display:none; margin-top:8px;">
+                  <div style="height:4px; background:rgba(255,255,255,.12); border-radius:2px;">
+                    <div id="lidar_progress_bar" style="height:4px; width:0; background:#00e5ff; border-radius:2px; transition:width .4s;"></div>
+                  </div>
+                  <div id="lidar_status_text" style="font-size:10px; color:rgba(255,255,255,0.55); margin-top:4px;">Starting…</div>
+                </div>
+                <div id="lidar_results" style="display:none; margin-top:10px;">
+                  <div style="font-size:11px; color:rgba(255,255,255,0.7); margin-bottom:5px;">Overlays</div>
+                  <label style="display:block;"><input type="checkbox" id="lidar_show_veg" checked onchange="window._lidarToggleLayer('veg', this.checked)"> Vegetation density</label>
+                  <label style="display:block;"><input type="checkbox" id="lidar_show_void" checked onchange="window._lidarToggleLayer('void', this.checked)"> Voids</label>
+                  <label style="display:block; margin-top:4px;">Opacity
+                    <input id="lidar_opacity" type="range" min="0" max="100" value="75" style="width:110px; vertical-align:middle;"
+                      oninput="window._lidarSetOpacity(this.value/100)">
+                  </label>
+                  <div id="lidar_stats" style="font-size:10px; color:rgba(255,255,255,0.45); margin-top:6px; line-height:1.6;"></div>
+                  <div style="margin-top:8px; display:flex; gap:5px; flex-wrap:wrap;">
+                    <a id="lidar_dl_veg"    class="btn btn-sm btn-secondary" style="font-size:10px;" href="#" download>⬇ vegetation.tif</a>
+                    <a id="lidar_dl_void"   class="btn btn-sm btn-secondary" style="font-size:10px;" href="#" download>⬇ voids.tif</a>
+                    <a id="lidar_dl_ground" class="btn btn-sm btn-secondary" style="font-size:10px;" href="#" download>⬇ ground.tif</a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
         <!-- ══════════════ HELP ════════════════════════════════════════════ -->
         <div class="collapse" id="helpCollapsible">
           <div class="lp-panel-wrap">
@@ -1379,6 +1607,7 @@
             '#lidarCollapsible',
             '#toolsCollapsible',
             '#exportCollapsible',
+            '#lidarDeriveCollapsible',
             '#helpCollapsible',
           ];
 
@@ -1996,6 +2225,219 @@
     }
 
     // ── Run export ───────────────────────────────────────────────────────────
+    // ── Live HAG filter controls ─────────────────────────────────────────────
+    (function _wireHag() {
+      const en  = document.getElementById('lp-hag-enable');
+      const box = document.getElementById('lp-hag-controls');
+      const lo  = document.getElementById('lp-hag-min');
+      const hi  = document.getElementById('lp-hag-max');
+      const loL = document.getElementById('lp-hag-min-label');
+      const hiL = document.getElementById('lp-hag-max-label');
+      const sum = document.getElementById('lp-hag-label');
+      if (!en || !lo || !hi) return;
+
+      const fmt = v => (v < 0 ? '\u2212' : '') + Math.abs(v).toFixed(1) + ' m';
+      function apply() {
+        let a = parseFloat(lo.value), b = parseFloat(hi.value);
+        if (b < a + 0.25) b = a + 0.25, hi.value = b;
+        loL.textContent = fmt(a);
+        hiL.textContent = fmt(b);
+        if (sum) sum.textContent = fmt(a) + ' \u2013 ' + fmt(b);
+        if (window._hagSetRange) window._hagSetRange(a, b);
+      }
+      en.addEventListener('change', () => {
+        box.style.display = en.checked ? 'block' : 'none';
+        if (window._hagEnable) window._hagEnable(en.checked);
+        if (en.checked) apply();
+      });
+      lo.addEventListener('input', apply);
+      hi.addEventListener('input', apply);
+
+      const cell = document.getElementById('lp-hag-cell');
+      if (cell) cell.addEventListener('change', () => {
+        if (window._hagSetCellSize) window._hagSetCellSize(parseFloat(cell.value));
+      });
+
+      const fbk = document.getElementById('lp-hag-fallback');
+      if (fbk) fbk.addEventListener('change', () => {
+        if (window._hagSetFallback) window._hagSetFallback(fbk.checked);
+      });
+
+      const dbg = document.getElementById('lp-hag-debug');
+      if (dbg) dbg.addEventListener('change', () => {
+        if (window._hagSetDebugColor) window._hagSetDebugColor(dbg.checked);
+        if (dbg.checked && !en.checked) { en.checked = true; box.style.display = 'block'; }
+      });
+    })();
+
+    // ── LiDAR analysis ───────────────────────────────────────────────────────
+    // Vegetation density and void rasters for the drawn area. Shares the bbox
+    // and the dataset picker with Export; everything else is its own.
+    const _lidarLayers = { veg: null, void: null };
+    let   _lidarJobId  = null;
+
+    function _lidarSyncBbox() {
+      const el = document.getElementById('lidar_bbox_text');
+      if (!el) return;
+      if (!_bboxCorner1 || !_bboxCorner2) { el.textContent = '— no area drawn —'; return; }
+      const w = Math.min(_bboxCorner1[0], _bboxCorner2[0]).toFixed(5);
+      const e = Math.max(_bboxCorner1[0], _bboxCorner2[0]).toFixed(5);
+      const s2 = Math.min(_bboxCorner1[1], _bboxCorner2[1]).toFixed(5);
+      const n = Math.max(_bboxCorner1[1], _bboxCorner2[1]).toFixed(5);
+      el.textContent = `${w}, ${s2}  →  ${e}, ${n}`;
+    }
+    setInterval(_lidarSyncBbox, 1000);
+
+    // Mirror the Export dataset list rather than duplicating the discovery
+    // logic, so both panels always agree on what is loaded.
+    function _lidarMirrorDatasets() {
+      const src = document.getElementById('export_ept_select');
+      const dst = document.getElementById('lidar_ept_select');
+      if (!src || !dst) return;
+      const keep = dst.value;
+      dst.innerHTML = src.innerHTML;
+      if (keep) dst.value = keep;
+    }
+    setInterval(_lidarMirrorDatasets, 1500);
+
+    window._lidarSetOpacity = function(a) {
+      Object.values(_lidarLayers).forEach(l => { if (l) l.alpha = a; });
+    };
+    window._lidarToggleLayer = function(which, on) {
+      const l = _lidarLayers[which];
+      if (l) l.show = on;
+    };
+
+    function _lidarClearLayers() {
+      Object.keys(_lidarLayers).forEach(k => {
+        if (_lidarLayers[k]) {
+          try { cesiumViewer.imageryLayers.remove(_lidarLayers[k], true); } catch(_) {}
+          _lidarLayers[k] = null;
+        }
+      });
+    }
+
+    async function _lidarAddOverlay(which, url, rectDeg, alpha) {
+      const rect = Cesium.Rectangle.fromDegrees(rectDeg[0], rectDeg[1], rectDeg[2], rectDeg[3]);
+      let provider;
+      // Cesium deprecated the SingleTileImageryProvider constructor in favour of
+      // an async fromUrl; support both so this does not break on either side of
+      // a Cesium bump.
+      if (Cesium.SingleTileImageryProvider.fromUrl) {
+        provider = await Cesium.SingleTileImageryProvider.fromUrl(url, { rectangle: rect });
+      } else {
+        provider = new Cesium.SingleTileImageryProvider({ url, rectangle: rect });
+      }
+      const layer = cesiumViewer.imageryLayers.addImageryProvider(provider);
+      layer.alpha = alpha;
+      _lidarLayers[which] = layer;
+      return layer;
+    }
+
+    window._lidarRun = function() {
+      if (!_bboxCorner1 || !_bboxCorner2) { alert('Draw an area first.'); return; }
+      const w = Math.min(_bboxCorner1[0], _bboxCorner2[0]);
+      const e = Math.max(_bboxCorner1[0], _bboxCorner2[0]);
+      const s2 = Math.min(_bboxCorner1[1], _bboxCorner2[1]);
+      const n = Math.max(_bboxCorner1[1], _bboxCorner2[1]);
+
+      const eptPath = document.getElementById('lidar_ept_select').value;
+      if (!eptPath) { alert('Select a point cloud dataset first.'); return; }
+
+      const cellVal = document.getElementById('lidar_cell').value;
+      const body = {
+        bbox: [w, s2, e, n],
+        eptPath,
+        cell: cellVal ? parseFloat(cellVal) : null,
+        veg_band: [parseFloat(document.getElementById('lidar_veg_lo').value),
+                   parseFloat(document.getElementById('lidar_veg_hi').value)],
+        void_depth: parseFloat(document.getElementById('lidar_void_depth').value),
+        void_min_points: parseInt(document.getElementById('lidar_void_min').value),
+        low_cut: parseFloat(document.getElementById('lidar_low_cut').value),
+        stat: document.getElementById('lidar_stat').value,
+      };
+
+      const btn  = document.getElementById('lidar_run_btn');
+      const wrap = document.getElementById('lidar_progress_wrap');
+      const bar  = document.getElementById('lidar_progress_bar');
+      const txt  = document.getElementById('lidar_status_text');
+      btn.disabled = true;
+      wrap.style.display = 'block';
+      document.getElementById('lidar_results').style.display = 'none';
+      bar.style.width = '5%';
+      txt.textContent = 'Starting…';
+
+      fetch('/api/lidar/derive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).then(r => r.json()).then(j => {
+        if (!j.ok) throw new Error(j.error || 'failed to start');
+        _lidarJobId = j.jobId;
+        const poll = setInterval(() => {
+          fetch('/api/lidar/status/' + _lidarJobId).then(r => r.json()).then(st => {
+            bar.style.width = (st.progress || 5) + '%';
+            txt.textContent = st.message || st.status;
+            if (st.status === 'done') {
+              clearInterval(poll);
+              btn.disabled = false;
+              _lidarShowResults(_lidarJobId, st.meta);
+            } else if (st.status === 'error') {
+              clearInterval(poll);
+              btn.disabled = false;
+              txt.textContent = 'Error: ' + (st.error || 'see server log');
+            }
+          }).catch(err => {
+            clearInterval(poll); btn.disabled = false;
+            txt.textContent = 'Error: ' + err.message;
+          });
+        }, 1200);
+      }).catch(err => {
+        btn.disabled = false;
+        txt.textContent = 'Error: ' + err.message;
+      });
+    };
+
+    async function _lidarShowResults(jobId, meta) {
+      document.getElementById('lidar_results').style.display = 'block';
+      const base = '/api/lidar/result/' + jobId + '/';
+      ['veg','void','ground'].forEach(k => {
+        const a = document.getElementById('lidar_dl_' + k);
+        if (a) a.href = base + (k === 'veg' ? 'vegetation.tif'
+                              : k === 'void' ? 'voids.tif' : 'ground.tif');
+      });
+
+      // Place the overlays on the raster's OWN lon/lat footprint, not the
+      // requested bbox: the grid is UTM-aligned and snapped out to whole cells,
+      // so its real extent differs slightly from what was asked for.
+      const rect = (meta && meta.raster_bounds_lonlat) || null;
+      const alpha = (parseInt(document.getElementById('lidar_opacity').value) || 75) / 100;
+      _lidarClearLayers();
+      if (rect) {
+        try {
+          await _lidarAddOverlay('veg',  base + 'vegetation.png', rect, alpha);
+          await _lidarAddOverlay('void', base + 'voids.png',      rect, alpha);
+          _lidarToggleLayer('veg',  document.getElementById('lidar_show_veg').checked);
+          _lidarToggleLayer('void', document.getElementById('lidar_show_void').checked);
+        } catch (e) {
+          console.warn('[lidar] overlay failed', e);
+        }
+      }
+
+      if (meta) {
+        const pc = meta.ground_returns_per_cell;
+        const warn = (pc > 0 && pc < 4)
+          ? ` <span style="color:#e8a33d;">(thin — consider a larger cell)</span>` : '';
+        document.getElementById('lidar_stats').innerHTML =
+          `cell ${meta.cell} m · ${meta.grid[0]}×${meta.grid[1]}<br>` +
+          `ground returns/cell ${pc.toFixed(1)}${warn}<br>` +
+          `cells with direct ground ${(meta.cells_direct_fraction*100).toFixed(0)}%<br>` +
+          `points ${meta.points_total.toLocaleString()} · kept ${meta.points_kept.toLocaleString()}<br>` +
+          `<b>void cells ${meta.void_cells.toLocaleString()}</b>`;
+      }
+      document.getElementById('lidar_status_text').textContent = 'Done.';
+    }
+
     window._exportRun = function() {
       if (!_bboxCorner1 || !_bboxCorner2) { alert('Draw a bbox first.'); return; }
 

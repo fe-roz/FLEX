@@ -768,6 +768,24 @@ export class Renderer {
 			}
 			gl.uniformMatrix4fv(lModelView, false, mat4holder);
 
+			// FLEX height-above-ground: the node's world matrix with the ground-grid
+			// origin folded into the XY translation, differenced here in float64.
+			// Point clouds keep their source CRS, where an EPSG:3857 easting can be
+			// -1.3e7 and one float32 ULP is about a metre -- coarser than the grid
+			// cells themselves. Shifting before the cast keeps the shader's cell
+			// lookup exact and, just as important, makes it agree with the float64
+			// binning the JS accumulator does.
+			const lGroundModel = shader.uniformLocations["uGroundModelMatrix"];
+			if (lGroundModel && material.uniforms.uGroundOrigin) {
+				const go = material.uniforms.uGroundOrigin.value;
+				for (let j = 0; j < 16; j++) {
+					mat4holder[j] = world.elements[j];
+				}
+				mat4holder[12] = world.elements[12] - go[0];
+				mat4holder[13] = world.elements[13] - go[1];
+				gl.uniformMatrix4fv(lGroundModel, false, mat4holder);
+			}
+
 			{ // Clip Polygons
 				if(material.clipPolygons && material.clipPolygons.length > 0){
 
@@ -1368,6 +1386,71 @@ export class Renderer {
 			gl.bindTexture(matcapTexture.target, matcapTexture.id);
 			currentTextureBindingPoint++;
 
+			// ---- FLEX: height-above-ground filter -------------------------------
+			// Two things this renderer does differently from three.js, both of which
+			// have cost a debugging round:
+			//
+			// 1. It does NOT walk material.uniforms and upload them. It sets every
+			//    uniform it cares about by name, here. A uniform not listed below is
+			//    never sent, and the shader reads zero.
+			// 2. Its WebGLTexture helper decides how to upload by testing
+			//    "texture instanceof THREE.DataTexture" against the three.js bundled
+			//    inside potree.js. A texture built by page code from the global
+			//    three.js is a different class, every branch misses, texImage2D is
+			//    never called, and the sampler returns (0,0,0,1) for an incomplete
+			//    texture -- opaque black, which reads as valid ground at the bottom
+			//    of the decode window. That is silent and it is why the filter
+			//    appeared to work while measuring against nothing.
+			//
+			// So the ground grids are plain {width, height, data, version} objects
+			// and go up through raw GL calls. No three.js in the path at all.
+			{
+				const gu = material.uniforms;
+				if (gu && gu.uGroundTex) {
+					if (!this.hagTextures) { this.hagTextures = new Map(); }
+					const bindHag = (name, desc) => {
+						if (!desc || !desc.data || !desc.width) { return false; }
+						let rec = this.hagTextures.get(desc);
+						if (!rec) {
+							rec = { id: gl.createTexture(), version: -1 };
+							this.hagTextures.set(desc, rec);
+						}
+						shader.setUniform1i(name, currentTextureBindingPoint);
+						gl.activeTexture(gl.TEXTURE0 + currentTextureBindingPoint);
+						gl.bindTexture(gl.TEXTURE_2D, rec.id);
+						if (rec.version !== desc.version) {
+							gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+							gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+							gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+							gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, desc.width, desc.height, 0,
+							              gl.RGBA, gl.UNSIGNED_BYTE, desc.data);
+							gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+							gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+							gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+							gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+							rec.version = desc.version;
+						}
+						currentTextureBindingPoint++;
+						return true;
+					};
+
+					bindHag("uGroundTex", gu.uGroundTex.value);
+					const haveCoarse = bindHag("uGroundTexC", gu.uGroundTexC && gu.uGroundTexC.value);
+
+					// uGroundOrigin is deliberately not a shader uniform: it is folded
+					// into uGroundModelMatrix per node, in float64, in the node loop.
+					shader.setUniform1f("uGroundCellSize", gu.uGroundCellSize.value);
+					shader.setUniform2f("uGroundTexSize",  gu.uGroundTexSize.value);
+					shader.setUniform2f("uGroundZRange",   gu.uGroundZRange.value);
+					shader.setUniform2f("uHagRange",       gu.uHagRange.value);
+					shader.setUniform1f("uGroundCellSizeC",  gu.uGroundCellSizeC.value);
+					shader.setUniform2f("uGroundTexSizeC",   gu.uGroundTexSizeC.value);
+					shader.setUniform2f("uGroundShiftC",     gu.uGroundShiftC.value);
+					shader.setUniform1f("uGroundFallbackOn",
+					                    haveCoarse ? gu.uGroundFallbackOn.value : 0.0);
+					shader.setUniform1f("uHagDebug", gu.uHagDebug ? gu.uHagDebug.value : 0.0);
+				}
+			}
 
 			if (material.snapEnabled === true) {
 
