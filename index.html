@@ -1050,7 +1050,41 @@
                   </div>
                   <input type="range" id="lp-point-budget"
                     min="500000" max="20000000" step="500000" value="10000000"
-                    style="width:100%;">
+                    style="width:100%; box-sizing:border-box;">
+
+                  <div style="display:flex; align-items:center; justify-content:space-between; margin:6px 0 3px;"
+                       title="The smallest a node may appear on screen before Potree refuses to refine it. Lower means more detail everywhere and a budget that drains faster; higher means coarser nodes but the budget reaches further. Potree's own default is 30.">
+                    <span style="font-size:11px; color:rgba(255,255,255,0.85);">Detail &mdash; min node size</span>
+                    <span id="lp-lod-detail-label" style="font-size:11px; color:rgba(255,255,255,0.6); font-variant-numeric:tabular-nums;">90 px</span>
+                  </div>
+                  <input type="range" id="lp-lod-detail"
+                    min="10" max="200" step="5" value="90"
+                    style="width:100%; box-sizing:border-box;">
+
+                  <div style="display:flex; align-items:center; justify-content:space-between; margin:6px 0 3px;"
+                       title="How far out still counts as near when deciding what to load first. Inside it nodes keep their full priority; beyond it priority falls off as the square of distance, so the foreground wins the point budget rather than merely being preferred. Measured to the nearest point of a node, not its centre, so a node miles across that reaches your feet counts as near. Too small and the middle distance you are actually looking at gets buried; 0 turns it off and orders purely by size on screen.">
+                    <span style="font-size:11px; color:rgba(255,255,255,0.85);">Load priority range</span>
+                    <span id="lp-lod-near-label" style="font-size:11px; color:rgba(255,255,255,0.6); font-variant-numeric:tabular-nums;">2000 m</span>
+                  </div>
+                  <input type="range" id="lp-lod-near"
+                    min="0" max="10000" step="250" value="2000"
+                    style="width:100%; box-sizing:border-box;">
+
+                  <div style="display:flex; align-items:center; justify-content:space-between; margin:6px 0 3px;"
+                       title="Past this distance from the camera, a node has to be several times larger on screen before it refines, so an oblique view stops spending the point budget on the horizon. Measured to the nearest point of the node, not its centre.">
+                    <span style="font-size:11px; color:rgba(255,255,255,0.85);">Far detail cutoff</span>
+                    <span id="lp-lod-far-label" style="font-size:11px; color:rgba(255,255,255,0.6); font-variant-numeric:tabular-nums;">10 mi</span>
+                  </div>
+                  <select id="lp-lod-far" style="width:100%; box-sizing:border-box;">
+                    <option value="0">Off &mdash; refine everywhere</option>
+                    <option value="402">0.25 mi</option>
+                    <option value="805">0.5 mi</option>
+                    <option value="1609">1 mi</option>
+                    <option value="3219">2 mi</option>
+                    <option value="8047">5 mi</option>
+                    <option value="16093" selected>10 mi</option>
+                    <option value="32187">20 mi</option>
+                  </select>
                 </div>
 
               </div>
@@ -1063,11 +1097,139 @@
         <div class="collapse" id="toolsCollapsible">
           <div class="lp-panel-wrap">
 
+            <!-- Ground and height. No job and no bbox: it works on whatever is
+                 streamed in right now, so it belongs with the live tools rather
+                 than next to the batch Analyze run. Starts collapsed - it is
+                 tall. Every control is found by id (lp-hag-*), so moving this
+                 markup needs no JS change.
+
+                 The menu has no outer width anywhere: .lp-panel-wrap is
+                 shrink-to-fit over a 240px minimum, so the widest thing in a
+                 tab sets that tab's width. A fixed max-width here was the wrong
+                 tool - it pinned the sliders to 236px while the tab itself was
+                 wider. width:0 with min-width:100% is the fix: a definite width
+                 of zero contributes nothing to the parent's intrinsic size, and
+                 the percentage minimum then stretches the section to whatever
+                 the panel settled on. Fills the menu, never widens it.
+                 Short labels stay regardless; the long text is in title
+                 attributes so no prose can push a tab wide again. -->
+            <div class="lp-section" style="width:0; min-width:100%; box-sizing:border-box;">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▸</span> Ground and height
+              </div>
+              <div class="lp-section-body">
+                <label style="display:block;">
+                  <input type="checkbox" id="lp-hag-enable"> Filter by height above ground
+                </label>
+                <label style="display:block; margin-top:3px;">
+                  <input type="checkbox" id="lp-hag-bush"> Bushwhack highlight
+                </label>
+                <div id="lp-hag-controls" style="display:none; margin-top:8px;">
+
+                  <div id="lp-hag-keep" style="display:none;">
+                    <div style="font-size:11px; color:rgba(255,255,255,0.7);">
+                      Keep points between <span id="lp-hag-label">−20.0 m – 20.0 m</span>
+                    </div>
+                    <label style="display:block; margin-top:6px; font-size:11px;">
+                      Min <span id="lp-hag-min-label" style="color:#00e5ff;">−20.0 m</span>
+                      <input id="lp-hag-min" type="range" min="-100" max="10" step="0.25" value="-20" style="width:100%; box-sizing:border-box;">
+                    </label>
+                    <label style="display:block; font-size:11px;">
+                      Max <span id="lp-hag-max-label" style="color:#00e5ff;">20.0 m</span>
+                      <input id="lp-hag-max" type="range" min="-10" max="100" step="0.25" value="20" style="width:100%; box-sizing:border-box;">
+                    </label>
+                  </div>
+
+                  <div id="lp-hag-bush-controls" style="display:none;">
+                    <div style="font-size:11px; color:rgba(255,255,255,0.7); margin-top:6px;">
+                      <span style="color:#26ff1a;">&#9632;</span>
+                      Paint points between
+                      <span id="lp-hag-bush-label">1 m &ndash; 3 m</span>
+                    </div>
+                    <label style="display:block; margin-top:6px; font-size:11px;">
+                      Low <span id="lp-hag-bush-lo-label" style="color:#26ff1a;">1 m</span>
+                      <input id="lp-hag-bush-lo" type="range" min="0" max="5" step="0.05" value="1" style="width:100%; box-sizing:border-box;">
+                    </label>
+                    <label style="display:block; font-size:11px;">
+                      High <span id="lp-hag-bush-hi-label" style="color:#26ff1a;">3 m</span>
+                      <input id="lp-hag-bush-hi" type="range" min="0" max="5" step="0.05" value="3" style="width:100%; box-sizing:border-box;">
+                    </label>
+                    <div style="font-size:10px; color:rgba(255,255,255,0.45); margin-top:3px;"
+                         title="Nothing is hidden: points in the band are painted green and everything else keeps its normal colour. Marked brush is never culled by the height filter, so you can keep a tight band and still see it. On steep ground the band is measured from both ends of the local ground, so brush shows at the foot of a drop and on top of it, but the bare face between them does not.">
+                      Painted, never hidden &mdash; and exempt from the filter above.
+                    </div>
+                  </div>
+
+                  <div style="border-top:1px solid rgba(255,255,255,0.12); margin:10px 0 6px;"></div>
+
+                  <label style="display:block; font-size:11px;">
+                    <b>Terrain resolution</b> &mdash; detail cell size
+                    <select id="lp-hag-cell" style="width:100%; margin-top:2px; box-sizing:border-box;">
+                      <option value="0.25">0.25 m</option>
+                      <option value="0.5" selected>0.5 m</option>
+                      <option value="1">1 m</option>
+                      <option value="2">2 m</option>
+                      <option value="5">5 m</option>
+                      <option value="10">10 m</option>
+                    </select>
+                  </label>
+                  <div style="font-size:10px; color:rgba(255,255,255,0.45); margin-top:3px;"
+                       title="This is what the filter measures against - treat it like a DEM cell size. The grid is always 2048x2048 cells centred on what the camera is looking at, so the area it covers follows from the cell size rather than the other way round.">
+                    <span id="lp-hag-window">2048&times;2048 cells</span>, on the view
+                  </div>
+
+                  <label style="display:block; font-size:11px; margin-top:8px;">
+                    <b>Steep ground</b> &mdash; how far a ground return reaches
+                    <select id="lp-hag-env" style="width:100%; margin-top:2px; box-sizing:border-box;">
+                      <option value="0">Its own cell only</option>
+                      <option value="1">Its own cell + neighbours</option>
+                      <option value="2" selected>Its own cell + 2 cells</option>
+                      <option value="3">Its own cell + 3 cells</option>
+                    </select>
+                  </label>
+                  <div style="font-size:10px; color:rgba(255,255,255,0.45); margin-top:3px;"
+                       title="Each cell keeps the lowest and highest bare-earth return in it, and the filter measures the floor from the bottom of that band and the ceiling from the top, so a cliff widens the band instead of eating the points on it. Own cell only fixes clifftops and ledges, where one cell holds returns from both the top and the base; it cannot help an undercut, because the cell above the lip has never seen the ground below it. Reach is the radius times the cell size, so 2 cells at 1 m reaches 2 m and at 5 m reaches 10 m. Changing it rebuilds the grid.">
+                    Reach = radius &times; cell. Wider rescues undercuts. Rebuilds.
+                  </div>
+
+                  <label style="display:block; font-size:11px; margin-top:8px;">
+                    <input type="checkbox" id="lp-hag-fallback" checked>
+                    <b>Wide-area fallback</b>
+                  </label>
+                  <div style="font-size:10px; color:rgba(255,255,255,0.45); margin-top:3px;"
+                       title="A separate coarse grid, read only where the detail grid has no ground yet, so points outside the detail window are still measured instead of passing through unfiltered. Coarse cells over-estimate height on steep ground; switch this off if you are working a tight band on a slope.">
+                    <span id="lp-hag-fallback-note">8 m cells over 8.2 km</span>,
+                    used only where detail has none
+                  </div>
+
+                  <div style="font-size:10px; color:#e8a33d; margin-top:6px;"
+                       title="Cells with no ground data in either grid are never filtered.">
+                    Min below zero isolates pits, sinks and fissures.
+                  </div>
+                  <label style="display:block; font-size:11px; margin-top:8px;">
+                    <input type="checkbox" id="lp-hag-debug">
+                    <b>Show the decision as colour</b> (diagnose)
+                  </label>
+                  <div style="font-size:10px; color:rgba(255,255,255,0.45); margin-top:3px; line-height:1.6;"
+                       title="Nothing is hidden; every point is painted by what the shader worked out. White: the uniforms never reached the GPU. Magenta: no ground reference, point passed through. Green: inside the band. Orange: below it. Blue: above it. Yellow: kept only because the ground here is steep. Darker shades mean the reference came from the coarse grid.">
+                    <span style="color:#fff;">&#9632;</span> no uniforms
+                    <span style="color:#f0f;">&#9632;</span> no ground
+                    <span style="color:#1aff33;">&#9632;</span> in band
+                    <span style="color:#ff5900;">&#9632;</span> below
+                    <span style="color:#0066ff;">&#9632;</span> above
+                    <span style="color:#fff21a;">&#9632;</span> steep
+                    &middot; dark = coarse grid
+                  </div>
+                  <div id="lp-hag-stats" style="font-size:10px; color:rgba(255,255,255,0.4); margin-top:5px;">building grids&hellip;</div>
+                </div>
+              </div>
+            </div>
+
             <div class="lp-section">
               <div class="lp-section-header" onclick="window._lpToggle(this)">
                 <span class="lp-section-arrow">▸</span> Incidence Angle
               </div>
-              <div class="lp-section-body open" id="lp-incidence-body">
+              <div class="lp-section-body" id="lp-incidence-body">
                 <div style="padding:2px 0;">
                   <label><input type="checkbox" id="incidence_toggle"> Show Incidence Lines</label><br>
                   <label style="margin-top:4px; display:block;">
@@ -1246,90 +1408,6 @@
         <!-- ══════════════ LiDAR ANALYSIS ══════════════════════════════════ -->
         <div class="collapse" id="lidarDeriveCollapsible">
           <div class="lp-panel-wrap">
-
-            <!-- Live height-above-ground filter: no job, works on whatever is
-                 currently streamed in. Restored from bdecc3f0 with the
-                 coordinate-space bug fixed. -->
-            <div class="lp-section">
-              <div class="lp-section-header" onclick="window._lpToggle(this)">
-                <span class="lp-section-arrow">▾</span> Live height filter
-              </div>
-              <div class="lp-section-body open">
-                <label style="display:block;">
-                  <input type="checkbox" id="lp-hag-enable"> Filter by height above ground
-                </label>
-                <div id="lp-hag-controls" style="display:none; margin-top:8px;">
-                  <div style="font-size:11px; color:rgba(255,255,255,0.7);">
-                    Keep points between <span id="lp-hag-label">−20.0 m – 20.0 m</span>
-                  </div>
-                  <label style="display:block; margin-top:6px; font-size:11px;">
-                    Min <span id="lp-hag-min-label" style="color:#00e5ff;">−20.0 m</span>
-                    <input id="lp-hag-min" type="range" min="-100" max="10" step="0.25" value="-20" style="width:100%;">
-                  </label>
-                  <label style="display:block; font-size:11px;">
-                    Max <span id="lp-hag-max-label" style="color:#00e5ff;">20.0 m</span>
-                    <input id="lp-hag-max" type="range" min="-10" max="100" step="0.25" value="20" style="width:100%;">
-                  </label>
-                  <div style="border-top:1px solid rgba(255,255,255,0.12); margin:10px 0 6px;"></div>
-
-                  <label style="display:block; font-size:11px;">
-                    <b>Terrain resolution</b> &mdash; detail cell size
-                    <select id="lp-hag-cell" style="width:100%; margin-top:2px;">
-                      <option value="0.25">0.25 m</option>
-                      <option value="0.5">0.5 m</option>
-                      <option value="1" selected>1 m</option>
-                      <option value="2">2 m</option>
-                      <option value="5">5 m</option>
-                      <option value="10">10 m</option>
-                    </select>
-                  </label>
-                  <div style="font-size:10px; color:rgba(255,255,255,0.45); margin-top:3px;">
-                    This is what the filter measures against &mdash; treat it like a
-                    DEM cell size. The grid is always
-                    <span id="lp-hag-window">2048&times;2048 cells</span>, centred on
-                    what the camera is looking at, so the area it covers follows
-                    from the cell size rather than the other way round.
-                  </div>
-
-                  <label style="display:block; font-size:11px; margin-top:8px;">
-                    <input type="checkbox" id="lp-hag-fallback" checked>
-                    <b>Wide-area fallback</b>
-                  </label>
-                  <div style="font-size:10px; color:rgba(255,255,255,0.45); margin-top:3px;">
-                    A separate coarse grid &mdash;
-                    <span id="lp-hag-fallback-note">16 m cells over 16.4 km</span> &mdash;
-                    read <i>only</i> where the detail grid has no ground yet, so
-                    points outside the detail window are still measured instead
-                    of passing through unfiltered. Coarse cells over-estimate
-                    height on steep ground; switch this off if you are working a
-                    tight band on a slope.
-                  </div>
-
-                  <div style="font-size:10px; color:#e8a33d; margin-top:6px;">
-                    Drag Min well below zero to isolate sub-ground returns &mdash;
-                    pits, sinks and fissures. Cells with no ground data in either
-                    grid are never filtered.
-                  </div>
-                  <label style="display:block; font-size:11px; margin-top:8px;">
-                    <input type="checkbox" id="lp-hag-debug">
-                    <b>Show the decision as colour</b> (diagnose)
-                  </label>
-                  <div style="font-size:10px; color:rgba(255,255,255,0.45); margin-top:3px; line-height:1.5;">
-                    Nothing is hidden; every point is painted by what the shader
-                    worked out.
-                    <span style="color:#fff;">&#9632; white</span> the uniforms never
-                    reached the GPU &mdash;
-                    <span style="color:#f0f;">&#9632; magenta</span> no ground
-                    reference, point passed through &mdash;
-                    <span style="color:#1aff33;">&#9632; green</span> inside the band
-                    &mdash; <span style="color:#ff5900;">&#9632; orange</span> below it
-                    &mdash; <span style="color:#0066ff;">&#9632; blue</span> above it.
-                    Darker shades mean the reference came from the coarse grid.
-                  </div>
-                  <div id="lp-hag-stats" style="font-size:10px; color:rgba(255,255,255,0.4); margin-top:5px;">building grids&hellip;</div>
-                </div>
-              </div>
-            </div>
 
             <div class="lp-section">
               <div class="lp-section-header" onclick="window._lpToggle(this)">
@@ -2236,7 +2314,37 @@
       const sum = document.getElementById('lp-hag-label');
       if (!en || !lo || !hi) return;
 
+      const keepBox = document.getElementById('lp-hag-keep');
+      const bush    = document.getElementById('lp-hag-bush');
+      const bushBox = document.getElementById('lp-hag-bush-controls');
+      const bLo = document.getElementById('lp-hag-bush-lo');
+      const bHi = document.getElementById('lp-hag-bush-hi');
+      const bLoL = document.getElementById('lp-hag-bush-lo-label');
+      const bHiL = document.getElementById('lp-hag-bush-hi-label');
+      const bSum = document.getElementById('lp-hag-bush-label');
+
       const fmt = v => (v < 0 ? '\u2212' : '') + Math.abs(v).toFixed(1) + ' m';
+      // Field judgement is in feet even when the data is metric, so show both.
+      const fmtBoth = v => String(+v.toFixed(2)) + ' m (' + (v * 3.28084).toFixed(1) + ' ft)';
+
+      // The panel is visible when anything that needs the grid is on.
+      function syncVisibility() {
+        const any = en.checked || bush.checked ||
+                    (document.getElementById('lp-hag-debug') || {}).checked;
+        box.style.display = any ? 'block' : 'none';
+        keepBox.style.display = en.checked ? 'block' : 'none';
+        bushBox.style.display = bush.checked ? 'block' : 'none';
+      }
+
+      function applyBush() {
+        let a = parseFloat(bLo.value), b = parseFloat(bHi.value);
+        if (b < a + 0.05) { b = a + 0.05; bHi.value = b; }
+        bLoL.textContent = fmtBoth(a);
+        bHiL.textContent = fmtBoth(b);
+        bSum.textContent = fmtBoth(a) + ' \u2013 ' + fmtBoth(b);
+        if (window._hagSetBushRange) window._hagSetBushRange(a, b);
+      }
+
       function apply() {
         let a = parseFloat(lo.value), b = parseFloat(hi.value);
         if (b < a + 0.25) b = a + 0.25, hi.value = b;
@@ -2246,16 +2354,30 @@
         if (window._hagSetRange) window._hagSetRange(a, b);
       }
       en.addEventListener('change', () => {
-        box.style.display = en.checked ? 'block' : 'none';
+        syncVisibility();
         if (window._hagEnable) window._hagEnable(en.checked);
         if (en.checked) apply();
       });
       lo.addEventListener('input', apply);
       hi.addEventListener('input', apply);
 
+      bush.addEventListener('change', () => {
+        syncVisibility();
+        if (window._hagSetBush) window._hagSetBush(bush.checked);
+        if (bush.checked) applyBush();
+      });
+      bLo.addEventListener('input', applyBush);
+      bHi.addEventListener('input', applyBush);
+      applyBush();
+
       const cell = document.getElementById('lp-hag-cell');
       if (cell) cell.addEventListener('change', () => {
         if (window._hagSetCellSize) window._hagSetCellSize(parseFloat(cell.value));
+      });
+
+      const env = document.getElementById('lp-hag-env');
+      if (env) env.addEventListener('change', () => {
+        if (window._hagSetEnvRadius) window._hagSetEnvRadius(parseInt(env.value, 10));
       });
 
       const fbk = document.getElementById('lp-hag-fallback');
@@ -2266,7 +2388,7 @@
       const dbg = document.getElementById('lp-hag-debug');
       if (dbg) dbg.addEventListener('change', () => {
         if (window._hagSetDebugColor) window._hagSetDebugColor(dbg.checked);
-        if (dbg.checked && !en.checked) { en.checked = true; box.style.display = 'block'; }
+        syncVisibility();
       });
     })();
 

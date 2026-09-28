@@ -148,6 +148,15 @@ uniform float     uGroundFallbackOn;
 // The GPU cannot be read back, so this is the only way to see what the
 // shader actually computed. See the colour key in the filter block.
 uniform float     uHagDebug;
+// Metres spanned by the 8-bit band byte, so the shader and the JS packer
+// agree on the scale without hardcoding it twice.
+uniform float     uGroundSpreadMax;
+// uHagCull separates the machinery from the culling: the define only says
+// the ground grid is compiled in, so the highlight below can run with the
+// filter switched off and nothing hidden.
+uniform float     uHagCull;
+uniform float     uBushOn;
+uniform vec2      uBushRange;
 
 uniform sampler2D visibleNodes;
 uniform sampler2D gradient;
@@ -891,7 +900,7 @@ void doClipping(){
 			}
 		}
 
-		float groundZ = 0.0;
+		float groundLo = 0.0, groundHi = 0.0;
 		bool  haveGround = false;
 		bool  fromCoarse = false;
 		vec4  pick = vec4(0.0);
@@ -905,16 +914,30 @@ void doClipping(){
 		// WebGL samples as (0,0,0,1). That reads as valid ground at the bottom
 		// of the decode window, which is a silent and very convincing failure:
 		// every point then measures as hundreds of metres above 'ground'.
-		bool texLive = (pick.r + pick.g + pick.b) > 0.001;
+		// RG hold the LOWEST ground in the cell as 16 bits of the decode window,
+		// B how far the ground rises above that. One height per cell is what
+		// broke cliffs: measuring a clifftop point against the base of the drop
+		// gave it 30 m of height above ground and culled it, and measuring an
+		// undercut against the top of the drop culled that too. A band lets the
+		// low cutoff work from the bottom of the local ground and the high
+		// cutoff from the top, so a cliff widens the filter instead of eating it.
+		float q16 = pick.r * 256.0 + pick.g;
+		bool texLive = q16 > 0.001;                 // 0 is reserved, see the JS packer
 		if (pick.a > 0.25 && texLive) {
-			float gt = dot(pick.rgb, vec3(65536.0, 256.0, 1.0)) * (255.0 / 16777215.0);
-			groundZ = uGroundZRange.x + gt * uGroundZRange.y;
+			groundLo = uGroundZRange.x + q16 * (255.0 / 65535.0) * uGroundZRange.y;
+			groundHi = groundLo + pick.b * uGroundSpreadMax;
 			haveGround = true;
 		}
 
 		// No ground anywhere means no opinion: the point passes through. Never
 		// hide a point because the ground under it is unknown.
-		float hag = hagWorld.z - groundZ;
+		// Measured from the bottom of the local ground for the floor, from the
+		// top of it for the ceiling.
+		float hagLo = hagWorld.z - groundLo;
+		float hagHi = hagWorld.z - groundHi;
+		bool  inBand = hagLo >= uHagRange.x && hagHi <= uHagRange.y;
+		// Would a single-height reference have kept it? Only used for the colour.
+		bool  inStrict = hagLo >= uHagRange.x && hagLo <= uHagRange.y;
 
 		if (uHagDebug > 0.5) {
 			// COLOUR KEY, for diagnosing this from a screenshot:
@@ -924,13 +947,34 @@ void doClipping(){
 			//   blue         above the band - would be culled
 			//   darkened     the reference came from the coarse fallback grid
 			// (white is set outside this block and means the uniforms never arrived)
-			if      (!haveGround)          hagDbg = vec3(1.0, 0.0, 1.0);
-			else if (hag < uHagRange.x)    hagDbg = vec3(1.0, 0.35, 0.0);
-			else if (hag > uHagRange.y)    hagDbg = vec3(0.0, 0.4, 1.0);
-			else                           hagDbg = vec3(0.1, 1.0, 0.2);
-			if (haveGround && fromCoarse)  hagDbg *= 0.45;
+			//   yellow  kept only because the ground here is steep
+			if      (!haveGround)              hagDbg = vec3(1.0, 0.0, 1.0);
+			else if (inBand && !inStrict)      hagDbg = vec3(1.0, 0.95, 0.1);
+			else if (hagLo < uHagRange.x)      hagDbg = vec3(1.0, 0.35, 0.0);
+			else if (hagHi > uHagRange.y)      hagDbg = vec3(0.0, 0.4, 1.0);
+			else                               hagDbg = vec3(0.1, 1.0, 0.2);
+			if (haveGround && fromCoarse)      hagDbg *= 0.45;
 		} else if (haveGround) {
-			if (hag < uHagRange.x || hag > uHagRange.y) {
+			// Bushwhack highlight. A second band that RECOLOURS rather than
+			// culls, so it composes with the filter instead of competing with
+			// it. Tested against both ends of the ground band: brush reads
+			// green at the foot of a drop and on top of it, while the bare
+			// face between the two does not, because a point halfway up is far
+			// above the lower ground and far below the upper.
+			bool isBush = false;
+			if (uBushOn > 0.5) {
+				bool bushFromLow  = hagLo >= uBushRange.x && hagLo <= uBushRange.y;
+				bool bushFromHigh = hagHi >= uBushRange.x && hagHi <= uBushRange.y;
+				isBush = bushFromLow || bushFromHigh;
+				if (isBush) {
+					vColor = vec3(0.15, 1.0, 0.1);
+				}
+			}
+			// Marked brush is exempt from the keep-band. The highlight is there
+			// to be looked at, and a band tight enough to strip canopy also
+			// strips the brush you asked to see, which reads as the highlight
+			// being broken.
+			if (uHagCull > 0.5 && !inBand && !isBush) {
 				gl_Position = vec4(100.0, 100.0, 100.0, 0.0);
 				return;
 			}

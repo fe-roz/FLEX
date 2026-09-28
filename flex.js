@@ -1907,7 +1907,26 @@ potreeViewer.setEDLStrength(0.4);
 potreeViewer.setFOV(60);
 potreeViewer.setPointBudget(10_000_000);
 potreeViewer.classifications = ClassificationScheme;
-// potreeViewer.setMinNodeSize(50);
+
+// Potree starts its own animation loop in its constructor
+// (viewer.js:320, setAnimationLoop) regardless of useDefaultRenderLoop - the
+// check that was supposed to gate it is commented out upstream. That loop ran
+// update() and render() every frame while FLEX's own loop rendered a second
+// time, so the cloud was drawn twice, and worse, updateVisibility picked LOD
+// nodes BEFORE the Cesium camera had been synced to Potree. LOD was being
+// decided against a camera one frame stale. FLEX drives both itself now, in
+// the right order, at the end of loop().
+potreeViewer.renderer.setAnimationLoop(null);
+
+// Four requests in flight starves the near field when the falloff below makes
+// it the only thing worth loading.
+Potree.maxNodesLoading = 8;
+
+// A node smaller than this on screen is not refined. Potree's own default
+// is 30, which is permissive enough that an oblique view spends the budget
+// on the horizon. 90 was picked in the field. The Detail slider overrides
+// this once the UI wires up; this is the value if it never does.
+potreeViewer.setMinNodeSize(90);
 potreeViewer.loadSettingsFromURL();
 potreeViewer.setBackground(null);
 potreeViewer.useHQ = false;
@@ -5891,6 +5910,53 @@ renderPoiList();
                      : (v / 1_000).toFixed(0) + ' K';
   }
 
+  // Detail: minimumNodePixelSize, the smallest a node may appear before Potree
+  // refuses to refine it. viewer.update() pushes this onto every point cloud
+  // each frame, so it has to be set on the viewer - writing
+  // pointcloud.minimumNodePixelSize directly is overwritten next frame.
+  const detailSlider = document.getElementById('lp-lod-detail');
+  const detailLabel  = document.getElementById('lp-lod-detail-label');
+  function _applyDetail(px) {
+    potreeViewer.setMinNodeSize(px);
+    if (detailSlider) detailSlider.value = px;
+    if (detailLabel)  detailLabel.textContent = px + ' px';
+  }
+  if (detailSlider) {
+    _applyDetail(parseInt(detailSlider.value, 10));
+    detailSlider.addEventListener('input',
+      () => _applyDetail(parseInt(detailSlider.value, 10)));
+  }
+
+  // Load priority range: the knee of the loading-order falloff. Inside it a
+  // node keeps its full weight; beyond it weight falls as 1/(1+(d/near)^2).
+  const nearSlider = document.getElementById('lp-lod-near');
+  const nearLabel  = document.getElementById('lp-lod-near-label');
+  function _applyNear(metres) {
+    Potree.lodNearDistance = metres;
+    if (nearLabel) nearLabel.textContent = metres > 0 ? metres + ' m' : 'off';
+  }
+  if (nearSlider) {
+    _applyNear(parseInt(nearSlider.value, 10));
+    nearSlider.addEventListener('input',
+      () => _applyNear(parseInt(nearSlider.value, 10)));
+  }
+
+  // Far cutoff: past this distance a node must be lodFarPenalty times larger
+  // on screen before it refines, so the horizon stops eating the budget.
+  const farSelect = document.getElementById('lp-lod-far');
+  const farLabel  = document.getElementById('lp-lod-far-label');
+  function _applyFar(metres) {
+    Potree.lodFarDistance = metres;
+    if (farLabel) farLabel.textContent = metres > 0
+      ? (metres / 1609.344).toFixed(2).replace(/0+$/, '').replace(/\.$/, '') + ' mi'
+      : 'off';
+  }
+  if (farSelect) {
+    _applyFar(parseFloat(farSelect.value));
+    farSelect.addEventListener('change',
+      () => _applyFar(parseFloat(farSelect.value)));
+  }
+
   if (budgetSlider) {
     // Restore saved value, or keep the hardcoded default
     const savedBudget = _savedSession?.pointBudget;
@@ -6533,8 +6599,8 @@ if (flags.Fly) {
     if (moveRate <0){
       moveRate = -moveRate;
     }
-    if (moveRate <0.2){ // make sure we can go underground
-      moveRate = 0.2;
+    if (moveRate <0.1){ // make sure we can go underground, slowly
+      moveRate = 0.1;
     }
 
     if (moveRate > 6000){ // setting some limits
@@ -7345,7 +7411,8 @@ function loop(timestamp){
 
   // console.log(timestamp);
 
-  // potreeViewer.update(potreeViewer.clock.getDelta(), timestamp);
+  // (LOD update + render happen at the end of this function, after the
+  //  camera sync - see potreeViewer.update below.)
 
   cesiumViewer.resize();
   // potreeViewer.resize();
@@ -7432,6 +7499,10 @@ function loop(timestamp){
 
   }
 
+  // Now that the Cesium camera has been synced onto the Potree camera, decide
+  // LOD and draw. Order matters: update() is what runs updateVisibility, so it
+  // has to see the camera we are about to render from.
+  potreeViewer.update(potreeViewer.clock.getDelta(), timestamp);
   potreeViewer.render();
 
   // Update incidence angle lines when camera moves 50m+ (with 2s minimum interval)
@@ -8215,6 +8286,7 @@ const _HAG_DETAIL_DIM   = 2048;   // 2048^2: ~50 MB of typed arrays, 16 MB on th
 const _HAG_FALLBACK_DIM = 1024;
 const _HAG_SHIFT_MS = 1000;        // don't chase the camera faster than this
 const _HAG_CELL_MIN = 0.25, _HAG_CELL_MAX = 10;
+const _HAG_SPREAD_MAX = 128.0;     // metres the 8-bit spread byte spans
 const _HAG_TIME_BUDGET = 14;       // ms of binning per pass
 const _HAG_CATCHUP_MS  = 25;       // gap between passes while there is a backlog
 
@@ -8223,8 +8295,14 @@ function _hagMakeGrid(dim, label) {
   return {
     label, dim,
     cell: 1, originX: 0, originY: 0,
-    ground:   new Float32Array(n).fill(_HAG_NONE),   // min Z of class-2 returns (authoritative)
-    fallback: new Float32Array(n).fill(_HAG_NONE),   // min Z of everything else, used only where no class 2
+    // The ground in a cell is a BAND, not a number. One height per cell is
+    // what broke cliffs: a cell straddling a 30 m drop stored the base, so
+    // anyone standing on the top read +30 m and was culled. Keeping the class-2
+    // minimum and maximum lets the low cutoff measure from the bottom of the
+    // local ground and the high cutoff from the top of it.
+    ground:    new Float32Array(n).fill(_HAG_NONE),    // lowest class-2 return
+    groundMax: new Float32Array(n).fill(-_HAG_NONE),   // highest class-2 return
+    fallback:  new Float32Array(n).fill(_HAG_NONE),    // lowest of everything else, only where no class 2
     // RGBA8: RGB are the height as 24 bits, A is provenance —
     // 255 = an actual class-2 return, 128 = the lowest non-ground return in
     // that cell (a guess), 0 = nothing. The shader prefers 255 anywhere over
@@ -8241,9 +8319,20 @@ function _hagMakeGrid(dim, label) {
 const _hag = {
   detail:   null,
   fallbackGrid: null,
-  cellSize: 1.0,        // metres — the DETAIL cell size. The user's DEM resolution.
+  cellSize: 0.5,        // metres — the DETAIL cell size. The user's DEM resolution.
   useFallback: true,
   debugColor: false,
+  // The bushwhack highlight: a second band that recolours instead of
+  // culling, so it runs with the filter on, off, or on its own.
+  bushOn: false,
+  bushLo: 1.0, bushHi: 3.0,     // metres, about 3 to 10 ft
+  // How far a class-2 return reaches when it defines the local ground, in
+  // cells. 0 keeps each cell to its own returns, which fixes clifftops but not
+  // undercuts. 2 is the default because it is what holds up in the field: it
+  // reaches far enough behind a lip to rescue points under an overhang, and on
+  // flat ground the neighbours agree so the band stays closed and nothing
+  // changes.
+  envRadius: 2,
   zMin: 0, zSpan: 1, zInv: 0,   // shared 24-bit decode window, widened from the data
   obsLo: Infinity, obsHi: -Infinity,
   processed: new Map(),   // node key -> its world bbox, so a shift can re-queue selectively
@@ -8302,14 +8391,35 @@ function _hagViewCenter() {
 
   const minLevel = Math.max(0, deepest - 1);
   let sx = 0, sy = 0, n = 0;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const e of entries) {
     if (e.lvl < minLevel) continue;
     const b = e.bb.clone().applyMatrix4(e.pc.matrixWorld);
     sx += (b.min.x + b.max.x) * 0.5;
     sy += (b.min.y + b.max.y) * 0.5;
+    if (b.min.x < x0) x0 = b.min.x;
+    if (b.min.y < y0) y0 = b.min.y;
+    if (b.max.x > x1) x1 = b.max.x;
+    if (b.max.y > y1) y1 = b.max.y;
     n++;
   }
   if (!n) return null;
+
+  // "The deepest nodes are the ones near the camera" holds while something is
+  // refining locally. Zoom out past the LOD far cutoff and nothing refines
+  // anywhere, so the deepest level is uniform across the whole dataset and its
+  // centroid is just the dataset centre - which would anchor the grid miles
+  // from what is on screen. When the deepest level is spread wider than the
+  // grid could ever cover, trust the camera instead.
+  const cov = _HAG_DETAIL_DIM * _hag.cellSize;
+  if (Math.max(x1 - x0, y1 - y0) > cov * 2) {
+    const cam = (typeof potreeViewer !== 'undefined') &&
+                potreeViewer?.scene?.getActiveCamera?.();
+    if (cam && Number.isFinite(cam.position?.x)) {
+      return { x: cam.position.x, y: cam.position.y,
+               level: deepest, nodes: n, fromCamera: true };
+    }
+  }
   return { x: sx / n, y: sy / n, level: deepest, nodes: n };
 }
 
@@ -8411,6 +8521,7 @@ function _hagAnchor(g, cell, cx, cy) {
   g.originX = Math.floor((cx - cov / 2) / cell) * cell;
   g.originY = Math.floor((cy - cov / 2) / cell) * cell;
   g.ground.fill(_HAG_NONE);
+  g.groundMax.fill(-_HAG_NONE);
   g.fallback.fill(_HAG_NONE);
   g.upload.fill(0);
   g.texture.version++;
@@ -8425,8 +8536,9 @@ function _hagShift(g, cx, cy) {
   const dx = Math.round((nx - g.originX) / g.cell);
   const dy = Math.round((ny - g.originY) / g.cell);
   if (dx === 0 && dy === 0) return false;
-  _hagTranslate(g.ground,   g.dim, 1, dx, dy, _HAG_NONE);
-  _hagTranslate(g.fallback, g.dim, 1, dx, dy, _HAG_NONE);
+  _hagTranslate(g.ground,    g.dim, 1, dx, dy, _HAG_NONE);
+  _hagTranslate(g.groundMax, g.dim, 1, dx, dy, -_HAG_NONE);
+  _hagTranslate(g.fallback,  g.dim, 1, dx, dy, _HAG_NONE);
   _hagTranslate(g.upload,   g.dim, 4, dx, dy, 0);
   g.originX = nx; g.originY = ny;
   g.texture.version++;
@@ -8482,6 +8594,27 @@ function _hagSetCellSize(v) {
   _hagPushUniforms();
 }
 
+/**
+ * How far a class-2 return reaches when it defines the local ground.
+ *
+ * 0 keeps every cell to its own returns. That already fixes clifftops, because
+ * a cell straddling the lip holds returns from both the top and the base, so
+ * its band spans the drop. It does nothing for a cell wholly on the clifftop
+ * next to a cell wholly at the base — the undercut case — because neither cell
+ * has ever seen the other's ground. Radius 1 lets them borrow from each other.
+ *
+ * Changing it cannot be applied to what is already accumulated, so this rebuilds.
+ */
+function _hagSetEnvRadius(r) {
+  r = Math.max(0, Math.min(3, r | 0));
+  if (r === _hag.envRadius) return;
+  _hag.envRadius = r;
+  if (!_hag.detail) return;
+  const e = _hagExtent(_hag.detail);
+  _hagReset(e.cx, e.cy);
+  _hagPushUniforms();
+}
+
 function _hagSetFallback(on) {
   _hag.useFallback = !!on;
   _hagPushUniforms();
@@ -8504,9 +8637,7 @@ function _hagSetFallback(on) {
  */
 function _hagSetDebugColor(on) {
   _hag.debugColor = !!on;
-  _hagPushUniforms();
-  // The define has to be on for the shader to colour anything at all.
-  if (on && !_hag.enabled) _hagEnable(true);
+  _hagApplyDefine();
 }
 
 /**
@@ -8525,30 +8656,32 @@ function _hagWindowFrom(lo, hi) {
   const pad = Math.max(50, (hi - lo) * 0.25);
   _hag.zMin  = lo - pad;
   _hag.zSpan = Math.max(100, (hi - lo) + 2 * pad);
-  _hag.zInv  = 16777215 / _hag.zSpan;
+  _hag.zInv  = 65535 / _hag.zSpan;
 }
 
 /** Rewrite both grids' textures from the accumulators. Only on a range change. */
 function _hagRepackAll() {
   if (!_hag.detail) return;
-  const zMin = _hag.zMin, inv = _hag.zInv;
+  const zMin = _hag.zMin, invLo = 65535 / _hag.zSpan, spreadQ = 255 / _HAG_SPREAD_MAX;
   for (const g of [_hag.detail, _hag.fallbackGrid]) {
-    const gr = g.ground, fb = g.fallback, u = g.upload;
-    let filled = 0, groundCells = 0;
-    for (let i = 0; i < gr.length; i++) {
-      const isGround = gr[i] < _HAG_NONE;
-      const v = isGround ? gr[i] : fb[i];
-      const o = i * 4;
-      if (v >= _HAG_NONE) { u[o] = u[o+1] = u[o+2] = u[o+3] = 0; continue; }
-      let q = ((v - zMin) * inv) | 0;
-      if (q < 1) q = 1; else if (q > 16777215) q = 16777215;   // 0 is reserved, see below
-      u[o] = (q >>> 16) & 255; u[o+1] = (q >>> 8) & 255; u[o+2] = q & 255;
-      u[o+3] = isGround ? 255 : 128;
-      filled++;
-      if (isGround) groundCells++;
+    const lo = g.ground, hi = g.groundMax, fb = g.fallback, u = g.upload;
+    let filled = 0, ground = 0;
+    for (let i = 0; i < lo.length; i++) {
+      const t = i * 4;
+      let vLo, vHi, prov;
+      if (lo[i] < _HAG_NONE)      { vLo = lo[i]; vHi = hi[i] > -_HAG_NONE ? hi[i] : lo[i]; prov = 255; }
+      else if (fb[i] < _HAG_NONE) { vLo = fb[i]; vHi = fb[i]; prov = 128; }
+      else { u[t] = u[t+1] = u[t+2] = u[t+3] = 0; continue; }
+      let q = ((vLo - zMin) * invLo) | 0;
+      if (q < 1) q = 1; else if (q > 65535) q = 65535;
+      u[t] = (q >>> 8) & 255; u[t+1] = q & 255;
+      let sp = vHi - vLo;
+      if (sp < 0) sp = 0; else if (sp > _HAG_SPREAD_MAX) sp = _HAG_SPREAD_MAX;
+      u[t+2] = (sp * spreadQ) | 0;
+      u[t+3] = prov;
+      filled++; if (prov === 255) ground++;
     }
-    g.filled = filled;
-    g.groundCells = groundCells;
+    g.filled = filled; g.groundCells = ground;
     g.texture.version++;
   }
 }
@@ -8556,6 +8689,14 @@ function _hagRepackAll() {
 function _hagScan() {
   const pcs = (typeof potreeViewer !== 'undefined' && potreeViewer?.scene?.pointclouds) || [];
   if (!pcs.length) return;
+
+  // Nothing reads the grid unless the filter, the highlight or the diagnose
+  // colours are on. It used to be maintained regardless, from page load, which
+  // cost up to a third of the main thread while a cloud was streaming - and it
+  // competed for exactly the frames the point cloud was trying to load in. The
+  // trade is that switching a feature on now starts from an empty grid and
+  // takes a few seconds of catch-up to fill.
+  if (!_hag.enabled && !_hag.bushOn && !_hag.debugColor) return;
 
   const view = _hagViewCenter();
   if (!view) return;
@@ -8598,11 +8739,44 @@ function _hagScan() {
   const D = _hag.detail, F = _hag.fallbackGrid;
   const dDim = D.dim, dCell = D.cell, dox = D.originX, doy = D.originY;
   const fDim = F.dim, fCell = F.cell, fox = F.originX, foy = F.originY;
-  const dG = D.ground, dF = D.fallback, dU = D.upload;
-  const fG = F.ground, fF = F.fallback, fU = F.upload;
-  const winLo = _hag.zMin, winHi = _hag.zMin + _hag.zSpan, inv = _hag.zInv;
+  const dG = D.ground, dMx = D.groundMax, dF = D.fallback;
+  const fG = F.ground, fMx = F.groundMax, fF = F.fallback;
+  const winLo = _hag.zMin, winHi = _hag.zMin + _hag.zSpan;
+  const invLo = 65535 / _hag.zSpan, spreadQ = 255 / _HAG_SPREAD_MAX;
+  const R = _hag.envRadius;
+
+  // Pack one cell: RG = 16-bit low ground, B = how far the ground rises above
+  // it inside the envelope, A = provenance. 16 bits over a few hundred metres
+  // is ~1 cm, far finer than a threshold needs, and it buys the byte that
+  // carries the band. Returns false when the value did not fit the current
+  // packing window, which schedules a repack.
+  function packCell(g, k) {
+    const u = g.upload, t = k * 4;
+    const lo = g.ground[k], hiRaw = g.groundMax[k];
+    let vLo, vHi, prov;
+    if (lo < _HAG_NONE)             { vLo = lo; vHi = hiRaw > -_HAG_NONE ? hiRaw : lo; prov = 255; }
+    else if (g.fallback[k] < _HAG_NONE) { vLo = g.fallback[k]; vHi = vLo; prov = 128; }
+    else {
+      if (u[t+3] !== 0) { g.filled--; if (u[t+3] === 255) g.groundCells--; }
+      u[t] = u[t+1] = u[t+2] = u[t+3] = 0; g.dirty = true; return true;
+    }
+    if (u[t+3] === 0) g.filled++;
+    if (prov === 255 && u[t+3] !== 255) g.groundCells++;
+    // Never emit 0 for the height. An incomplete WebGL texture samples as
+    // (0,0,0,1) -- opaque black that would decode to a plausible ground height.
+    // Reserving zero lets the shader tell "never uploaded" from "ground is low".
+    let q = ((vLo - winLo) * invLo) | 0;
+    if (q < 1) q = 1; else if (q > 65535) q = 65535;
+    u[t] = (q >>> 8) & 255; u[t+1] = q & 255;
+    let sp = vHi - vLo;
+    if (sp < 0) sp = 0; else if (sp > _HAG_SPREAD_MAX) sp = _HAG_SPREAD_MAX;
+    u[t+2] = (sp * spreadQ) | 0;
+    u[t+3] = prov;
+    g.dirty = true;
+    return vLo >= winLo && vHi <= winHi;
+  }
   let obsLo = _hag.obsLo, obsHi = _hag.obsHi;
-  let needRepack = !inv;                  // no window yet: pack after this pass
+  let needRepack = !_hag.zInv;            // no window yet: pack after this pass
   let updated = false;
 
   // Binning costs roughly 100 ns a point, so a whole visible set arriving at
@@ -8661,69 +8835,59 @@ function _hagScan() {
         // the ground reference and hide the pit from the filter.
         const isGround = !!cls && Math.round(cls[i]) === 2;
 
+        // Class 2 widens the ground band of every cell inside the envelope
+        // radius. Both ends are monotone -- the low only falls, the high only
+        // rises -- so this needs no rescan and never has to shrink.
         if (inD) {
-          const k = dy * dDim + dx;
-          let write = false;
           if (isGround) {
-            if (wz < dG[k]) { dG[k] = wz; write = true; }
-          } else if (wz < dF[k]) {
-            dF[k] = wz;
-            write = dG[k] >= _HAG_NONE;      // ground, once known, always wins
-          }
-          if (write) {
+            for (let oy = -R; oy <= R; oy++) {
+              const ny = dy + oy; if (ny < 0 || ny >= dDim) continue;
+              const rowBase = ny * dDim;
+              for (let ox = -R; ox <= R; ox++) {
+                const nx = dx + ox; if (nx < 0 || nx >= dDim) continue;
+                const kk = rowBase + nx;
+                let ch = false;
+                if (wz < dG[kk])  { dG[kk]  = wz; ch = true; }
+                if (wz > dMx[kk]) { dMx[kk] = wz; ch = true; }
+                if (ch) { if (!packCell(D, kk)) needRepack = true; updated = true; }
+              }
+            }
             if (wz < obsLo) obsLo = wz;
             if (wz > obsHi) obsHi = wz;
-            const t = k * 4;
-            // Pack in place while the value sits inside the current window;
-            // anything outside means the window has to grow, and the repack at
-            // the end of the pass rewrites every cell against the new one.
-            if (wz >= winLo && wz <= winHi) {
-              // Never emit q == 0. An incomplete WebGL texture samples as
-              // (0,0,0,1) -- opaque black that decodes to a perfectly plausible
-              // ground height at the bottom of the window. Reserving zero lets
-              // the shader tell "no data uploaded" from "ground is low here".
-              const q = Math.max(1, ((wz - winLo) * inv) | 0);
-              dU[t] = (q >>> 16) & 255; dU[t+1] = (q >>> 8) & 255; dU[t+2] = q & 255;
-            } else {
-              needRepack = true;
+          } else {
+            const k = dy * dDim + dx;
+            if (wz < dF[k]) {
+              dF[k] = wz;
+              if (dG[k] >= _HAG_NONE) {      // ground, once known, always wins
+                if (!packCell(D, k)) needRepack = true;
+                updated = true;
+                if (wz < obsLo) obsLo = wz;
+                if (wz > obsHi) obsHi = wz;
+              }
             }
-            if (dU[t+3] === 0) D.filled++;
-            if (isGround && dU[t+3] !== 255) D.groundCells++;
-            dU[t+3] = isGround ? 255 : 128;
-            D.dirty = true; updated = true;
           }
         }
 
         if (inF) {
           const k = fy * fDim + fx;
-          let write = false;
           if (isGround) {
-            if (wz < fG[k]) { fG[k] = wz; write = true; }
+            let ch = false;
+            if (wz < fG[k])  { fG[k]  = wz; ch = true; }
+            if (wz > fMx[k]) { fMx[k] = wz; ch = true; }
+            if (ch) {
+              if (!packCell(F, k)) needRepack = true;
+              updated = true;
+              if (wz < obsLo) obsLo = wz;
+              if (wz > obsHi) obsHi = wz;
+            }
           } else if (wz < fF[k]) {
             fF[k] = wz;
-            write = fG[k] >= _HAG_NONE;
-          }
-          if (write) {
-            if (wz < obsLo) obsLo = wz;
-            if (wz > obsHi) obsHi = wz;
-            const t = k * 4;
-            // Pack in place while the value sits inside the current window;
-            // anything outside means the window has to grow, and the repack at
-            // the end of the pass rewrites every cell against the new one.
-            if (wz >= winLo && wz <= winHi) {
-              // Never emit q == 0. An incomplete WebGL texture samples as
-              // (0,0,0,1) -- opaque black that decodes to a perfectly plausible
-              // ground height at the bottom of the window. Reserving zero lets
-              // the shader tell "no data uploaded" from "ground is low here".
-              const q = Math.max(1, ((wz - winLo) * inv) | 0);
-              fU[t] = (q >>> 16) & 255; fU[t+1] = (q >>> 8) & 255; fU[t+2] = q & 255;
-            } else {
-              needRepack = true;
+            if (fG[k] >= _HAG_NONE) {
+              if (!packCell(F, k)) needRepack = true;
+              updated = true;
+              if (wz < obsLo) obsLo = wz;
+              if (wz > obsHi) obsHi = wz;
             }
-            if (fU[t+3] === 0) F.filled++;
-            if (isGround && fU[t+3] !== 255) F.groundCells++;
-            fU[t+3] = isGround ? 255 : 128;
-            F.dirty = true; updated = true;
           }
         }
       }
@@ -8840,32 +9004,60 @@ function _hagPushUniforms() {
     u.uGroundTexSizeC.value  = [F.dim, F.dim];
     u.uGroundShiftC.value    = [D.originX - F.originX, D.originY - F.originY];
     if (u.uHagDebug) u.uHagDebug.value = _hag.debugColor ? 1.0 : 0.0;
+    if (u.uGroundSpreadMax) u.uGroundSpreadMax.value = _HAG_SPREAD_MAX;
+    if (u.uHagCull)   u.uHagCull.value   = _hag.enabled ? 1.0 : 0.0;
+    if (u.uBushOn)    u.uBushOn.value    = _hag.bushOn  ? 1.0 : 0.0;
+    if (u.uBushRange) u.uBushRange.value = [_hag.bushLo, _hag.bushHi];
     // Point clouds can finish loading long after the checkbox was ticked, and
     // the grid may not have existed when it was. Re-assert the define here so
     // enabling the filter never depends on the order those two happen in.
-    if (_hag.enabled && pc.material.defines &&
+    if ((_hag.enabled || _hag.bushOn || _hag.debugColor) && pc.material.defines &&
         !pc.material.defines.get('clip_hag_enabled')) {
       pc.material.setDefine('clip_hag_enabled', '#define clip_hag_enabled');
     }
   }
 }
 
-function _hagEnable(on) {
-  _hag.enabled = on;
+/**
+ * Compile the ground-grid machinery in or out.
+ *
+ * The define no longer means "filter". Three separate things need it — the
+ * keep-band, the bushwhack highlight and the diagnose colours — and any of
+ * them can run without the others, so whether points are actually culled is
+ * uHagCull, not the define. Recompiling costs a shader link, so this only
+ * touches a material whose state is wrong.
+ */
+function _hagApplyDefine() {
+  const want = !!_hag.detail && (_hag.enabled || _hag.bushOn || _hag.debugColor);
   for (const pc of ((typeof potreeViewer !== 'undefined' && potreeViewer?.scene?.pointclouds) || [])) {
     if (!pc.material) continue;
-    if (on) {
-      // Only switch the define on once a texture exists: an unbound sampler
-      // reads whatever is on texture unit 0, which would filter unpredictably.
-      if (_hag.detail) {
-        pc.material.setDefine('clip_hag_enabled', '#define clip_hag_enabled');
-        _hagPushUniforms();
-      }
-    } else {
+    const has = !!pc.material.defines?.get('clip_hag_enabled');
+    if (want && !has) {
+      // Only switch it on once a texture exists: an unbound sampler reads
+      // whatever is on texture unit 0, which would behave unpredictably.
+      pc.material.setDefine('clip_hag_enabled', '#define clip_hag_enabled');
+    } else if (!want && has) {
       pc.material.removeDefine('clip_hag_enabled');
       pc.material.updateShaderSource();
     }
   }
+  if (want) _hagPushUniforms();
+}
+
+function _hagEnable(on) {
+  _hag.enabled = !!on;
+  _hagApplyDefine();
+}
+
+/** Paint points sitting 0.3-1.5 m over the ground. A display mode, not a filter. */
+function _hagSetBush(on) {
+  _hag.bushOn = !!on;
+  _hagApplyDefine();
+}
+
+function _hagSetBushRange(lo, hi) {
+  _hag.bushLo = lo; _hag.bushHi = hi;
+  _hagPushUniforms();
 }
 
 function _hagSetRange(min, max) {
@@ -8886,7 +9078,11 @@ function _hagDebug() {
   const out = {
     enabled: _hag.enabled,
     detailCell: D?.cell, detailCoverageM: cov.detail, detailCover: D ? _hagCover(D) : null,
+    cullOn: _hag.enabled,
+    bushOn: _hag.bushOn,
+    bushRange: [_hag.bushLo, _hag.bushHi],
     fallbackOn: _hag.useFallback,
+    envRadius: _hag.envRadius,
     fallbackCell: F?.cell, fallbackCoverageM: cov.fallback, fallbackCover: F ? _hagCover(F) : null,
     detailExtent: D ? _hagExtent(D) : null,
     packWindow: [_hag.zMin, _hag.zMin + _hag.zSpan],
@@ -8909,16 +9105,17 @@ function _hagDebug() {
     const t = (cy * g.dim + cx) * 4;
     const a = g.upload[t+3];
     if (a === 0) return null;
-    const q = (g.upload[t] << 16) | (g.upload[t+1] << 8) | g.upload[t+2];
-    return { z: _hag.zMin + (q / 16777215) * _hag.zSpan, ground: a > 191 };
+    const q = (g.upload[t] << 8) | g.upload[t+1];
+    const lo = _hag.zMin + (q / 65535) * _hag.zSpan;
+    return { z: lo, hi: lo + (g.upload[t+2] / 255) * _HAG_SPREAD_MAX, ground: a > 191 };
   };
   const lookup = (wx, wy) => {
     const d = read(D, wx, wy);
     const c = _hag.useFallback ? read(F, wx, wy) : null;
-    if (d && d.ground) return { z: d.z, src: 'detail/ground' };
-    if (c && c.ground) return { z: c.z, src: 'fallback/ground' };
-    if (d)             return { z: d.z, src: 'detail/est' };
-    if (c)             return { z: c.z, src: 'fallback/est' };
+    if (d && d.ground) return { ...d, src: 'detail/ground' };
+    if (c && c.ground) return { ...c, src: 'fallback/ground' };
+    if (d)             return { ...d, src: 'detail/est' };
+    if (c)             return { ...c, src: 'fallback/est' };
     return null;
   };
 
@@ -8942,9 +9139,10 @@ function _hagDebug() {
           cls: cls ? Math.round(cls[i]) : '?',
           z: +wz.toFixed(2),
           source: hit ? hit.src : 'none',
-          groundZ: hit ? +hit.z.toFixed(2) : null,
+          groundLo: hit ? +hit.z.toFixed(2) : null,
+          band: hit ? +(hit.hi - hit.z).toFixed(2) : null,
           hag: hit ? +(wz - hit.z).toFixed(2) : null,
-          kept: !hit || (wz - hit.z >= _hag.minHag && wz - hit.z <= _hag.maxHag),
+          kept: !hit || (wz - hit.z >= _hag.minHag && wz - hit.hi <= _hag.maxHag),
         });
         if (samples.length >= 12) break outer;
       }
@@ -8963,6 +9161,9 @@ if (typeof window !== 'undefined') {
   window._hagSetRange = _hagSetRange;
   window._hagSetCellSize = _hagSetCellSize;
   window._hagSetFallback = _hagSetFallback;
+  window._hagSetEnvRadius = _hagSetEnvRadius;
+  window._hagSetBush = _hagSetBush;
+  window._hagSetBushRange = _hagSetBushRange;
   window._hagSetDebugColor = _hagSetDebugColor;
   window._hagDebug = _hagDebug;
   window._hagScan = _hagScan;

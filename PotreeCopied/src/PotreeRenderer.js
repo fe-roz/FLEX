@@ -1449,6 +1449,11 @@ export class Renderer {
 					shader.setUniform1f("uGroundFallbackOn",
 					                    haveCoarse ? gu.uGroundFallbackOn.value : 0.0);
 					shader.setUniform1f("uHagDebug", gu.uHagDebug ? gu.uHagDebug.value : 0.0);
+					shader.setUniform1f("uGroundSpreadMax",
+					                    gu.uGroundSpreadMax ? gu.uGroundSpreadMax.value : 128.0);
+					shader.setUniform1f("uHagCull", gu.uHagCull ? gu.uHagCull.value : 1.0);
+					shader.setUniform1f("uBushOn",  gu.uBushOn  ? gu.uBushOn.value  : 0.0);
+					if (gu.uBushRange) shader.setUniform2f("uBushRange", gu.uBushRange.value);
 				}
 			}
 

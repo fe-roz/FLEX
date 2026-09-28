@@ -369,12 +369,49 @@ export function updateVisibility(pointclouds, camera, renderer){
 				let slope = Math.tan(fov / 2);
 				let projFactor = (0.5 * domHeight) / (slope * distance);
 				let screenPixelRadius = radius * projFactor;
-				
-				if(screenPixelRadius < pointcloud.minimumNodePixelSize){
+
+				// FLEX: distance-based level of detail. Two separate jobs.
+				//
+				// 1. A far cutoff. Past lodFarDistance a node has to be much
+				//    bigger on screen before it is refined at all, which is
+				//    what stops an oblique view from spending the whole budget
+				//    on the horizon. Gated on screen size rather than octree
+				//    level on purpose: level is not comparable between
+				//    datasets, since a USGS county tile's level 2 spans
+				//    kilometres and a small local cloud's spans metres.
+				// Distance to the NEAREST POINT of the node, not to its centre.
+				// An octree node miles across can have its centre miles away
+				// while the node itself is under your feet, and judging it by
+				// its centre buries exactly the big nodes that cover where you
+				// are standing. Potree's own "camera inside the sphere" special
+				// case below is the degenerate version of the same idea.
+				let surfaceDistance = distance - radius;
+				if(surfaceDistance < 0.0){
+					surfaceDistance = 0.0;
+				}
+
+				let minPixels = pointcloud.minimumNodePixelSize;
+				let lodFar = Potree.lodFarDistance;
+				if(lodFar > 0 && surfaceDistance > lodFar){
+					minPixels = minPixels * Potree.lodFarPenalty;
+				}
+
+				if(screenPixelRadius < minPixels){
 					continue;
 				}
-			
+
 				weight = screenPixelRadius;
+
+				// 2. A steeper falloff for loading ORDER. Screen radius alone
+				//    falls off as 1/distance, gentle enough that the horizon
+				//    still outbids the foreground when it covers a lot of
+				//    screen. Nothing is excluded here; a far node just queues
+				//    later and so loses the budget rather than winning it.
+				let lodNear = Potree.lodNearDistance;
+				if(lodNear > 0){
+					let r = surfaceDistance / lodNear;
+					weight = weight / (1.0 + r * r);
+				}
 
 				if(distance - radius < 0){
 					weight = Number.MAX_VALUE;

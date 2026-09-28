@@ -102,6 +102,33 @@ export let pointBudget = 1 * 1000 * 1000;
 export let framenumber = 0;
 export let numNodesLoading = 0;
 export let maxNodesLoading = 4;
+// ---- FLEX: distance-based LOD ---------------------------------------------
+// Potree already favours near nodes, but only by 1/distance through the
+// screen-size weighting, so an oblique view spends the point budget on the
+// horizon. These add a distance term. Read through the Potree namespace in
+// Potree_update_visibility.js, so page code can set them live.
+//
+// lodFarDistance: metres past which a node must be much larger on screen
+//   before it is refined. 0 disables the whole thing. Measured to the
+//   nearest point of the node, not its centre.
+// lodFarPenalty: how much larger, as a multiple of minimumNodePixelSize.
+//   Deliberately NOT an octree level: level means nothing absolute, since a
+//   USGS county tile is 100+ km at the root and a local cloud is metres, so
+//   the same level number is a different size in every dataset. Screen size
+//   is the scale-free way to say "coarse is enough out there".
+// lodNearDistance: the knee of the loading-order falloff. Weight becomes
+//   screenPixelRadius / (1 + (distance/lodNearDistance)^2), so the near field
+//   wins the budget rather than merely being preferred. 0 disables it.
+//   This started at 250 m and was far too tight: the divisor is 5 at 500 m,
+//   17 at 1 km and 65 at 2 km, which buries the exact middle distance you are
+//   usually looking at behind whatever happens to sit under the camera. At
+//   2000 m, settled on in the field, it is 1.06 at 500 m, 1.25 at 1 km, 2.0
+//   at 2 km and 7.25 at 5 km - near still wins the budget without flattening
+//   the working distance. Exposed as the Load priority range slider.
+//   3000 m was tried and gave back too much of the horizon saving.
+export let lodFarDistance  = 16093;  // 10 miles
+export let lodFarPenalty   = 6;
+export let lodNearDistance = 2000;
 
 export const debug = {};
 
