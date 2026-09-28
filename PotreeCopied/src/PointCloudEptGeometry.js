@@ -235,12 +235,44 @@ export class PointCloudEptGeometryNode extends PointCloudTreeNode {
 	load() {
 		if (this.loaded || this.loading) return;
 		if (Potree.numNodesLoading >= Potree.maxNodesLoading) return;
+		// A node that has failed backs off instead of hammering the server. It
+		// is never written off for good: a 404 costs one cheap retry a minute,
+		// and a network blip or a server restart heals by itself.
+		if (this.nextLoadAttempt && performance.now() < this.nextLoadAttempt) return;
 
 		this.loading = true;
 		++Potree.numNodesLoading;
 
 		if (this.numPoints == -1) this.loadHierarchy();
 		this.loadPoints();
+	}
+
+	/**
+	 * The single release path for a load that did not finish.
+	 *
+	 * Every failure exit MUST come through here. doneLoading() used to be the
+	 * only place that cleared this.loading and decremented numNodesLoading, so
+	 * any request that failed left the node stuck with loading === true - and
+	 * load() early-returns on that, so the node could never be asked for again
+	 * until a page reload. Worse, the global numNodesLoading counter leaked
+	 * with it: enough failures and it sits at maxNodesLoading forever and the
+	 * whole cloud stops loading. Idempotent, so a late error after a success
+	 * cannot double-decrement.
+	 */
+	loadFailed(reason) {
+		if (!this.loading) return;
+		this.loading = false;
+		--Potree.numNodesLoading;
+		if (Potree.numNodesLoading < 0) Potree.numNodesLoading = 0;
+
+		this.loadAttempts = (this.loadAttempts || 0) + 1;
+		const backoff = Math.min(60000, 500 * Math.pow(2, this.loadAttempts));
+		this.nextLoadAttempt = performance.now() + backoff;
+
+		if (this.loadAttempts <= 3) {
+			console.warn(`[ept] ${this.name || ''} load failed (${reason}), ` +
+				`attempt ${this.loadAttempts}, retrying in ${(backoff / 1000).toFixed(1)}s`);
+		}
 	}
 
 	loadPoints(){
@@ -255,8 +287,22 @@ export class PointCloudEptGeometryNode extends PointCloudTreeNode {
 		let eptHierarchyFile =
 			`${this.ept.url}ept-hierarchy/${this.filename()}.json`;
 
-		let response = await fetch(eptHierarchyFile);
-		let hier = await response.json();
+		// Unguarded, a failed hierarchy fetch or an HTML error page parsed as
+		// JSON becomes an unhandled rejection and the subtree silently never
+		// appears. The points request owns the loading flag, so this only has
+		// to avoid throwing.
+		let hier;
+		try {
+			let response = await fetch(eptHierarchyFile);
+			if (!response.ok) {
+				console.warn(`[ept] hierarchy ${eptHierarchyFile}: HTTP ${response.status}`);
+				return;
+			}
+			hier = await response.json();
+		} catch (e) {
+			console.warn(`[ept] hierarchy ${eptHierarchyFile} failed:`, e);
+			return;
+		}
 
 		// Since we want to traverse top-down, and 10 comes
 		// lexicographically before 9 (for example), do a deep sort.
@@ -305,8 +351,12 @@ export class PointCloudEptGeometryNode extends PointCloudTreeNode {
 		this.numPoints = np;
 		this.mean = mean;
 		this.loaded = true;
-		this.loading = false;
-		--Potree.numNodesLoading;
+		if (this.loading) {
+			this.loading = false;
+			--Potree.numNodesLoading;
+		}
+		this.loadAttempts = 0;
+		this.nextLoadAttempt = 0;
 	}
 
 	toPotreeName(d, x, y, z) {

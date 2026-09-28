@@ -21,18 +21,30 @@ export class EptLaszipLoader {
 		xhr.open('GET', url, true);
 		xhr.responseType = 'arraybuffer';
 		xhr.overrideMimeType('text/plain; charset=x-user-defined');
+		// See the same block in BinaryLoader: a failure that does not release
+		// the node strands it forever and leaks a concurrency slot.
+		xhr.timeout = 60000;
 		xhr.onreadystatechange = () => {
 			if (xhr.readyState === 4) {
 				if (xhr.status === 200) {
 					let buffer = xhr.response;
-					this.parse(node, buffer);
+					this.parse(node, buffer).catch(
+						(e) => node.loadFailed('laz parse: ' + e));
 				} else {
-					console.log('Failed ' + url + ': ' + xhr.status);
+					node.loadFailed('HTTP ' + xhr.status + ' ' + url);
 				}
 			}
 		};
+		xhr.onerror = () => node.loadFailed('network ' + url);
+		xhr.ontimeout = () => node.loadFailed('timeout ' + url);
+		xhr.onabort = () => node.loadFailed('aborted ' + url);
 
-		xhr.send(null);
+		try {
+			xhr.send(null);
+		}
+		catch (e) {
+			node.loadFailed('send threw: ' + e);
+		}
 	}
 
 	async parse(node, buffer){

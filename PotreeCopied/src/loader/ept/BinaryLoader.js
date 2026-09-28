@@ -20,22 +20,29 @@ export class EptBinaryLoader {
 		xhr.open('GET', url, true);
 		xhr.responseType = 'arraybuffer';
 		xhr.overrideMimeType('text/plain; charset=x-user-defined');
+		// Every exit that is not a successful parse has to release the node,
+		// or it stays loading === true for good and takes one of the global
+		// concurrency slots with it. See PointCloudEptGeometryNode.loadFailed.
+		xhr.timeout = 60000;
 		xhr.onreadystatechange = () => {
 			if (xhr.readyState === 4) {
 				if (xhr.status === 200) {
 					let buffer = xhr.response;
 					this.parse(node, buffer);
 				} else {
-					console.log('Failed ' + url + ': ' + xhr.status);
+					node.loadFailed('HTTP ' + xhr.status + ' ' + url);
 				}
 			}
 		};
+		xhr.onerror = () => node.loadFailed('network ' + url);
+		xhr.ontimeout = () => node.loadFailed('timeout ' + url);
+		xhr.onabort = () => node.loadFailed('aborted ' + url);
 
 		try {
 			xhr.send(null);
 		}
 		catch (e) {
-			console.log('Failed request: ' + e);
+			node.loadFailed('send threw: ' + e);
 		}
 	}
 
@@ -43,7 +50,15 @@ export class EptBinaryLoader {
 		let workerPath = this.workerPath();
 		let worker = Potree.workerPool.getWorker(workerPath);
 
+		// A worker that throws, or a malformed message, would otherwise never
+		// reach doneLoading and leak the node exactly like a failed request.
+		worker.onerror = (err) => {
+			node.loadFailed('decode worker: ' + (err && err.message ? err.message : err));
+			Potree.workerPool.returnWorker(workerPath, worker);
+		};
+
 		worker.onmessage = function(e) {
+			try {
 			let g = new THREE.BufferGeometry();
 			let numPoints = e.data.numPoints;
 
@@ -97,6 +112,10 @@ export class EptBinaryLoader {
 					new THREE.Vector3(...e.data.mean));
 
 			Potree.workerPool.returnWorker(workerPath, worker);
+			} catch (err) {
+				node.loadFailed('decode: ' + err);
+				Potree.workerPool.returnWorker(workerPath, worker);
+			}
 		};
 
 		let toArray = (v) => [v.x, v.y, v.z];
