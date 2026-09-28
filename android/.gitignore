@@ -10,3 +10,7 @@ local.properties
 # export_terrain.py. It is assembled by tools/assemble_assets.sh and must
 # never be committed.
 /app/src/main/assets/flex/
+
+# Per-cave identity written by tools/assemble_assets.py. It names the cave,
+# so it stays local; build.gradle.kts falls back to a generic name without it.
+/cave.properties

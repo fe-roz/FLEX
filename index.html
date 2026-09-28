@@ -1273,6 +1273,27 @@
         <div class="collapse" id="exportCollapsible">
           <div class="lp-panel-wrap">
 
+            <!-- Map name: titles the viewer, names the ZIP and the Android app -->
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▾</span> Map Name
+              </div>
+              <div class="lp-section-body open" id="lp-export-name-body">
+                <div style="padding:2px 0;">
+                  <input type="text" id="export_map_name" maxlength="60"
+                    placeholder="e.g. Cave Ridge"
+                    oninput="this.style.borderColor=''; document.getElementById('export_map_name_hint').style.display='none';"
+                    style="width:100%; box-sizing:border-box; background:#1a1a1a; color:#eee; border:1px solid #444; border-radius:3px; padding:4px 6px; font-size:12px;" />
+                  <div id="export_map_name_hint" style="display:none; font-size:10px; color:#ff7a7a; margin-top:3px;">
+                    Name the map before exporting.
+                  </div>
+                  <div style="font-size:10px; color:rgba(255,255,255,0.4); margin-top:3px;">
+                    Shown in the viewer's title bar and used as the app name.
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- BBox draw -->
             <div class="lp-section">
               <div class="lp-section-header" onclick="window._lpToggle(this)">
@@ -1371,14 +1392,23 @@
                       <option value="bing" selected>Bing (default)</option>
                     </select>
                   </label>
-                  <label style="display:block; margin-bottom:3px; font-size:11px; color:rgba(255,255,255,0.8);">
-                    Hillshade URL (optional):
+                  <label style="display:block; margin-bottom:5px;">
+                    Hillshade:
+                    <select id="export_hillshade_mode"
+                      onchange="document.getElementById('export_hillshade_url_wrap').style.display = this.value === 'url' ? 'block' : 'none';"
+                      style="margin-left:4px; background:#222; color:#eee; border:1px solid #444; border-radius:3px; padding:2px 4px;">
+                      <option value="lidar" selected>From LiDAR (highest res)</option>
+                      <option value="url">Tile URL</option>
+                      <option value="none">None</option>
+                    </select>
                   </label>
-                  <input type="text" id="export_hillshade_url"
-                    placeholder="https://api.mapbox.com/…"
-                    style="width:100%; box-sizing:border-box; background:#1a1a1a; color:#eee; border:1px solid #444; border-radius:3px; padding:4px 6px; font-size:11px; font-family:monospace;" />
+                  <div id="export_hillshade_url_wrap" style="display:none;">
+                    <input type="text" id="export_hillshade_url"
+                      placeholder="https://…/{z}/{x}/{y}"
+                      style="width:100%; box-sizing:border-box; background:#1a1a1a; color:#eee; border:1px solid #444; border-radius:3px; padding:4px 6px; font-size:11px; font-family:monospace;" />
+                  </div>
                   <div style="font-size:10px; color:rgba(255,255,255,0.4); margin-top:3px;">
-                    Leave blank to skip hillshade overlay.
+                    From LiDAR shades the ground returns directly, from several light directions, at the finest resolution the data supports.
                   </div>
                 </div>
               </div>
@@ -1806,12 +1836,12 @@
           <div style="font-size:10px; color:rgba(255,255,255,0.6); margin-bottom:3px;">Real-world position of that station:</div>
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; margin-bottom:6px;">
             <label style="font-size:10px; color:rgba(255,255,255,0.7);">Latitude<br>
-              <input type="number" id="cwiz-anc-lat" step="any" placeholder="e.g. 37.1234" style="
+              <input type="number" id="cwiz-anc-lat" step="any" placeholder="e.g. 45.1234" style="
                 width:100%; background:#111; border:1px solid rgba(255,255,255,0.2);
                 border-radius:3px; padding:3px 5px; color:#ddd; font-size:11px; box-sizing:border-box; margin-top:2px;">
             </label>
             <label style="font-size:10px; color:rgba(255,255,255,0.7);">Longitude<br>
-              <input type="number" id="cwiz-anc-lon" step="any" placeholder="e.g. -86.0567" style="
+              <input type="number" id="cwiz-anc-lon" step="any" placeholder="e.g. -100.5678" style="
                 width:100%; background:#111; border:1px solid rgba(255,255,255,0.2);
                 border-radius:3px; padding:3px 5px; color:#ddd; font-size:11px; box-sizing:border-box; margin-top:2px;">
             </label>
@@ -2561,6 +2591,18 @@
     }
 
     window._exportRun = function() {
+      const nameEl  = document.getElementById('export_map_name');
+      const mapName = nameEl.value.trim();
+      if (!mapName) {
+        nameEl.style.borderColor = '#ff5a5a';
+        document.getElementById('export_map_name_hint').style.display = 'block';
+        const body = document.getElementById('lp-export-name-body');
+        if (body && !body.classList.contains('open') && window._lpToggle)
+          window._lpToggle(body.previousElementSibling);
+        nameEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        nameEl.focus();
+        return;
+      }
       if (!_bboxCorner1 || !_bboxCorner2) { alert('Draw a bbox first.'); return; }
 
       const [w, s] = [Math.min(_bboxCorner1[0], _bboxCorner2[0]), Math.min(_bboxCorner1[1], _bboxCorner2[1])];
@@ -2572,7 +2614,13 @@
       const texSize          = parseInt(document.getElementById('export_tex_size').value);
       const includeCaves     = document.getElementById('export_include_caves').checked;
       const satelliteSource  = document.getElementById('export_satellite_source').value;
+      const hillshadeMode    = document.getElementById('export_hillshade_mode').value;
       const hillshadeUrl     = document.getElementById('export_hillshade_url').value.trim();
+      if (hillshadeMode === 'url' && !hillshadeUrl) {
+        document.getElementById('export_hillshade_url').style.borderColor = '#ff5a5a';
+        document.getElementById('export_hillshade_url').focus();
+        return;
+      }
       if (!eptPath) { alert('Select a point cloud dataset first.'); document.getElementById('export_run_btn').disabled = false; return; }
 
       const caves = includeCaves ? _collectCavesInBbox(w, s, e, n) : { surveys: [] };
@@ -2584,7 +2632,9 @@
         max_triangles: maxTri,
         tex_size: texSize,
         satellite_source: satelliteSource,
-        hillshade_url: hillshadeUrl,
+        hillshade_mode: hillshadeMode,
+        hillshade_url: hillshadeMode === 'url' ? hillshadeUrl : '',
+        name: mapName,
         caves,
       };
 
@@ -2626,7 +2676,7 @@
           _setProgress(100, '✅ Done!');
           const dl = document.getElementById('export_download_link');
           dl.href = '/api/export/download/' + _exportJobId;
-          dl.download = 'flex_export.zip';
+          dl.download = data.filename || 'flex_export.zip';
           document.getElementById('export_download_wrap').style.display = 'block';
           document.getElementById('export_run_btn').disabled = false;
         } else if (data.status === 'error') {

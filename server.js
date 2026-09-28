@@ -688,8 +688,14 @@ function handleExportTerrain(req, res) {
             max_triangles     = 2000000,
             tex_size          = 16384,
             satellite_source  = 'bing',
+            hillshade_mode    = 'lidar',     // 'lidar' | 'url' | 'none'
             hillshade_url     = '',
+            name              = '',
         } = params;
+        const hsMode  = ['lidar', 'url', 'none'].includes(hillshade_mode) ? hillshade_mode : 'lidar';
+        // Free text from the UI goes to the exporter as one argv element (spawn,
+        // no shell), so only length and control characters need policing.
+        const mapName = String(name || '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 60);
         if (!bbox || bbox.length !== 4) return jsonResponse(res, { ok: false, error: 'bbox required: [minLon,minLat,maxLon,maxLat]' }, 400);
         if (!eptPath) return jsonResponse(res, { ok: false, error: 'eptPath is required — select a dataset in the export panel' }, 400);
 
@@ -698,7 +704,11 @@ function handleExportTerrain(req, res) {
         const outZip = path.join(EXPORT_OUT_DIR, `export_${jobId}.zip`);
         const ept = eptPath;
 
-        _exportJobs[jobId] = { status: 'running', progress: [], outPath: outZip, error: null };
+        // Download name from the map name: "Cave Ridge" -> FLEX-Cave-Ridge.zip
+        const slug = mapName.normalize('NFKD').replace(/[^\w\s-]/g, '').trim()
+                            .replace(/[\s_]+/g, '-').slice(0, 48);
+        const filename = slug ? `FLEX-${slug}.zip` : `flex_export_${jobId}.zip`;
+        _exportJobs[jobId] = { status: 'running', progress: [], outPath: outZip, error: null, filename };
         jsonResponse(res, { ok: true, jobId });
 
         // Write caves JSON to a temp file so Python can read it
@@ -717,8 +727,10 @@ function handleExportTerrain(req, res) {
             '--max-triangles',     String(max_triangles),
             '--tex-size',          String(tex_size),
             '--satellite-source',  satellite_source,
+            '--hillshade',         (hsMode === 'url' && !hillshade_url) ? 'lidar' : hsMode,
         ];
-        if (hillshade_url) args.push('--hillshade-url', hillshade_url);
+        if (hsMode === 'url' && hillshade_url) args.push('--hillshade-url', hillshade_url);
+        if (mapName) args.push('--name', mapName);
         if (cavesFilePath) args.push('--caves', cavesFilePath);
 
         const proc = spawn(CONDA_PYTHON, args);
@@ -761,15 +773,18 @@ function handleExportStatus(req, res, jobId) {
     // Return last progress line as 'message' and a rough progress % based on step markers
     const lines = job.progress;
     const last = lines[lines.length - 1] || '';
+    // Step markers first: "[4/7] Fetching satellite..." also says "Fetching",
+    // which the keyword fallbacks would read as step 1.
+    const PCT = { '0': 5, '1': 15, '2': 40, '3': 55, '4': 65, '4b': 78, '5': 85, '6': 95, '7': 98 };
     let pct = 5;
-    if      (last.includes('[1/') || last.includes('Fetching')) pct = 15;
-    else if (last.includes('[2/') || last.includes('Building CSF')) pct = 40;
-    else if (last.includes('[3/') || last.includes('Triangul')) pct = 55;
-    else if (last.includes('[4/') || last.includes('satellite')) pct = 70;
-    else if (last.includes('[5/') || last.includes('Packaging GLB')) pct = 85;
-    else if (last.includes('[6/') || last.includes('Writing')) pct = 95;
+    const step = /\[(\d)(b?)\/\d\]/.exec(last);
+    if (step && PCT[step[1] + step[2]] !== undefined) pct = PCT[step[1] + step[2]];
+    else if (last.includes('Building CSF')) pct = 40;
+    else if (last.includes('Triangul')) pct = 55;
+    else if (last.includes('Packaging GLB')) pct = 85;
     if (job.status === 'done') pct = 100;
-    jsonResponse(res, { status: job.status, progress: pct, message: last, error: job.error });
+    jsonResponse(res, { status: job.status, progress: pct, message: last, error: job.error,
+                        filename: job.filename });
 }
 
 function handleExportDownload(req, res, jobId) {
@@ -778,7 +793,7 @@ function handleExportDownload(req, res, jobId) {
     const stat = fs.statSync(job.outPath);
     res.writeHead(200, {
         'Content-Type': 'application/zip',
-        'Content-Disposition': `attachment; filename="flex_export_${jobId}.zip"`,
+        'Content-Disposition': `attachment; filename="${job.filename || `flex_export_${jobId}.zip`}"`,
         'Content-Length': stat.size,
         'Access-Control-Allow-Origin': '*',
     });

@@ -16,7 +16,9 @@ template rather than taken from the export, so an old export picks up viewer
 fixes without being re-exported.
 
 Usage:
-    python3 assemble_assets.py <export_dir> <flex_dir> <out_assets_dir> [--name "Marbles"]
+    python3 assemble_assets.py <export_dir> <flex_dir> <out_assets_dir> [--name "Cave Ridge"]
+
+--name is only needed for exports made before the map-name field existed.
 """
 import argparse, base64, io, json, os, re, shutil, sys
 
@@ -34,6 +36,25 @@ def slugify(s):
         s = 'c' + s
     return s or 'cave'
 
+def label_safe(s):
+    """A cave name that survives the trip to the launcher label.
+
+    The name goes cave.properties -> Gradle resValue -> an Android string
+    resource. A straight apostrophe ("Soldier's Cave") is a hard AAPT error
+    there, '&' and '<' break the generated XML, and a leading '@' or '?' is
+    read as a reference. Swap them for look-alikes that need no escaping, so
+    the build never depends on how the plugin escapes.
+    """
+    s = (s or '').replace("'", '\u2019').replace('"', '\u201d').replace('&', ' and ')
+    s = re.sub(r'[<>\\]', '', s)
+    s = re.sub(r'\s+', ' ', s).strip().lstrip('@?')
+    return s
+
+def props_value(s):
+    """Escape for a .properties value: Properties.load() reads ISO-8859-1, so
+    anything past ASCII goes as \\uXXXX."""
+    return ''.join(ch if 32 <= ord(ch) < 127 else '\\u%04x' % ord(ch) for ch in s)
+
 def extract_const(html, name):
     """Pull the quoted value of `const <name> = "...";` without regexing 170 MB."""
     m = re.search(r'(?:const|let|var)\s+%s\s*=\s*"' % re.escape(name), html)
@@ -48,7 +69,8 @@ def main():
     ap.add_argument('flex_dir')
     ap.add_argument('out_dir')
     ap.add_argument('--name', default=None,
-                    help='Cave name for the app label; defaults to the export folder name')
+                    help='Cave name for the app label; defaults to the map name typed '
+                         'in FLEX before exporting, then to the export folder name')
     a = ap.parse_args()
     export_dir, flex_dir, out_dir = a.export_dir, a.flex_dir, a.out_dir
 
@@ -104,6 +126,8 @@ def main():
                   encoding='utf-8').read()
     caves_json = io.open(os.path.join(export_dir, 'caves.json'), encoding='utf-8').read()
     json.loads(caves_json)   # fail here, not silently in the browser
+    # Inside a <script>, "</" in any name would end the block early.
+    caves_json = caves_json.replace('</', '<\\/')
 
     has_hs = os.path.exists(os.path.join(out_dir, 'tex_hs.jpg'))
     for old, new in [('"PLACEHOLDER_GLB_B64"', '"terrain.glb"'),
@@ -118,15 +142,18 @@ def main():
     print('  wrote viewer.html %s' % human(os.path.getsize(out_html)))
 
     # ── cave identity for the Gradle build ──────────────────────────────────
-    name = a.name or os.path.basename(os.path.normpath(export_dir))
+    # The map name typed in FLEX's export panel travels in caves.json.
+    meta_name = ((json.loads(caves_json).get('meta') or {}).get('name') or '').strip()
+    name = a.name or meta_name or os.path.basename(os.path.normpath(export_dir))
     name = re.sub(r'^FLEX[- ]?Portable[- ]?Viewer[- ]?', '', name, flags=re.I)
     name = re.sub(r'[-_]+', ' ', name).strip() or 'Cave'
+    name = label_safe(name) or 'Cave'
     props = os.path.join(flex_dir, 'android', 'cave.properties')
     io.open(props, 'w', encoding='utf-8').write(
         '# Written by tools/assemble_assets.py; read by app/build.gradle.kts.\n'
         '# Identity is per cave so several exports can be installed side by side\n'
         '# instead of overwriting one another.\n'
-        'cave.name=%s\ncave.id=%s\n' % (name, slugify(name)))
+        'cave.name=%s\ncave.id=%s\n' % (props_value(name), slugify(name)))
     print('  cave.properties  name=%s  id=%s' % (name, slugify(name)))
 
     total = sum(os.path.getsize(os.path.join(dp, f))

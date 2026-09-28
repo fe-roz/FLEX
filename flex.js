@@ -2201,24 +2201,6 @@ function _otHandleClick(screenPos) {
 
 
 
-//   const promise2 = Cesium.GeoJsonDataSource.load(
-//     ProxyUrlGenerator.generateProxyUrl(
-//       "https://feroz.us/RWUTS.geojson"
-//     )
-//   );
-// promise2
-//   .then(function (dataSource) {
-//     cesiumViewer.dataSources.add(dataSource);
-
-//     //Get the array of entities
-    
-//     dataSource.show = true;
-    
-//   })
-//   .catch(function (error) {
-//     //Display any errrors encountered while loading.
-//     window.alert(error);
-//   });
 const scene = cesiumViewer.scene;
 scene.screenSpaceCameraController.enableCollisionDetection = false;
 const canvas = cesiumViewer.canvas;
@@ -3679,12 +3661,6 @@ Potree.loadPointCloud(url, _pcName, function(e){
     let shapeNode = new THREE.Object3D();
     potreeViewer.scene.scene.add(shapeNode);
     
-    // Potree.Utils.loadShapefileFeatures(ProxyUrlGenerator.generateProxyUrl("https://feroz.us/Marbles-attempt-1.shp"), features => {
-    //   for(let feature of features){
-    //     let node = featureToSceneNode(feature, 0x00ff00);
-    //     shapeNode.add(node);
-    //   }
-    // });
     
 
     // viewer.onGUILoaded(() => {
@@ -3704,40 +3680,6 @@ Potree.loadPointCloud(url, _pcName, function(e){
   }
 );
 
-}
-if (flags.displayPC){
-  // window.addPC("http://10.3.90.211:8083/MK/ept.json");
-  // window.addPC("http://localhost:8083/marbles/ept.json");
-  // window.addPC("http://localhost:8083/B22_10/D/ept.json");
-// window.addPC("http://localhost:8083/EMK/ept.json");
-// window.addPC("http://localhost:8083/KMFA/ept.json");
-// window.addPC("http://localhost:8083/BC/ept.json");
-// window.addPC("http://localhost:8083/H1/ept.json");
-// window.addPC("http://localhost:8083/H2/ept.json");
-// window.addPC("http://localhost:8083/H3/ept.json");
-// window.addPC("http://localhost:8083/H4/ept.json");
-// window.addPC("http://localhost:8083/H8/ept.json");
-// window.addPC("http://localhost:8083/SFK0/ept.json");
-// window.addPC("http://localhost:8083/SFK1/ept.json");
-// window.addPC("http://localhost:8083/SFK2/ept.json");
-// window.addPC("http://localhost:8083/SFK3/ept.json");
-// window.addPC("http://localhost:8083/SFK4/ept.json");
-// window.addPC("http://localhost:8083/LS/ept.json");
-// window.addPC("http://localhost:8083/M4/ept.json");
-// window.addPC("http://localhost:8083/2IFG/ept.json");
-// window.addPC("http://localhost:8083/TIFG/ept.json");
-// window.addPC("http://localhost:8083/YM/ept.json");
-//https://ot-process2.sdsc.edu/appEntwineEPTService1710109846278868656237/pc1710109735500
-// window.addPC("https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/entwine/geoid18/9262/ept.json"); // NorCal Kangaroo Mtn, Skorp?
-// window.addPC(ProxyUrlGenerator.generateProxyUrl("https://ot-process2.sdsc.edu/appEntwineEPTService1714692934285-1026035806/pc1714692403090/ept.json")); // LS Bluffs North of the Marbles
-// window.addPC(ProxyUrlGenerator.generateProxyUrl("https://ot-process2.sdsc.edu/appEntwineEPTService1710112615372926451108/pc1710112504574/ept.json"));
-// window.addPC(ProxyUrlGenerator.generateProxyUrl("https://ot-process2.sdsc.edu/appEntwineEPTService1710113099587-473228176/pc1710112958845/ept.json"));
-// window.addPC(ProxyUrlGenerator.generateProxyUrl("https://ot-process2.sdsc.edu/appEntwineEPTService1710109846278868656237/pc1710109735500/ept.json"));
-//https://ot-process2.sdsc.edu/appEntwineEPTService1710113099587-473228176/pc1710112958845
-//https://ot-process2.sdsc.edu/appEntwineEPTService1710112615372926451108/pc1710112504574
-// window.addPC("http://localhost:8083/PC/ept.json");
-// window.addPC("https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/entwine/geoid18/9782/ept.json");
-// window.addPC("http://localhost:8083/T2/ept.json");
 }
 
 // Intercept addPC to track loaded URLs for session persistence and update panel
@@ -4505,7 +4447,7 @@ function parsePLT(text) {
       result.datum = rest;
     } else if (cmd === 'N') {
       // Survey name line: N<code> <day-of-week> <month> <day> <year> C<description>
-      // e.g. "NME D 3 24 2013 CMeatgrinder via Osterizer"
+      // e.g. "NME D 3 24 2013 CEntrance series"
       const nCode = rest.split(/\s+/)[0] || rest;
       const nDescM = rest.match(/C(.+)$/);
       const nDesc = nDescM ? nDescM[1].trim() : '';

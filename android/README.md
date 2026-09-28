@@ -65,7 +65,7 @@ systems on one phone, but it does mean the first build after this change lands
 alongside the old `com.feroz.flexviewer` install rather than upgrading it.
 Uninstall that one by hand.
 
-Pass `--name "Marbles"` to override the label if the export folder name is ugly.
+Pass `--name "Cave Ridge"` to override the label if the export folder name is ugly.
 
 Exports made before the exporter wrote sidecar textures still work: the script
 falls back to decoding them out of the 170 MB `viewer.html`, which is slow but

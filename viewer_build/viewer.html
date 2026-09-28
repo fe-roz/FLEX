@@ -336,8 +336,21 @@ window.addEventListener('resize', () => {
 // ── Coordinate conversion (mirrors Python latlon_to_utm) ─────────────────────
 const META = (CAVES_DATA && CAVES_DATA.meta) || {};
 
+// The name typed in FLEX's export panel titles the viewer (and the app).
+function applyMapName() {
+  const name = (META.name || '').trim();
+  if (!name) return;
+  document.title = name + ' \u2014 FLEX';
+  const h1 = document.querySelector('#title-bar h1');
+  if (h1) h1.textContent = name;
+}
+applyMapName();
+
 function latlonToUTM(lat, lon) {
-  const zone   = Math.floor((lon + 180) / 6) + 1;
+  // The export's own zone, not the point's: near a zone line a GPS fix can
+  // fall in the neighbouring zone, and converting it there puts it in a
+  // different coordinate system from the terrain (hundreds of km off).
+  const zone   = META.utm_zone || (Math.floor((lon + 180) / 6) + 1);
   const lonRad = lon * Math.PI / 180;
   const latRad = lat * Math.PI / 180;
   const lon0   = ((zone - 1) * 6 - 180 + 3) * Math.PI / 180;
@@ -451,11 +464,25 @@ function loadB64Texture(src, onLoad) {
     if (typeof requestRender === 'function') { requestRender(); wakeRender(); }
   };
   img.onerror = () => console.warn('texture failed to load:', String(src).slice(0, 64));
-  // Accepts a bare base64 payload (the inline export), a full data: URI, or a
-  // relative file name — the APK build extracts the textures to sidecar files
-  // so the WebView never has to parse a 180 MB HTML document.
-  img.src = /^(data:|https?:|\.{0,2}\/)/.test(src) ? src
-          : (/^[A-Za-z0-9+/=\s]+$/.test(src.slice(0, 120)) ? 'data:image/jpeg;base64,' + src : src);
+  img.src = textureSrc(src);
+}
+
+// Where a texture comes from. Three shapes reach here: a data:/http(s): URL,
+// used as is; a sidecar file name ("tex_sat.jpg") from the APK build, which
+// splits the assets out so the WebView never parses a 180 MB document; and a
+// bare base64 payload from the single-file export.
+//
+// Decide by what the string IS, not by its first character. JPEG base64 always
+// begins "/9j/", so a rule keyed on a leading slash sent every single-file
+// export off to fetch a file that does not exist and left the terrain bare.
+// Base64 has no '.', so a trailing image extension can only be a file name.
+// tools/test_viewer_texsrc.js pins this down.
+function textureSrc(src) {
+  src = String(src);
+  if (/^(data:|https?:|blob:)/i.test(src)) return src;
+  if (/\.(jpe?g|png|webp)(\?.*)?$/i.test(src)) return src;
+  const mime = src.startsWith('iVBOR') ? 'image/png' : 'image/jpeg';
+  return 'data:' + mime + ';base64,' + src;
 }
 const _downRay = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, 0, -1));
 
@@ -476,7 +503,7 @@ function terrainZAt(x, y) {
 // pass over the vertex buffer at load time bins every vertex into a coarse
 // grid, after which a height query is a handful of array reads. Build cost is
 // paid once; lookup goes from O(triangles) to O(1).
-// Sized from a hold-out test against the real Marbles mesh (991,569 vertices
+// Sized from a hold-out test against a real exported mesh (991,569 vertices
 // over 3353 x 3214 m): grid built from 90% of vertices, error measured on the
 // other 10%. Accuracy improves monotonically with resolution --
 //    498 cells (6.7 m): 1.77 m mean, 5.1 m p95
@@ -1174,7 +1201,7 @@ setTimeout(() => {
     terrainGroup = gltf.scene;
     scene.add(terrainGroup);
 
-    // Two-texture system: satellite (ESRI) + hillshade (Mapbox/custom XYZ).
+    // Two-texture system: satellite + hillshade (built from the LiDAR, or XYZ tiles).
     // flipY=false is critical: our UVs have V=0 at north, matching glTF convention.
     // (terrainTexSat, terrainTexHs, texMode, applyTerrainTexture, loadB64Texture
     //  are declared at top level so imagery toggle buttons can reach them.)
@@ -1188,6 +1215,13 @@ setTimeout(() => {
     if (TERRAIN_HS_B64 && TERRAIN_HS_B64 !== 'PLACEHOLDER_HS_B64') {
       loadB64Texture(TERRAIN_HS_B64, tex => {
         terrainTexHs = tex;
+        // Say where the shading came from: built from this LiDAR, or tiles.
+        const hsBtn = document.getElementById('btn-layer-hs');
+        if (hsBtn && META.hillshade === 'lidar') {
+          hsBtn.textContent = '\u26f0\ufe0f LIDAR';
+          hsBtn.title = 'Hillshade built from the LiDAR ground returns' +
+            (META.hillshade_cell_m ? ' (' + META.hillshade_cell_m + ' m)' : '');
+        }
         // Reveal the imagery toggle section inside the map panel
         const layerSection = document.getElementById('map-panel-layer');
         if (layerSection) layerSection.style.display = 'block';
