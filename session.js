@@ -20,6 +20,7 @@ let _caveVisible     = false;
 let _poiVisible      = true;
 let _panelSections   = {};   // { sectionBodyId: true/false (open) }
 let _pointBudget     = 10_000_000;
+let _searchPins      = [];   // [{name, lon, lat, elev}] — pins dropped by the search box
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -90,6 +91,16 @@ export function notifyPointBudgetChanged(budget) {
 }
 
 /**
+ * Called by the search-pin code in flex.js whenever a pin is added or cleared,
+ * and once at startup with the restored pins (before initSession, so that
+ * call only seeds the state; saveSession is a no-op until then).
+ */
+export function notifySearchPinsChanged(pins) {
+  _searchPins = (pins || []).map(p => ({ name: p.name, lon: p.lon, lat: p.lat, elev: p.elev }));
+  saveSession();
+}
+
+/**
  * Serialize current state to localStorage.
  */
 export function saveSession() {
@@ -108,6 +119,7 @@ export function saveSession() {
       poiVisible:      _poiVisible,
       panelSections:   { ..._panelSections },
       pointBudget:     _pointBudget,
+      searchPins:      _searchPins,
     };
     localStorage.setItem(SESSION_KEY, JSON.stringify(snapshot));
     _flashIndicator(true);
