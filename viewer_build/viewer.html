@@ -226,6 +226,19 @@
     padding: 4px 12px; font-size: 11px; cursor: pointer; pointer-events: all; white-space: nowrap;
   }
   #rec-badge.show { display: block; }
+
+  /* Reach bar (third tap on a station) */
+  #reach-bar {
+    display: none; position: fixed; top: 46px; left: 50%; transform: translateX(-50%); z-index: 39;
+    background: rgba(10,10,20,.9); border: 1px solid rgba(255,255,255,.15); border-radius: 18px;
+    padding: 5px 8px 5px 12px; font-size: 11px; align-items: center; gap: 8px; pointer-events: all;
+    white-space: nowrap; max-width: calc(100vw - 80px);
+  }
+  #reach-bar.show { display: flex; }
+  #reach-from { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+  #reach-half { width: 110px; accent-color: #00e5ff; }
+  #reach-half-lbl { opacity: .7; min-width: 64px; }
+  #reach-off { background: none; border: none; color: #aaa; font-size: 14px; cursor: pointer; padding: 0 4px; }
   #rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #fff; margin-right: 6px; animation: gpsPulse 1.2s infinite; }
   .tb-btn.fly-active { background: rgba(255,160,0,.35); border-color: #ffa000; }
 </style>
@@ -310,6 +323,7 @@
     <div class="help-row"><span class="help-icon">🔍</span><span class="help-desc">Search stations, areas and leads · leads list · record tracks and drop points (export GPX / KML)</span></div>
     <div class="help-row"><span class="help-icon">🌈</span><span class="help-desc">Colour: survey → elevation → depth below ground</span></div>
     <div class="help-row"><span class="help-icon">🧍</span><span class="help-desc">Tap a station, then tap it again: orbit around it, with a caver for scale</span></div>
+    <div class="help-row"><span class="help-icon">🫥</span><span class="help-desc">Tap a station a third time: fade everything by distance along the survey from it (slider sets how fast)</span></div>
     <div class="help-row"><span class="help-icon">📏</span><span class="help-desc">Measure: tap two points (stations snap); shows slope, horizontal and vertical distance. Tap 📏 again to clear</span></div>
     <div class="help-row"><span class="help-icon">🏷️</span><span class="help-desc">Area names &amp; leads: both → names → leads → none</span></div>
     <div class="help-row"><span class="help-icon">📍</span><span class="help-desc">GPS: tap → pin → follow → heading-up → off</span></div>
@@ -336,6 +350,13 @@
   <div id="dl-title"></div>
   <div id="dl-bar"></div>
   <div class="dl-ends"><span id="dl-lo"></span><span id="dl-hi"></span></div>
+</div>
+
+<div id="reach-bar">
+  <span id="reach-from"></span>
+  <input type="range" id="reach-half" min="0" max="100" value="47" aria-label="Fade distance">
+  <span id="reach-half-lbl"></span>
+  <button id="reach-off" title="Turn reach off">✕</button>
 </div>
 
 <div id="rec-badge"><span id="rec-dot"></span>REC <span id="rec-stats"></span></div>
@@ -1618,7 +1639,7 @@ function buildPassageMesh(groups) {
   let nv = 0, ni = 0;
   groups.forEach(g => { nv += g.pos.length / 3; ni += g.idx.length; });
   if (!nv || !ni) return;
-  const pos = new Float32Array(nv * 3), col = new Float32Array(nv * 3);
+  const pos = new Float32Array(nv * 3), col = new Float32Array(nv * 4);   // RGBA: reach fades per vertex
   const idx = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
   let vo = 0, io = 0;
   groups.forEach(g => {
@@ -1628,7 +1649,7 @@ function buildPassageMesh(groups) {
     const c = new THREE.Color(hex);
     pos.set(P, vo * 3);
     for (let i = 0; i < n; i++) {
-      col[(vo + i) * 3] = c.r; col[(vo + i) * 3 + 1] = c.g; col[(vo + i) * 3 + 2] = c.b;
+      col[(vo + i) * 4] = c.r; col[(vo + i) * 4 + 1] = c.g; col[(vo + i) * 4 + 2] = c.b; col[(vo + i) * 4 + 3] = 1;
     }
     for (let k = 0; k < I.length; k++) idx[io + k] = I[k] + vo;
     vo += n; io += I.length;
@@ -1636,7 +1657,7 @@ function buildPassageMesh(groups) {
   });
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 4));
   geo.setIndex(new THREE.BufferAttribute(idx, 1));
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
@@ -1659,6 +1680,7 @@ function buildPassageMesh(groups) {
   if (btn) btn.style.display = '';
   applyWallMode();
   if (colourMode) applyWallColours();     // walls can arrive after 🌈 was set
+  if (reach) applyReach();                 // …or after reach was turned on
 }
 
 function applyWallMode() {
@@ -2035,23 +2057,37 @@ function depthT(mode, d, R) {
   return mode === 2 ? 1 - t : t;
 }
 
-// Per-vertex colours for a geometry, cached per mode on the object.
+// Per-vertex colours for a geometry: rgb from the colour mode (cached per mode
+// on the object), alpha from reach (obj.userData.alpha, or opaque). The colour
+// attribute is RGBA (itemSize 4) so three.js blends per vertex.
 function colourVertices(obj, baseKey, mode) {
   const geo = obj.geometry, attr = geo.attributes.color;
   if (!attr) return;
-  if (!obj.userData[baseKey]) obj.userData[baseKey] = attr.array.slice();
-  if (mode === 0) { attr.array.set(obj.userData[baseKey]); attr.needsUpdate = true; return; }
-  const ck = baseKey + '_m' + mode;
-  if (!obj.userData[ck]) {
-    const P = geo.attributes.position.array, out = new Float32Array(P.length);
-    const R = colourRange(mode), c = new THREE.Color();
-    for (let i = 0; i < P.length; i += 3) {
-      rampColor(depthT(mode, depthValue(mode, P[i], P[i + 1], P[i + 2]), R), c);
-      out[i] = c.r; out[i + 1] = c.g; out[i + 2] = c.b;
-    }
-    obj.userData[ck] = out;
+  const st = attr.itemSize, A = attr.array, n = A.length / st;
+  if (!obj.userData[baseKey]) {
+    const b = new Float32Array(n * 3);
+    for (let v = 0; v < n; v++) { b[3 * v] = A[st * v]; b[3 * v + 1] = A[st * v + 1]; b[3 * v + 2] = A[st * v + 2]; }
+    obj.userData[baseKey] = b;
   }
-  attr.array.set(obj.userData[ck]);
+  let rgb = obj.userData[baseKey];
+  if (mode !== 0) {
+    const ck = baseKey + '_m' + mode;
+    if (!obj.userData[ck]) {
+      const P = geo.attributes.position.array, out = new Float32Array(P.length);
+      const R = colourRange(mode), c = new THREE.Color();
+      for (let i = 0; i < P.length; i += 3) {
+        rampColor(depthT(mode, depthValue(mode, P[i], P[i + 1], P[i + 2]), R), c);
+        out[i] = c.r; out[i + 1] = c.g; out[i + 2] = c.b;
+      }
+      obj.userData[ck] = out;
+    }
+    rgb = obj.userData[ck];
+  }
+  const alpha = obj.userData.alpha;
+  for (let v = 0; v < n; v++) {
+    A[st * v] = rgb[3 * v]; A[st * v + 1] = rgb[3 * v + 1]; A[st * v + 2] = rgb[3 * v + 2];
+    if (st === 4) A[st * v + 3] = alpha ? alpha[v] : 1;
+  }
   attr.needsUpdate = true;
 }
 
@@ -2107,6 +2143,194 @@ document.getElementById('btn-colour').addEventListener('click', () => {
   applyColourMode();
   showToast('Colour: ' + COLOUR_MODES[colourMode].name);
 });
+
+// ── Reach: fade by distance along the survey (third tap) ────────────────────
+// Tap a station, tap it again (caver), tap a third time: everything fades by
+// how far it is *along the survey* from that station, not in a straight line,
+// so passages that cross over without connecting read as far apart. The fade
+// halves every `half` metres (slider on the reach bar); unconnected or very
+// far passage bottoms out at REACH_MIN_ALPHA so it stays in view. Walls take
+// the distance of the nearest survey shot (approximate where passages nearly
+// touch). Tapping other stations only selects them and shows their distance;
+// a third tap on another station moves the reach there; ✕ turns it off.
+const REACH_MIN_ALPHA = 0.08;
+const REACH_HALF_MIN = 10, REACH_HALF_MAX = 3000;   // slider range, metres
+let reach = null;                 // { origin, dist: Map(key → m), half }
+let caveEdges = [];               // [fromKey, toKey, length] per shot
+let _segKeys = [];                // per line vertex: its station key (or null)
+let _caveAdj = null;
+
+function reachAdjacency() {
+  if (_caveAdj) return _caveAdj;
+  _caveAdj = new Map();
+  const add = (a, b, w) => { if (!_caveAdj.has(a)) _caveAdj.set(a, []); _caveAdj.get(a).push(b, w); };
+  for (const [a, b, w] of caveEdges) { if (a && b && a !== b) { add(a, b, w); add(b, a, w); } }
+  return _caveAdj;
+}
+
+// Single-source shortest paths over the shot graph (binary heap).
+function reachDistances(src) {
+  const adj = reachAdjacency(), dist = new Map([[src, 0]]);
+  const hk = [src], hd = [0];
+  const push = (k, d) => {
+    let i = hk.length; hk.push(k); hd.push(d);
+    while (i > 0) { const p = (i - 1) >> 1; if (hd[p] <= d) break; hk[i] = hk[p]; hd[i] = hd[p]; i = p; }
+    hk[i] = k; hd[i] = d;
+  };
+  const pop = () => {
+    const k = hk[0], d = hd[0], lk = hk.pop(), ld = hd.pop();
+    if (hk.length) {
+      let i = 0;
+      for (;;) {
+        let c = 2 * i + 1; if (c >= hk.length) break;
+        if (c + 1 < hk.length && hd[c + 1] < hd[c]) c++;
+        if (hd[c] >= ld) break;
+        hk[i] = hk[c]; hd[i] = hd[c]; i = c;
+      }
+      hk[i] = lk; hd[i] = ld;
+    }
+    return [k, d];
+  };
+  while (hk.length) {
+    const [k, d] = pop();
+    if (d > dist.get(k)) continue;
+    const nb = adj.get(k); if (!nb) continue;
+    for (let j = 0; j < nb.length; j += 2) {
+      const nd = d + nb[j + 1];
+      if (nd < (dist.has(nb[j]) ? dist.get(nb[j]) : Infinity)) { dist.set(nb[j], nd); push(nb[j], nd); }
+    }
+  }
+  return dist;
+}
+
+const reachAlpha = d => (d === undefined || !isFinite(d)) ? REACH_MIN_ALPHA
+  : Math.max(REACH_MIN_ALPHA, Math.pow(0.5, d / reach.half));
+
+// Wall vertex → nearest shot (segment index into caveLines) and where along it.
+function wallShotMap() {
+  const wm = passageMesh && passageMesh.userData.meshes && passageMesh.userData.meshes[0];
+  if (!wm || !caveLines) return null;
+  if (wm.userData.segIdx) return wm.userData;
+  const S = caveLines.geometry.attributes.position.array, nSeg = S.length / 6;
+  const C = 6, grid = new Map(), cell = (x, y) => Math.floor(x / C) + ',' + Math.floor(y / C);
+  for (let s = 0; s < nSeg; s++) {
+    const o = s * 6;
+    const x0 = Math.floor(Math.min(S[o], S[o + 3]) / C), x1 = Math.floor(Math.max(S[o], S[o + 3]) / C);
+    const y0 = Math.floor(Math.min(S[o + 1], S[o + 4]) / C), y1 = Math.floor(Math.max(S[o + 1], S[o + 4]) / C);
+    for (let gx = x0; gx <= x1; gx++) for (let gy = y0; gy <= y1; gy++) {
+      const k = gx + ',' + gy; if (!grid.has(k)) grid.set(k, []); grid.get(k).push(s);
+    }
+  }
+  const P = wm.geometry.attributes.position.array, nv = P.length / 3;
+  const segIdx = new Int32Array(nv).fill(-1), segT = new Float32Array(nv);
+  for (let v = 0; v < nv; v++) {
+    const px = P[3 * v], py = P[3 * v + 1], pz = P[3 * v + 2];
+    const cx = Math.floor(px / C), cy = Math.floor(py / C);
+    let best = -1, bestD = Infinity, bestT = 0;
+    for (let r = 1; r <= 4 && best < 0; r++) {          // widen until a shot is found
+      for (let gx = cx - r; gx <= cx + r; gx++) for (let gy = cy - r; gy <= cy + r; gy++) {
+        const list = grid.get(gx + ',' + gy); if (!list) continue;
+        for (const s of list) {
+          const o = s * 6, ax = S[o], ay = S[o + 1], az = S[o + 2];
+          const dx = S[o + 3] - ax, dy = S[o + 4] - ay, dz = S[o + 5] - az;
+          const L2 = dx * dx + dy * dy + dz * dz;
+          let t = L2 > 0 ? ((px - ax) * dx + (py - ay) * dy + (pz - az) * dz) / L2 : 0;
+          t = t < 0 ? 0 : t > 1 ? 1 : t;
+          const qx = ax + t * dx - px, qy = ay + t * dy - py, qz = az + t * dz - pz;
+          const d2 = qx * qx + qy * qy + qz * qz;
+          if (d2 < bestD) { bestD = d2; best = s; bestT = t; }
+        }
+      }
+    }
+    segIdx[v] = best; segT[v] = bestT;
+  }
+  wm.userData.segIdx = segIdx; wm.userData.segT = segT;
+  return wm.userData;
+}
+
+// Distance along the survey to a point a fraction t along line segment s.
+function reachSegDist(s, t) {
+  const kA = _segKeys[2 * s], kB = _segKeys[2 * s + 1];
+  const dA = kA != null && reach.dist.has(kA) ? reach.dist.get(kA) : Infinity;
+  const dB = kB != null && reach.dist.has(kB) ? reach.dist.get(kB) : Infinity;
+  const S = caveLines.geometry.attributes.position.array, o = s * 6;
+  const L = Math.hypot(S[o + 3] - S[o], S[o + 4] - S[o + 1], S[o + 5] - S[o + 2]);
+  return Math.min(dA + t * L, dB + (1 - t) * L);
+}
+
+function applyReach() {
+  const on = !!reach;
+  if (caveLines) {
+    const n = caveLines.geometry.attributes.position.count;
+    let a = null;
+    if (on) {
+      a = new Float32Array(n);
+      for (let v = 0; v < n; v++) {
+        const k = _segKeys[v];
+        a[v] = reachAlpha(k != null ? reach.dist.get(k) : undefined);
+      }
+    }
+    caveLines.userData.alpha = a;
+    colourVertices(caveLines, 'baseCol', colourMode);
+  }
+  const wm = passageMesh && passageMesh.userData.meshes && passageMesh.userData.meshes[0];
+  if (wm) {
+    let a = null;
+    if (on) {
+      const map = wallShotMap();
+      const nv = wm.geometry.attributes.position.count;
+      a = new Float32Array(nv);
+      for (let v = 0; v < nv; v++) {
+        const s = map ? map.segIdx[v] : -1;
+        a[v] = s < 0 ? REACH_MIN_ALPHA : reachAlpha(reachSegDist(s, map.segT[v]));
+      }
+    }
+    wm.userData.alpha = a;
+    applyWallColours();
+  }
+  stationMap.forEach(st => {
+    const a = on ? (st === reach.origin ? 1 : reachAlpha(reach.dist.get(st._key))) : 1;
+    st._reachAlpha = a;
+    if (st._mesh) { st._mesh.material.transparent = a < 1; st._mesh.material.opacity = a; st._mesh.material.needsUpdate = true; }
+    if (st._sprite && st._sprite !== _selSprite) st._sprite.material.opacity = a;
+    if (st._leadSprite) st._leadSprite.material.opacity = a;
+  });
+  const bar = document.getElementById('reach-bar');
+  bar.classList.toggle('show', on);
+  if (on) {
+    document.getElementById('reach-from').textContent = 'Reach from ' + (reach.origin.name || 'station');
+    document.getElementById('reach-half-lbl').textContent = '½ every ' + fmtHalf(reach.half);
+  }
+  requestRender(); wakeRender();
+}
+const escHtml = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmtHalf = m => m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
+
+function reachFrom(st) {
+  const half = reach ? reach.half : reachHalfFromSlider();
+  reach = { origin: st, dist: reachDistances(st._key), half };
+  applyReach();
+  let n = 0; reach.dist.forEach(() => n++);
+  showToast(`Reach from ${st.name || 'station'}: ${n - 1} connected stations`);
+  if (_selMesh && _selMesh._station === st) selectStation(st);   // refresh the panel row
+}
+function reachOff() { reach = null; applyReach(); }
+
+function reachHalfFromSlider() {
+  const v = +document.getElementById('reach-half').value / 100;
+  return REACH_HALF_MIN * Math.pow(REACH_HALF_MAX / REACH_HALF_MIN, v);
+}
+let _reachRaf = 0;      // big caves: recompute at most once a frame while dragging
+document.getElementById('reach-half').addEventListener('input', () => {
+  if (!reach || _reachRaf) return;
+  _reachRaf = requestAnimationFrame(() => {
+    _reachRaf = 0;
+    if (!reach) return;
+    reach.half = reachHalfFromSlider();
+    applyReach();
+  });
+});
+document.getElementById('reach-off').addEventListener('click', reachOff);
 
 // ── 🔍 Find panel: Search · Leads · Tracks & points ─────────────────────────
 const findPanel = document.getElementById('find-panel');
@@ -2736,6 +2960,7 @@ function buildCaveLines() {
   // Every shot goes into one LineSegments with per-vertex colours: one draw
   // call however big the cave, and 🌈 recolours it in place.
   const _segPos = [], _segCol = [];
+  _segKeys = []; caveEdges = []; _caveAdj = null;
 
   surveys.forEach(sv => {
     let hexColor = sv.color || '#00e5ff';
@@ -2750,7 +2975,7 @@ function buildCaveLines() {
       const pts = line.map(([x,y,z]) => new THREE.Vector3(x, y, z));
       for (let k = 0; k + 1 < pts.length; k++) {
         _segPos.push(pts[k].x, pts[k].y, pts[k].z, pts[k + 1].x, pts[k + 1].y, pts[k + 1].z);
-        _segCol.push(col.r, col.g, col.b, col.r, col.g, col.b);
+        _segCol.push(col.r, col.g, col.b, 1, col.r, col.g, col.b, 1);
       }
       drawn = true;
 
@@ -2771,6 +2996,11 @@ function buildCaveLines() {
         stationMap.set(toKey, { pos: pts[1].clone(), name: toName || '', surveyName: sv.name || 'Survey', cave: sv.cave || '', hexColor, shots: [], lrud: null, dist: null });
       }
       if (shot) stationMap.get(toKey).shots.push({ ...shot, _role: 'to' });
+      // Reach: which station each line vertex is, and the shot as a graph edge.
+      for (let k = 0; k + 1 < pts.length; k++) {
+        _segKeys.push(pts.length === 2 ? fromKey : null, pts.length === 2 ? toKey : null);
+      }
+      caveEdges.push([fromKey, toKey, pts[0].distanceTo(pts[1])]);
     });
 
     // Overlay proper station data (name, lrud, dist) from sv.stations if present
@@ -2823,8 +3053,9 @@ function buildCaveLines() {
   if (_segPos.length) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(_segPos), 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(_segCol), 3));
-    caveLines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false }));
+    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(_segCol), 4));
+    caveLines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false, transparent: true }));
+    caveLines.renderOrder = -1;      // first in the transparent pass, as when it was opaque
     caveGroup.add(caveLines);
   }
 
@@ -2836,9 +3067,11 @@ function buildCaveLines() {
   const hitGeo   = new THREE.SphereGeometry(stR * 4, 6, 6);   // 4× radius — easy finger tap
   const hitMat   = new THREE.MeshBasicMaterial({ visible: false });  // invisible hit volume
   stationMap.forEach((st, key) => {
+    st._key = key;
     const stMat = new THREE.MeshBasicMaterial({ color: st.hexColor, depthTest: false });
     stMat.renderOrder = 2;
     const mesh = new THREE.Mesh(stGeo, stMat);
+    mesh.renderOrder = -1;           // stays ahead of the terrain when reach makes it translucent
     mesh.position.copy(st.pos);
     mesh._station = st;
     stationGroup.add(mesh);
@@ -3004,6 +3237,8 @@ function clearStationHighlight() {
     const st = _selMesh._station;
     _selMesh.scale.set(1, 1, 1);
     _selMesh.material.color.set(st._dispColor || st.hexColor);
+    const ra = st._reachAlpha ?? 1;
+    _selMesh.material.opacity = ra; _selMesh.material.transparent = ra < 1;
     _selMesh.visible = isStationVisible(st);
   }
   if (_selSprite) {
@@ -3015,7 +3250,7 @@ function clearStationHighlight() {
       _selSprite.scale.copy(_selSprite._baseScale);
     }
     _selSprite.material.color.set(0xffffff);
-    _selSprite.material.opacity = 1;
+    _selSprite.material.opacity = (st && st._reachAlpha) ?? 1;
     _selSprite.visible = st ? isStationVisible(st) : false;
   }
   _selMesh = null; _selSprite = null;
@@ -3030,6 +3265,7 @@ function selectStation(st) {
     st._mesh.visible = true;
     st._mesh.scale.set(2, 2, 2);
     st._mesh.material.color.set(0xffffff);
+    st._mesh.material.opacity = 1;
     _selMesh = st._mesh;
   }
   if (st._sprite) {
@@ -3039,6 +3275,7 @@ function selectStation(st) {
     const factor = (stationMode === 1 && st._isEnd) ? 2 : 1;
     st._sprite.scale.copy(st._sprite._baseScale).multiplyScalar(factor * 2);
     st._sprite.material.color.set(0xffffff);
+    st._sprite.material.opacity = 1;
     _selSprite = st._sprite;
   }
 
@@ -3064,6 +3301,11 @@ function selectStation(st) {
   // Elevation
   html += `<div class="fx-row"><span class="lbl">Elevation:</span> <span class="val">${st.pos.z.toFixed(1)} m</span></div>`;
   const cover = coverAt(st.pos.x, st.pos.y, st.pos.z);
+  if (reach && reach.origin !== st) {
+    const rd = reach.dist.get(st._key);
+    html += `<div class="fx-row"><span class="lbl">Along the survey from ${escHtml(reach.origin.name || 'origin')}:</span> <span class="val">${
+      rd === undefined ? 'not connected' : `${Math.round(rd)} m (${Math.round(rd / 0.3048)} ft)`}</span></div>`;
+  }
   if (isFinite(cover)) html += `<div class="fx-row"><span class="lbl">Below ground:</span> <span class="val">${
     cover > 0.5 ? `${cover.toFixed(1)} m (${Math.round(cover / 0.3048)} ft)` : 'at or above the surface'}</span></div>`;
 
@@ -3102,7 +3344,11 @@ function selectStation(st) {
     });
   }
 
-  html += `<div class="fx-row" style="opacity:.45;font-size:10px;margin-top:6px">Tap the station again to stand a caver there and orbit it</div>`;
+  const _caverHere = stationCaver && stationCaver.visible && stationCaver.userData.station === st;
+  html += `<div class="fx-row" style="opacity:.45;font-size:10px;margin-top:6px">${
+    reach && reach.origin === st ? 'Fading by distance along the survey from here — ✕ on the bar turns it off'
+    : _caverHere ? 'Tap again to fade everything by distance along the survey from here'
+    : 'Tap the station again to stand a caver there and orbit it'}</div>`;
 
   // Compass calibration against a survey shot from this station
   const nb = stationNeighbour(st);
@@ -3189,8 +3435,11 @@ function onPointerTap(e) {
   const hits = _tapRay.intersectObjects(stationMeshes, false);
   if (hits.length) {
     const st = hits[0].object._station;
-    if (_selMesh && _selMesh._station === st) focusStation(st);
-    else selectStation(st);
+    if (_selMesh && _selMesh._station === st) {
+      // Second tap: caver and orbit. Third tap: reach from here.
+      if (stationCaver && stationCaver.visible && stationCaver.userData.station === st) reachFrom(st);
+      else focusStation(st);
+    } else selectStation(st);
   } else {
     infoPanel.classList.remove('open');
     clearStationHighlight();
