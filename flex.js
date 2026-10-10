@@ -24,6 +24,7 @@ import {
   notifyPanelSectionToggled, notifyPointBudgetChanged,
   notifySearchPinsChanged,
 } from "./session.js";
+import { initSpaceMouse } from "./spacemouse.js";
 
 function isAoiGeometry(geometry) {
   if (!geometry || typeof geometry !== "object") {
@@ -6546,6 +6547,40 @@ scene.screenSpaceCameraController.enableZoom = true;
 scene.screenSpaceCameraController.enableTilt = true;
 scene.screenSpaceCameraController.enableLook = true;
 
+// Mouse buttons outside fly mode: right-drag orbits, middle-drag zooms (Cesium's
+// default is the other way round). Fly mode keeps Cesium's defaults. Ctrl+drag
+// and the wheel/pinch behave as before in both.
+const _CamEv = Cesium.CameraEventType;
+const _sscc  = scene.screenSpaceCameraController;
+const _CAM_DEFAULT = {
+  zoom: _sscc.zoomEventTypes,
+  tilt: _sscc.tiltEventTypes,
+};
+const _CAM_SWAPPED = {
+  zoom: [_CamEv.MIDDLE_DRAG, _CamEv.WHEEL, _CamEv.PINCH],
+  tilt: [_CamEv.RIGHT_DRAG, _CamEv.PINCH,
+         { eventType: _CamEv.LEFT_DRAG,   modifier: Cesium.KeyboardEventModifier.CTRL },
+         { eventType: _CamEv.RIGHT_DRAG,  modifier: Cesium.KeyboardEventModifier.CTRL }],
+};
+let _camButtonsSwapped = null;
+function _setCameraButtons(swapped) {
+  if (_camButtonsSwapped === swapped) return;
+  const m = swapped ? _CAM_SWAPPED : _CAM_DEFAULT;
+  _sscc.zoomEventTypes = m.zoom;
+  _sscc.tiltEventTypes = m.tilt;
+  _camButtonsSwapped = swapped;
+}
+_setCameraButtons(true);
+
+// 3Dconnexion SpaceMouse (WebHID). Drives the Cesium camera every frame from
+// loop(); Potree follows Cesium's camera as usual. Panel: Tools → SpaceMouse.
+let _spaceMouse = null;
+try {
+  _spaceMouse = initSpaceMouse({ viewer: cesiumViewer, heightAboveGround: sampleHeightAboveGround });
+} catch (err) {
+  console.warn('[spacemouse] init failed', err);
+}
+
 let startMousePosition;
 let moveRate = 100;
 let moverRateMultiplyer = 1;
@@ -7164,6 +7199,7 @@ if (flags.Fly) {
 
     moveRate = moveRate*moverRateMultiplyer;
 
+  _setCameraButtons(false);
   scene.screenSpaceCameraController.enableZoom = false;
   scene.screenSpaceCameraController.enableRotate = false;
   if (flags.moveForward) {
@@ -7185,6 +7221,7 @@ if (flags.Fly) {
     camera.moveRight(moveRate*0.75);
   }
 }else{
+  _setCameraButtons(true);
   scene.screenSpaceCameraController.enableZoom = true;
   scene.screenSpaceCameraController.enableRotate = true;
 }
@@ -7955,6 +7992,7 @@ function updateHtmlLabels() {
 
 function loop(timestamp){
   requestAnimationFrame(loop);
+  if (_spaceMouse) _spaceMouse.update(timestamp);
   onCameraFrame();
 
   // console.log(timestamp);

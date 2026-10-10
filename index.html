@@ -1266,6 +1266,39 @@
               </div>
             </div>
 
+            <!-- 3Dconnexion SpaceMouse (spacemouse.js, WebHID: Chrome/Edge) -->
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▸</span> SpaceMouse
+              </div>
+              <div class="lp-section-body" id="lp-spacemouse-body">
+                <div style="padding:2px 0; font-size:11px;">
+                  <button id="sm_connect_btn" class="btn btn-sm btn-primary" style="width:100%;">Connect SpaceMouse</button>
+                  <div id="sm_status" style="margin-top:4px; color:rgba(255,255,255,0.55);">Not connected</div>
+                  <label style="display:block; margin-top:6px;"><input type="checkbox" id="sm_enabled" checked> Control the camera</label>
+                  <label style="display:block; margin-top:4px;">
+                    Speed: <input type="range" id="sm_speed" min="-6" max="6" step="0.25" value="0" style="width:110px; vertical-align:middle;">
+                    <span id="sm_speed_label">×1</span>
+                  </label>
+                  <label style="display:block; margin-top:4px;">
+                    Turn: <input type="range" id="sm_turn" min="0.1" max="3" step="0.05" value="1" style="width:110px; vertical-align:middle;">
+                    <span id="sm_turn_label">×1.00</span>
+                  </label>
+                  <div style="margin-top:6px; color:rgba(255,255,255,0.7);">Invert:
+                    <label><input type="checkbox" id="sm_inv_fwd"> fwd</label>
+                    <label><input type="checkbox" id="sm_inv_right"> side</label>
+                    <label><input type="checkbox" id="sm_inv_up"> up</label>
+                    <label><input type="checkbox" id="sm_inv_yaw"> turn</label>
+                    <label><input type="checkbox" id="sm_inv_pitch"> tilt</label>
+                  </div>
+                  <div id="sm_live" style="margin-top:4px; font-family:monospace; color:rgba(255,255,255,0.45);"></div>
+                  <div style="margin-top:4px; color:rgba(255,255,255,0.4);">
+                    Left button halves the speed, right doubles it. If the 3Dconnexion driver also scrolls or zooms the page, set Chrome to "no action" in 3DxWare.
+                  </div>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
 

@@ -9,6 +9,7 @@
 // ── Constants ─────────────────────────────────────────────────────────────────
 const LONG_PRESS_MS     = 500;
 const TOAST_DURATION_MS = 2000;
+const RIGHT_DRAG_TOLERANCE_PX = 6;   // a right-press that moves further is a drag, not a click
 // Web Mercator: metres per pixel at zoom 0 at the equator
 const WEB_MERCATOR_C    = 156543;
 
@@ -112,6 +113,37 @@ export class ContextMenuController {
     this._boundHandlers.keydown      = (e) => this._handleKeydown(e);
     this._boundHandlers.menuClick    = (e) => this._handleMenuClick(e);
 
+    // A right-drag (orbit, and anything else bound to it) ends with the
+    // browser's contextmenu event on release, which would open the menu after
+    // every orbit. Remember where the right button went down and how far it
+    // has moved; only a click that stayed put opens the menu. Window capture
+    // so the moves are seen whatever the canvas handlers do with them.
+    this._rightDown = null;   // {x, y, moved}
+    this._boundHandlers.ptrDown = (e) => {
+      if (e.button === 2) this._rightDown = { x: e.clientX, y: e.clientY, moved: false };
+    };
+    this._boundHandlers.ptrMove = (e) => {
+      const d = this._rightDown;
+      if (d && !d.moved && Math.hypot(e.clientX - d.x, e.clientY - d.y) > RIGHT_DRAG_TOLERANCE_PX) {
+        d.moved = true;
+      }
+    };
+    // Windows fires contextmenu on release, macOS and Linux on press. On press
+    // nothing is known yet, so the menu waits for the release (see below).
+    this._pendingMenu = null;   // {x, y} while a press-time contextmenu waits
+    this._boundHandlers.ptrUp = (e) => {
+      if (e.button !== 2) return;
+      const d = this._rightDown, pending = this._pendingMenu;
+      this._pendingMenu = null;
+      if (pending) {
+        this._rightDown = null;
+        if (!(d && d.moved)) this._showMenuAtPosition(pending.x, pending.y);
+      }
+    };
+    this.window.addEventListener('pointerdown', this._boundHandlers.ptrDown, true);
+    this.window.addEventListener('pointermove', this._boundHandlers.ptrMove, true);
+    this.window.addEventListener('pointerup',   this._boundHandlers.ptrUp,   true);
+
     canvas.addEventListener('contextmenu', this._boundHandlers.contextMenu);
     this.document.addEventListener('click',   this._boundHandlers.clickOutside);
     this.document.addEventListener('keydown', this._boundHandlers.keydown);
@@ -156,6 +188,17 @@ export class ContextMenuController {
 
   _handleContextMenu(e) {
     e.preventDefault();
+    const d = this._rightDown;
+    if (d && (e.buttons & 2)) {
+      // Fired on press (macOS/Linux): decide on release.
+      this._pendingMenu = { x: e.clientX, y: e.clientY };
+      return;
+    }
+    this._rightDown = null;
+    if (d && (d.moved ||
+        Math.hypot(e.clientX - d.x, e.clientY - d.y) > RIGHT_DRAG_TOLERANCE_PX)) {
+      return;   // it was a drag (orbit etc.), not a click
+    }
     this._showMenuAtPosition(e.clientX, e.clientY);
   }
 
@@ -302,6 +345,9 @@ export class ContextMenuController {
       canvas.removeEventListener('touchend',     this._boundHandlers.touchEnd);
       canvas.removeEventListener('touchcancel',  this._boundHandlers.touchEnd);
     }
+    this.window.removeEventListener('pointerdown', this._boundHandlers.ptrDown, true);
+    this.window.removeEventListener('pointermove', this._boundHandlers.ptrMove, true);
+    this.window.removeEventListener('pointerup',   this._boundHandlers.ptrUp,   true);
     this.document.removeEventListener('click',   this._boundHandlers.clickOutside);
     this.document.removeEventListener('keydown', this._boundHandlers.keydown);
     if (this.menuElement) {
