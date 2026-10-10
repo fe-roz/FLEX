@@ -159,6 +159,74 @@
     display: none; pointer-events: none;
   }
   #joy-canvas.active { display: block; }
+
+  /* A long toolbar scrolls rather than running off a landscape phone */
+  #toolbar { max-height: calc(100vh - 24px); overflow-y: auto; scrollbar-width: none; }
+  #toolbar .tb-btn { flex-shrink: 0; }
+  #toolbar::-webkit-scrollbar { display: none; }
+
+  /* Colour-by-depth legend */
+  #depth-legend {
+    display: none; position: fixed; top: 58px; left: 16px; z-index: 12; pointer-events: none;
+    background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.1); border-radius: 7px;
+    padding: 6px 9px; font-size: 10px;
+  }
+  #depth-legend.show { display: block; }
+  body:has(#find-panel.open) #depth-legend { display: none; }
+  #dl-title { opacity: .8; font-weight: 600; }
+  #dl-bar { width: 160px; height: 8px; border-radius: 3px; margin: 4px 0 3px; }
+  .dl-ends { display: flex; justify-content: space-between; gap: 10px; opacity: .7; }
+
+  /* 🔍 Find panel */
+  #find-panel {
+    display: none; position: fixed; top: 58px; left: 12px; z-index: 35;
+    width: min(340px, calc(100vw - 80px)); max-height: calc(100vh - 120px);
+    background: rgba(10,10,20,.97); border: 1px solid rgba(255,255,255,.13); border-radius: 10px;
+    flex-direction: column; overflow: hidden; pointer-events: all; font-size: 12px;
+  }
+  #find-panel.open { display: flex; }
+  .fp-head { display: flex; align-items: center; gap: 4px; padding: 8px 8px 6px; border-bottom: 1px solid rgba(255,255,255,.08); }
+  .fp-tabs { display: flex; gap: 4px; flex: 1; min-width: 0; }
+  .fp-tab, .fp-sort button, .fp-btn {
+    padding: 5px 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,.15);
+    background: rgba(255,255,255,.06); color: #eee; font-size: 11px; cursor: pointer; white-space: nowrap;
+  }
+  .fp-tab.active, .fp-sort button.active, .fp-btn.active { background: rgba(33,150,243,.35); border-color: #2196F3; }
+  .fp-btn.rec { background: rgba(200,0,50,.45); border-color: #ff4f7a; }
+  .fp-btn:disabled { opacity: .35; }
+  #fp-close { background: none; border: none; color: #aaa; font-size: 16px; cursor: pointer; padding: 2px 6px; }
+  .fp-body { padding: 8px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+  .fp-body[hidden] { display: none; }
+  #fp-q, #fp-form input, #fp-form textarea, .fp-name {
+    width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,.18);
+    background: rgba(0,0,0,.35); color: #eee; font-size: 13px; font-family: inherit;
+  }
+  .fp-name { padding: 2px 4px; font-size: 12px; font-weight: 600; background: transparent; border-color: transparent; }
+  .fp-name:focus { border-color: rgba(255,255,255,.25); background: rgba(0,0,0,.35); }
+  .fp-list { display: flex; flex-direction: column; }
+  .fp-item { display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-bottom: 1px solid rgba(255,255,255,.06); cursor: pointer; }
+  .fp-item:active { background: rgba(0,229,255,.1); }
+  .fp-ic { width: 18px; text-align: center; opacity: .8; flex-shrink: 0; color: #ff9f1c; font-weight: 800; }
+  .fp-tx { flex: 1; min-width: 0; }
+  .fp-t1 { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fp-t2 { font-size: 10px; opacity: .5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fp-note { font-size: 11px; opacity: .55; }
+  .fp-h { font-size: 9px; text-transform: uppercase; letter-spacing: .7px; opacity: .4; margin: 8px 0 2px; }
+  .fp-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .fp-sort { display: flex; gap: 4px; align-items: center; }
+  .fp-mini { background: none; border: 1px solid transparent; color: #ddd; font-size: 14px; cursor: pointer; padding: 2px 4px; border-radius: 5px; flex-shrink: 0; }
+  .fp-mini.armed { color: #ff6b6b; border-color: #ff6b6b; font-size: 11px; }
+  #fp-form { border: 1px solid rgba(255,79,163,.4); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+  #fp-form[hidden] { display: none; }
+
+  /* Track recording badge */
+  #rec-badge {
+    display: none; position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 40;
+    background: rgba(170,0,40,.85); border: 1px solid #ff4f7a; color: #fff; border-radius: 14px;
+    padding: 4px 12px; font-size: 11px; cursor: pointer; pointer-events: all; white-space: nowrap;
+  }
+  #rec-badge.show { display: block; }
+  #rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #fff; margin-right: 6px; animation: gpsPulse 1.2s infinite; }
   .tb-btn.fly-active { background: rgba(255,160,0,.35); border-color: #ffa000; }
 </style>
 </head>
@@ -191,8 +259,12 @@
 
 <div id="toolbar">
   <button class="tb-btn" id="btn-fullscreen" title="Fullscreen">⛶</button>
+  <button class="tb-btn" id="btn-find"  title="Search · leads · tracks &amp; points">🔍</button>
   <button class="tb-btn" id="btn-fly"   title="Fly / Crane mode" style="font-size:14px">🕹️</button>
   <button class="tb-btn" id="btn-cave"  title="Station display">◎</button>
+  <button class="tb-btn" id="btn-colour" title="Colour: survey → elevation → depth below ground">🌈</button>
+  <button class="tb-btn" id="btn-measure" title="Measure: tap two points (station or ground)">📏</button>
+  <button class="tb-btn" id="btn-labels" title="Area names &amp; leads" style="display:none">🏷️</button>
   <button class="tb-btn" id="btn-walls" title="Passage walls: on → ghost → off" style="display:none">🧱</button>
   <button class="tb-btn" id="btn-gps"   title="GPS: off → pin → follow">📍</button>
   <button class="tb-btn" id="btn-kml"   title="Import KML/KMZ">📂</button>
@@ -235,6 +307,11 @@
     <div class="help-section">TOOLBAR</div>
     <div class="help-row"><span class="help-icon">🕹️</span><span class="help-desc">Fly mode (tap again for Crane; again to exit)</span></div>
     <div class="help-row"><span class="help-icon">◎</span><span class="help-desc">Stations: end-only → all → hidden</span></div>
+    <div class="help-row"><span class="help-icon">🔍</span><span class="help-desc">Search stations, areas and leads · leads list · record tracks and drop points (export GPX / KML)</span></div>
+    <div class="help-row"><span class="help-icon">🌈</span><span class="help-desc">Colour: survey → elevation → depth below ground</span></div>
+    <div class="help-row"><span class="help-icon">🧍</span><span class="help-desc">Tap a station, then tap it again: orbit around it, with a caver for scale</span></div>
+    <div class="help-row"><span class="help-icon">📏</span><span class="help-desc">Measure: tap two points (stations snap); shows slope, horizontal and vertical distance. Tap 📏 again to clear</span></div>
+    <div class="help-row"><span class="help-icon">🏷️</span><span class="help-desc">Area names &amp; leads: both → names → leads → none</span></div>
     <div class="help-row"><span class="help-icon">📍</span><span class="help-desc">GPS: tap → pin → follow → heading-up → off</span></div>
     <div class="help-row"><span class="help-icon">⏱️</span><span class="help-desc">Long-press 📍 → test mode: centres the terrain on you</span></div>
     <div class="help-row"><span class="help-icon">📂</span><span class="help-desc">Import KML / KMZ route file</span></div>
@@ -254,6 +331,62 @@
 
 <!-- Hidden KML file picker -->
 <input type="file" id="kml-input" accept=".kml,.kmz" style="display:none">
+
+<div id="depth-legend">
+  <div id="dl-title"></div>
+  <div id="dl-bar"></div>
+  <div class="dl-ends"><span id="dl-lo"></span><span id="dl-hi"></span></div>
+</div>
+
+<div id="rec-badge"><span id="rec-dot"></span>REC <span id="rec-stats"></span></div>
+
+<div id="find-panel">
+  <div class="fp-head">
+    <div class="fp-tabs">
+      <button class="fp-tab active" data-tab="search">Search</button>
+      <button class="fp-tab" data-tab="leads">Leads</button>
+      <button class="fp-tab" data-tab="field">Tracks &amp; points</button>
+    </div>
+    <button id="fp-close" title="Close">✕</button>
+  </div>
+  <div id="fp-search" class="fp-body">
+    <input id="fp-q" type="search" placeholder="Station, area or lead" autocomplete="off" spellcheck="false">
+    <div id="fp-results" class="fp-list"></div>
+  </div>
+  <div id="fp-leads" class="fp-body" hidden>
+    <div class="fp-sort">
+      <button data-sort="near" class="active">Nearest</button>
+      <button data-sort="size">Biggest</button>
+    </div>
+    <div id="fp-leads-from" class="fp-note"></div>
+    <div id="fp-lead-list" class="fp-list"></div>
+  </div>
+  <div id="fp-field" class="fp-body" hidden>
+    <div class="fp-row">
+      <button id="fp-rec" class="fp-btn">● Record track</button>
+      <span id="fp-rec-stats" class="fp-note"></span>
+    </div>
+    <div class="fp-row">
+      <button id="fp-pt-gps" class="fp-btn">📍 Point at my position</button>
+      <button id="fp-pt-map" class="fp-btn">👆 Tap the map</button>
+    </div>
+    <div id="fp-form" hidden>
+      <div id="fp-form-where" class="fp-note"></div>
+      <input id="fp-form-name" maxlength="80" placeholder="Name">
+      <textarea id="fp-form-note" rows="2" maxlength="2000" placeholder="Note (optional)"></textarea>
+      <div class="fp-row">
+        <button id="fp-form-save" class="fp-btn active">Save point</button>
+        <button id="fp-form-cancel" class="fp-btn">Cancel</button>
+      </div>
+    </div>
+    <div id="fp-field-list" class="fp-list"></div>
+    <div class="fp-row" style="margin-top:4px">
+      <span class="fp-note">Export all:</span>
+      <button id="fp-exp-gpx" class="fp-btn">GPX</button>
+      <button id="fp-exp-kml" class="fp-btn">KML</button>
+    </div>
+  </div>
+</div>
 
 <div id="info-panel">
   <button id="info-close">✕</button>
@@ -969,6 +1102,7 @@ const GPS_MIN_INTERVAL_MS = 4500;
 let _gpsLastAccepted = 0;
 
 function _gpsOnSuccess(pos) {
+  fieldOnFix(pos);                 // track recording sees every fix
   gpsLastFix = Date.now();
   gpsLastLatLon = { lat: pos.coords.latitude, lon: pos.coords.longitude };
   if (gpsMarker && Date.now() - _gpsLastAccepted < GPS_MIN_INTERVAL_MS) return;
@@ -1098,6 +1232,37 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // ── Compass ───────────────────────────────────────────────────────────────────
+// The phone reports magnetic north; the scene's +Y is UTM grid north. Grid
+// convergence is known from the map (applied by default); magnetic
+// declination and any bias in the phone are not, so the station panel offers a
+// one-tap calibration: stand at a station, point the phone along the survey
+// shot to a neighbouring station, tap. The offset is kept per map.
+let compassRaw = null;            // smoothed, uncorrected phone heading
+const COMPASS_KEY = 'flex_compass_offset_' + ((META.name || '') + '|' +
+  (META.center_lon || 0).toFixed(3) + '|' + (META.center_lat || 0).toFixed(3));
+let compassOffset = (() => {      // degrees added to the phone heading, or null
+  try { const v = localStorage.getItem(COMPASS_KEY); return v === null ? null : +v; }
+  catch (_) { return null; }
+})();
+
+// Grid convergence at the map centre: grid bearing = true bearing - gamma.
+function gridConvergenceDeg() {
+  const lat = META.center_lat, lon = META.center_lon, zone = META.utm_zone;
+  if (lat == null || lon == null || !zone) return 0;
+  const dl = (lon - (zone * 6 - 183)) * Math.PI / 180;
+  return Math.atan(Math.tan(dl) * Math.sin(lat * Math.PI / 180)) * 180 / Math.PI;
+}
+function compassCorrection() {
+  return compassOffset !== null && isFinite(compassOffset) ? compassOffset : -gridConvergenceDeg();
+}
+function setCompassOffset(v) {
+  compassOffset = v;
+  try { if (v === null) localStorage.removeItem(COMPASS_KEY); else localStorage.setItem(COMPASS_KEY, String(v)); }
+  catch (_) { /* storage off: the calibration lasts for this session */ }
+  if (compassRaw !== null) compassHeading = (compassRaw + compassCorrection() + 360) % 360;
+  wakeRender();
+}
+
 function handleOrientation(e) {
   let h = null;
   if (e.webkitCompassHeading !== undefined && e.webkitCompassHeading !== null) {
@@ -1108,7 +1273,8 @@ function handleOrientation(e) {
     h = (360 - e.alpha) % 360;                  // fallback
   }
   if (h !== null) {
-    compassHeading = smoothHeading(h);
+    compassRaw = smoothHeading(h);
+    compassHeading = (compassRaw + compassCorrection() + 360) % 360;
     // deviceorientation fires ~60 Hz. Waking the renderer on every event would
     // undo the idle throttling entirely, so only do it once the heading has
     // actually moved enough to see.
@@ -1337,6 +1503,63 @@ function makeTextSprite(text, hexColor) {
   return { sprite: sp, aspect: canvas.width / canvas.height };
 }
 
+// ── Lead marker ──────────────────────────────────────────────────────────────
+// Just a question mark, outlined and glowing so it reads over terrain, walls and dark cave
+// alike. Drawn on a canvas at 2x; the same code is in flex.js and viewer.html.
+const LEAD_PX = 40;                       // on-screen height, CSS pixels
+const LEAD_Q  = { font: '900 {s}px system-ui, -apple-system, "Segoe UI", sans-serif',
+                  fill: '#ff9f1c', stroke: 'rgba(0,0,0,.85)', sw: 0.10, glow: '#ff8f00' };
+function drawLeadIcon(px) {
+  const W = Math.max(8, Math.round(px * 2));
+  const c = document.createElement('canvas');
+  c.width = W; c.height = W;
+  const g = c.getContext('2d');
+  const size = W * 0.92;
+  g.font = LEAD_Q.font.replace('{s}', size);
+  g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
+  const x = W / 2, y = W / 2 + W * 0.04;
+  g.shadowColor = LEAD_Q.glow; g.shadowBlur = W * 0.18;      // soft orange glow
+  g.lineWidth = size * LEAD_Q.sw; g.strokeStyle = LEAD_Q.stroke; g.strokeText('?', x, y);
+  g.shadowBlur = 0;
+  g.fillStyle = LEAD_Q.fill; g.fillText('?', x, y);
+  return c;
+}
+
+// Leads are a real-world size (like a 1.2 m sign) clamped on screen between
+// LEAD_MIN_PX and LEAD_MAX_PX: small and steady when zoomed out, never huge up
+// close. Sized every drawn frame; one shared texture drawn at LEAD_PX.
+const LEAD_WORLD_M = 1.2;
+const LEAD_MIN_PX  = 12;
+const LEAD_MAX_PX  = 26;
+let _leadTex = null;
+const leadSprites = [];
+function makeLeadSprite() {
+  if (!_leadTex) _leadTex = new THREE.CanvasTexture(drawLeadIcon(LEAD_PX));
+  const mat = new THREE.SpriteMaterial({ map: _leadTex, depthTest: false, transparent: true, sizeAttenuation: false });
+  const sp = new THREE.Sprite(mat);
+  sp.center.set(0.5, -0.05);              // just above the station
+  sp.renderOrder = 3;
+  leadSprites.push(sp);
+  sizeLeadSprites();
+  return sp;
+}
+const _leadWp = new THREE.Vector3();
+function sizeLeadSprites() {
+  if (!leadSprites.length) return;
+  const h = renderer.domElement.clientHeight || window.innerHeight || 1;
+  const tanH = 2 * Math.tan(camera.fov * Math.PI / 360);   // view height at distance 1
+  for (const sp of leadSprites) {
+    if (!sp.visible) continue;
+    sp.getWorldPosition(_leadWp);
+    const dist = Math.max(0.01, camera.position.distanceTo(_leadWp));
+    const truePx = LEAD_WORLD_M * h / (tanH * dist);
+    const px = Math.min(LEAD_MAX_PX, Math.max(LEAD_MIN_PX, truePx));
+    const u = tanH * px / h;
+    sp.scale.set(u, u, 1);
+  }
+}
+window.addEventListener('resize', sizeLeadSprites);
+
 // ── Passage walls (LRUD) ─────────────────────────────────────────────────────
 // Meshes FLEX drew from the survey LRUDs, already in scene XYZ (the exporter
 // converts them with the same UTM frame as the shot lines). Merged into ONE
@@ -1435,6 +1658,7 @@ function buildPassageMesh(groups) {
   const btn = document.getElementById('btn-walls');
   if (btn) btn.style.display = '';
   applyWallMode();
+  if (colourMode) applyWallColours();     // walls can arrive after 🌈 was set
 }
 
 function applyWallMode() {
@@ -1459,8 +1683,1044 @@ document.getElementById('btn-walls').addEventListener('click', () => {
   applyWallMode();
 });
 
+// ── Station focus: orbit a station with a caver standing in the passage ─────
+// Tapping the highlighted station again centres the orbit on it and stands a
+// true-size caver (1.78 m, no on-screen floor: it is there for scale) on the
+// passage floor. The floor is the station minus its D (down) LRUD; without
+// one, a ray straight down onto the exported walls; without walls, the
+// station itself. The caver faces along the passage, toward the next station.
+let stationCaver = null;
+let _focusTween = null;          // {t0, from:{pos,target}, to:{pos,target}}
+const FOCUS_MS = 700;
+const _floorRay = new THREE.Raycaster();
+
+function stationFloorZ(st) {
+  let lr = st.lrud;
+  if (!lr) for (const s of st.shots) if (s.lrud) { lr = s.lrud; if (s._role === 'to') break; }
+  const d = lr == null ? null : (Array.isArray(lr) ? lr[3] : lr.d);
+  if (typeof d === 'number' && isFinite(d) && d >= 0 && d < 60) return st.pos.z - d;
+  if (passageMesh && passageMesh.userData.meshes) {
+    _floorRay.set(new THREE.Vector3(st.pos.x, st.pos.y, st.pos.z + 0.05), new THREE.Vector3(0, 0, -1));
+    _floorRay.far = 30;
+    const hit = _floorRay.intersectObjects(passageMesh.userData.meshes, false)[0];
+    if (hit) return hit.point.z;
+  }
+  return st.pos.z;
+}
+
+// The caver faces where the phone faces when the compass is running (GPS on),
+// otherwise along the passage.
+function caverHeadingFor(st) {
+  return compassHeading !== null ? compassHeading : stationHeading(st);
+}
+
+// Heading (degrees from north, clockwise) toward the next station, if any.
+function stationHeading(st) {
+  let best = null;
+  for (const s of st.shots) {
+    const other = s._role === 'from' ? s.to_xyz : s.from_xyz;
+    if (!other) continue;
+    const dx = other[0] - st.pos.x, dy = other[1] - st.pos.y;
+    if (Math.hypot(dx, dy) < 0.05) continue;
+    best = Math.atan2(dx, dy) * 180 / Math.PI;
+    if (s._role === 'from') break;        // prefer the shot leading onward
+  }
+  if (best === null) {                    // nothing to go on: face the camera
+    best = Math.atan2(camera.position.x - st.pos.x, camera.position.y - st.pos.y) * 180 / Math.PI;
+  }
+  return best;
+}
+
+function focusStation(st) {
+  const floorZ = stationFloorZ(st);
+  if (!stationCaver) {
+    stationCaver = buildCaverMesh(0.60);
+    scene.add(stationCaver);
+  }
+  stationCaver.visible = true;
+  stationCaver.position.set(st.pos.x, st.pos.y, floorZ);
+  stationCaver.userData.station = st;
+  stationCaver.rotation.set(0, 0, -caverHeadingFor(st) * Math.PI / 180);
+
+  const aim = new THREE.Vector3(st.pos.x, st.pos.y, floorZ + CAVER_H * 0.5);
+  if (flyMode) {
+    // Fly/crane keep their own look direction: just move to 5 m in front.
+    const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd);
+    _focusTween = { t0: performance.now(), fly: true,
+      fromPos: camera.position.clone(), toPos: aim.clone().addScaledVector(fwd, -5) };
+  } else {
+    const off = camera.position.clone().sub(controls.target);
+    const len = off.length() || 1;
+    off.multiplyScalar(Math.min(8, Math.max(3, len)) / len);
+    _focusTween = { t0: performance.now(), fly: false,
+      fromPos: camera.position.clone(), toPos: aim.clone().add(off),
+      fromTgt: controls.target.clone(), toTgt: aim };
+  }
+  wakeRender(FOCUS_MS + 300);
+  requestRender();
+}
+
+function stepStationFocus() {
+  if (stationCaver && stationCaver.visible && compassHeading !== null) {
+    stationCaver.rotation.z = -compassHeading * Math.PI / 180;
+  }
+  if (!_focusTween) return;
+  const u = Math.min(1, (performance.now() - _focusTween.t0) / FOCUS_MS);
+  const e = smootherstep(u);
+  camera.position.lerpVectors(_focusTween.fromPos, _focusTween.toPos, e);
+  if (!_focusTween.fly) {
+    controls.target.lerpVectors(_focusTween.fromTgt, _focusTween.toTgt, e);
+    controls.update();
+  }
+  if (u >= 1) _focusTween = null;
+  requestRender();
+}
+
+// ── Area names ───────────────────────────────────────────────────────────────
+// Names placed in FLEX (🏷 Labels on a cave), drawn at a fixed on-screen size
+// so they read from anywhere; the 🏷️ button hides them.
+const areaLabelGroup = new THREE.Group();
+scene.add(areaLabelGroup);
+const AREA_LABEL_PX = 26;
+// Area names and lead markers share the 🏷️ button:
+// 0 both → 1 names only → 2 leads only → 3 none → both …
+const leadGroup = new THREE.Group();
+scene.add(leadGroup);
+let annotMode = 0;
+const ANNOT_MODES = [
+  { names: true,  leads: true,  icon: '🏷️', title: 'Area names & leads (tap: names only)' },
+  { names: true,  leads: false, icon: '🔤', title: 'Area names only (tap: leads only)' },
+  { names: false, leads: true,  icon: '❓', title: 'Leads only (tap: none)' },
+  { names: false, leads: false, icon: '🏷️', title: 'Names & leads hidden (tap: both)' },
+];
+function applyAnnotMode() {
+  const m = ANNOT_MODES[annotMode];
+  areaLabelGroup.visible = m.names;
+  leadGroup.visible = m.leads;
+  const btn = document.getElementById('btn-labels');
+  if (btn) {
+    btn.textContent = m.icon;
+    btn.title = m.title;
+    btn.classList.toggle('off', !m.names && !m.leads);
+  }
+  requestRender(); wakeRender();
+}
+function setupAnnotButton() {
+  const btn = document.getElementById('btn-labels');
+  if (!btn || setupAnnotButton._done) return;
+  if (!areaLabelGroup.children.length && !leadGroup.children.length) return;
+  setupAnnotButton._done = true;
+  btn.style.display = '';
+  btn.addEventListener('click', () => { annotMode = (annotMode + 1) % ANNOT_MODES.length; applyAnnotMode(); });
+  applyAnnotMode();
+}
+
+function sizeAreaLabels() {
+  // sizeAttenuation:false sprites are sized in view units at distance 1:
+  // the view is 2*tan(fov/2) units tall there.
+  const h = renderer.domElement.clientHeight || window.innerHeight || 1;
+  const unit = 2 * Math.tan(camera.fov * Math.PI / 360) * AREA_LABEL_PX / h;
+  areaLabelGroup.children.forEach(sp => sp.scale.set(unit * sp.userData.aspect, unit, 1));
+}
+
+function buildAreaLabels() {
+  const labels = (CAVES_DATA && CAVES_DATA.labels) || [];
+  labels.forEach(lb => {
+    if (!lb || !lb.text || !lb.xyz) return;
+    const { sprite, aspect } = makeTextSprite(String(lb.text), '#7fe7ff');
+    sprite.material.sizeAttenuation = false;
+    sprite.renderOrder = 4;
+    sprite.userData.aspect = aspect;
+    sprite.position.set(lb.xyz[0], lb.xyz[1], lb.xyz[2]);
+    areaLabelGroup.add(sprite);
+  });
+  sizeAreaLabels();
+}
+window.addEventListener('resize', sizeAreaLabels);
+
+// ── Measure ──────────────────────────────────────────────────────────────────
+// 📏 on, then tap two points: a station (snaps to it) or the ground. Draws a
+// right triangle: the straight-line distance on the hypotenuse, the level
+// leg at the lower point's height and the plumb leg, each labelled in m and
+// ft, with the figures (plus slope angle and bearing) in the info panel.
+// One measurement at a time: a third tap starts again; 📏 off clears it.
+let measureOn = false;
+let measurePts = [];
+const measureGroup = new THREE.Group();
+measureGroup.renderOrder = 5;
+scene.add(measureGroup);
+const MEASURE_LABEL_PX = 17;
+const MEASURE_COL = { hyp: '#ffd400', hz: '#00e5ff', vt: '#ff5fd2', pt: '#ffffff' };
+
+const fmtMF = m => `${m.toFixed(m < 10 ? 2 : 1)} m (${(m / 0.3048).toFixed(m < 10 ? 1 : 0)} ft)`;
+
+function clearMeasure() {
+  measurePts = [];
+  while (measureGroup.children.length) {
+    const o = measureGroup.children.pop();
+    if (o.geometry) o.geometry.dispose();
+    if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); }
+  }
+  requestRender(); wakeRender();
+}
+
+// The point under the tap: a station if one is hit, else the terrain surface.
+function measurePick() {
+  const st = _tapRay.intersectObjects(stationMeshes, false)[0];
+  if (st) return { p: st.object._station.pos.clone(), name: st.object._station.name || 'station' };
+  if (terrainGroup) {
+    const t = _tapRay.intersectObject(terrainGroup, true)[0];
+    if (t) return { p: t.point.clone(), name: null };
+  }
+  return null;
+}
+
+function measureLine(a, b, color, dashed) {
+  const geo = new THREE.BufferGeometry().setFromPoints([a, b]);
+  const mat = dashed
+    ? new THREE.LineDashedMaterial({ color, dashSize: Math.max(0.2, a.distanceTo(b) / 24),
+        gapSize: Math.max(0.12, a.distanceTo(b) / 40), depthTest: false, transparent: true })
+    : new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true });
+  const ln = new THREE.Line(geo, mat);
+  if (dashed) ln.computeLineDistances();
+  ln.renderOrder = 5;
+  measureGroup.add(ln);
+}
+
+function measureLabel(text, color, at) {
+  const { sprite, aspect } = makeTextSprite(text, color);
+  sprite.material.sizeAttenuation = false;
+  sprite.renderOrder = 6;
+  sprite.userData.aspect = aspect;
+  sprite.position.copy(at);
+  measureGroup.add(sprite);
+  sizeMeasureLabels();
+}
+
+function measureDot(at) {
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ color: 0xffffff, depthTest: false, sizeAttenuation: false }));
+  sp.userData.dot = true;
+  sp.position.copy(at);
+  sp.renderOrder = 6;
+  measureGroup.add(sp);
+  sizeMeasureLabels();
+}
+
+function sizeMeasureLabels() {
+  const h = renderer.domElement.clientHeight || window.innerHeight || 1;
+  const unit = 2 * Math.tan(camera.fov * Math.PI / 360) / h;
+  measureGroup.children.forEach(o => {
+    if (!o.isSprite) return;
+    if (o.userData.dot) o.scale.set(unit * 8, unit * 8, 1);
+    else o.scale.set(unit * MEASURE_LABEL_PX * o.userData.aspect, unit * MEASURE_LABEL_PX, 1);
+  });
+}
+window.addEventListener('resize', sizeMeasureLabels);
+
+function drawMeasure(A, B) {
+  // Corner of the right angle: level with the lower point, plumb under/over the higher.
+  const lo = A.p.z <= B.p.z ? A.p : B.p, hi = lo === A.p ? B.p : A.p;
+  const C = new THREE.Vector3(hi.x, hi.y, lo.z);
+  const hyp = A.p.distanceTo(B.p);
+  const hz  = Math.hypot(B.p.x - A.p.x, B.p.y - A.p.y);
+  const vt  = B.p.z - A.p.z;                         // + means B is higher
+  const mid = (a, b) => a.clone().add(b).multiplyScalar(0.5);
+
+  measureLine(A.p, B.p, MEASURE_COL.hyp, false);
+  if (hz > 0.01)           measureLine(lo, C, MEASURE_COL.hz, true);
+  if (Math.abs(vt) > 0.01) measureLine(C, hi, MEASURE_COL.vt, true);
+  measureDot(A.p); measureDot(B.p);
+  measureLabel(fmtMF(hyp), MEASURE_COL.hyp, mid(A.p, B.p));
+  if (hz > 0.01)           measureLabel('↔ ' + fmtMF(hz), MEASURE_COL.hz, mid(lo, C));
+  if (Math.abs(vt) > 0.01) measureLabel('↕ ' + fmtMF(Math.abs(vt)), MEASURE_COL.vt, mid(C, hi));
+
+  const slope   = Math.atan2(vt, hz) * 180 / Math.PI;
+  const bearing = (Math.atan2(B.p.x - A.p.x, B.p.y - A.p.y) * 180 / Math.PI + 360) % 360;
+  const nm = P => P.name ? `station ${P.name}` : 'ground';
+  showInfo('📏 Measurement', `${nm(A)} → ${nm(B)}`, [
+    ['Straight line', fmtMF(hyp)],
+    ['Horizontal',    fmtMF(hz)],
+    ['Vertical',      fmtMF(Math.abs(vt)) + (Math.abs(vt) > 0.01 ? (vt > 0 ? ' up' : ' down') : '')],
+    ['Slope',         `${slope >= 0 ? '+' : ''}${slope.toFixed(1)}°`],
+    ['Bearing',       `${bearing.toFixed(0)}° (grid)`],
+  ]);
+  requestRender(); wakeRender();
+}
+
+function measureTap() {
+  const hit = measurePick();
+  if (!hit) return;
+  if (measurePts.length >= 2) clearMeasure();
+  measurePts.push(hit);
+  if (measurePts.length === 1) {
+    measureDot(hit.p);
+    showInfo('📏 Measurement', hit.name ? `From station ${hit.name}` : 'From ground', [['Next', 'tap the second point']]);
+    requestRender(); wakeRender();
+  } else {
+    clearMeasureGraphicsOnly();
+    drawMeasure(measurePts[0], measurePts[1]);
+  }
+}
+function clearMeasureGraphicsOnly() {
+  const keep = measurePts.slice();
+  clearMeasure();
+  measurePts = keep;
+}
+
+document.getElementById('btn-measure').addEventListener('click', function () {
+  measureOn = !measureOn;
+  this.classList.toggle('active', measureOn);
+  clearMeasure();
+  if (measureOn) {
+    clearStationHighlight();
+    showInfo('📏 Measure', 'Tap two points', [['Points', 'a station (snaps) or the ground'], ['Clear', 'tap 📏 again']]);
+  } else {
+    infoPanel.classList.remove('open');
+  }
+});
+
+// ── Colour by depth ──────────────────────────────────────────────────────────
+// 🌈 cycles survey colours → elevation → depth below ground. Lines, station
+// dots and walls are recoloured from one ramp (no red: red is kept for route
+// difficulty later). Depth below ground is the terrain height above a point
+// minus its own height, read from the height grid built at load — the same
+// terrain that is drawn, so cover and picture agree. The range is the 2nd–98th
+// percentile over the stations, so one odd station can't flatten the ramp.
+const COLOUR_MODES = [
+  { key: 'survey', name: 'Survey colours' },
+  { key: 'elev',   name: 'Elevation' },
+  { key: 'cover',  name: 'Depth below ground' },
+];
+let colourMode = 0;
+let caveLines = null;                       // one LineSegments for every shot
+const RAMP = ['#3b1c8c', '#2a5fd6', '#1fb3d6', '#35c46a', '#c6dc2f', '#ffc61a']
+  .map(h => new THREE.Color(h));            // cool (low / deep) → warm (high / shallow)
+const RAMP_UNKNOWN = new THREE.Color('#8a8f98');
+const _colourRange = {};
+
+function rampColor(t, out) {
+  if (!isFinite(t)) return out.copy(RAMP_UNKNOWN);
+  const f = Math.min(1, Math.max(0, t)) * (RAMP.length - 1);
+  const i = Math.min(RAMP.length - 2, Math.floor(f));
+  return out.copy(RAMP[i]).lerp(RAMP[i + 1], f - i);
+}
+
+// Rock above a point (m); NaN off the terrain. Negative = above the ground.
+function coverAt(x, y, z) {
+  const g = gridZAt(x, y);
+  return (g === null || isNaN(g)) ? NaN : g - z;
+}
+function depthValue(mode, x, y, z) { return mode === 1 ? z : coverAt(x, y, z); }
+
+function colourRange(mode) {
+  if (_colourRange[mode]) return _colourRange[mode];
+  const v = [];
+  stationMap.forEach(st => {
+    const d = depthValue(mode, st.pos.x, st.pos.y, st.pos.z);
+    if (isFinite(d)) v.push(d);
+  });
+  if (!v.length) return (_colourRange[mode] = null);
+  v.sort((a, b) => a - b);
+  const q = p => v[Math.min(v.length - 1, Math.max(0, Math.round(p * (v.length - 1))))];
+  let lo = q(0.02), hi = q(0.98);
+  if (mode === 2) lo = Math.max(0, lo);
+  if (!(hi - lo > 0.5)) hi = lo + 1;
+  return (_colourRange[mode] = { lo, hi });
+}
+
+// 0..1 along the ramp: high elevation and shallow cover are warm.
+function depthT(mode, d, R) {
+  if (!isFinite(d) || !R) return NaN;
+  const t = Math.min(1, Math.max(0, (d - R.lo) / (R.hi - R.lo)));
+  return mode === 2 ? 1 - t : t;
+}
+
+// Per-vertex colours for a geometry, cached per mode on the object.
+function colourVertices(obj, baseKey, mode) {
+  const geo = obj.geometry, attr = geo.attributes.color;
+  if (!attr) return;
+  if (!obj.userData[baseKey]) obj.userData[baseKey] = attr.array.slice();
+  if (mode === 0) { attr.array.set(obj.userData[baseKey]); attr.needsUpdate = true; return; }
+  const ck = baseKey + '_m' + mode;
+  if (!obj.userData[ck]) {
+    const P = geo.attributes.position.array, out = new Float32Array(P.length);
+    const R = colourRange(mode), c = new THREE.Color();
+    for (let i = 0; i < P.length; i += 3) {
+      rampColor(depthT(mode, depthValue(mode, P[i], P[i + 1], P[i + 2]), R), c);
+      out[i] = c.r; out[i + 1] = c.g; out[i + 2] = c.b;
+    }
+    obj.userData[ck] = out;
+  }
+  attr.array.set(obj.userData[ck]);
+  attr.needsUpdate = true;
+}
+
+function applyWallColours() {
+  if (!passageMesh || !passageMesh.userData.meshes) return;
+  colourVertices(passageMesh.userData.meshes[0], 'baseCol', colourMode);   // shared geometry
+}
+
+function applyColourMode() {
+  if (caveLines) colourVertices(caveLines, 'baseCol', colourMode);
+  applyWallColours();
+  const R = colourMode ? colourRange(colourMode) : null, c = new THREE.Color();
+  stationMap.forEach(st => {
+    st._dispColor = colourMode
+      ? '#' + rampColor(depthT(colourMode, depthValue(colourMode, st.pos.x, st.pos.y, st.pos.z), R), c).getHexString()
+      : st.hexColor;
+    if (st._mesh && st._mesh !== _selMesh) st._mesh.material.color.set(st._dispColor);
+  });
+  updateDepthLegend();
+  const btn = document.getElementById('btn-colour');
+  if (btn) {
+    btn.classList.toggle('active', colourMode !== 0);
+    btn.title = 'Colour: ' + COLOUR_MODES[colourMode].name + ' (tap to change)';
+  }
+  requestRender(); wakeRender();
+}
+
+function updateDepthLegend() {
+  const el = document.getElementById('depth-legend');
+  if (!el) return;
+  const R = colourMode ? colourRange(colourMode) : null;
+  if (!colourMode || !R) { el.classList.remove('show'); return; }
+  const stops = RAMP.map(c => '#' + c.getHexString());
+  const m = v => `${Math.round(v)} m (${Math.round(v / 0.3048)} ft)`;
+  document.getElementById('dl-title').textContent = COLOUR_MODES[colourMode].name;
+  if (colourMode === 1) {
+    document.getElementById('dl-bar').style.background = `linear-gradient(to right, ${stops.join(',')})`;
+    document.getElementById('dl-lo').textContent = m(R.lo);
+    document.getElementById('dl-hi').textContent = m(R.hi);
+  } else {
+    document.getElementById('dl-bar').style.background = `linear-gradient(to right, ${stops.slice().reverse().join(',')})`;
+    document.getElementById('dl-lo').textContent = (R.lo <= 0.5 ? 'surface' : m(R.lo));
+    document.getElementById('dl-hi').textContent = m(R.hi) + ' deep';
+  }
+  el.classList.add('show');
+}
+
+document.getElementById('btn-colour').addEventListener('click', () => {
+  if (!stationMap.size && !caveLines) return;
+  let next = (colourMode + 1) % COLOUR_MODES.length;
+  if (next === 2 && !_hgrid) next = 0;           // no terrain: no depth below ground
+  colourMode = next;
+  applyColourMode();
+  showToast('Colour: ' + COLOUR_MODES[colourMode].name);
+});
+
+// ── 🔍 Find panel: Search · Leads · Tracks & points ─────────────────────────
+const findPanel = document.getElementById('find-panel');
+let findTab = 'search';
+
+function openFind(tab) {
+  if (tab) findTab = tab;
+  findPanel.classList.add('open');
+  document.getElementById('btn-find').classList.add('active');
+  document.querySelectorAll('#find-panel .fp-tab').forEach(b =>
+    b.classList.toggle('active', b.dataset.tab === findTab));
+  ['search', 'leads', 'field'].forEach(t =>
+    document.getElementById('fp-' + t).hidden = (t !== findTab));
+  if (findTab === 'leads') leadsRender();
+  if (findTab === 'field') fieldRenderList();
+}
+function closeFind() {
+  findPanel.classList.remove('open');
+  document.getElementById('btn-find').classList.remove('active');
+}
+document.getElementById('btn-find').addEventListener('click', () =>
+  findPanel.classList.contains('open') ? closeFind() : openFind());
+document.getElementById('fp-close').addEventListener('click', closeFind);
+document.querySelectorAll('#find-panel .fp-tab').forEach(b =>
+  b.addEventListener('click', () => openFind(b.dataset.tab)));
+
+// Small screens: the panel covers the view, so get out of the way after a pick.
+function findPicked() { if (window.innerWidth < 700) closeFind(); }
+
+// Move the camera to look at a point from `dist` metres, keeping the current
+// viewing direction (orbit), or the current look direction (fly/crane).
+function flyToPoint(aim, dist) {
+  aim = new THREE.Vector3(aim.x, aim.y, aim.z);
+  if (flyMode) {
+    const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd);
+    _focusTween = { t0: performance.now(), fly: true,
+      fromPos: camera.position.clone(), toPos: aim.clone().addScaledVector(fwd, -dist) };
+  } else {
+    const off = camera.position.clone().sub(controls.target);
+    const len = off.length() || 1;
+    off.multiplyScalar(dist / len);
+    _focusTween = { t0: performance.now(), fly: false,
+      fromPos: camera.position.clone(), toPos: aim.clone().add(off),
+      fromTgt: controls.target.clone(), toTgt: aim };
+  }
+  wakeRender(FOCUS_MS + 300);
+  requestRender();
+}
+
+function goToStation(st) {
+  selectStation(st);
+  flyToPoint(st.pos, 25);
+  findPicked();
+}
+
+function fpRow(icon, text, sub, onClick, extraEl) {
+  const row = document.createElement('div');
+  row.className = 'fp-item';
+  const ic = document.createElement('span'); ic.className = 'fp-ic'; ic.textContent = icon;
+  const tx = document.createElement('div'); tx.className = 'fp-tx';
+  const t1 = document.createElement('div'); t1.className = 'fp-t1'; t1.textContent = text;
+  tx.appendChild(t1);
+  if (sub) { const t2 = document.createElement('div'); t2.className = 'fp-t2'; t2.textContent = sub; tx.appendChild(t2); }
+  row.append(ic, tx);
+  if (extraEl) row.appendChild(extraEl);
+  if (onClick) row.addEventListener('click', onClick);
+  return row;
+}
+
+// Search: station names, area names and lead descriptions.
+let findIndex = [];
+function findIndexBuild() {
+  findIndex = [];
+  stationMap.forEach(st => {
+    if (st.name) findIndex.push({ kind: 'station', text: st.name,
+      sub: [st.surveyName, st.cave].filter(Boolean).join(' · '), st });
+    (st.leads || []).forEach(ld => findIndex.push({ kind: 'lead',
+      text: ld.description || 'Lead', sub: 'Lead at ' + (st.name || 'station'), st }));
+  });
+  ((CAVES_DATA && CAVES_DATA.labels) || []).forEach(lb => {
+    if (lb && lb.text && lb.xyz) findIndex.push({ kind: 'label', text: String(lb.text), sub: 'Area', xyz: lb.xyz });
+  });
+  findIndex.forEach(e => { e.lc = e.text.toLowerCase(); });
+}
+
+function findSearch(q) {
+  q = q.trim().toLowerCase();
+  if (!q) return [];
+  const out = [];
+  for (const e of findIndex) {
+    const i = e.lc.indexOf(q);
+    if (i < 0) continue;
+    let score = e.lc === q ? 0 : i === 0 ? 1 : /[\s\-_.,(]/.test(e.lc[i - 1]) ? 2 : 3;
+    if (e.kind === 'label') score -= 0.5;          // area names first among equals
+    out.push({ e, score });
+  }
+  out.sort((a, b) => a.score - b.score || a.e.text.length - b.e.text.length || a.e.text.localeCompare(b.e.text));
+  return out.slice(0, 60).map(o => o.e);
+}
+
+function findGo(e) {
+  if (e.kind === 'label') {
+    flyToPoint({ x: e.xyz[0], y: e.xyz[1], z: e.xyz[2] }, 80);
+    showToast(e.text);
+    findPicked();
+  } else {
+    goToStation(e.st);
+  }
+}
+
+let _findT = null;
+document.getElementById('fp-q').addEventListener('input', ev => {
+  clearTimeout(_findT);
+  _findT = setTimeout(() => {
+    const box = document.getElementById('fp-results');
+    box.textContent = '';
+    const q = ev.target.value;
+    const hits = findSearch(q);
+    if (!hits.length) {
+      if (q.trim()) { const n = document.createElement('div'); n.className = 'fp-note'; n.textContent = 'Nothing found.'; box.appendChild(n); }
+      return;
+    }
+    const icons = { station: '◎', lead: '?', label: '🏷' };
+    hits.forEach(e => box.appendChild(fpRow(icons[e.kind], e.text, e.sub, () => findGo(e))));
+  }, 120);
+});
+
+// Leads list: nearest to the selected station (or you, or the view centre), or biggest.
+let leadSort = 'near';
+function leadsRender() {
+  const list = document.getElementById('fp-lead-list'), from = document.getElementById('fp-leads-from');
+  list.textContent = '';
+  let origin, originName;
+  const sel = _selMesh && _selMesh._station;
+  if (sel) { origin = sel.pos; originName = 'from station ' + (sel.name || ''); }
+  else if (gpsScenePos) { origin = new THREE.Vector3(gpsScenePos.x, gpsScenePos.y, gpsScenePos.z); originName = 'from you'; }
+  else { origin = controls.target; originName = 'from the view centre'; }
+  const items = [];
+  stationMap.forEach(st => (st.leads || []).forEach(ld => {
+    const size = Math.max(ld.width || 0, ld.height || 0);
+    items.push({ st, ld, d: st.pos.distanceTo(origin), size });
+  }));
+  document.querySelector('#find-panel .fp-tab[data-tab="leads"]').textContent = items.length ? `Leads (${items.length})` : 'Leads';
+  if (!items.length) { from.textContent = 'No open leads in this export.'; return; }
+  from.textContent = leadSort === 'near' ? 'Straight-line distance ' + originName : 'Biggest first (unsized last)';
+  items.sort(leadSort === 'near' ? (a, b) => a.d - b.d : (a, b) => b.size - a.size || a.d - b.d);
+  const m = v => v < 1000 ? `${Math.round(v)} m` : `${(v / 1000).toFixed(1)} km`;
+  items.slice(0, 300).forEach(it => {
+    const sz = it.size ? `${it.size.toFixed(1)} m` : '';
+    const sub = ['at ' + (it.st.name || 'station'), m(it.d), sz].filter(Boolean).join(' · ');
+    list.appendChild(fpRow('?', it.ld.description || 'Lead', sub, () => goToStation(it.st)));
+  });
+}
+document.querySelectorAll('#fp-leads .fp-sort button').forEach(b => b.addEventListener('click', () => {
+  leadSort = b.dataset.sort;
+  document.querySelectorAll('#fp-leads .fp-sort button').forEach(x => x.classList.toggle('active', x === b));
+  leadsRender();
+}));
+
+// ── Tracks & points (surface) ────────────────────────────────────────────────
+// Record a GPS track and drop named points, at your GPS position or by tapping
+// the ground. Stored on this phone per map (localStorage), drawn on the
+// terrain, and exported as GPX (CalTopo, Gaia, GPS units) or KML (FLEX).
+// Recording runs while the viewer is open: the phone's browser/WebView gets no
+// GPS with the app in the background or the screen off.
+const FIELD_KEY = 'flex_field_v1|' + ((META.name || '') + '|' +
+  (META.center_lon || 0).toFixed(3) + '|' + (META.center_lat || 0).toFixed(3));
+const FIELD_COL = '#ff4fa3';
+const FIELD_PIN_PX = 26, FIELD_LABEL_PX = 14;
+const fieldGroup = new THREE.Group();
+fieldGroup.renderOrder = 4;
+scene.add(fieldGroup);
+
+let field = (() => {
+  try {
+    const v = JSON.parse(localStorage.getItem(FIELD_KEY));
+    if (v && Array.isArray(v.tracks) && Array.isArray(v.points)) return v;
+  } catch (_) { /* nothing saved, or storage off */ }
+  return { tracks: [], points: [] };
+})();
+let _fieldSaveT = null, _fieldSaveWarned = false;
+function saveField(now) {
+  clearTimeout(_fieldSaveT);
+  const doit = () => {
+    try { localStorage.setItem(FIELD_KEY, JSON.stringify(field)); _fieldSaveWarned = false; }
+    catch (e) {
+      if (!_fieldSaveWarned) showToast('Could not save on this phone — export your tracks');
+      _fieldSaveWarned = true;
+    }
+  };
+  if (now) doit(); else _fieldSaveT = setTimeout(doit, 1500);
+}
+const fieldId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+// UTM → lat/lon (Snyder), the inverse of latlonToUTM, in the export's zone.
+function utmToLatLonV(E, N, zone, south) {
+  const a = 6378137.0, f = 1 / 298.257223563, e2 = 2 * f - f * f, ep2 = e2 / (1 - e2), k0 = 0.9996;
+  const lon0 = ((zone - 1) * 6 - 180 + 3) * Math.PI / 180;
+  const M = (N - (south ? 10000000 : 0)) / k0;
+  const mu = M / (a * (1 - e2 / 4 - 3 * e2 * e2 / 64 - 5 * e2 * e2 * e2 / 256));
+  const e1 = (1 - Math.sqrt(1 - e2)) / (1 + Math.sqrt(1 - e2));
+  const p1 = mu + (3 * e1 / 2 - 27 * e1 ** 3 / 32) * Math.sin(2 * mu)
+    + (21 * e1 * e1 / 16 - 55 * e1 ** 4 / 32) * Math.sin(4 * mu)
+    + (151 * e1 ** 3 / 96) * Math.sin(6 * mu);
+  const N1 = a / Math.sqrt(1 - e2 * Math.sin(p1) ** 2), T1 = Math.tan(p1) ** 2, C1 = ep2 * Math.cos(p1) ** 2;
+  const R1 = a * (1 - e2) / Math.pow(1 - e2 * Math.sin(p1) ** 2, 1.5), D = (E - 500000) / (N1 * k0);
+  const lat = p1 - (N1 * Math.tan(p1) / R1) * (D * D / 2
+    - (5 + 3 * T1 + 10 * C1 - 4 * C1 * C1 - 9 * ep2) * D ** 4 / 24
+    + (61 + 90 * T1 + 298 * C1 + 45 * T1 * T1 - 252 * ep2 - 3 * C1 * C1) * D ** 6 / 720);
+  const lon = lon0 + (D - (1 + 2 * T1 + C1) * D ** 3 / 6
+    + (5 - 2 * C1 + 28 * T1 - 3 * C1 * C1 + 8 * ep2 + 24 * T1 * T1) * D ** 5 / 120) / Math.cos(p1);
+  return { lat: lat * 180 / Math.PI, lon: lon * 180 / Math.PI };
+}
+// Scene x/y → lat/lon: the inverse of gpsToScene (test origin included).
+function sceneToLatLon(x, y) {
+  let oE = META.utm_center_e || 0, oN = META.utm_center_n || 0;
+  if (gpsOriginOverride) { const o = latlonToUTM(gpsOriginOverride.lat, gpsOriginOverride.lon); oE = o.easting; oN = o.northing; }
+  const zone = META.utm_zone || 1, south = (META.center_lat || 0) < 0;
+  return utmToLatLonV(x + oE, y + oN, zone, south);
+}
+
+function haversineM(lat1, lon1, lat2, lon2) {
+  const r = Math.PI / 180, dLat = (lat2 - lat1) * r, dLon = (lon2 - lon1) * r;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(dLon / 2) ** 2;
+  return 2 * 6371008.8 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+function trackLengthM(tr) {
+  let d = 0;
+  for (let i = 1; i < tr.pts.length; i++) d += haversineM(tr.pts[i - 1][0], tr.pts[i - 1][1], tr.pts[i][0], tr.pts[i][1]);
+  return d;
+}
+const fmtKm = m => m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(2)} km`;
+const fmtWhen = t => { const d = new Date(t); return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }); };
+
+// Where a lat/lon sits in the scene: on the terrain (+1.5 m so lines don't
+// z-fight), or at its GPS height off the terrain.
+function fieldScenePos(lat, lon, alt) {
+  const s = gpsToScene(lat, lon), g = gridZAt(s.x, s.y);
+  const z = (g !== null && !isNaN(g)) ? g + 1.5 : (alt != null ? alt + (META.z_offset || 0) : 0);
+  return new THREE.Vector3(s.x, s.y, z);
+}
+// Ground elevation for export: the terrain's own height (the LiDAR DEM, back
+// in its vertical datum), else the GPS altitude.
+function fieldEle(lat, lon, alt) {
+  if (!gpsOriginOverride) {
+    const s = gpsToScene(lat, lon), g = gridZAt(s.x, s.y);
+    if (g !== null && !isNaN(g)) return g - (META.z_offset || 0);
+  }
+  return alt != null ? alt : null;
+}
+
+// ── Drawing ──
+let _fieldPinTex = null;
+function fieldPinTexture() {
+  if (_fieldPinTex) return _fieldPinTex;
+  const W = 64, c = document.createElement('canvas'); c.width = c.height = W;
+  const g = c.getContext('2d');
+  g.beginPath(); g.moveTo(32, 62);
+  g.bezierCurveTo(26, 48, 12, 38, 12, 24); g.arc(32, 24, 20, Math.PI, 0);
+  g.bezierCurveTo(52, 38, 38, 48, 32, 62); g.closePath();
+  g.fillStyle = FIELD_COL; g.fill(); g.lineWidth = 4; g.strokeStyle = '#fff'; g.stroke();
+  g.beginPath(); g.arc(32, 24, 7, 0, Math.PI * 2); g.fillStyle = '#fff'; g.fill();
+  return (_fieldPinTex = new THREE.CanvasTexture(c));
+}
+function fieldFixedSprite(sp, px, aspect) {
+  sp.userData.px = px; sp.userData.aspect = aspect || 1;
+  const h = renderer.domElement.clientHeight || window.innerHeight || 1;
+  const u = 2 * Math.tan(camera.fov * Math.PI / 360) * px / h;
+  sp.scale.set(u * sp.userData.aspect, u, 1);
+}
+function sizeFieldSprites() {
+  fieldGroup.children.forEach(o => { if (o.isSprite) fieldFixedSprite(o, o.userData.px, o.userData.aspect); });
+}
+window.addEventListener('resize', sizeFieldSprites);
+
+function fieldDispose(o) {
+  if (o.geometry) o.geometry.dispose();
+  if (o.material) { if (o.material.map && o.material.map !== _fieldPinTex) o.material.map.dispose(); o.material.dispose(); }
+}
+function trackObject(tr) {
+  const pts = tr.pts.map(p => fieldScenePos(p[0], p[1], p[2]));
+  const geo = new THREE.BufferGeometry().setFromPoints(pts.length > 1 ? pts : pts.concat(pts));
+  const ln = new THREE.Line(geo, new THREE.LineBasicMaterial({
+    color: FIELD_COL, depthTest: false, transparent: true, opacity: tr === recTrack ? 1 : 0.85 }));
+  ln.renderOrder = 4;
+  ln.userData.trackId = tr.id;
+  return ln;
+}
+function fieldRebuild() {
+  while (fieldGroup.children.length) fieldDispose(fieldGroup.children.pop());
+  field.tracks.forEach(tr => { if (tr.pts.length) fieldGroup.add(trackObject(tr)); });
+  field.points.forEach(p => {
+    const at = fieldScenePos(p.lat, p.lon, p.alt);
+    const pin = new THREE.Sprite(new THREE.SpriteMaterial({ map: fieldPinTexture(), depthTest: false, transparent: true, sizeAttenuation: false }));
+    pin.center.set(0.5, 0); pin.position.copy(at); pin.renderOrder = 5;
+    pin.userData.pointId = p.id;
+    fieldFixedSprite(pin, FIELD_PIN_PX, 1);
+    fieldGroup.add(pin);
+    const { sprite, aspect } = makeTextSprite(p.name || 'Point', '#ffd1e8');
+    sprite.material.sizeAttenuation = false;
+    sprite.center.set(0.5, -FIELD_PIN_PX / FIELD_LABEL_PX - 0.1);
+    sprite.position.copy(at); sprite.renderOrder = 5;
+    fieldFixedSprite(sprite, FIELD_LABEL_PX, aspect);
+    fieldGroup.add(sprite);
+  });
+  requestRender(); wakeRender();
+}
+function fieldUpdateTrack(tr) {
+  const old = fieldGroup.children.find(o => o.userData.trackId === tr.id);
+  if (old) { fieldGroup.remove(old); fieldDispose(old); }
+  if (tr.pts.length) fieldGroup.add(trackObject(tr));
+  requestRender(); wakeRender();
+}
+
+// ── Recording ──
+let recTrack = null, recTimer = null, fieldLastFix = null;
+
+// Called on every GPS fix, before the marker's own throttling.
+function fieldOnFix(pos) {
+  const c = pos.coords;
+  fieldLastFix = { lat: c.latitude, lon: c.longitude, alt: c.altitude, acc: c.accuracy, t: pos.timestamp || Date.now() };
+  if (!recTrack) return;
+  if (c.accuracy != null && c.accuracy > 50) return;          // too vague to keep
+  const t = fieldLastFix.t, last = recTrack.pts[recTrack.pts.length - 1];
+  if (last && haversineM(last[0], last[1], c.latitude, c.longitude) < 3 && t - last[3] < 30000) return;
+  recTrack.pts.push([+c.latitude.toFixed(7), +c.longitude.toFixed(7),
+    c.altitude == null ? null : +c.altitude.toFixed(1), t,
+    c.accuracy == null ? null : Math.round(c.accuracy)]);
+  saveField(false);
+  fieldUpdateTrack(recTrack);
+  recBadgeUpdate();
+}
+
+function recBadgeUpdate() {
+  const b = document.getElementById('rec-badge');
+  if (!recTrack) { b.classList.remove('show'); return; }
+  const s = Math.round((Date.now() - Date.parse(recTrack.started)) / 1000);
+  const hms = `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  document.getElementById('rec-stats').textContent = `${hms} · ${fmtKm(trackLengthM(recTrack))}` +
+    (fieldLastFix && Date.now() - fieldLastFix.t < 20000 ? '' : ' · no GPS');
+  b.classList.add('show');
+  if (findTab === 'field' && findPanel.classList.contains('open')) {
+    const st = document.getElementById('fp-rec-stats'); if (st) st.textContent = document.getElementById('rec-stats').textContent;
+    const rm = document.getElementById('fp-rec-meta'); if (rm && rm._meta) rm.textContent = rm._meta();
+    const has = field.tracks.some(t => t.pts.length) || field.points.length;
+    document.getElementById('fp-exp-gpx').disabled = !has;
+    document.getElementById('fp-exp-kml').disabled = !has;
+  }
+}
+
+function recStart() {
+  if (recTrack) return;
+  if (gpsState === 0) document.getElementById('btn-gps').click();     // GPS on (pin mode)
+  recTrack = { id: fieldId(), name: 'Track ' + fmtWhen(Date.now()), started: new Date().toISOString(), pts: [] };
+  field.tracks.push(recTrack);
+  saveField(true);
+  if (fieldLastFix && Date.now() - fieldLastFix.t < 10000) fieldOnFix({ coords: {
+    latitude: fieldLastFix.lat, longitude: fieldLastFix.lon, altitude: fieldLastFix.alt, accuracy: fieldLastFix.acc },
+    timestamp: Date.now() });
+  recTimer = setInterval(recBadgeUpdate, 1000);
+  recBadgeUpdate();
+  fieldRenderList();
+  showToast('Recording track — keep the viewer open');
+}
+function recStop() {
+  if (!recTrack) return;
+  const tr = recTrack;
+  recTrack = null;
+  clearInterval(recTimer); recTimer = null;
+  tr.ended = new Date().toISOString();
+  if (!tr.pts.length) { field.tracks = field.tracks.filter(t => t !== tr); showToast('No GPS fixes — track not kept'); }
+  else showToast(`Track saved · ${fmtKm(trackLengthM(tr))}`);
+  saveField(true);
+  recBadgeUpdate();
+  fieldRebuild();
+  fieldRenderList();
+}
+
+// ── Points ──
+let fieldPickOn = false, fieldPending = null;
+
+function fieldFormOpen(p) {
+  fieldPending = p;
+  const f = document.getElementById('fp-form');
+  f.hidden = false;
+  document.getElementById('fp-form-where').textContent =
+    `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}` + (p.src === 'gps' && p.acc ? ` ±${Math.round(p.acc)} m (GPS)` : ' (on the map)');
+  const nm = document.getElementById('fp-form-name');
+  nm.value = 'Point ' + (field.points.length + 1);
+  document.getElementById('fp-form-note').value = '';
+  openFind('field');
+  nm.focus(); nm.select();
+}
+function fieldFormClose() { fieldPending = null; document.getElementById('fp-form').hidden = true; }
+
+document.getElementById('fp-pt-gps').addEventListener('click', () => {
+  if (!fieldLastFix || Date.now() - fieldLastFix.t > 60000) {
+    if (gpsState === 0) document.getElementById('btn-gps').click();
+    showToast('Waiting for a GPS fix — try again in a moment');
+    return;
+  }
+  const f = fieldLastFix;
+  fieldFormOpen({ lat: f.lat, lon: f.lon, alt: f.alt, acc: f.acc, src: 'gps' });
+});
+document.getElementById('fp-pt-map').addEventListener('click', () => {
+  fieldPickOn = !fieldPickOn;
+  document.getElementById('fp-pt-map').classList.toggle('active', fieldPickOn);
+  if (fieldPickOn) { showToast('Tap the ground to place a point'); findPicked(); }
+});
+function fieldPickTap() {
+  const hit = terrainGroup && _tapRay.intersectObject(terrainGroup, true)[0];
+  if (!hit) { showToast('Tap on the ground'); return; }
+  fieldPickOn = false;
+  document.getElementById('fp-pt-map').classList.remove('active');
+  const ll = sceneToLatLon(hit.point.x, hit.point.y);
+  fieldFormOpen({ lat: ll.lat, lon: ll.lon, alt: null, acc: null, src: 'map' });
+}
+document.getElementById('fp-form-save').addEventListener('click', () => {
+  if (!fieldPending) return;
+  const p = fieldPending;
+  field.points.push({ id: fieldId(), name: document.getElementById('fp-form-name').value.trim().slice(0, 80) || 'Point',
+    note: document.getElementById('fp-form-note').value.trim().slice(0, 2000),
+    lat: +p.lat.toFixed(7), lon: +p.lon.toFixed(7), alt: p.alt == null ? null : +(+p.alt).toFixed(1),
+    acc: p.acc == null ? null : Math.round(p.acc), src: p.src, t: Date.now() });
+  saveField(true);
+  fieldFormClose();
+  fieldRebuild();
+  fieldRenderList();
+});
+document.getElementById('fp-form-cancel').addEventListener('click', fieldFormClose);
+
+// Tap on a point marker: screen-space, like the GPS marker.
+function fieldHitTest(ndc) {
+  let best = null, bestD = 0.06;
+  const v = new THREE.Vector3();
+  fieldGroup.children.forEach(o => {
+    if (!o.userData.pointId) return;
+    v.copy(o.position).project(camera);
+    if (v.z > 1) return;
+    const d = Math.hypot(v.x - ndc.x, v.y - (ndc.y - 0.03));    // the pin sits above its foot
+    if (d < bestD) { bestD = d; best = o.userData.pointId; }
+  });
+  return best && field.points.find(p => p.id === best);
+}
+function fieldShowPoint(p) {
+  const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const ele = fieldEle(p.lat, p.lon, p.alt);
+  const rows = [];
+  if (p.note) rows.push(['Note', esc(p.note)]);
+  rows.push(['Position', `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`]);
+  if (ele != null) rows.push(['Elevation', `${Math.round(ele)} m (${Math.round(ele / 0.3048)} ft)`]);
+  rows.push(['Placed', (p.src === 'gps' ? 'GPS' + (p.acc ? ` ±${p.acc} m` : '') : 'on the map') + ' · ' + esc(fmtWhen(p.t))]);
+  showInfo(p.name || 'Point', 'Surface point', rows);
+}
+
+// ── Panel list ──
+function fpButton(label, title, onClick, cls) {
+  const b = document.createElement('button');
+  b.className = 'fp-mini' + (cls ? ' ' + cls : ''); b.textContent = label; b.title = title;
+  b.addEventListener('click', ev => { ev.stopPropagation(); onClick(b); });
+  return b;
+}
+// Two taps to delete: the first arms the button for three seconds.
+function fpDelete(onConfirm) {
+  return fpButton('✕', 'Delete', b => {
+    if (b.dataset.armed) { onConfirm(); return; }
+    b.dataset.armed = '1'; b.textContent = 'Delete?'; b.classList.add('armed');
+    setTimeout(() => { delete b.dataset.armed; b.textContent = '✕'; b.classList.remove('armed'); }, 3000);
+  });
+}
+function fpNameInput(value, onChange) {
+  const i = document.createElement('input');
+  i.className = 'fp-name'; i.value = value; i.maxLength = 80;
+  i.addEventListener('click', ev => ev.stopPropagation());
+  i.addEventListener('change', () => onChange(i.value.trim() || value));
+  return i;
+}
+
+function fieldRenderList() {
+  const recBtn = document.getElementById('fp-rec');
+  recBtn.textContent = recTrack ? '■ Stop recording' : '● Record track';
+  recBtn.classList.toggle('rec', !!recTrack);
+  const rs = document.getElementById('fp-rec-stats');
+  rs.textContent = recTrack ? document.getElementById('rec-stats').textContent : '';
+  const list = document.getElementById('fp-field-list');
+  list.textContent = '';
+  const fly = (pts) => {
+    const ps = pts.map(p => fieldScenePos(p[0], p[1], p[2]));
+    const box = new THREE.Box3().setFromPoints(ps), c = box.getCenter(new THREE.Vector3());
+    const sz = box.getSize(new THREE.Vector3());
+    flyToPoint(c, Math.max(60, Math.max(sz.x, sz.y) * 1.3));
+    findPicked();
+  };
+  if (field.tracks.length) {
+    const h = document.createElement('div'); h.className = 'fp-h'; h.textContent = 'Tracks'; list.appendChild(h);
+    field.tracks.slice().reverse().forEach(tr => {
+      const row = document.createElement('div'); row.className = 'fp-item';
+      const tx = document.createElement('div'); tx.className = 'fp-tx';
+      tx.appendChild(fpNameInput(tr.name, v => { tr.name = v; saveField(true); }));
+      const t2 = document.createElement('div'); t2.className = 'fp-t2';
+      const meta = () => `${fmtWhen(Date.parse(tr.started))} · ${fmtKm(trackLengthM(tr))} · ${tr.pts.length} pts` + (tr === recTrack ? ' · recording' : '');
+      t2.textContent = meta();
+      if (tr === recTrack) { t2.id = 'fp-rec-meta'; t2._meta = meta; }
+      tx.appendChild(t2);
+      row.appendChild(tx);
+      if (tr.pts.length) row.appendChild(fpButton('🎯', 'Show on the map', () => fly(tr.pts)));
+      if (tr !== recTrack) row.appendChild(fpDelete(() => {
+        field.tracks = field.tracks.filter(t => t !== tr); saveField(true); fieldRebuild(); fieldRenderList();
+      }));
+      list.appendChild(row);
+    });
+  }
+  if (field.points.length) {
+    const h = document.createElement('div'); h.className = 'fp-h'; h.textContent = 'Points'; list.appendChild(h);
+    field.points.slice().reverse().forEach(p => {
+      const row = document.createElement('div'); row.className = 'fp-item';
+      const tx = document.createElement('div'); tx.className = 'fp-tx';
+      tx.appendChild(fpNameInput(p.name, v => { p.name = v; saveField(true); fieldRebuild(); }));
+      const t2 = document.createElement('div'); t2.className = 'fp-t2';
+      t2.textContent = (p.note ? p.note.slice(0, 60) + (p.note.length > 60 ? '…' : '') + ' · ' : '') + fmtWhen(p.t);
+      tx.appendChild(t2);
+      row.appendChild(tx);
+      row.appendChild(fpButton('🎯', 'Show on the map', () => { fly([[p.lat, p.lon, p.alt]]); fieldShowPoint(p); }));
+      row.appendChild(fpDelete(() => {
+        field.points = field.points.filter(x => x !== p); saveField(true); fieldRebuild(); fieldRenderList();
+      }));
+      list.appendChild(row);
+    });
+  }
+  if (!field.tracks.length && !field.points.length) {
+    const n = document.createElement('div'); n.className = 'fp-note';
+    n.textContent = 'Nothing recorded yet. Tracks and points stay on this phone until you export them.';
+    list.appendChild(n);
+  }
+  const has = field.tracks.some(t => t.pts.length) || field.points.length;
+  document.getElementById('fp-exp-gpx').disabled = !has;
+  document.getElementById('fp-exp-kml').disabled = !has;
+}
+document.getElementById('fp-rec').addEventListener('click', () => recTrack ? recStop() : recStart());
+document.getElementById('rec-badge').addEventListener('click', () => openFind('field'));
+
+// ── Export ──
+const xmlEsc = s => String(s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
+const eleFix = v => v == null || !isFinite(v) ? null : v.toFixed(1);
+
+function fieldGPX() {
+  const mapName = META.name || 'FLEX map', out = [];
+  out.push('<?xml version="1.0" encoding="UTF-8"?>',
+    '<gpx version="1.1" creator="FLEX Portable Viewer" xmlns="http://www.topografix.com/GPX/1/1">',
+    `<metadata><name>${xmlEsc(mapName)}</name><time>${new Date().toISOString()}</time></metadata>`);
+  field.points.forEach(p => {
+    const e = eleFix(fieldEle(p.lat, p.lon, p.alt));
+    out.push(`<wpt lat="${p.lat.toFixed(7)}" lon="${p.lon.toFixed(7)}">` + (e ? `<ele>${e}</ele>` : '') +
+      `<time>${new Date(p.t).toISOString()}</time><name>${xmlEsc(p.name)}</name>` +
+      (p.note ? `<desc>${xmlEsc(p.note)}</desc>` : '') + '</wpt>');
+  });
+  field.tracks.filter(t => t.pts.length).forEach(tr => {
+    out.push(`<trk><name>${xmlEsc(tr.name)}</name><trkseg>`);
+    tr.pts.forEach(q => {
+      const e = eleFix(fieldEle(q[0], q[1], q[2]));
+      out.push(`<trkpt lat="${q[0].toFixed(7)}" lon="${q[1].toFixed(7)}">` + (e ? `<ele>${e}</ele>` : '') +
+        `<time>${new Date(q[3]).toISOString()}</time></trkpt>`);
+    });
+    out.push('</trkseg></trk>');
+  });
+  out.push('</gpx>');
+  return out.join('\n');
+}
+
+function fieldKML() {
+  const mapName = META.name || 'FLEX map', out = [];
+  const coord = (lat, lon, alt) => { const e = eleFix(fieldEle(lat, lon, alt)); return `${lon.toFixed(7)},${lat.toFixed(7)}` + (e ? ',' + e : ''); };
+  out.push('<?xml version="1.0" encoding="UTF-8"?>',
+    '<kml xmlns="http://www.opengis.net/kml/2.2"><Document>',
+    `<name>${xmlEsc(mapName)} — tracks and points</name>`,
+    '<Style id="trk"><LineStyle><color>ffa34fff</color><width>3</width></LineStyle></Style>',
+    '<Style id="pt"><IconStyle><color>ffa34fff</color></IconStyle></Style>');
+  field.points.forEach(p => out.push(
+    `<Placemark><name>${xmlEsc(p.name)}</name>` + (p.note ? `<description>${xmlEsc(p.note)}</description>` : '') +
+    `<TimeStamp><when>${new Date(p.t).toISOString()}</when></TimeStamp><styleUrl>#pt</styleUrl>` +
+    `<Point><coordinates>${coord(p.lat, p.lon, p.alt)}</coordinates></Point></Placemark>`));
+  field.tracks.filter(t => t.pts.length).forEach(tr => out.push(
+    `<Placemark><name>${xmlEsc(tr.name)}</name><styleUrl>#trk</styleUrl>` +
+    `<LineString><tessellate>1</tessellate><altitudeMode>clampToGround</altitudeMode><coordinates>` +
+    tr.pts.map(q => coord(q[0], q[1], q[2])).join(' ') + '</coordinates></LineString></Placemark>'));
+  out.push('</Document></kml>');
+  return out.join('\n');
+}
+
+function fieldSaveFile(name, mime, text) {
+  // In the Android app: the share sheet (save to Files, Drive, email…).
+  if (window.AndroidHost && typeof window.AndroidHost.shareFile === 'function') {
+    try { if (window.AndroidHost.shareFile(name, mime, text)) return; } catch (_) { /* fall through */ }
+  }
+  const url = URL.createObjectURL(new Blob([text], { type: mime }));
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+function fieldFileName(ext) {
+  const slug = (META.name || 'flex').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'flex';
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  return `${slug}-field-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.${ext}`;
+}
+document.getElementById('fp-exp-gpx').addEventListener('click', () =>
+  fieldSaveFile(fieldFileName('gpx'), 'application/gpx+xml', fieldGPX()));
+document.getElementById('fp-exp-kml').addEventListener('click', () =>
+  fieldSaveFile(fieldFileName('kml'), 'application/vnd.google-earth.kml+xml', fieldKML()));
+
 function buildCaveLines() {
   buildCavePassages();
+  if (!buildCaveLines._field) { buildCaveLines._field = true; fieldRebuild(); fieldRenderList(); }
+  if (!buildCaveLines._labels) { buildCaveLines._labels = true; buildAreaLabels(); }
   const surveys = (CAVES_DATA && CAVES_DATA.surveys) || [];
   const legendEl = document.getElementById('legend');
   if (!surveys.length) return;
@@ -1473,38 +2733,42 @@ function buildCaveLines() {
   // Deduplicate stations by name (or by rounded position if unnamed)
   // Map: stationKey → { pos, name, surveyName, hexColor, shots[] }
   stationMap = new Map();  // assigned to outer let — visible to applyStationMode()
+  // Every shot goes into one LineSegments with per-vertex colours: one draw
+  // call however big the cave, and 🌈 recolours it in place.
+  const _segPos = [], _segCol = [];
 
   surveys.forEach(sv => {
     let hexColor = sv.color || '#00e5ff';
     if (/^#[0-9a-f]{8}$/i.test(hexColor)) hexColor = hexColor.slice(0, 7);
     const col = new THREE.Color(hexColor);
-
-    // Shot lines
-    const lineMat = new THREE.LineBasicMaterial({ color: col, linewidth: 1.5, depthTest: false });
-    lineMat.renderOrder = 1;
     let drawn = false;
+    // Station names are unique within a cave, not across caves.
+    const cavePfx = sv.cave ? sv.cave + '|' : '';
 
     (sv.lines || []).forEach((line, li) => {
       if (line.length < 2) return;
       const pts = line.map(([x,y,z]) => new THREE.Vector3(x, y, z));
-      caveGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lineMat));
+      for (let k = 0; k + 1 < pts.length; k++) {
+        _segPos.push(pts[k].x, pts[k].y, pts[k].z, pts[k + 1].x, pts[k + 1].y, pts[k + 1].z);
+        _segCol.push(col.r, col.g, col.b, col.r, col.g, col.b);
+      }
       drawn = true;
 
       const shot = (sv.shots && sv.shots[li]) || null;
 
       // Register from station (fallback: derive from shot endpoint)
       const fromName = shot && shot.from_name;
-      const fromKey  = fromName || `${Math.round(pts[0].x)},${Math.round(pts[0].y)},${Math.round(pts[0].z)}`;
+      const fromKey  = fromName ? cavePfx + fromName : `${Math.round(pts[0].x)},${Math.round(pts[0].y)},${Math.round(pts[0].z)}`;
       if (!stationMap.has(fromKey)) {
-        stationMap.set(fromKey, { pos: pts[0].clone(), name: fromName || '', surveyName: sv.name || 'Survey', hexColor, shots: [], lrud: null, dist: null });
+        stationMap.set(fromKey, { pos: pts[0].clone(), name: fromName || '', surveyName: sv.name || 'Survey', cave: sv.cave || '', hexColor, shots: [], lrud: null, dist: null });
       }
       if (shot) stationMap.get(fromKey).shots.push({ ...shot, _role: 'from' });
 
       // Register to station (fallback: derive from shot endpoint)
       const toName = shot && shot.to_name;
-      const toKey  = toName || `${Math.round(pts[1].x)},${Math.round(pts[1].y)},${Math.round(pts[1].z)}`;
+      const toKey  = toName ? cavePfx + toName : `${Math.round(pts[1].x)},${Math.round(pts[1].y)},${Math.round(pts[1].z)}`;
       if (!stationMap.has(toKey)) {
-        stationMap.set(toKey, { pos: pts[1].clone(), name: toName || '', surveyName: sv.name || 'Survey', hexColor, shots: [], lrud: null, dist: null });
+        stationMap.set(toKey, { pos: pts[1].clone(), name: toName || '', surveyName: sv.name || 'Survey', cave: sv.cave || '', hexColor, shots: [], lrud: null, dist: null });
       }
       if (shot) stationMap.get(toKey).shots.push({ ...shot, _role: 'to' });
     });
@@ -1513,19 +2777,33 @@ function buildCaveLines() {
     (sv.stations || []).forEach(st => {
       const pos = new THREE.Vector3(st.xyz[0], st.xyz[1], st.xyz[2]);
       // Try to find by name first, then by coordinate proximity
-      let key = st.name || null;
+      let key = st.name ? cavePfx + st.name : null;
       if (!key || !stationMap.has(key)) {
         const ck = `${Math.round(pos.x)},${Math.round(pos.y)},${Math.round(pos.z)}`;
-        key = stationMap.has(ck) ? ck : (st.name || ck);
+        key = stationMap.has(ck) ? ck : (st.name ? cavePfx + st.name : ck);
       }
       if (!stationMap.has(key)) {
-        stationMap.set(key, { pos, name: st.name || '', surveyName: sv.name || 'Survey', hexColor, shots: [], lrud: null, dist: null });
+        stationMap.set(key, { pos, name: st.name || '', surveyName: sv.name || 'Survey', cave: sv.cave || '', hexColor, shots: [], lrud: null, dist: null });
       }
       const entry = stationMap.get(key);
       entry.name = st.name || entry.name;
       entry.pos  = pos;
       if (st.lrud  !== undefined) entry.lrud = st.lrud;
       if (st.dist  !== undefined) entry.dist = st.dist;
+      if (st.comment) entry.comment = st.comment;
+    });
+
+    // Open leads: hang them on their station (made here if the export box
+    // cut its shots off), shown as an orange "?" above the station.
+    (sv.leads || []).forEach((ld, i) => {
+      if (!ld.xyz) return;
+      const key = ld.station ? cavePfx + ld.station : `${cavePfx}lead${i}`;
+      if (!stationMap.has(key)) {
+        stationMap.set(key, { pos: new THREE.Vector3(ld.xyz[0], ld.xyz[1], ld.xyz[2]), name: ld.station || '',
+          surveyName: sv.name || 'Survey', cave: sv.cave || '', hexColor, shots: [], lrud: null, dist: null });
+      }
+      const entry = stationMap.get(key);
+      (entry.leads || (entry.leads = [])).push(ld);
     });
 
     if (drawn) {
@@ -1541,6 +2819,14 @@ function buildCaveLines() {
       legendEl.appendChild(row);
     }
   });
+
+  if (_segPos.length) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(_segPos), 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(_segCol), 3));
+    caveLines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false }));
+    caveGroup.add(caveLines);
+  }
 
   // Mark end stations (only one connecting shot = survey terminus / splay end)
   stationMap.forEach(st => { st._isEnd = st.shots.length <= 1; });
@@ -1577,6 +2863,14 @@ function buildCaveLines() {
       stationGroup.add(sprite);
     }
 
+    // Lead marker: in leadGroup, shown and hidden with the area names (🏷️)
+    if (st.leads && st.leads.length) {
+      const lead = makeLeadSprite();
+      lead.position.copy(st.pos);
+      leadGroup.add(lead);
+      st._leadSprite = lead;
+    }
+
     // Store refs on station for highlight/restore
     st._mesh   = mesh;
     st._sprite = sprite;
@@ -1585,6 +2879,11 @@ function buildCaveLines() {
 
   // Apply initial display mode (ends only)
   applyStationMode();
+  setupAnnotButton();
+  stationMap.forEach(st => { st._dispColor = st.hexColor; });
+  findIndexBuild();
+  leadsRender();                 // fills the Leads tab count
+  if (colourMode) applyColourMode();
 }
 
 // ── KML / KMZ import ──────────────────────────────────────────────────────────
@@ -1704,7 +3003,7 @@ function clearStationHighlight() {
   if (_selMesh) {
     const st = _selMesh._station;
     _selMesh.scale.set(1, 1, 1);
-    _selMesh.material.color.set(st.hexColor);
+    _selMesh.material.color.set(st._dispColor || st.hexColor);
     _selMesh.visible = isStationVisible(st);
   }
   if (_selSprite) {
@@ -1764,6 +3063,9 @@ function selectStation(st) {
 
   // Elevation
   html += `<div class="fx-row"><span class="lbl">Elevation:</span> <span class="val">${st.pos.z.toFixed(1)} m</span></div>`;
+  const cover = coverAt(st.pos.x, st.pos.y, st.pos.z);
+  if (isFinite(cover)) html += `<div class="fx-row"><span class="lbl">Below ground:</span> <span class="val">${
+    cover > 0.5 ? `${cover.toFixed(1)} m (${Math.round(cover / 0.3048)} ft)` : 'at or above the surface'}</span></div>`;
 
   // Passage dimensions (LRUD)
   if (bestLrud) {
@@ -1772,8 +3074,19 @@ function selectStation(st) {
     html += `<div class="fx-row"><span class="lbl">Passage L/R/U/D:</span> <span class="val">${lr[0]} / ${lr[1]} / ${lr[2]} / ${lr[3]} m</span></div>`;
   }
 
-  // Survey name
-  html += `<div class="fx-row"><span class="lbl">Survey:</span> <span class="val">${st.surveyName || '—'}</span></div>`;
+  // Survey name (and the shot's note, if any); both come from survey text
+  const escTxt = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  html += `<div class="fx-row"><span class="lbl">Survey:</span> <span class="val">${escTxt(st.surveyName || '—')}</span></div>`;
+  if (st.comment) html += `<div class="fx-row"><span class="lbl">Note:</span> <span class="val"><i>${escTxt(st.comment)}</i></span></div>`;
+  (st.leads || []).forEach(ld => {
+    const one = v => `${v.toFixed(1)} m (${(v / 0.3048).toFixed(0)} ft)`;
+    const size = [ld.height != null ? one(ld.height) + ' high' : null,
+                  ld.width  != null ? one(ld.width)  + ' wide' : null].filter(Boolean).join(' × ');
+    html += `<div class="fx-divider" style="color:#ff8f00;opacity:.9">Open lead</div>`;
+    if (ld.description) html += `<div class="fx-row"><span class="val">${escTxt(ld.description)}</span></div>`;
+    if (size) html += `<div class="fx-row"><span class="lbl">Size:</span> <span class="val">${size}</span></div>`;
+    if (ld.date) html += `<div class="fx-row"><span class="lbl">Noted:</span> <span class="val">${escTxt(ld.date)}</span></div>`;
+  });
 
   // (Adjacent shots removed — not needed in station panel)
   if (false && st.shots.length) {
@@ -1789,12 +3102,56 @@ function selectStation(st) {
     });
   }
 
+  html += `<div class="fx-row" style="opacity:.45;font-size:10px;margin-top:6px">Tap the station again to stand a caver there and orbit it</div>`;
+
+  // Compass calibration against a survey shot from this station
+  const nb = stationNeighbour(st);
+  if (nb) {
+    html += `<div class="fx-divider" style="opacity:.6">Compass</div>`;
+    if (compassHeading === null) {
+      html += `<div class="fx-row" style="opacity:.5;font-size:11px">The compass runs in GPS follow mode (tap 📍 until it shows 🧭).</div>`;
+    } else {
+      html += `<div class="fx-row" style="font-size:11px;opacity:.75">Stand here, point the top of the phone at <b>${escTxt(nb.name || 'the next station')}</b> (${nb.bearing.toFixed(0)}°), then:</div>`
+            + `<div class="fx-row"><button id="btn-compass-cal" class="layer-btn" style="flex:1">🧭 Calibrate compass</button>`
+            + (compassOffset !== null ? ` <button id="btn-compass-reset" class="layer-btn">Reset</button>` : '') + `</div>`
+            + `<div class="fx-row" style="opacity:.45;font-size:10px">${compassOffset !== null
+                ? 'Calibrated: ' + (compassOffset >= 0 ? '+' : '') + compassOffset.toFixed(1) + '°'
+                : 'Not calibrated (grid convergence only, ' + (-gridConvergenceDeg()).toFixed(1) + '°)'}</div>`;
+    }
+  }
+
   const titleEl2 = document.getElementById('info-title');
   titleEl2.textContent  = st.name || '(unnamed)';
   titleEl2.style.color  = st.hexColor || '#00e5ff';
   document.getElementById('info-subtitle').textContent = st.surveyName || '';
   document.getElementById('info-rows').innerHTML       = html;
   infoPanel.classList.add('open');
+  const cal = document.getElementById('btn-compass-cal');
+  if (cal && nb) cal.addEventListener('click', () => {
+    if (compassRaw === null) return;
+    let off = nb.bearing - compassRaw;
+    off = ((off + 540) % 360) - 180;
+    setCompassOffset(+off.toFixed(1));
+    selectStation(st);                        // refresh the panel
+  });
+  const rst = document.getElementById('btn-compass-reset');
+  if (rst) rst.addEventListener('click', () => { setCompassOffset(null); selectStation(st); });
+}
+
+// A station joined to this one by a shot: its name and grid bearing.
+function stationNeighbour(st) {
+  let best = null;
+  for (const s of st.shots) {
+    const other = s._role === 'from' ? s.to_xyz : s.from_xyz;
+    if (!other) continue;
+    const dx = other[0] - st.pos.x, dy = other[1] - st.pos.y;
+    const hz = Math.hypot(dx, dy);
+    if (hz < 1) continue;                     // too short or too steep to aim along
+    const cand = { name: s._role === 'from' ? s.to_name : s.from_name, hz,
+                   bearing: (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360 };
+    if (!best || cand.hz > best.hz) best = cand;  // longest shot aims best
+  }
+  return best;
 }
 
 function onPointerTap(e) {
@@ -1819,15 +3176,21 @@ function onPointerTap(e) {
         ['Elevation', gpsScenePos.z.toFixed(1) + ' m'],
         ['Compass',   compassHeading !== null ? Math.round(compassHeading) + '°' : 'N/A'],
       ]);
-      hlRing.visible = false;
       return;
     }
   }
 
+  if (fieldPickOn) { fieldPickTap(); return; }
+  if (measureOn) { measureTap(); return; }
+  const fpHit = fieldHitTest(ndc);
+  if (fpHit) { fieldShowPoint(fpHit); return; }
+
   // Raycast against station sphere meshes
   const hits = _tapRay.intersectObjects(stationMeshes, false);
   if (hits.length) {
-    selectStation(hits[0].object._station);
+    const st = hits[0].object._station;
+    if (_selMesh && _selMesh._station === st) focusStation(st);
+    else selectStation(st);
   } else {
     infoPanel.classList.remove('open');
     clearStationHighlight();
@@ -1937,6 +3300,7 @@ function _gpsToggleTestOrigin() {
   }
   // Re-anchor straight away rather than waiting for the next fix.
   if (gpsLastLatLon) updateGpsMarker(gpsLastLatLon.lat, gpsLastLatLon.lon, null);
+  fieldRebuild();
   if (gpsScenePos) {
     const { x, y, z } = gpsScenePos;
     controls.target.set(x, y, z);
@@ -2571,6 +3935,8 @@ let _t = 0;
   }
 
   if (gpsMarker) { easeMarker(_dt); updateCaverScale(); }
+  stepStationFocus();
+  sizeLeadSprites();
 
   if (flyMode) {
     if (craneMode) {

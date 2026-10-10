@@ -2,6 +2,8 @@ package com.feroz.flexviewer
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.WindowManager
@@ -17,10 +19,12 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.webkit.WebViewAssetLoader
+import java.io.File
 
 /**
  * A single-activity WebView host for a FLEX portable cave export.
@@ -169,6 +173,41 @@ class MainActivity : AppCompatActivity() {
         /** Lets the viewer show "running as app" and enable app-only affordances. */
         @JavascriptInterface
         fun isNativeHost(): Boolean = true
+
+        /**
+         * Hands a text file the viewer made (GPX/KML of tracks and points) to the
+         * Android share sheet: save to Files, Drive, email, another app. The file
+         * goes to app-private cache and is shared through a FileProvider URI with
+         * a read grant, so no storage permission is needed. The page has no
+         * download path inside a WebView, which is why this exists.
+         */
+        @JavascriptInterface
+        fun shareFile(name: String, mime: String, content: String): Boolean {
+            return try {
+                val safe = name.replace(Regex("[^A-Za-z0-9._-]"), "_").take(100)
+                    .ifEmpty { "flex-export.txt" }
+                val dir = File(cacheDir, "shared").apply { mkdirs() }
+                val file = File(dir, safe)
+                file.writeText(content, Charsets.UTF_8)
+                val uri = FileProvider.getUriForFile(
+                    this@MainActivity, "$packageName.fileprovider", file
+                )
+                val send = Intent(Intent.ACTION_SEND).apply {
+                    type = mime
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    putExtra(Intent.EXTRA_SUBJECT, safe)
+                    clipData = ClipData.newRawUri(safe, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                runOnUiThread { startActivity(Intent.createChooser(send, safe)) }
+                true
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this@MainActivity, "Could not share: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+                false
+            }
+        }
     }
 
     private fun enterImmersive() {

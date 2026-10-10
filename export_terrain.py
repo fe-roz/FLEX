@@ -1257,15 +1257,44 @@ def convert_caves(caves_path, utm_center_e, utm_center_n, progress=print, zone=N
                 entry["lrud"] = st["lrud"]
             if st.get("dist") is not None:
                 entry["dist"] = st["dist"]
+            if st.get("comment"):
+                entry["comment"] = st["comment"]
             stations_out.append(entry)
 
-        out["surveys"].append({
+        survey_out = {
             "name":     survey.get("name",  "Survey"),
             "color":    survey.get("color", "#00e5ff"),
             "lines":    lines,
             "shots":    shots_out,
             "stations": stations_out,
-        })
+        }
+        # Cave the survey belongs to: the viewer keys station names per cave,
+        # so two caves' station "1" stay two stations.
+        if survey.get("cave"):
+            survey_out["cave"] = survey["cave"]
+        # Open leads: station name, position and the note/size/date, if any.
+        leads_out = []
+        for ld in survey.get("leads", []):
+            le, ln, _ = latlon_to_utm(ld.get("lat", 0), ld.get("lon", 0), zone)
+            entry = {"station": ld.get("station", ""),
+                     "xyz": [le - utm_center_e, ln - utm_center_n, ld.get("elev", 0)]}
+            for key in ("description", "width", "height", "date"):
+                if ld.get(key) is not None:
+                    entry[key] = ld[key]
+            leads_out.append(entry)
+        if leads_out:
+            survey_out["leads"] = leads_out
+        out["surveys"].append(survey_out)
+    # Area labels named in FLEX: text at a point, same conversion as stations.
+    labels_out = []
+    for lb in raw.get("labels", []):
+        if not lb.get("text"):
+            continue
+        le, ln, _ = latlon_to_utm(lb.get("lat", 0), lb.get("lon", 0), zone)
+        labels_out.append({"text": str(lb["text"])[:60],
+                           "xyz": [le - utm_center_e, ln - utm_center_n, lb.get("elev", 0)]})
+    if labels_out:
+        out["labels"] = labels_out
     progress(f"  Converted {sum(len(s['lines']) for s in out['surveys']):,} shots across "
              f"{len(out['surveys'])} surveys")
 

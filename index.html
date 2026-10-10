@@ -986,10 +986,14 @@
                 <div id="lp-cave-list" style="margin-bottom:4px;"></div>
                 <div id="cave-inline-panel" style="display:none;margin:4px 0 8px;"></div>
                 <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:2px;">
-                  <button class="btn btn-sm btn-primary lp-add-btn" onclick="window._importCavePLT()" style="font-size:11px;">+ Import PLT</button>
+                  <button class="btn btn-sm btn-primary lp-add-btn" onclick="window._importCavePLT()" style="font-size:11px;" title="Compass .plt, or a Breakout .json">+ Import PLT / Breakout</button>
                   <label class="lp-row" style="margin:0; cursor:pointer;">
                     <input type="checkbox" id="lp-cave-toggle" style="margin:0;">
                     <span style="font-size:10px; opacity:0.7; margin-left:4px;">Show all</span>
+                  </label>
+                  <label class="lp-row" style="margin:0; cursor:pointer;" title="Open leads from Breakout files">
+                    <input type="checkbox" id="lp-cave-leads-toggle" checked style="margin:0;" onchange="window._setCaveLeadsVisible(this.checked)">
+                    <span style="font-size:10px; opacity:0.7; margin-left:4px;">Leads</span>
                   </label>
                 </div>
                 <div id="lp-plt-recents"></div>
@@ -1814,7 +1818,7 @@
 
     <!-- Step 1: File -->
     <div style="margin-bottom:8px;">
-      <input type="file" id="cwiz-file-input" accept=".plt,.PLT,.txt" style="
+      <input type="file" id="cwiz-file-input" accept=".plt,.PLT,.txt,.json" style="
         width:100%; background:#111; border:1px solid rgba(255,255,255,0.2);
         border-radius:4px; padding:6px; color:#ddd; font-size:11px; cursor:pointer; box-sizing:border-box;">
       <div id="cwiz-file-info" style="margin-top:5px; font-size:11px; color:#8f8; min-height:14px;"></div>
@@ -2295,12 +2299,118 @@
     // ── Collect cave shots within bbox ───────────────────────────────────────
     function _collectCavesInBbox(minLon, minLat, maxLon, maxLat) {
       // Access the global cave import state from flex.js
-      const surveys = [];
+      let surveys = [];
       const surveyMap = {};
+      const handledIds = new Set();
+      const areaLabels = [];
+      const inBox = (lon, lat) => lon >= minLon && lon <= maxLon && lat >= minLat && lat <= maxLat;
+
+      // First: caves rendered by _rerenderCave keep their coordinate converter,
+      // so shots and stations are rebuilt from the parsed survey itself. Every
+      // shot carries its from/to station names and every station its name,
+      // LRUD and distance, whether or not station dots are switched on and
+      // whatever the cave size (big caves draw one polyline per segment, which
+      // carries no station names). Stations are grouped per cave so the viewer
+      // never merges two caves' identically named stations.
+      try {
+        (window._caveImports || []).forEach((imp, ci) => {
+          if (!imp || !imp.parsed || typeof imp._convertFn !== 'function') return;
+          (imp.cesiumIds || []).forEach(id => handledIds.add(id));
+          if (imp.visible === false) return;
+          const dopt = imp.displayOptions || {};
+          const colors = dopt.surveyColors || {};
+          const conv = imp._convertFn;
+          const memo = new Map();
+          const ll = p => {
+            if (memo.has(p)) return memo.get(p);
+            let r = null;
+            const cart = conv(p.n, p.e, p.v);
+            if (cart) {
+              const c = Cesium.Cartographic.fromCartesian(cart);
+              if (c) r = [Cesium.Math.toDegrees(c.longitude), Cesium.Math.toDegrees(c.latitude), c.height];
+            }
+            memo.set(p, r);
+            return r;
+          };
+          const descOf = {};
+          (imp.parsed.surveys || []).forEach(sv => { if (sv.code && !(sv.code in descOf)) descOf[sv.code] = sv.desc || ''; });
+          const entryFor = code => {
+            const key = `cave${ci}|${code}`;
+            if (!surveyMap[key]) {
+              const d = descOf[code];
+              surveyMap[key] = {
+                name:  code ? (d ? `${code} — ${d}` : code) : (imp.name || 'Survey'),
+                cave:  imp.name || `cave${ci}`,
+                color: colors[code] || colors[''] || '#00e5ff',
+                shots: [], stations: [],
+              };
+              surveys.push(surveyMap[key]);
+            }
+            return surveyMap[key];
+          };
+          const hidden  = code => !!(dopt.hiddenSurveys && dopt.hiddenSurveys[code]);
+          const surface = code => !!(dopt.surfaceSurveys && dopt.surfaceSurveys[code]);
+
+          for (const seg of imp.parsed.segments || []) {
+            const code = seg.survey || '';
+            if (hidden(code)) continue;
+            if ((seg.isSurface || surface(code)) && !dopt.showSurface) continue;
+            const pts = seg.points.filter(p => !p.excluded);
+            for (let k = 0; k + 1 < pts.length; k++) {
+              const A = pts[k], B = pts[k + 1];
+              const a = ll(A), b = ll(B);
+              if (!a || !b || !inBox((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)) continue;
+              const shot = { from: a, to: b,
+                length: +Math.hypot(B.e - A.e, B.n - A.n, B.v - A.v).toFixed(3) };
+              if (A.name) shot.from_name = A.name;
+              if (B.name) shot.to_name = B.name;
+              entryFor(code).shots.push(shot);
+            }
+          }
+          const withShots = new Set((imp.parsed.segments || []).map(sg => sg.survey || ''));
+          for (const s of imp.parsed.stations || []) {
+            const code = s.survey || '';
+            if (hidden(code)) continue;
+            if ((s.isSurface || surface(code) || !withShots.has(code)) && !dopt.showSurface) continue;
+            const p = ll(s);
+            if (!p || !inBox(p[0], p[1])) continue;
+            const st = { name: s.name || '', lon: p[0], lat: p[1], elev: p[2] };
+            if (s.lrud) st.lrud = [s.lrud.l, s.lrud.r, s.lrud.u, s.lrud.d];
+            if (s.dist != null && isFinite(s.dist)) st.dist = s.dist;
+            if (s.comment) st.comment = s.comment;
+            entryFor(code).stations.push(st);
+          }
+          // Area labels (🏷 Labels): named spots, same conversion as stations.
+          for (const lb of dopt.areaLabels || []) {
+            if (!lb || !lb.text) continue;
+            const p = ll(lb);
+            if (!p || !inBox(p[0], p[1])) continue;
+            areaLabels.push({ text: String(lb.text), cave: imp.name || '', lon: p[0], lat: p[1], elev: p[2] });
+          }
+          // Open leads ride with the survey of the station they hang off.
+          const stnByName = new Map();
+          for (const s of imp.parsed.stations || []) if (!stnByName.has(s.name)) stnByName.set(s.name, s);
+          for (const ld of imp.parsed.leads || []) {
+            if (ld.done) continue;
+            const s = stnByName.get(ld.station);
+            if (!s || hidden(s.survey || '')) continue;
+            const p = ll(s);
+            if (!p || !inBox(p[0], p[1])) continue;
+            const lead = { station: ld.station, lon: p[0], lat: p[1], elev: p[2] };
+            if (ld.d) lead.description = String(ld.d);
+            if (ld.w != null && isFinite(ld.w)) lead.width = ld.w;
+            if (ld.h != null && isFinite(ld.h)) lead.height = ld.h;
+            if (ld.t) lead.date = String(ld.t);
+            const sv = entryFor(s.survey || '');
+            (sv.leads || (sv.leads = [])).push(lead);
+          }
+        });
+      } catch(e) { console.warn('Cave export (parsed) error:', e); }
 
       try {
-        // Iterate all Cesium entities with isCaveSurvey property
+        // Anything else: read back Cesium entities with the isCaveSurvey property
         cesiumViewer.entities.values.forEach(entity => {
+          if (handledIds.has(entity.id)) return;
           if (!entity.properties || !entity.properties.isCaveSurvey || !entity.properties.isCaveSurvey.getValue()) return;
           if (!entity.polyline) return;
           const positions = entity.polyline.positions.getValue(Cesium.JulianDate.now());
@@ -2311,10 +2421,18 @@
             return [Cesium.Math.toDegrees(c.longitude), Cesium.Math.toDegrees(c.latitude), c.height];
           });
 
-          // Check if shot midpoint is within bbox
-          const midLon = (pts[0][0] + pts[1][0]) / 2;
-          const midLat = (pts[0][1] + pts[1][1]) / 2;
-          if (midLon < minLon || midLon > maxLon || midLat < minLat || midLat > maxLat) return;
+          // A polyline is one shot (anchored caves) or a whole chain of shots
+          // (UTM and large caves): take every consecutive pair, keeping shots
+          // whose midpoint falls in the bbox. Taking only the first pair used
+          // to drop all but one shot of every chain from the export.
+          const shotsIn = [];
+          for (let k = 0; k + 1 < pts.length; k++) {
+            const midLon = (pts[k][0] + pts[k + 1][0]) / 2;
+            const midLat = (pts[k][1] + pts[k + 1][1]) / 2;
+            if (midLon < minLon || midLon > maxLon || midLat < minLat || midLat > maxLat) continue;
+            shotsIn.push({ from: pts[k], to: pts[k + 1] });
+          }
+          if (!shotsIn.length) return;
 
           const code  = entity.properties.surveyCode ? entity.properties.surveyCode.getValue() : '';
           // Initial name is just the code — 3rd pass enriches it with the real per-survey description
@@ -2327,7 +2445,7 @@
             surveyMap[key] = { name, color, shots: [] };
             surveys.push(surveyMap[key]);
           }
-          surveyMap[key].shots.push({ from: pts[0], to: pts[1] });
+          surveyMap[key].shots.push(...shotsIn);
         });
       } catch(e) { console.warn('Cave export collection error:', e); }
 
@@ -2335,6 +2453,7 @@
       try {
         cesiumViewer.entities.values.forEach(entity => {
           if (!entity.properties || !entity.properties.isCaveSurvey || !entity.properties.isCaveSurvey.getValue()) return;
+          if (handledIds.has(entity.id)) return;
           if (!entity.point || !entity.position) return;
           const cart = entity.position.getValue(Cesium.JulianDate.now());
           if (!cart) return;
@@ -2430,7 +2549,11 @@
         });
       } catch(e) { console.warn('Cave passage export error:', e); }
 
-      return passages.length ? { surveys, passages } : { surveys };
+      surveys = surveys.filter(sv => sv.shots.length || (sv.stations && sv.stations.length) || (sv.leads && sv.leads.length));
+      const out = { surveys };
+      if (passages.length) out.passages = passages;
+      if (areaLabels.length) out.labels = areaLabels;
+      return out;
     }
 
     // ── Run export ───────────────────────────────────────────────────────────
