@@ -107,9 +107,37 @@ def main():
         del html
 
     # ── geometry + survey data ───────────────────────────────────────────────
-    for name in ('terrain.glb', 'caves.json'):
-        shutil.copyfile(os.path.join(export_dir, name), os.path.join(out_dir, name))
-        print('  copied %-14s %s' % (name, human(os.path.getsize(os.path.join(out_dir, name)))))
+    shutil.copyfile(os.path.join(export_dir, 'terrain.glb'), os.path.join(out_dir, 'terrain.glb'))
+    print('  copied %-14s %s' % ('terrain.glb', human(os.path.getsize(os.path.join(out_dir, 'terrain.glb')))))
+
+    # Passage walls ride as a binary sidecar (walls.bin, see cave_walls.py).
+    # Newer exports already carry it; exports made while the walls travelled as
+    # JSON inside caves.json are converted here, so they need no re-export.
+    caves = json.loads(io.open(os.path.join(export_dir, 'caves.json'), encoding='utf-8').read())
+    has_walls = False
+    stale = os.path.join(out_dir, 'walls.bin')
+    if os.path.exists(stale):            # never carry the previous cave's walls over
+        try:
+            os.remove(stale)
+        except OSError:
+            pass                         # harmless: unreferenced unless this cave has walls
+    if caves.get('walls') and os.path.exists(os.path.join(export_dir, caves['walls']['file'])):
+        shutil.copyfile(os.path.join(export_dir, caves['walls']['file']), os.path.join(out_dir, 'walls.bin'))
+        caves['walls']['file'] = 'walls.bin'
+        has_walls = True
+        print('  sidecar %-14s %s' % ('walls.bin', human(os.path.getsize(os.path.join(out_dir, 'walls.bin')))))
+    elif caves.get('passages'):
+        sys.path.insert(0, flex_dir)
+        from cave_walls import pack_walls
+        data, desc = pack_walls(caves.pop('passages'))
+        if desc:
+            io.open(os.path.join(out_dir, 'walls.bin'), 'wb').write(data)
+            caves['walls'] = desc
+            has_walls = True
+            print('  packed  %-14s %s (from JSON walls in caves.json)' % ('walls.bin', human(len(data))))
+    caves_json = json.dumps(caves, separators=(',', ':'))
+    io.open(os.path.join(out_dir, 'caves.json'), 'w', encoding='utf-8').write(caves_json)
+    print('  wrote  %-15s %s' % ('caves.json', human(os.path.getsize(os.path.join(out_dir, 'caves.json')))))
 
     # ── three.js and friends: prefer the export's own copy ──────────────────
     libs_src = os.path.join(export_dir, 'libs')
@@ -124,8 +152,7 @@ def main():
     # ── the shell, always from the current template ─────────────────────────
     tpl = io.open(os.path.join(flex_dir, 'viewer_build', 'viewer.html'),
                   encoding='utf-8').read()
-    caves_json = io.open(os.path.join(export_dir, 'caves.json'), encoding='utf-8').read()
-    json.loads(caves_json)   # fail here, not silently in the browser
+    # (caves_json was built and validated above, with any walls moved out)
     # Inside a <script>, "</" in any name would end the block early.
     caves_json = caves_json.replace('</', '<\\/')
 
@@ -133,6 +160,7 @@ def main():
     for old, new in [('"PLACEHOLDER_GLB_B64"', '"terrain.glb"'),
                      ('"PLACEHOLDER_TEX_B64"', '"tex_sat.jpg"'),
                      ('"PLACEHOLDER_HS_B64"',  '"tex_hs.jpg"' if has_hs else '"PLACEHOLDER_HS_B64"'),
+                     ('"PLACEHOLDER_WALLS_B64"', '"walls.bin"' if has_walls else '"PLACEHOLDER_WALLS_B64"'),
                      ('PLACEHOLDER_CAVES_JSON', caves_json)]:
         if old not in tpl:
             print('  WARNING: %s not found in template' % old)

@@ -1993,6 +1993,32 @@
         </label>
       </div>
 
+      <!-- Passage walls from LRUDs -->
+      <div style="font-size:10px;color:rgba(255,255,255,0.45);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em;">Passage (LRUD)</div>
+      <div style="margin-bottom:12px;padding:7px 9px;background:rgba(255,255,255,0.04);border-radius:6px;">
+        <div id="style-passage-modes" style="display:flex;gap:0;margin-bottom:7px;">
+          <button type="button" data-mode="none"   onclick="window._stylePassageMode('none')"   style="flex:1;padding:4px 0;font-size:12px;cursor:pointer;border:1px solid rgba(255,255,255,0.18);border-radius:4px 0 0 4px;">None</button>
+          <button type="button" data-mode="blocky" onclick="window._stylePassageMode('blocky')" style="flex:1;padding:4px 0;font-size:12px;cursor:pointer;border:1px solid rgba(255,255,255,0.18);border-left:none;">Blocky</button>
+          <button type="button" data-mode="smooth" onclick="window._stylePassageMode('smooth')" style="flex:1;padding:4px 0;font-size:12px;cursor:pointer;border:1px solid rgba(255,255,255,0.18);border-left:none;border-radius:0 4px 4px 0;">Smooth</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:7px;font-size:12px;">
+          <span title="Direction U and D are measured in">U/D</span>
+          <div id="style-passage-axis" style="display:flex;flex:1;">
+            <button type="button" data-axis="vertical" onclick="window._stylePassageAxis('vertical')" title="U/D straight up and down (plumb); L/R level" style="flex:1;padding:3px 0;font-size:11px;cursor:pointer;border:1px solid rgba(255,255,255,0.18);border-radius:4px 0 0 4px;">Vertical</button>
+            <button type="button" data-axis="shot" onclick="window._stylePassageAxis('shot')" title="U/D perpendicular to the shot, tilting with its inclination; L/R level" style="flex:1;padding:3px 0;font-size:11px;cursor:pointer;border:1px solid rgba(255,255,255,0.18);border-left:none;border-radius:0 4px 4px 0;">&perp; Shot</button>
+          </div>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
+          Opacity
+          <input type="range" id="style-passage-opacity" min="10" max="100" step="5"
+            onchange="window._stylePassageOpacity(this)"
+            oninput="document.getElementById('style-passage-opacity-val').textContent = this.value + '%'"
+            style="width:90px;accent-color:#00e5ff;">
+          <span id="style-passage-opacity-val" style="font-size:11px;color:#aaa;min-width:30px;">55%</span>
+        </label>
+        <div id="style-passage-note" style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:5px;"></div>
+      </div>
+
       <!-- Survey color list -->
       <div style="font-size:10px;color:rgba(255,255,255,0.45);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em;">Survey colors</div>
       <div id="style-survey-list" style="max-height:220px;overflow-y:auto;margin-bottom:10px;"></div>
@@ -2294,7 +2320,7 @@
 
       // Third pass: enrich stations with lrud/dist AND survey names from _caveImports (flex.js global)
       try {
-        const imports = typeof _caveImports !== 'undefined' ? _caveImports : [];
+        const imports = window._caveImports || [];
         imports.forEach(imp => {
           if (!imp || !imp.parsed) return;
           // Build surveyCode → description map.
@@ -2329,7 +2355,49 @@
         });
       } catch(e) { console.warn('Cave LRUD/dist enrichment error:', e); }
 
-      return { surveys };
+      // Fourth pass: passage walls, exactly as drawn (Style panel → Passage).
+      // Each visible cave keeps its wall mesh in world coordinates; send it as
+      // lon/lat/height like the shots, keeping triangles whose centre falls in
+      // the export box, re-indexed compactly. The exporter converts it to the
+      // viewer's frame with the same UTM code as the survey lines.
+      const passages = [];
+      try {
+        const imports = window._caveImports || [];
+        imports.forEach(imp => {
+          const mesh = imp && imp._passageMesh;
+          if (!mesh || imp.visible === false) return;
+          mesh.groups.forEach(g => {
+            const nv = g.pos.length / 3;
+            const lon = new Float64Array(nv), lat = new Float64Array(nv), h = new Float64Array(nv);
+            const scratch = new Cesium.Cartesian3();
+            for (let i = 0; i < nv; i++) {
+              scratch.x = g.pos[3 * i]; scratch.y = g.pos[3 * i + 1]; scratch.z = g.pos[3 * i + 2];
+              const c = Cesium.Cartographic.fromCartesian(scratch);
+              if (!c) { lon[i] = NaN; continue; }
+              lon[i] = Cesium.Math.toDegrees(c.longitude);
+              lat[i] = Cesium.Math.toDegrees(c.latitude);
+              h[i]   = c.height;
+            }
+            const remap = new Int32Array(nv).fill(-1);
+            const lonlat = [], indices = [];
+            for (let t = 0; t + 2 < g.idx.length; t += 3) {
+              const a0 = g.idx[t], a1 = g.idx[t + 1], a2 = g.idx[t + 2];
+              const cl = (lon[a0] + lon[a1] + lon[a2]) / 3, ca = (lat[a0] + lat[a1] + lat[a2]) / 3;
+              if (!(cl >= minLon && cl <= maxLon && ca >= minLat && ca <= maxLat)) continue;
+              for (const v of [a0, a1, a2]) {
+                if (remap[v] < 0) {
+                  remap[v] = lonlat.length / 3;
+                  lonlat.push(+lon[v].toFixed(8), +lat[v].toFixed(8), +h[v].toFixed(3));
+                }
+                indices.push(remap[v]);
+              }
+            }
+            if (indices.length) passages.push({ color: g.hex, opacity: mesh.alpha, lonlat, indices });
+          });
+        });
+      } catch(e) { console.warn('Cave passage export error:', e); }
+
+      return passages.length ? { surveys, passages } : { surveys };
     }
 
     // ── Run export ───────────────────────────────────────────────────────────

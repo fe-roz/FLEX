@@ -1123,7 +1123,7 @@ def get_viewer_libs(progress=print):
 
 
 def build_inline_viewer(glb_path, tex_b64, caves_data, viewer_libs, progress=print,
-                        hs_b64=None):
+                        hs_b64=None, walls_bytes=None):
     """
     Build a fully self-contained HTML file:
       - Three.js libs inlined as <script> blocks
@@ -1172,6 +1172,12 @@ def build_inline_viewer(glb_path, tex_b64, caves_data, viewer_libs, progress=pri
         progress(f"  Embedding hillshade texture ({len(hs_b64)//1024} KB)...")
         html = html.replace('"PLACEHOLDER_HS_B64"', f'"{hs_b64}"')
     # (if not provided the placeholder stays, viewer JS will detect and hide the toggle)
+
+    # 4b. Embed passage walls (walls.bin) as base64 — same bytes as the sidecar
+    if walls_bytes:
+        walls_b64 = base64.b64encode(walls_bytes).decode('ascii')
+        progress(f"  Embedding passage walls ({len(walls_b64)//1024} KB)...")
+        html = html.replace('"PLACEHOLDER_WALLS_B64"', f'"{walls_b64}"')
 
     # 5. Embed caves data as JSON literal
     caves_json = json.dumps(caves_data, separators=(',', ':'))
@@ -1262,6 +1268,40 @@ def convert_caves(caves_path, utm_center_e, utm_center_n, progress=print, zone=N
         })
     progress(f"  Converted {sum(len(s['lines']) for s in out['surveys']):,} shots across "
              f"{len(out['surveys'])} surveys")
+
+    # Passage walls (optional): meshes FLEX drew from the LRUDs, sent as a flat
+    # lon/lat/alt vertex list plus triangle indices. Converted with the same
+    # latlon_to_utm and centre as the shots, so the walls sit on the lines.
+    #   in:  {"color", "opacity", "lonlat": [lon,lat,alt,...], "indices": [...]}
+    #   out: {"color", "opacity", "positions": [x,y,z,...],   "indices": [...]}
+    passages_out = []
+    for pg in raw.get("passages", []) or []:
+        ll = pg.get("lonlat") or []
+        idx = pg.get("indices") or []
+        nv = len(ll) // 3
+        if nv < 3 or len(idx) < 3:
+            continue
+        pos = []
+        for i in range(nv):
+            lon, lat, alt = ll[3 * i], ll[3 * i + 1], ll[3 * i + 2]
+            e, n, _ = latlon_to_utm(lat, lon, zone)
+            pos.extend((round(e - utm_center_e, 3), round(n - utm_center_n, 3), round(alt, 3)))
+        tris = []                       # drop whole triangles, never single indices
+        for t in range(0, len(idx) - 2, 3):
+            tri = (int(idx[t]), int(idx[t + 1]), int(idx[t + 2]))
+            if all(0 <= k < nv for k in tri):
+                tris.extend(tri)
+        idx = tris
+        passages_out.append({
+            "color":     pg.get("color", "#00e5ff"),
+            "opacity":   float(pg.get("opacity", 0.55)),
+            "positions": pos,
+            "indices":   idx,
+        })
+    if passages_out:
+        out["passages"] = passages_out
+        progress(f"  Converted passage walls: "
+                 f"{sum(len(p['indices']) // 3 for p in passages_out):,} triangles")
     return out
 
 
@@ -1489,13 +1529,26 @@ def main():
                 "hillshade":    (hs_mode if hs_bytes else None),
                 "hillshade_cell_m": (float(hs_cell) if hs_cell else None),
             }
+            # Passage walls travel as a binary sidecar (cave_walls.py), not as
+            # JSON: a third of the size, and the viewer loads it with no parse.
+            walls_bytes = None
+            if caves_out.get("passages"):
+                from cave_walls import pack_walls
+                walls_bytes, walls_desc = pack_walls(caves_out.pop("passages"))
+                if walls_desc:
+                    caves_out["walls"] = walls_desc
+                    zf.writestr('walls.bin', walls_bytes)
+                    print(f"[6/7] Passage walls: walls.bin {len(walls_bytes)//1024} KB, "
+                          f"{sum(g['icount'] for g in walls_desc['groups'])//3:,} triangles")
+                else:
+                    walls_bytes = None
             zf.writestr('caves.json', json.dumps(caves_out))
 
             # Viewer HTML: fully self-contained (Three.js + GLB + textures + caves all inline)
             inline_html = build_inline_viewer(
                 glb_path, tex_b64, caves_out, viewer_libs,
                 progress=lambda m: print(f"[6/7] {m}"),
-                hs_b64=hs_b64)
+                hs_b64=hs_b64, walls_bytes=walls_bytes)
             zf.writestr('viewer.html', inline_html.encode('utf-8'))
 
             # serve.bat (Windows) — double-click to start local HTTP server

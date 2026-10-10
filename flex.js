@@ -4096,6 +4096,11 @@ function renderCaltopoStatus() {
 // so we have fine-grained control over each polyline / point.
 
 let _caveImports = [];       // Array of { name, parsed, cesiumIds, visible }
+// flex.js is an ES module, so its top-level names are invisible to the inline
+// scripts in index.html — the export collector reads the cave list (LRUDs,
+// survey names, passage walls) through this window reference. The array is
+// only ever mutated in place, never reassigned, so the reference stays valid.
+window._caveImports = _caveImports;
 let _cwizParsed  = null;     // Holds last-parsed PLT data while wizard is open
 
 // ── Recents (EPT + PLT) ───────────────────────────────────────────────────────
@@ -4357,6 +4362,10 @@ window._loadPltRecent = async function(i) {
     if (entry) _rerenderCave(_caveImports.indexOf(entry));
   } else {
     entry = renderCaveSurveyUTM(r.name, parsed, r.georef.zone, r.georef.south);
+    if (entry) {
+      entry.displayOptions = r.displayOptions || _defaultDisplayOptions(entry.parsed);
+      if ((entry.displayOptions.passageMode || 'none') !== 'none') _rerenderCave(_caveImports.indexOf(entry));
+    }
   }
   _finishCaveLoad(entry);
 };
@@ -4605,6 +4614,7 @@ function setCaveSurveyVisible(visible) {
       const e = cesiumViewer.entities.getById(id);
       if (e) e.show = visible;
     }
+    _setCavePassageVisible(imp, visible);
   }
   notifyCaveVisibilityChanged(visible);
 }
@@ -4653,6 +4663,7 @@ function _renderCaveList() {
         <div class="lp-row" style="gap:4px;">
           <input type="checkbox" ${imp.visible ? 'checked' : ''} onchange="window._toggleCaveImport(${i}, this.checked)" style="margin:0; flex-shrink:0;">
           <span class="lp-row-name" style="font-size:10px; cursor:pointer;" title="${imp.name}" onclick="window._toggleCaveInfo(${i})">${imp.name}</span>
+          <button onclick="window._flyToCave(${i})" style="background:none;border:none;color:rgba(255,255,255,0.5);cursor:pointer;font-size:12px;padding:0 2px;flex-shrink:0;" title="Fly to this cave">⌖</button>
           <button onclick="window._toggleCaveInfo(${i})" style="background:none;border:none;color:rgba(255,255,255,0.4);cursor:pointer;font-size:11px;padding:0 2px;flex-shrink:0;" title="Info / Edit">ℹ</button>
           <button onclick="window._removeCaveImport(${i})" style="background:none;border:none;color:#f88;cursor:pointer;font-size:11px;padding:0 2px;flex-shrink:0;" title="Remove">✕</button>
         </div>
@@ -4762,9 +4773,454 @@ function _defaultDisplayOptions(parsed) {
   return opts;
 }
 
+// ── Passage volumes from LRUDs ───────────────────────────────────────────────
+// The PLT parser keeps L/U/D/R per station (feet → metres). Compass writes a
+// negative number, or a 999-style sentinel, for a dimension nobody measured.
+//
+// Geometry is built in survey space (e/n/v metres) and pushed through the same
+// convertFn as the survey lines, so anchoring, declination and control-point
+// warps apply to the walls exactly as they do to the centreline. One Cesium
+// Primitive per cave, one GeometryInstance per survey colour.
+//
+// Modes:  none   — lines only
+//         blocky — one box per shot, flat-shaded (each shot's own direction)
+//         smooth — curved elliptical tube: spline centreline through the
+//                  stations, sizes eased between them, rounded dead ends
+const PASSAGE_SMOOTH_SIDES = 16;
+
+function _lrudValid(x) { return Number.isFinite(x) && x >= 0 && x < 300; }
+
+// A station's LRUD, or null. All four at zero is a placeholder, not a
+// measurement (a real passage is never 0x0), so it counts as unmeasured: it is
+// interpolated from its neighbours, or takes the 1 ft default like any gap.
+function _stationLrud(p) {
+  const w = p.lrud;
+  if (!w) return null;
+  if (['l', 'r', 'u', 'd'].every(k => Math.abs(w[k]) < 1e-6)) return null;
+  return w;
+}
+
+function _countLrudStations(parsed) {
+  let n = 0;
+  for (const seg of parsed.segments)
+    for (const p of seg.points)
+      if (_stationLrud(p) && ['l', 'r', 'u', 'd'].some(k => _lrudValid(p.lrud[k]))) n++;
+  return n;
+}
+
+// Every station of a segment gets all four dimensions. A missing value is
+// interpolated between the nearest measured stations either side (held flat
+// past the ends). A dimension never measured anywhere in the segment defaults
+// to 1 ft, so a leg with no LRUD at all still draws as a 2 ft x 2 ft passage.
+const PASSAGE_DEFAULT_LRUD = 0.3048;   // 1 ft each side
+
+function _segmentLruds(pts) {
+  const keys = ['l', 'r', 'u', 'd'];
+  const out = pts.map(() => ({}));
+  for (const k of keys) {
+    const idx = [];
+    pts.forEach((p, i) => { if (_stationLrud(p) && _lrudValid(p.lrud[k])) idx.push(i); });
+    if (!idx.length) { out.forEach(o => { o[k] = null; }); continue; }
+    let j = 0;
+    for (let i = 0; i < pts.length; i++) {
+      while (j + 1 < idx.length && idx[j + 1] <= i) j++;
+      const lo = idx[j] <= i ? idx[j] : -1;
+      const hi = idx.find(x => x >= i) ?? -1;
+      const val = x => pts[x].lrud[k];
+      if (lo < 0) out[i][k] = val(hi);
+      else if (hi < 0 || hi === lo) out[i][k] = val(lo);
+      else out[i][k] = val(lo) + (val(hi) - val(lo)) * (i - lo) / (hi - lo);
+    }
+  }
+  for (const o of out) {
+    // Floor, so a wall measured at zero reads as a thin sheet, not nothing.
+    for (const k of keys) o[k] = Math.max(o[k] ?? PASSAGE_DEFAULT_LRUD, 0.05);
+  }
+  return out;
+}
+
+// Unit horizontal direction a→b in survey space, or null for a vertical shot.
+function _hdir(a, b) {
+  const dx = b.e - a.e, dy = b.n - a.n, h = Math.hypot(dx, dy);
+  return h > 1e-3 ? { x: dx / h, y: dy / h } : null;
+}
+
+// ── Section frames ───────────────────────────────────────────────────────────
+// A cross-section is laid out in a frame of three survey-space unit vectors:
+//   L  towards the left wall      U  towards the ceiling
+//   F  along the passage (only used to push rounded caps past a dead end)
+// Two conventions for U/D, chosen in the Style panel:
+//   vertical — U is straight up and L is horizontal: the usual Compass reading,
+//              where L/R are taken level and U/D with a plumb line.
+//   shot     — U is perpendicular to the shot, tilted with its inclination, so
+//              the section stays square to the survey line on slopes and a
+//              vertical shot becomes a tube along the shaft instead of needing
+//              the shaft special case. L stays horizontal in both.
+function _frameVertical(d) {
+  return { L: { e: -d.y, n: d.x, v: 0 }, U: { e: 0, n: 0, v: 1 }, F: { e: d.x, n: d.y, v: 0 } };
+}
+
+// t: unit 3D direction of the passage; d: horizontal heading to fall back on
+// when t is vertical.
+function _frameShot(t, d) {
+  const h = Math.hypot(t.e, t.n);
+  const dh = h > 1e-3 ? { x: t.e / h, y: t.n / h } : d;
+  const L = { e: -dh.y, n: dh.x, v: 0 };
+  // U = t x L (already unit: t and L are perpendicular unit vectors)
+  const U = { e: -t.v * L.n, n: t.v * L.e, v: t.e * L.n - t.n * L.e };
+  return { L, U, F: t };
+}
+
+function _unit3(a, b) {
+  const x = b.e - a.e, y = b.n - a.n, z = b.v - a.v, m = Math.hypot(x, y, z);
+  return m > 1e-6 ? { e: x / m, n: y / m, v: z / m } : null;
+}
+
+// World point at P + (-side)·L + up·U + fwd·F. `side` is positive to the right.
+function _framePoint(convertFn, P, fr, side, up, fwd = 0) {
+  const e = P.e - fr.L.e * side + fr.U.e * up + fr.F.e * fwd;
+  const n = P.n - fr.L.n * side + fr.U.n * up + fr.F.n * fwd;
+  const v = P.v - fr.L.v * side + fr.U.v * up + fr.F.v * fwd;
+  return convertFn(n, e, v);
+}
+
+function _passageGroup(groups, hex) {
+  if (!groups.has(hex)) groups.set(hex, { pos: [], idx: [] });
+  return groups.get(hex);
+}
+function _pushVert(g, c) { g.pos.push(c.x, c.y, c.z); return g.pos.length / 3 - 1; }
+function _pushQuad(g, a, b, c, d) {
+  const i = _pushVert(g, a), j = _pushVert(g, b), k = _pushVert(g, c), l = _pushVert(g, d);
+  g.idx.push(i, j, k, i, k, l);
+}
+
+// Vertical-U mode only: a vertical shot has no heading to hang a level section
+// on, so sections built like the others would all lie in one plane and draw a
+// sheet with no thickness. Draw it as a shaft instead: a horizontal footprint
+// L+R wide (across the last horizontal heading) and (L+R)/2 deep, running from
+// the lower station's floor to the upper station's ceiling.
+function _buildShaft(g, A, B, wA, wB, d, smooth) {
+  const lo = A.v <= B.v ? [A, wA] : [B, wB], hi = A.v <= B.v ? [B, wB] : [A, wA];
+  const zBot = lo[0].v - lo[1].d, zTop = hi[0].v + hi[1].u;
+  // The narrower end: a pit is rarely as wide as the room at its lip.
+  const l = Math.min(wA.l, wB.l), r = Math.min(wA.r, wB.r);
+  const depth = Math.max((l + r) / 2, 0.3);
+  const cx = (A.e + B.e) / 2, cy = (A.n + B.n) / 2;
+  // footprint points as (side, fwd): side to the right of d, fwd along d
+  const prof = smooth
+    ? Array.from({ length: PASSAGE_SMOOTH_SIDES }, (_, k) => {
+        const t = 2 * Math.PI * k / PASSAGE_SMOOTH_SIDES, c = Math.cos(t);
+        return [(c >= 0 ? r : l) * c, depth * Math.sin(t)];
+      })
+    : [[r, depth], [-l, depth], [-l, -depth], [r, -depth]];
+  const at = ([side, fwd], z, cf) =>
+    cf(cy - d.x * side + d.y * fwd, cx + d.y * side + d.x * fwd, z);
+  return { prof, at, zBot, zTop };
+}
+
+function _emitShaft(g, sh, convertFn, smooth) {
+  const { prof, at, zBot, zTop } = sh, N = prof.length;
+  const bot = prof.map(q => at(q, zBot, convertFn)), top = prof.map(q => at(q, zTop, convertFn));
+  if (bot.some(x => !x) || top.some(x => !x)) return;
+  if (!smooth) {
+    for (let k = 0; k < N; k++) { const k1 = (k + 1) % N; _pushQuad(g, bot[k], bot[k1], top[k1], top[k]); }
+    _pushQuad(g, top[0], top[1], top[2], top[3]);
+    _pushQuad(g, bot[3], bot[2], bot[1], bot[0]);
+    return;
+  }
+  const b = bot.map(c => _pushVert(g, c)), t = top.map(c => _pushVert(g, c));
+  for (let k = 0; k < N; k++) {
+    const k1 = (k + 1) % N;
+    g.idx.push(b[k], b[k1], t[k1], b[k], t[k1], t[k]);
+  }
+  for (const [ring, z] of [[top, zTop], [bot, zBot]]) {       // flat caps, own rim
+    const c = at([0, 0], z, convertFn);
+    if (!c) continue;
+    const ci = _pushVert(g, c), rim = ring.map(v => _pushVert(g, v));
+    for (let k = 0; k < N; k++) g.idx.push(ci, rim[k], rim[(k + 1) % N]);
+  }
+}
+
+// Blocky: a box per shot, both end sections in that shot's own frame, so every
+// shot is a separate flat-shaded prism. Unshared vertices per face give flat
+// normals.
+function _buildBlocky(g, pts, lr, convertFn, perp) {
+  let prev = null;
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const A = pts[i], B = pts[i + 1];
+    const hd = _hdir(A, B);
+    const d = hd || prev || { x: 0, y: 1 };
+    prev = d;
+    let fr;
+    if (perp) {
+      const t = _unit3(A, B);
+      if (!t) continue;                                   // zero-length shot
+      fr = _frameShot(t, d);
+    } else {
+      if (!hd) { _emitShaft(g, _buildShaft(g, A, B, lr[i], lr[i + 1], d, false), convertFn, false); continue; }
+      fr = _frameVertical(d);
+    }
+    const sec = (P, w) => [
+      _framePoint(convertFn, P, fr, -w.l,  w.u),   // top-left
+      _framePoint(convertFn, P, fr,  w.r,  w.u),   // top-right
+      _framePoint(convertFn, P, fr,  w.r, -w.d),   // bottom-right
+      _framePoint(convertFn, P, fr, -w.l, -w.d),   // bottom-left
+    ];
+    const a = sec(A, lr[i]), b = sec(B, lr[i + 1]);
+    if (a.some(x => !x) || b.some(x => !x)) continue;
+    for (let k = 0; k < 4; k++) {
+      const k1 = (k + 1) % 4;
+      _pushQuad(g, a[k], a[k1], b[k1], b[k]);
+    }
+    _pushQuad(g, a[3], a[2], a[1], a[0]);
+    _pushQuad(g, b[0], b[1], b[2], b[3]);
+  }
+}
+
+// Smooth: one curved tube per run of shots.
+//   * The centreline is a centripetal Catmull-Rom spline through the stations —
+//     a cubic Bézier per shot whose control points come from the neighbouring
+//     stations. It passes exactly through every station, and the centripetal
+//     knots stop it overshooting or looping at tight turns.
+//   * Each shot is cut into a few rings (more for longer shots). A ring faces
+//     the curve's tangent — horizontally in vertical-U mode, fully in 3D in
+//     perpendicular mode — so bends turn gradually instead of kinking.
+//   * Passage size eases between stations (smoothstep), so a room opening off
+//     a crawl flares instead of stepping.
+//   * Each quadrant of a ring is an ellipse quarter with its own radius
+//     (R/U/L/D), so an asymmetric passage stays asymmetric.
+//   * Dead ends get a rounded cap instead of a flat disc.
+//   * In vertical-U mode, vertical shots break the run and are drawn as shafts
+//     (see _buildShaft); in perpendicular mode the tube simply follows them.
+const PASSAGE_RING_SPACING = 1.5;   // metres of shot per ring, roughly
+const PASSAGE_MAX_RINGS    = 10;    // per shot
+const PASSAGE_CAP_RINGS    = 4;
+
+function _crPoint(p0, p1, p2, p3, t) {
+  const knot = (a, b) => Math.max(Math.sqrt(Math.hypot(b.e - a.e, b.n - a.n, b.v - a.v)), 1e-4);
+  const t0 = 0, t1 = t0 + knot(p0, p1), t2 = t1 + knot(p1, p2), t3 = t2 + knot(p2, p3);
+  const u = t1 + (t2 - t1) * t;
+  const mix = (a, b, ta, tb) => {
+    const wa = (tb - u) / (tb - ta), wb = (u - ta) / (tb - ta);
+    return { e: a.e * wa + b.e * wb, n: a.n * wa + b.n * wb, v: a.v * wa + b.v * wb };
+  };
+  const A1 = mix(p0, p1, t0, t1), A2 = mix(p1, p2, t1, t2), A3 = mix(p2, p3, t2, t3);
+  const B1 = mix(A1, A2, t0, t2), B2 = mix(A2, A3, t1, t3);
+  return mix(B1, B2, t1, t2);
+}
+
+function _lerpLrud(a, b, t) {
+  const s = t * t * (3 - 2 * t);
+  return { l: a.l + (b.l - a.l) * s, r: a.r + (b.r - a.r) * s,
+           u: a.u + (b.u - a.u) * s, d: a.d + (b.d - a.d) * s };
+}
+
+// One ring of N points: centre c in frame fr, dimensions w scaled by `scale`,
+// pushed `fwd` metres along fr.F (used by the rounded caps).
+function _smoothRing(g, convertFn, c, fr, w, scale, fwd) {
+  const N = PASSAGE_SMOOTH_SIDES, ring = [];
+  for (let k = 0; k < N; k++) {
+    const t = 2 * Math.PI * k / N, co = Math.cos(t), si = Math.sin(t);
+    const side = (co >= 0 ? w.r : w.l) * co * scale;
+    const up   = (si >= 0 ? w.u : w.d) * si * scale;
+    const x = _framePoint(convertFn, c, fr, side, up, fwd);
+    if (!x) return null;
+    ring.push(_pushVert(g, x));
+  }
+  return ring;
+}
+
+function _stitchRings(g, a, b) {
+  const N = a.length;
+  for (let k = 0; k < N; k++) {
+    const k1 = (k + 1) % N;
+    g.idx.push(a[k], a[k1], b[k1], a[k], b[k1], b[k]);
+  }
+}
+
+// Rounded end: rings shrink along a quarter circle and close on an apex that
+// sits a little past the station, so a dead end reads as rock, not a cut.
+function _roundCap(g, convertFn, c, fr, w, rim, outward) {
+  const len = Math.max(Math.min(w.l + w.r, w.u + w.d) / 2, 0.1);
+  const sgn = outward ? 1 : -1;
+  let prev = rim;
+  for (let m = 1; m < PASSAGE_CAP_RINGS; m++) {
+    const phi = (m / PASSAGE_CAP_RINGS) * Math.PI / 2;
+    const ring = _smoothRing(g, convertFn, c, fr, w, Math.cos(phi), sgn * len * Math.sin(phi));
+    if (!ring) return;
+    if (outward) _stitchRings(g, prev, ring); else _stitchRings(g, ring, prev);
+    prev = ring;
+  }
+  // apex on the centreline (the rings scale about it), pushed out by len
+  const ax = _framePoint(convertFn, c, fr, 0, 0, sgn * len);
+  if (!ax) return;
+  const ai = _pushVert(g, ax), N = prev.length;
+  for (let k = 0; k < N; k++) {
+    const k1 = (k + 1) % N;
+    if (outward) g.idx.push(prev[k], prev[k1], ai); else g.idx.push(prev[k1], prev[k], ai);
+  }
+}
+
+function _buildSmooth(g, pts, lr, convertFn, perp) {
+  const n = pts.length;
+  // Runs of shots to spline. Vertical-U mode splits at vertical shots and
+  // draws those as shafts; perpendicular mode keeps the whole leg as one run.
+  const runs = [];
+  if (perp) runs.push(pts.map((_, i) => i));
+  else {
+    let run = [0], lastDir = null;
+    for (let i = 0; i + 1 < n; i++) {
+      const hd = _hdir(pts[i], pts[i + 1]);
+      if (hd) { lastDir = hd; run.push(i + 1); continue; }
+      if (run.length >= 2) runs.push(run);
+      const nextDir = (() => { for (let j = i + 1; j + 1 < n; j++) { const h = _hdir(pts[j], pts[j + 1]); if (h) return h; } return null; })();
+      _emitShaft(g, _buildShaft(g, pts[i], pts[i + 1], lr[i], lr[i + 1], lastDir || nextDir || { x: 0, y: 1 }, true), convertFn, true);
+      run = [i + 1];
+    }
+    if (run.length >= 2) runs.push(run);
+  }
+
+  for (const ids of runs) {
+    // Sample the spline: centre + dimensions at each ring.
+    const S = [];
+    const P = k => pts[ids[k]];
+    for (let k = 0; k + 1 < ids.length; k++) {
+      const p1 = P(k), p2 = P(k + 1);
+      const p0 = k > 0 ? P(k - 1) : { e: 2 * p1.e - p2.e, n: 2 * p1.n - p2.n, v: 2 * p1.v - p2.v };
+      const p3 = k + 2 < ids.length ? P(k + 2) : { e: 2 * p2.e - p1.e, n: 2 * p2.n - p1.n, v: 2 * p2.v - p1.v };
+      const len = Math.hypot(p2.e - p1.e, p2.n - p1.n, p2.v - p1.v);
+      if (len < 1e-6) continue;                           // duplicate station
+      const K = Math.min(PASSAGE_MAX_RINGS, Math.max(2, Math.ceil(len / PASSAGE_RING_SPACING)));
+      for (let s = 0; s < K; s++) {
+        const t = s / K;
+        S.push({ c: s === 0 ? p1 : _crPoint(p0, p1, p2, p3, t), w: _lerpLrud(lr[ids[k]], lr[ids[k + 1]], t) });
+      }
+    }
+    if (!S.length) continue;
+    S.push({ c: P(ids.length - 1), w: lr[ids[ids.length - 1]] });
+
+    // Frame at each sample from the tangent through its neighbours.
+    let prevD = null;
+    for (let j = 0; j < S.length; j++) {
+      const a = S[Math.max(0, j - 1)].c, b = S[Math.min(S.length - 1, j + 1)].c;
+      const d = _hdir(a, b) || prevD || { x: 0, y: 1 };
+      prevD = d;
+      const t = perp ? _unit3(a, b) : null;
+      S[j].fr = t ? _frameShot(t, d) : _frameVertical(d);
+    }
+
+    const rings = [];
+    for (const s of S) {
+      const r = _smoothRing(g, convertFn, s.c, s.fr, s.w, 1, 0);
+      if (!r) return;
+      rings.push(r);
+    }
+    for (let j = 0; j + 1 < rings.length; j++) _stitchRings(g, rings[j], rings[j + 1]);
+    const first = S[0], last = S[S.length - 1];
+    _roundCap(g, convertFn, first.c, first.fr, first.w, rings[0], false);
+    _roundCap(g, convertFn, last.c, last.fr, last.w, rings[rings.length - 1], true);
+  }
+}
+
+function _removeCavePassages(imp) {
+  if (imp && imp._passagePrimitive) {
+    cesiumViewer.scene.primitives.remove(imp._passagePrimitive);   // destroys it
+    imp._passagePrimitive = null;
+  }
+  if (imp) imp._passageMesh = null;
+}
+
+function _setCavePassageVisible(imp, visible) {
+  if (imp && imp._passagePrimitive) imp._passagePrimitive.show = !!visible;
+}
+
+// (Re)build the walls for one cave. Honours the same hidden-survey and
+// surface rules as the survey lines.
+function _buildCavePassages(imp, convertFn) {
+  _removeCavePassages(imp);
+  const dopt = imp.displayOptions || _defaultDisplayOptions(imp.parsed);
+  const mode = dopt.passageMode || 'none';
+  if (mode === 'none') return;
+  const alpha = dopt.passageOpacity ?? 0.55;
+  const groups = new Map();
+  for (const seg of imp.parsed.segments) {
+    if (dopt.hiddenSurveys && dopt.hiddenSurveys[seg.survey]) continue;
+    const surface = seg.isSurface || !!(dopt.surfaceSurveys && dopt.surfaceSurveys[seg.survey]);
+    if (surface) continue;                       // no walls on surface shots
+    const pts = seg.points.filter(p => !p.excluded);
+    if (pts.length < 2) continue;
+    const lr = _segmentLruds(pts);
+    const hex = dopt.surveyColors[seg.survey] || dopt.surveyColors[''] || '#00e5ff';
+    const g = _passageGroup(groups, hex);
+    const perp = dopt.passageUpAxis === 'shot';
+    if (mode === 'smooth') _buildSmooth(g, pts, lr, convertFn, perp);
+    else _buildBlocky(g, pts, lr, convertFn, perp);
+  }
+  const instances = [];
+  // Keep the world-space mesh exactly as drawn, so the portable export can carry
+  // the same walls (index.html _collectCavesInBbox → export_terrain.py → viewer).
+  imp._passageMesh = { alpha, groups: [] };
+  for (const [hex, g] of groups) {
+    if (!g.idx.length) continue;
+    imp._passageMesh.groups.push({ hex, pos: g.pos, idx: g.idx });
+    const geometry = new Cesium.Geometry({
+      attributes: {
+        position: new Cesium.GeometryAttribute({
+          componentDatatype: Cesium.ComponentDatatype.DOUBLE,
+          componentsPerAttribute: 3,
+          values: new Float64Array(g.pos),
+        }),
+      },
+      indices: Cesium.IndexDatatype.createTypedArray(g.pos.length / 3, g.idx),
+      primitiveType: Cesium.PrimitiveType.TRIANGLES,
+      boundingSphere: Cesium.BoundingSphere.fromVertices(g.pos),
+    });
+    Cesium.GeometryPipeline.computeNormal(geometry);
+    instances.push(new Cesium.GeometryInstance({
+      geometry,
+      attributes: {
+        color: Cesium.ColorGeometryInstanceAttribute.fromColor(
+          Cesium.Color.fromCssColorString(hex).withAlpha(alpha)),
+      },
+    }));
+  }
+  if (!instances.length) return;
+  imp._passagePrimitive = cesiumViewer.scene.primitives.add(new Cesium.Primitive({
+    geometryInstances: instances,
+    appearance: new Cesium.PerInstanceColorAppearance({
+      translucent: alpha < 1, closed: false, flat: false,
+    }),
+    asynchronous: false,          // custom Geometry cannot go to the workers
+    allowPicking: false,          // clicks fall through to the survey shots
+    releaseGeometryInstances: true,
+    show: imp.visible !== false,
+  }));
+}
+
+// Survey-space → world for a UTM-georeferenced cave (the anchor case builds
+// its own convertFn inside _rerenderCave).
+function _caveUtmConvertFn(imp) {
+  const g = imp.georef || {};
+  const zone = g.zone ?? imp.parsed.utmZone;
+  if (!zone) return null;
+  const isNorth = g.south !== undefined ? !g.south : !imp.parsed.utmSouth;
+  return (n, e, v) => {
+    const { lat, lon } = utmToLatLon(e, n, zone, isNorth);
+    return Cesium.Cartesian3.fromDegrees(lon, lat, v);
+  };
+}
+
 window._rerenderCave = function(i) {
   const imp = _caveImports[i];
   if (!imp || !imp.georef) return;
+  if (imp.georef.mode !== 'anchor') {
+    // UTM caves have no restyle path for their lines yet; only the passage
+    // walls are rebuilt. (Removing the entities here used to delete the cave.)
+    const fn = _caveUtmConvertFn(imp);
+    if (fn) _buildCavePassages(imp, fn); else _removeCavePassages(imp);
+    _renderCaveList();
+    return;
+  }
   // Remove old entities
   for (const id of imp.cesiumIds) {
     const e = cesiumViewer.entities.getById(id);
@@ -4868,7 +5324,7 @@ window._rerenderCave = function(i) {
           s.isSurface ? `<span style='color:#ffd93d'>&#9650; Surface shot</span>` : null,
           s.dist != null ? `Distance from entrance: ${s.dist.toFixed(1)} m` : null,
           s.comment ? `<i>${s.comment}</i>` : null,
-          s.lrud ? `Passage L/R/U/D: ${Object.values(s.lrud).map(v=>v.toFixed(1)).join(' / ')} m` : null,
+          s.lrud ? `Passage L/R/U/D: ${[s.lrud.l, s.lrud.r, s.lrud.u, s.lrud.d].map(v=>v.toFixed(1)).join(' / ')} m` : null,
           s.survey ? `Survey: ${s.survey}${s.surveyDesc ? ' — ' + s.surveyDesc : ''}` : null,
         ].filter(Boolean).join('<br>');
         const e = cesiumViewer.entities.add({
@@ -4883,9 +5339,18 @@ window._rerenderCave = function(i) {
         imp.cesiumIds.push(e.id);
       }
     }
+    _buildCavePassages(imp, convertFn);
   }
   _renderCaveList();
   console.log(`[cave] Re-rendered "${imp.name}" at (${g.lat.toFixed(5)}, ${g.lon.toFixed(5)}, ${g.elev.toFixed(0)}m)`);
+};
+
+window._flyToCave = function(i) {
+  const imp = _caveImports[i];
+  if (!imp) return;
+  const ents = imp.cesiumIds.map(id => cesiumViewer.entities.getById(id)).filter(Boolean);
+  if (ents.length) cesiumViewer.flyTo(ents,
+    { duration: 2.5, offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), 0) });
 };
 
 window._toggleCaveImport = function(i, visible) {
@@ -4896,6 +5361,7 @@ window._toggleCaveImport = function(i, visible) {
     const e = cesiumViewer.entities.getById(id);
     if (e) e.show = visible;
   }
+  _setCavePassageVisible(imp, visible);
 };
 
 window._removeCaveImport = function(i) {
@@ -4905,6 +5371,7 @@ window._removeCaveImport = function(i) {
     const e = cesiumViewer.entities.getById(id);
     if (e) cesiumViewer.entities.remove(e);
   }
+  _removeCavePassages(imp);
   _caveImports.splice(i, 1);
   _renderCaveList();
   if (_caveImports.length === 0) {
@@ -5473,13 +5940,8 @@ function _finishCaveLoad(entry) {
   if (!entry) return;
   const chk = document.getElementById('lp-cave-toggle');
   if (chk && !chk.checked) { chk.checked = true; notifyCaveVisibilityChanged(true); }
-  const ids = entry.cesiumIds;
-  if (ids.length) {
-    cesiumViewer.flyTo(
-      ids.map(id => cesiumViewer.entities.getById(id)).filter(Boolean),
-      { duration: 2.5, offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), 0) }
-    );
-  }
+  // Loading a cave leaves the camera where it is; the ⌖ button in the cave
+  // list flies to it on demand.
   // Persist to PLT recents (raw text stored in parsed._rawText)
   if (entry.parsed && entry.parsed._rawText) {
     _addPltRecent(entry.name, entry.parsed?._rawText || '', entry.georef || null, entry.displayOptions || null);
@@ -7691,6 +8153,9 @@ window._openStylePanel = function(i) {
   document.getElementById('style-station-size').value = dopt.stationSize || 5;
   document.getElementById('style-station-size-val').textContent = (dopt.stationSize || 5) + 'px';
 
+  // Passage walls
+  _syncPassageControls(imp);
+
   // Survey color list
   const list = document.getElementById('style-survey-list');
   const surveys = imp.parsed.surveys && imp.parsed.surveys.length
@@ -7724,6 +8189,61 @@ window._openStylePanel = function(i) {
   if (_sis) _sis.style.display = 'block';
   if (_sir) _sir.style.display = 'none';
   if (_sip) _sip.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+};
+
+function _syncPassageControls(imp) {
+  const dopt = imp.displayOptions;
+  const mode = dopt.passageMode || 'none';
+  const nLrud = _countLrudStations(imp.parsed);
+  document.querySelectorAll('#style-passage-modes button').forEach(btn => {
+    const on = btn.dataset.mode === mode;
+    btn.style.background = on ? 'rgba(0,229,255,0.22)' : 'rgba(255,255,255,0.04)';
+    btn.style.color = on ? '#fff' : 'rgba(255,255,255,0.6)';
+  });
+  const axis = dopt.passageUpAxis || 'vertical';
+  document.querySelectorAll('#style-passage-axis button').forEach(btn => {
+    const on = btn.dataset.axis === axis;
+    btn.style.background = on ? 'rgba(0,229,255,0.22)' : 'rgba(255,255,255,0.04)';
+    btn.style.color = on ? '#fff' : 'rgba(255,255,255,0.6)';
+  });
+  const op = Math.round((dopt.passageOpacity ?? 0.55) * 100);
+  const slider = document.getElementById('style-passage-opacity');
+  if (slider) slider.value = op;
+  const opv = document.getElementById('style-passage-opacity-val');
+  if (opv) opv.textContent = op + '%';
+  const note = document.getElementById('style-passage-note');
+  if (note) {
+    const total = imp.parsed.segments.reduce((s, sg) => s + sg.points.length, 0);
+    note.textContent = nLrud
+      ? `LRUD at ${nLrud} of ${total} stations; gaps are interpolated along each leg, legs with none default to 1 ft each side.`
+      : 'No LRUD data in this file; passages drawn at 1 ft each side.';
+  }
+}
+
+window._stylePassageMode = function(mode) {
+  const imp = _caveImports[_styleIdx];
+  if (!imp) return;
+  imp.displayOptions.passageMode = mode;
+  _rerenderCave(_styleIdx);
+  _syncPassageControls(imp);
+  _displayUpdateRecent(imp);
+};
+
+window._stylePassageAxis = function(axis) {
+  const imp = _caveImports[_styleIdx];
+  if (!imp) return;
+  imp.displayOptions.passageUpAxis = axis;
+  if ((imp.displayOptions.passageMode || 'none') !== 'none') _rerenderCave(_styleIdx);
+  _syncPassageControls(imp);
+  _displayUpdateRecent(imp);
+};
+
+window._stylePassageOpacity = function(input) {
+  const imp = _caveImports[_styleIdx];
+  if (!imp) return;
+  imp.displayOptions.passageOpacity = parseInt(input.value) / 100;
+  if ((imp.displayOptions.passageMode || 'none') !== 'none') _rerenderCave(_styleIdx);
+  _displayUpdateRecent(imp);
 };
 
 window._styleColorChange = function(input) {
