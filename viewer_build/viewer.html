@@ -118,8 +118,18 @@
     border-radius: 16px 16px 0 0; padding: 16px 18px 28px;
     transform: translateY(100%); transition: transform .28s ease;
     z-index: 30; pointer-events: all;
-    max-height: 45vh; overflow-y: auto;
+    max-height: clamp(140px, 21vh, 200px); overflow-y: auto; overscroll-behavior: contain;
   }
+  #info-panel { padding: 12px 16px 18px; }
+  #info-title { font-size: 17px; margin-bottom: 0; padding-right: 30px; }
+  #info-subtitle:empty { display: none; }
+  .st-chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 7px 0 4px; }
+  .chip { font-size: 12px; padding: 3px 9px; border-radius: 12px; background: rgba(255,255,255,.09); white-space: nowrap; }
+  .chip.mg { background: rgba(224,56,246,.25); color: #f3b6ff; }
+  .chip.kd { background: rgba(255,80,60,.18); color: #ffb3a6; }
+  .chip.ld { background: rgba(255,143,0,.2); color: #ffc266; }
+  .chip.rc { background: rgba(0,229,255,.16); color: #9cf3ff; }
+  .st-hint { font-size: 10px; opacity: .4; margin-bottom: 6px; }
   #info-panel.open { transform: translateY(0); }
   #info-close {
     position: absolute; top: 12px; right: 14px;
@@ -176,6 +186,16 @@
   #dl-title { opacity: .8; font-weight: 600; }
   #dl-bar { width: 160px; height: 8px; border-radius: 3px; margin: 4px 0 3px; }
   .dl-ends { display: flex; justify-content: space-between; gap: 10px; opacity: .7; }
+  .dl-hrow { display: flex; align-items: center; gap: 7px; margin-top: 4px; opacity: .85; }
+  .dl-chip { width: 44px; height: 8px; border-radius: 3px; flex-shrink: 0; }
+  .fp-item.sel { background: rgba(33,150,243,.22); }
+  .rt-row { font-size: 11px; padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,.06); line-height: 1.45; }
+  .rt-row .lbl { opacity: .5; }
+  .rt-row .val { font-weight: 600; }
+  .rt-end { display: flex; align-items: center; gap: 6px; }
+  .rt-end label { width: 34px; opacity: .6; font-size: 11px; }
+  #rt-from, #rt-to { flex: 1; padding: 5px 7px; border-radius: 6px; border: 1px solid rgba(255,255,255,.18);
+    background: rgba(0,0,0,.35); color: #eee; font-size: 13px; font-family: inherit; min-width: 0; }
 
   /* 🔍 Find panel */
   #find-panel {
@@ -227,6 +247,63 @@
   }
   #rec-badge.show { display: block; }
 
+  /* New toolbar: four buttons, sheets, one mode bar */
+  .tb-btn.legacy { display: none !important; }
+  .tb-btn.tb-new { width: 46px; height: 46px; border-radius: 11px; font-size: 21px; position: relative; }
+  .tb-btn.sheet-on { background: rgba(33,150,243,.35); border-color: #2196F3; }
+  .tb-btn.tool-on::after { content: ''; position: absolute; top: 5px; right: 5px; width: 8px; height: 8px;
+    border-radius: 50%; background: #ff4f7a; box-shadow: 0 0 0 2px #0a0a0f; }
+  #ui-sheet { display: none; position: fixed; right: 66px; top: 50%; transform: translateY(-50%); z-index: 36;
+    width: min(272px, calc(100vw - 84px)); max-height: calc(100vh - 20px); overflow-y: auto; overscroll-behavior: contain;
+    background: rgba(12,12,22,.97); border: 1px solid rgba(255,255,255,.14); border-radius: 14px; padding: 12px;
+    font-size: 13px; pointer-events: all; }
+  #ui-sheet.open { display: block; }
+  .sh-h { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; opacity: .45; margin: 12px 0 6px; }
+  .sh-h:first-child { margin-top: 0; }
+  .sh-seg { display: flex; border: 1px solid rgba(255,255,255,.16); border-radius: 9px; overflow: hidden; }
+  .sh-seg button { flex: 1; padding: 9px 2px; font-size: 12px; color: #eee; background: none; border: none;
+    border-left: 1px solid rgba(255,255,255,.1); cursor: pointer; font-family: inherit; }
+  .sh-seg button:first-child { border-left: none; }
+  .sh-seg button.a { background: rgba(33,150,243,.42); font-weight: 600; }
+  .sh-seg button:disabled { opacity: .3; }
+  .sh-row { display: flex; align-items: center; gap: 10px; padding: 10px 4px; border-bottom: 1px solid rgba(255,255,255,.07);
+    font-size: 14px; cursor: pointer; border-radius: 6px; }
+  .sh-row:last-child { border-bottom: none; }
+  .sh-row.a { background: rgba(33,150,243,.18); }
+  .sh-i { width: 24px; text-align: center; font-size: 18px; flex-shrink: 0; }
+  .sh-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .sh-s { font-size: 11px; opacity: .5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sh-chips { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .sh-chip { display: flex; align-items: center; gap: 6px; padding: 8px 8px; font-size: 12px; color: #eee; background: none;
+    border: 1px solid rgba(255,255,255,.16); border-radius: 9px; text-align: left; min-width: 0; }
+  .sh-chip span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sh-chip.a { background: rgba(33,150,243,.42); border-color: #2196F3; font-weight: 600; }
+  @media (max-height: 480px) {          /* phone landscape: the Display sheet fits without scrolling, */
+    #info-panel { right: 66px; }        /* and the station card leaves the toolbar column clear */
+    #ui-sheet { padding: 9px 12px; }
+    .sh-h { margin: 7px 0 4px; }
+    .sh-seg button { padding: 7px 2px; }
+    .sh-chip { padding: 6px 8px; }
+  }
+  .sh-sl { display: flex; align-items: center; gap: 8px; font-size: 12px; margin: 6px 0; }
+  .sh-sl label { width: 70px; opacity: .6; flex-shrink: 0; }
+  .sh-sl input[type=range] { flex: 1; width: auto !important; min-width: 0; display: block !important; }
+  .sh-sl > div { width: 40px; text-align: right; margin: 0 !important; opacity: .7; }
+  #ui-sheet #fp-field { padding: 0; overflow: visible; }
+  .sh-compass { display: flex; flex-direction: column; gap: 6px; }
+  #mode-bar { display: none; position: fixed; top: 46px; left: 50%; transform: translateX(-50%); z-index: 39;
+    background: rgba(10,10,20,.92); border: 1px solid rgba(255,255,255,.16); border-radius: 18px;
+    padding: 5px 6px 5px 12px; font-size: 12px; align-items: center; gap: 8px; white-space: nowrap;
+    max-width: calc(100vw - 80px); pointer-events: all; }
+  #mode-bar.show { display: flex; }
+  #mode-bar.below-rec { top: 46px; }
+  #mode-bar.below-reach { top: 86px; }
+  #mb-text { overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+  #mb-x { background: none; border: none; color: #aaa; font-size: 15px; cursor: pointer; padding: 0 6px; }
+  #area-label { display: none; }
+  body:has(#info-panel.open) #mode-toast { bottom: calc(clamp(140px, 21vh, 200px) + 14px); }
+  #rec-badge { top: 46px; }
+
   /* Reach bar (third tap on a station) */
   #reach-bar {
     display: none; position: fixed; top: 46px; left: 50%; transform: translateX(-50%); z-index: 39;
@@ -271,12 +348,17 @@
 <canvas id="joy-canvas"></canvas>
 
 <div id="toolbar">
+  <button class="tb-btn tb-new" id="tb-gps"   title="GPS, tracks and pins">📍</button>
+  <button class="tb-btn tb-new" id="tb-tools" title="Tools: find, measure, route, reach, fly">🔧</button>
+  <button class="tb-btn tb-new" id="tb-display" title="Display: colours, walls, stations, leads, layers, terrain">🎨</button>
+  <button class="tb-btn tb-new" id="tb-more"  title="More: units, fullscreen, help">⋯</button>
   <button class="tb-btn" id="btn-fullscreen" title="Fullscreen">⛶</button>
   <button class="tb-btn" id="btn-find"  title="Search · leads · tracks &amp; points">🔍</button>
   <button class="tb-btn" id="btn-fly"   title="Fly / Crane mode" style="font-size:14px">🕹️</button>
   <button class="tb-btn" id="btn-cave"  title="Station display">◎</button>
   <button class="tb-btn" id="btn-colour" title="Colour: survey → elevation → depth below ground">🌈</button>
   <button class="tb-btn" id="btn-measure" title="Measure: tap two points (station or ground)">📏</button>
+  <button class="tb-btn" id="btn-route" title="Route: tap a start and an end station">🚩</button>
   <button class="tb-btn" id="btn-labels" title="Area names &amp; leads" style="display:none">🏷️</button>
   <button class="tb-btn" id="btn-walls" title="Passage walls: on → ghost → off" style="display:none">🧱</button>
   <button class="tb-btn" id="btn-gps"   title="GPS: off → pin → follow">📍</button>
@@ -318,19 +400,12 @@
     <div class="help-row"><span class="help-icon">☝️</span><span class="help-desc">Drag to orbit · Two-finger drag to pan</span></div>
     <div class="help-row"><span class="help-icon">🤏</span><span class="help-desc">Pinch to zoom</span></div>
     <div class="help-section">TOOLBAR</div>
-    <div class="help-row"><span class="help-icon">🕹️</span><span class="help-desc">Fly mode (tap again for Crane; again to exit)</span></div>
-    <div class="help-row"><span class="help-icon">◎</span><span class="help-desc">Stations: end-only → all → hidden</span></div>
-    <div class="help-row"><span class="help-icon">🔍</span><span class="help-desc">Search stations, areas and leads · leads list · record tracks and drop points (export GPX / KML)</span></div>
-    <div class="help-row"><span class="help-icon">🌈</span><span class="help-desc">Colour: survey → elevation → depth below ground</span></div>
-    <div class="help-row"><span class="help-icon">🧍</span><span class="help-desc">Tap a station, then tap it again: orbit around it, with a caver for scale</span></div>
-    <div class="help-row"><span class="help-icon">🫥</span><span class="help-desc">Tap a station a third time: fade everything by distance along the survey from it (slider sets how fast)</span></div>
-    <div class="help-row"><span class="help-icon">📏</span><span class="help-desc">Measure: tap two points (stations snap); shows slope, horizontal and vertical distance. Tap 📏 again to clear</span></div>
-    <div class="help-row"><span class="help-icon">🏷️</span><span class="help-desc">Area names &amp; leads: both → names → leads → none</span></div>
-    <div class="help-row"><span class="help-icon">📍</span><span class="help-desc">GPS: tap → pin → follow → heading-up → off</span></div>
-    <div class="help-row"><span class="help-icon">⏱️</span><span class="help-desc">Long-press 📍 → test mode: centres the terrain on you</span></div>
-    <div class="help-row"><span class="help-icon">📂</span><span class="help-desc">Import KML / KMZ route file</span></div>
-    <div class="help-row"><span class="help-icon">🗺️</span><span class="help-desc">Terrain opacity &amp; imagery layer</span></div>
-    <div class="help-row"><span class="help-icon">⛶</span><span class="help-desc">Toggle fullscreen</span></div>
+    <div class="help-row"><span class="help-icon">📍</span><span class="help-desc">GPS: off / pin / follow / heading-up · record a track · drop pins · export GPX/KML · compass calibration</span></div>
+    <div class="help-row"><span class="help-icon">🔧</span><span class="help-desc">Tools: find, measure, route, reach, fly, crane, import KML</span></div>
+    <div class="help-row"><span class="help-icon">🎨</span><span class="help-desc">Display: colour by survey / elevation / depth / difficulty (narrow blue, low red, steep green), walls, stations (with their names); show or hide leads, area names, tracks, imported layers; imagery and terrain</span></div>
+    <div class="help-row"><span class="help-icon">⋯</span><span class="help-desc">Units (ft / m), fullscreen, help</span></div>
+    <div class="help-section">STATIONS</div>
+    <div class="help-row"><span class="help-icon">👆</span><span class="help-desc">Tap: info · again: caver for scale · again: reach (what's within range along the survey) · again: off</span></div>
   </div>
   <div id="help-dismiss">Tap anywhere to dismiss</div>
 </div>
@@ -349,12 +424,17 @@
 <div id="depth-legend">
   <div id="dl-title"></div>
   <div id="dl-bar"></div>
+  <div id="dl-hard" style="display:none"></div>
   <div class="dl-ends"><span id="dl-lo"></span><span id="dl-hi"></span></div>
 </div>
 
+<div id="ui-sheet"></div>
+<div id="ui-holder" hidden></div>
+<div id="mode-bar"><span id="mb-text"></span><button id="mb-x" title="Stop">✕</button></div>
+
 <div id="reach-bar">
   <span id="reach-from"></span>
-  <input type="range" id="reach-half" min="0" max="100" value="47" aria-label="Fade distance">
+  <input type="range" id="reach-half" min="0" max="1000" value="402" aria-label="Reach distance along the survey">
   <span id="reach-half-lbl"></span>
   <button id="reach-off" title="Turn reach off">✕</button>
 </div>
@@ -366,7 +446,7 @@
     <div class="fp-tabs">
       <button class="fp-tab active" data-tab="search">Search</button>
       <button class="fp-tab" data-tab="leads">Leads</button>
-      <button class="fp-tab" data-tab="field">Tracks &amp; points</button>
+      <button class="fp-tab" data-tab="route">Route</button>
     </div>
     <button id="fp-close" title="Close">✕</button>
   </div>
@@ -382,14 +462,31 @@
     <div id="fp-leads-from" class="fp-note"></div>
     <div id="fp-lead-list" class="fp-list"></div>
   </div>
+  <div id="fp-route" class="fp-body" hidden>
+    <div class="rt-end"><label>From</label><input id="rt-from" placeholder="Start station" autocomplete="off" spellcheck="false"></div>
+    <div class="rt-end"><label>To</label><input id="rt-to" placeholder="End station" autocomplete="off" spellcheck="false"></div>
+    <div id="rt-suggest" class="fp-list"></div>
+    <div class="fp-row">
+      <button id="rt-pick" class="fp-btn">🚩 Tap in 3D</button>
+      <button id="rt-swap" class="fp-btn" title="Swap start and end">⇅ Swap</button>
+      <button id="rt-clear" class="fp-btn">Clear</button>
+    </div>
+    <div class="fp-sort">
+      <button data-rmode="easy" class="active" title="Avoids tight and steep passage where it can">Easiest</button>
+      <button data-rmode="short">Shortest</button>
+    </div>
+    <div id="rt-note" class="fp-note"></div>
+    <div id="rt-list" class="fp-list"></div>
+    <div id="rt-detail"></div>
+  </div>
   <div id="fp-field" class="fp-body" hidden>
     <div class="fp-row">
       <button id="fp-rec" class="fp-btn">● Record track</button>
       <span id="fp-rec-stats" class="fp-note"></span>
     </div>
     <div class="fp-row">
-      <button id="fp-pt-gps" class="fp-btn">📍 Point at my position</button>
-      <button id="fp-pt-map" class="fp-btn">👆 Tap the map</button>
+      <button id="fp-pt-gps" class="fp-btn">📍 Pin here</button>
+      <button id="fp-pt-map" class="fp-btn">👆 Pin on map</button>
     </div>
     <div id="fp-form" hidden>
       <div id="fp-form-where" class="fp-note"></div>
@@ -491,6 +588,30 @@ window.addEventListener('resize', () => {
 
 // ── Coordinate conversion (mirrors Python latlon_to_utm) ─────────────────────
 const META = (CAVES_DATA && CAVES_DATA.meta) || {};
+
+// ── Units: feet by default, metres switchable (⋯ More). One unit at a time
+// keeps labels short on a phone. ───────────────────────────────────────────
+let UNITS = (() => { try { return localStorage.getItem('flex_units_v1') === 'm' ? 'm' : 'ft'; } catch (_) { return 'ft'; } })();
+const U = {
+  // lengths and distances: 1 decimal when short; miles / km when long
+  len(m) {
+    if (m == null || !isFinite(m)) return '—';
+    if (UNITS === 'ft') {
+      const f = m / 0.3048;
+      return f < 10 ? f.toFixed(1) + ' ft' : f < 10000 ? Math.round(f).toLocaleString() + ' ft' : (m / 1609.344).toFixed(2) + ' mi';
+    }
+    return m < 10 ? m.toFixed(1) + ' m' : m < 1000 ? Math.round(m) + ' m' : (m / 1000).toFixed(2) + ' km';
+  },
+  dim(m) { return UNITS === 'ft' ? (m / 0.3048).toFixed(1) + ' ft' : m.toFixed(2) + ' m'; },   // passage sizes
+  z(m) { return UNITS === 'ft' ? Math.round(m / 0.3048).toLocaleString() + ' ft' : Math.round(m).toLocaleString() + ' m'; },  // heights
+  num(m, d) { return UNITS === 'ft' ? (m / 0.3048).toFixed(d) : m.toFixed(d); },             // bare number
+  get u() { return UNITS; },
+};
+function setUnits(u) {
+  UNITS = u === 'm' ? 'm' : 'ft';
+  try { localStorage.setItem('flex_units_v1', UNITS); } catch (_) {}
+  if (typeof onUnitsChanged === 'function') onUnitsChanged();
+}
 
 // The name typed in FLEX's export panel titles the viewer (and the app).
 function applyMapName() {
@@ -1671,7 +1792,13 @@ function buildPassageMesh(groups) {
   const front = new THREE.Mesh(geo, mk(THREE.FrontSide));
   back.renderOrder  = 0.5;
   front.renderOrder = 0.6;
-  back.onBeforeRender = (r) => r.clearDepth();   // once per frame, before both passes
+  // Once per frame, before both passes. gl.clear() honours the depth *write
+  // mask*, and three's clear() doesn't touch it: whatever drew just before
+  // the walls decides. The caver's headlamp beam writes no depth, so when
+  // the transparent sort put it last (camera-dependent) the clear silently
+  // did nothing and the walls were hidden behind the terrain's depth — walls
+  // vanishing at some view angles. Force the mask on first.
+  back.onBeforeRender = (r) => { r.state.buffers.depth.setMask(true); r.clearDepth(); };
   passageMesh = new THREE.Group();
   passageMesh.add(back, front);
   passageMesh.userData.meshes = [back, front];
@@ -1681,6 +1808,7 @@ function buildPassageMesh(groups) {
   applyWallMode();
   if (colourMode) applyWallColours();     // walls can arrive after 🌈 was set
   if (reach) applyReach();                 // …or after reach was turned on
+  if (routes.length) routeApplyAlpha();
 }
 
 function applyWallMode() {
@@ -1874,7 +2002,7 @@ scene.add(measureGroup);
 const MEASURE_LABEL_PX = 17;
 const MEASURE_COL = { hyp: '#ffd400', hz: '#00e5ff', vt: '#ff5fd2', pt: '#ffffff' };
 
-const fmtMF = m => `${m.toFixed(m < 10 ? 2 : 1)} m (${(m / 0.3048).toFixed(m < 10 ? 1 : 0)} ft)`;
+const fmtMF = m => U.len(m);
 
 function clearMeasure() {
   measurePts = [];
@@ -2012,6 +2140,7 @@ const COLOUR_MODES = [
   { key: 'survey', name: 'Survey colours' },
   { key: 'elev',   name: 'Elevation' },
   { key: 'cover',  name: 'Depth below ground' },
+  { key: 'hard',   name: 'Difficulty (LRUD + steepness)' },
 ];
 let colourMode = 0;
 let caveLines = null;                       // one LineSegments for every shot
@@ -2070,7 +2199,11 @@ function colourVertices(obj, baseKey, mode) {
     obj.userData[baseKey] = b;
   }
   let rgb = obj.userData[baseKey];
-  if (mode !== 0) {
+  if (obj.userData.rgbOverride) {
+    rgb = obj.userData.rgbOverride;           // a route is showing its difficulty on the walls
+  } else if (mode === 3) {
+    rgb = obj === caveLines ? difficultyLineColours() : difficultyWallColours(obj);
+  } else if (mode !== 0) {
     const ck = baseKey + '_m' + mode;
     if (!obj.userData[ck]) {
       const P = geo.attributes.position.array, out = new Float32Array(P.length);
@@ -2099,10 +2232,10 @@ function applyWallColours() {
 function applyColourMode() {
   if (caveLines) colourVertices(caveLines, 'baseCol', colourMode);
   applyWallColours();
-  const R = colourMode ? colourRange(colourMode) : null, c = new THREE.Color();
+  const R = (colourMode === 1 || colourMode === 2) ? colourRange(colourMode) : null, c = new THREE.Color();
   stationMap.forEach(st => {
-    st._dispColor = colourMode
-      ? '#' + rampColor(depthT(colourMode, depthValue(colourMode, st.pos.x, st.pos.y, st.pos.z), R), c).getHexString()
+    st._dispColor = colourMode === 3 ? '#' + stationHardColor(st, c).getHexString()
+      : colourMode ? '#' + rampColor(depthT(colourMode, depthValue(colourMode, st.pos.x, st.pos.y, st.pos.z), R), c).getHexString()
       : st.hexColor;
     if (st._mesh && st._mesh !== _selMesh) st._mesh.material.color.set(st._dispColor);
   });
@@ -2118,10 +2251,39 @@ function applyColourMode() {
 function updateDepthLegend() {
   const el = document.getElementById('depth-legend');
   if (!el) return;
+  const hardEl = document.getElementById('dl-hard');
+  const showBar = on => {
+    document.getElementById('dl-bar').style.display = on ? '' : 'none';
+    document.querySelector('#depth-legend .dl-ends').style.display = on ? '' : 'none';
+    hardEl.style.display = on ? 'none' : '';
+  };
+  if (colourMode === 3) {
+    document.getElementById('dl-title').textContent = 'Difficulty (measured LRUD)';
+    const c = new THREE.Color(), hex = (w, h, st, known) => '#' + hardColor(w, h, st, known, c).getHexString();
+    const grad = (f) => `linear-gradient(to right, ${[0, 0.25, 0.5, 0.75, 1].map(f).join(',')})`;
+    const rows = [
+      [grad(t => hex(t, 0, 0, true)), 'Narrow: 3 ft → 1 ft wide'],
+      [grad(t => hex(0, t, 0, true)), 'Low: 6 → 4 → 2 ft high'],
+      [grad(t => hex(t, t, 0, true)), 'Narrow and low (tube)'],
+      [grad(t => hex(0, 0, t ? 0.3 + 0.7 * t : 0, true)), 'Steep: ≥50° and ≥10 ft up/down'],
+      [hex(0, 0, 0, false), 'No LRUD measured'],
+    ];
+    hardEl.textContent = '';
+    rows.forEach(([bg, label]) => {
+      const r = document.createElement('div'); r.className = 'dl-hrow';
+      const chip = document.createElement('span'); chip.className = 'dl-chip'; chip.style.background = bg;
+      const tx = document.createElement('span'); tx.textContent = label;
+      r.append(chip, tx); hardEl.appendChild(r);
+    });
+    showBar(false);
+    el.classList.add('show');
+    return;
+  }
+  showBar(true);
   const R = colourMode ? colourRange(colourMode) : null;
   if (!colourMode || !R) { el.classList.remove('show'); return; }
   const stops = RAMP.map(c => '#' + c.getHexString());
-  const m = v => `${Math.round(v)} m (${Math.round(v / 0.3048)} ft)`;
+  const m = v => U.z(v);
   document.getElementById('dl-title').textContent = COLOUR_MODES[colourMode].name;
   if (colourMode === 1) {
     document.getElementById('dl-bar').style.background = `linear-gradient(to right, ${stops.join(',')})`;
@@ -2138,26 +2300,167 @@ function updateDepthLegend() {
 document.getElementById('btn-colour').addEventListener('click', () => {
   if (!stationMap.size && !caveLines) return;
   let next = (colourMode + 1) % COLOUR_MODES.length;
-  if (next === 2 && !_hgrid) next = 0;           // no terrain: no depth below ground
+  if (next === 2 && !_hgrid) next = 3;           // no terrain: no depth below ground
   colourMode = next;
   applyColourMode();
   showToast('Colour: ' + COLOUR_MODES[colourMode].name);
 });
 
+// ── Passage difficulty (🌈 fourth mode, and route colouring) ────────────────
+// From measured LRUDs only: width = L+R, height = U+D at each station. Three
+// scores, 0 (fine) to 1 (worst), mixed additively so combinations show:
+//   narrow  — starts at 3 ft wide, worst at 1 ft            → blue
+//   low     — 6 ft stooping, 4 ft crawl, 2 ft flat-out       → red
+//             (blue + red: narrow *and* low, a tube → magenta)
+//   steep   — shots of 50° or more that also rise or fall
+//             10 ft or more; brighter toward vertical        → green
+// Stations with no measured LRUD (missing, Compass sentinels, all zeros)
+// are "unknown" (dark grey), never read as tight.
+const FT = 0.3048;
+const HARD_EASY = new THREE.Color('#9aa0aa'), HARD_UNKNOWN = new THREE.Color('#3c3f46');
+const HARD_NARROW = new THREE.Color(0.10, 0.38, 1.0);    // blue
+const HARD_LOW    = new THREE.Color(1.0, 0.08, 0.05);    // red
+const STEEP_MIN_DEG = 50, STEEP_MIN_DZ = 10 * FT;      // both, to count as steep
+const HARD_STEEP  = new THREE.Color(0.15, 0.95, 0.20);
+
+// {W, H} in metres (either may be null), or null with no usable LRUD.
+function stationWH(st) {
+  const lr = st && st.lrud;
+  if (!lr) return null;
+  const a = Array.isArray(lr) ? lr : [lr.l, lr.r, lr.u, lr.d];
+  if (a.every(v => v === 0)) return null;                    // placeholder
+  const ok = v => typeof v === 'number' && isFinite(v) && v >= 0 && v < 90;
+  const W = ok(a[0]) && ok(a[1]) ? a[0] + a[1] : null;
+  const H = ok(a[2]) && ok(a[3]) ? a[2] + a[3] : null;
+  return (W === null && H === null) ? null : { W, H };
+}
+const lerpScore = (x, pts) => {            // piecewise-linear [[value, score], …] by falling value
+  if (x >= pts[0][0]) return pts[0][1];
+  for (let i = 1; i < pts.length; i++) {
+    if (x >= pts[i][0]) { const [x0, s0] = pts[i - 1], [x1, s1] = pts[i]; return s0 + (s1 - s0) * (x0 - x) / (x0 - x1); }
+  }
+  return pts[pts.length - 1][1];
+};
+const narrowScore = W => W == null ? 0 : lerpScore(W, [[3 * FT, 0], [1 * FT, 1]]);
+const lowScore    = H => H == null ? 0 : lerpScore(H, [[6 * FT, 0], [4 * FT, 0.35], [2 * FT, 0.75], [1 * FT, 1]]);
+// Steep only with both the angle and the height: 0.3 at 50°, 1 at vertical.
+const isSteep     = (deg, dz) => deg >= STEEP_MIN_DEG && Math.abs(dz) >= STEEP_MIN_DZ;
+const steepScore  = (deg, dz) => !isSteep(deg, dz) ? 0
+  : 0.3 + 0.7 * Math.pow((Math.min(90, deg) - STEEP_MIN_DEG) / (90 - STEEP_MIN_DEG), 0.7);
+
+// Colour from scores; `known` false → unknown grey. `easy` overrides the base.
+function hardColor(w, h, s, known, out, easy) {
+  const base = known ? (easy || HARD_EASY) : HARD_UNKNOWN;
+  const m = Math.min(1, Math.max(w, h, s));
+  let r = base.r * (1 - m) + HARD_NARROW.r * w + HARD_LOW.r * h + HARD_STEEP.r * s;
+  let g = base.g * (1 - m) + HARD_NARROW.g * w + HARD_LOW.g * h + HARD_STEEP.g * s;
+  let b = base.b * (1 - m) + HARD_NARROW.b * w + HARD_LOW.b * h + HARD_STEEP.b * s;
+  // Narrow *and* low: pull green out so the red+blue mix reads as a stark
+  // magenta rather than a pale lilac — "under 2 ft both is kinda bad".
+  g *= 1 - 0.8 * Math.min(w, h);
+  const mx = Math.max(1, r, g, b);                           // keep hue when channels add past 1
+  return out.setRGB(r / mx, g / mx, b / mx);
+}
+function shotInclination(a, b) {
+  const hz = Math.hypot(b.x - a.x, b.y - a.y), dz = Math.abs(b.z - a.z);
+  return Math.atan2(dz, hz) * 180 / Math.PI;
+}
+
+// Per shot, cached on caveLines: both ends' L/R/U/D (8 floats, NaN where not
+// measured — same rules as stationWH) and the shot's steepness score.
+// userData.lrudZero flags ends that are 0/0/0/0 placeholders: unknown for
+// difficulty, but FLEX draws them as a plain 2 ft tube (1 ft each side).
+function shotLruds() {
+  if (caveLines.userData.lrud) return caveLines.userData.lrud;
+  const nSeg = caveLines.geometry.attributes.position.count / 2;
+  const out = new Float32Array(nSeg * 8).fill(NaN), zero = new Uint8Array(nSeg * 2);
+  caveLines.userData.lrudZero = zero;
+  const ok = v => typeof v === 'number' && isFinite(v) && v >= 0 && v < 90;
+  for (let s = 0; s < nSeg; s++) for (let e = 0; e < 2; e++) {
+    const k = _segKeys[2 * s + e], st = k != null ? stationMap.get(k) : null, lr = st && st.lrud;
+    if (!lr) continue;
+    const a = Array.isArray(lr) ? lr : [lr.l, lr.r, lr.u, lr.d];
+    if (a.every(v => v === 0)) { zero[2 * s + e] = 1; continue; }   // placeholder
+    for (let q = 0; q < 4; q++) if (ok(a[q])) out[8 * s + 4 * e + q] = a[q];
+  }
+  return (caveLines.userData.lrud = out);
+}
+function shotSteep() {
+  if (caveLines.userData.steep) return caveLines.userData.steep;
+  const P = caveLines.geometry.attributes.position.array, nSeg = P.length / 6;
+  const out = new Float32Array(nSeg), A = new THREE.Vector3(), B = new THREE.Vector3();
+  for (let s = 0; s < nSeg; s++) {
+    A.fromArray(P, 6 * s); B.fromArray(P, 6 * s + 3);
+    out[s] = steepScore(shotInclination(A, B), B.z - A.z);
+  }
+  return (caveLines.userData.steep = out);
+}
+
+// Per line vertex: its station's width/height scores, the shot's steepness.
+function difficultyLineColours() {
+  if (caveLines.userData.baseCol_m3) return caveLines.userData.baseCol_m3;
+  const n = caveLines.geometry.attributes.position.count;
+  const out = new Float32Array(n * 3), c = new THREE.Color(), steep = shotSteep();
+  for (let v = 0; v < n; v++) {
+    const k = _segKeys[v], sc = steep[v >> 1];
+    const wh = k != null ? stationWH(stationMap.get(k)) : null;
+    hardColor(wh ? narrowScore(wh.W) : 0, wh ? lowScore(wh.H) : 0, sc, !!wh || sc > 0, c);
+    out[3 * v] = c.r; out[3 * v + 1] = c.g; out[3 * v + 2] = c.b;
+  }
+  return (caveLines.userData.baseCol_m3 = out);
+}
+// Walls: scored from the passage size *at that point*. The width and height
+// are eased between the shot's two stations the way FLEX eased them to draw
+// the tube (smoothstep), then scored — so a roomy shot that ends in a squeeze
+// stays grey until its walls really close in, rather than shading blue all
+// the way from the far end. Which shot a vertex belongs to: wallShotMap().
+const _eased = (a, b, u) => a !== a ? (b !== b ? null : b) : b !== b ? a : a + (b - a) * u;   // NaN = not measured
+function difficultyWallColours(wm) {
+  if (wm.userData.baseCol_m3) return wm.userData.baseCol_m3;
+  const map = wallShotMap(), LR = shotLruds(), steep = shotSteep();
+  const n = wm.geometry.attributes.position.count, out = new Float32Array(n * 3), c = new THREE.Color();
+  for (let v = 0; v < n; v++) {
+    const s = map ? map.segIdx[v] : -1;
+    if (s < 0) { out[3 * v] = HARD_UNKNOWN.r; out[3 * v + 1] = HARD_UNKNOWN.g; out[3 * v + 2] = HARD_UNKNOWN.b; continue; }
+    const t = map.segT[v], u = t * t * (3 - 2 * t), o = 8 * s, sc = steep[s];
+    const WA = LR[o] + LR[o + 1], HA = LR[o + 2] + LR[o + 3], WB = LR[o + 4] + LR[o + 5], HB = LR[o + 6] + LR[o + 7];
+    const W = _eased(WA, WB, u), H = _eased(HA, HB, u);
+    const kA = (WA === WA || HA === HA) ? 1 : 0, kB = (WB === WB || HB === HB) ? 1 : 0;
+    const kw = sc > 0 ? 1 : kA + (kB - kA) * u;            // how measured this point is
+    hardColor(W == null ? 0 : narrowScore(W), H == null ? 0 : lowScore(H), sc, kw > 0, c);
+    if (kw > 0 && kw < 1) c.lerp(HARD_UNKNOWN, 1 - kw);
+    out[3 * v] = c.r; out[3 * v + 1] = c.g; out[3 * v + 2] = c.b;
+  }
+  return (wm.userData.baseCol_m3 = out);
+}
+function stationHardColor(st, out) {
+  const wh = stationWH(st);
+  return hardColor(wh ? narrowScore(wh.W) : 0, wh ? lowScore(wh.H) : 0, 0, !!wh, out);
+}
+const ftm = m => U.dim(m);
+
 // ── Reach: fade by distance along the survey (third tap) ────────────────────
 // Tap a station, tap it again (caver), tap a third time: everything fades by
 // how far it is *along the survey* from that station, not in a straight line,
 // so passages that cross over without connecting read as far apart. The fade
-// halves every `half` metres (slider on the reach bar); unconnected or very
-// far passage bottoms out at REACH_MIN_ALPHA so it stays in view. Walls take
-// the distance of the nearest survey shot (approximate where passages nearly
-// touch). Tapping other stations only selects them and shows their distance;
-// a third tap on another station moves the reach there; ✕ turns it off.
-const REACH_MIN_ALPHA = 0.08;
-const REACH_HALF_MIN = 10, REACH_HALF_MAX = 3000;   // slider range, metres
+// Within the reach distance (slider on the reach bar, along the survey)
+// passage stays clearly highlighted: from full at the origin down to
+// REACH_IN_MIN at the edge. Past the edge it drops sharply (over the next
+// 10%) to REACH_MIN_ALPHA, so the reachable part reads as one block rather
+// than a slow fade. Passage that can't be reached at all (not connected)
+// drops further, to REACH_UNREACHED_ALPHA. Walls take the distance of
+// the nearest survey shot (approximate where passages nearly touch); area
+// names take their nearest station's. Tapping other stations only selects
+// them and shows their distance; a third tap on another station moves the
+// reach there; tapping the origin again, or ✕, turns it off.
+const REACH_IN_MIN = 0.45;          // lowest opacity still inside the reach
+const REACH_MIN_ALPHA = 0.06;       // connected, beyond the reach
+const REACH_UNREACHED_ALPHA = 0.02;
+const REACH_HALF_MIN = 20, REACH_HALF_MAX = 3000;   // slider range, metres (log scale)
 let reach = null;                 // { origin, dist: Map(key → m), half }
 let caveEdges = [];               // [fromKey, toKey, length] per shot
 let _segKeys = [];                // per line vertex: its station key (or null)
+let _segChain = [];               // per line segment: its chain (shots that follow on = one FLEX wall tube)
 let _caveAdj = null;
 
 function reachAdjacency() {
@@ -2203,46 +2506,151 @@ function reachDistances(src) {
   return dist;
 }
 
-const reachAlpha = d => (d === undefined || !isFinite(d)) ? REACH_MIN_ALPHA
-  : Math.max(REACH_MIN_ALPHA, Math.pow(0.5, d / reach.half));
+const reachAlpha = d => (d === undefined || !isFinite(d)) ? REACH_UNREACHED_ALPHA
+  : reachAlphaIn(d / reach.half);
+function reachAlphaIn(t) {          // t = distance / reach distance
+  if (t <= 1) return 1 - (1 - REACH_IN_MIN) * t;
+  if (t >= 1.1) return REACH_MIN_ALPHA;
+  const u = (t - 1) / 0.1, sm = u * u * (3 - 2 * u);              // smoothstep over the last 10%
+  return REACH_IN_MIN + (REACH_MIN_ALPHA - REACH_IN_MIN) * sm;
+}
 
-// Wall vertex → nearest shot (segment index into caveLines) and where along it.
+// Wall vertex → the shot whose passage it is part of (segment index into
+// caveLines) and how far along that shot (0…1). Drives the difficulty wall
+// colours, reach fading and route walls.
+//
+// The walls carry no shot ids, so this is read back from the geometry:
+//  1. Size-aware nearest shot. A vertex's offset from each nearby shot is
+//     measured in that shot's own L/R/U/D, eased along it the way FLEX drew
+//     the tube: about 1 means "on this shot's wall". Plain distance handed a
+//     roomy passage's wall to a crawl whose line ran just outside it, and the
+//     crawl's colour bled across.
+//     Sections stand upright (vertical-U) for any shot with a heading, however
+//     steep; only an exactly vertical shot is a shaft, as FLEX draws it: its
+//     own L/R footprint from the lower station's floor to the upper station's
+//     ceiling. (Treating every steep shot as a round tube as big as its
+//     largest LRUD let a pitch below a tall canyon claim the walls metres
+//     around it, and its green spread along the passage.)
+//  2. Own chain only. FLEX draws one connected tube per chain of shots (a
+//     run that follows on, one station to the next, as the export lists them;
+//     in blocky mode one box per shot). Per connected piece of the wall mesh,
+//     the chain most of its vertices chose is its own, and a vertex that chose
+//     a shot of any other chain is moved to the best shot of its own. A side
+//     passage leaving the route therefore never lights up where its first
+//     metres sit inside the route's passage, and the route's walls at the
+//     junction aren't handed to the side passage. (Allowing survey-connected
+//     shots too, as first written, let both happen at every junction.)
+const WALL_HALF_MIN = 0.2, WALL_HALF_DEFAULT = FT;     // m: smallest half-size; size with no LRUD (FLEX's 1 ft)
 function wallShotMap() {
   const wm = passageMesh && passageMesh.userData.meshes && passageMesh.userData.meshes[0];
   if (!wm || !caveLines) return null;
   if (wm.userData.segIdx) return wm.userData;
-  const S = caveLines.geometry.attributes.position.array, nSeg = S.length / 6;
-  const C = 6, grid = new Map(), cell = (x, y) => Math.floor(x / C) + ',' + Math.floor(y / C);
+  const S = caveLines.geometry.attributes.position.array, nSeg = S.length / 6, LR = shotLruds();
+  const Z = caveLines.userData.lrudZero;
+  // Half-size as drawn, a fraction u along shot s (b = 8 s); a 0/0/0/0 end is FLEX's 1 ft.
+  const half = (b, q, u) => {
+    const a = Z[b >> 2] ? FT : LR[b + q], c = Z[(b >> 2) + 1] ? FT : LR[b + 4 + q];
+    const h = a !== a ? (c !== c ? WALL_HALF_DEFAULT : c) : c !== c ? a : a + (c - a) * u;
+    return h > WALL_HALF_MIN ? h : WALL_HALF_MIN;
+  };
+  // Offset of a point from shot s in units of the passage size there; sets _t.
+  let _t = 0;
+  const norm = (s, px, py, pz) => {
+    const o = 6 * s, ax = S[o], ay = S[o + 1], az = S[o + 2];
+    const dx = S[o + 3] - ax, dy = S[o + 4] - ay, dz = S[o + 5] - az;
+    const h2 = dx * dx + dy * dy, b = 8 * s;
+    if (h2 <= 1e-6) {                       // exactly vertical: FLEX's shaft (_buildShaft)
+      const aLow = az <= az + dz;
+      const l = Math.min(half(b, 0, 0), half(b, 0, 1)), r = Math.min(half(b, 1, 0), half(b, 1, 1));
+      const rh = Math.max(l, r, (l + r) / 2, 0.3);
+      const zBot = Math.min(az, az + dz) - half(b, 3, aLow ? 0 : 1);
+      const zTop = Math.max(az, az + dz) + half(b, 2, aLow ? 1 : 0);
+      const hx = px - ax - dx / 2, hy = py - ay - dy / 2;
+      const ex = pz < zBot ? zBot - pz : pz > zTop ? pz - zTop : 0;
+      _t = dz ? Math.min(1, Math.max(0, (pz - az) / dz)) : 0;
+      return Math.sqrt(hx * hx + hy * hy + ex * ex) / rh;
+    }
+    // Sections stand upright (vertical-U): the section through the point is
+    // found by its horizontal position along the shot.
+    let t = ((px - ax) * dx + (py - ay) * dy) / h2;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    _t = t;
+    const qx = px - ax - t * dx, qy = py - ay - t * dy, qz = pz - az - t * dz;
+    const u = t * t * (3 - 2 * t);
+    const hl = half(b, 0, u), hr = half(b, 1, u), hu = half(b, 2, u), hd = half(b, 3, u);
+    const h = Math.sqrt(h2), hx = dx / h, hy = dy / h;
+    const side = qx * hy - qy * hx;                    // + = right of the direction of the shot
+    const past = qx * hx + qy * hy;                    // beyond either end (the rounded caps)
+    const ws = side >= 0 ? hr : hl, wu = qz >= 0 ? hu : hd;
+    const wa = Math.max(Math.min(hl + hr, hu + hd) / 2, WALL_HALF_MIN);
+    return Math.sqrt((side / ws) ** 2 + (qz / wu) ** 2 + (past / wa) ** 2);
+  };
+  // Grid of 6 m cells; each shot is listed in every cell its walls could reach.
+  const C = 6, grid = new Map(), cellKey = (gx, gy) => gx * 131072 + gy;
   for (let s = 0; s < nSeg; s++) {
-    const o = s * 6;
-    const x0 = Math.floor(Math.min(S[o], S[o + 3]) / C), x1 = Math.floor(Math.max(S[o], S[o + 3]) / C);
-    const y0 = Math.floor(Math.min(S[o + 1], S[o + 4]) / C), y1 = Math.floor(Math.max(S[o + 1], S[o + 4]) / C);
+    const o = 6 * s, b = 8 * s;
+    let r = WALL_HALF_MIN;
+    for (let q = 0; q < 8; q++) { const v = LR[b + q]; r = Math.max(r, v === v ? v : WALL_HALF_DEFAULT); }
+    const len = Math.hypot(S[o + 3] - S[o], S[o + 4] - S[o + 1], S[o + 5] - S[o + 2]);
+    const pad = 1.5 * r + 0.15 * len + 0.5;          // + room for the spline's bulge at bends
+    const x0 = Math.floor((Math.min(S[o], S[o + 3]) - pad) / C), x1 = Math.floor((Math.max(S[o], S[o + 3]) + pad) / C);
+    const y0 = Math.floor((Math.min(S[o + 1], S[o + 4]) - pad) / C), y1 = Math.floor((Math.max(S[o + 1], S[o + 4]) + pad) / C);
     for (let gx = x0; gx <= x1; gx++) for (let gy = y0; gy <= y1; gy++) {
-      const k = gx + ',' + gy; if (!grid.has(k)) grid.set(k, []); grid.get(k).push(s);
+      const k = cellKey(gx, gy); let l = grid.get(k); if (!l) grid.set(k, l = []); l.push(s);
     }
   }
   const P = wm.geometry.attributes.position.array, nv = P.length / 3;
   const segIdx = new Int32Array(nv).fill(-1), segT = new Float32Array(nv);
-  for (let v = 0; v < nv; v++) {
+  const CH = _segChain.length === nSeg ? _segChain : null;
+  const chainShots = new Map();                        // chain → its shots
+  if (CH) for (let s = 0; s < nSeg; s++) { let l = chainShots.get(CH[s]); if (!l) chainShots.set(CH[s], l = []); l.push(s); }
+  const closest = (v, allow) => {                      // best shot for vertex v (optionally only from these chains)
     const px = P[3 * v], py = P[3 * v + 1], pz = P[3 * v + 2];
-    const cx = Math.floor(px / C), cy = Math.floor(py / C);
-    let best = -1, bestD = Infinity, bestT = 0;
-    for (let r = 1; r <= 4 && best < 0; r++) {          // widen until a shot is found
-      for (let gx = cx - r; gx <= cx + r; gx++) for (let gy = cy - r; gy <= cy + r; gy++) {
-        const list = grid.get(gx + ',' + gy); if (!list) continue;
-        for (const s of list) {
-          const o = s * 6, ax = S[o], ay = S[o + 1], az = S[o + 2];
-          const dx = S[o + 3] - ax, dy = S[o + 4] - ay, dz = S[o + 5] - az;
-          const L2 = dx * dx + dy * dy + dz * dz;
-          let t = L2 > 0 ? ((px - ax) * dx + (py - ay) * dy + (pz - az) * dz) / L2 : 0;
-          t = t < 0 ? 0 : t > 1 ? 1 : t;
-          const qx = ax + t * dx - px, qy = ay + t * dy - py, qz = az + t * dz - pz;
-          const d2 = qx * qx + qy * qy + qz * qz;
-          if (d2 < bestD) { bestD = d2; best = s; bestT = t; }
+    const list = grid.get(cellKey(Math.floor(px / C), Math.floor(py / C)));
+    let best = -1, bestN = Infinity, bestT = 0;
+    const tryShot = s => { const n = norm(s, px, py, pz); if (n < bestN) { bestN = n; best = s; bestT = _t; } };
+    if (list) for (const s of list) if (!allow || allow.has(CH[s])) tryShot(s);
+    if (best < 0 && allow) allow.forEach(c => chainShots.get(c).forEach(tryShot));
+    if (best < 0) {                                    // outside every shot's reach: nearest cell's shots
+      const cx = Math.floor(px / C), cy = Math.floor(py / C);
+      for (let r = 1; r <= 4 && best < 0; r++)
+        for (let gx = cx - r; gx <= cx + r; gx++) for (let gy = cy - r; gy <= cy + r; gy++) {
+          const l = grid.get(cellKey(gx, gy)); if (l) for (const s of l) tryShot(s);
         }
-      }
     }
     segIdx[v] = best; segT[v] = bestT;
+  };
+  for (let v = 0; v < nv; v++) closest(v, null);
+
+  // Connected pieces of the wall mesh (union-find over the triangles).
+  const I = wm.geometry.index ? wm.geometry.index.array : null;
+  if (I && CH) {
+    const par = new Int32Array(nv);
+    for (let i = 0; i < nv; i++) par[i] = i;
+    const find = i => { while (par[i] !== i) { par[i] = par[par[i]]; i = par[i]; } return i; };
+    for (let i = 0; i + 2 < I.length; i += 3) {
+      const a = find(I[i]), b = find(I[i + 1]); if (a !== b) par[b] = a;
+      const c = find(I[i + 2]), a2 = find(a); if (a2 !== c) par[c] = a2;
+    }
+    const root = new Int32Array(nv), count = new Int32Array(nv + 1);
+    for (let v = 0; v < nv; v++) { root[v] = find(v); count[root[v] + 1]++; }
+    for (let i = 0; i < nv; i++) count[i + 1] += count[i];
+    const order = new Int32Array(nv), fill = count.slice(0, nv);
+    for (let v = 0; v < nv; v++) order[fill[root[v]]++] = v;
+    const votes = new Map();
+    for (let r = 0; r < nv; r++) {
+      const lo = count[r], hi = count[r + 1];
+      if (hi - lo < 2) continue;
+      votes.clear();
+      for (let i = lo; i < hi; i++) { const s = segIdx[order[i]]; if (s >= 0) votes.set(CH[s], (votes.get(CH[s]) || 0) + 1); }
+      if (votes.size < 2) continue;
+      const own = new Set(), total = hi - lo;
+      let top = -1, topN = 0;
+      votes.forEach((n, c) => { if (n > topN) { topN = n; top = c; } });
+      own.add(top);
+      votes.forEach((n, c) => { if (n >= 0.25 * total) own.add(c); });   // a piece holding two chains
+      for (let i = lo; i < hi; i++) { const v = order[i]; if (segIdx[v] >= 0 && !own.has(CH[segIdx[v]])) closest(v, own); }
+    }
   }
   wm.userData.segIdx = segIdx; wm.userData.segT = segT;
   return wm.userData;
@@ -2282,10 +2690,11 @@ function applyReach() {
       a = new Float32Array(nv);
       for (let v = 0; v < nv; v++) {
         const s = map ? map.segIdx[v] : -1;
-        a[v] = s < 0 ? REACH_MIN_ALPHA : reachAlpha(reachSegDist(s, map.segT[v]));
+        a[v] = s < 0 ? REACH_UNREACHED_ALPHA : reachAlpha(reachSegDist(s, map.segT[v]));
       }
     }
     wm.userData.alpha = a;
+    wm.userData.rgbOverride = null;
     applyWallColours();
   }
   stationMap.forEach(st => {
@@ -2295,29 +2704,39 @@ function applyReach() {
     if (st._sprite && st._sprite !== _selSprite) st._sprite.material.opacity = a;
     if (st._leadSprite) st._leadSprite.material.opacity = a;
   });
+  // Area names: their nearest station's reach (found once per label).
+  areaLabelGroup.children.forEach(sp => {
+    if (on && sp.userData.nearKey === undefined) {
+      let best = null, bd = Infinity;
+      stationMap.forEach(st => { const d = st.pos.distanceToSquared(sp.position); if (d < bd) { bd = d; best = st._key; } });
+      sp.userData.nearKey = best;
+    }
+    sp.material.opacity = on ? reachAlpha(reach.dist.get(sp.userData.nearKey)) : 1;
+  });
   const bar = document.getElementById('reach-bar');
   bar.classList.toggle('show', on);
   if (on) {
-    document.getElementById('reach-from').textContent = 'Reach from ' + (reach.origin.name || 'station');
-    document.getElementById('reach-half-lbl').textContent = '½ every ' + fmtHalf(reach.half);
+    document.getElementById('reach-from').textContent = '🫥 ' + (reach.origin.name || 'station');
+    document.getElementById('reach-half-lbl').textContent = 'within ' + fmtHalf(reach.half);
   }
   requestRender(); wakeRender();
 }
 const escHtml = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const fmtHalf = m => m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
+const fmtHalf = m => U.len(m);
 
 function reachFrom(st) {
+  if (routes.length) { routes = []; routeSel = -1; routeClearDrawing(); routeRenderPanel(); applyWallMode(); }
   const half = reach ? reach.half : reachHalfFromSlider();
   reach = { origin: st, dist: reachDistances(st._key), half };
   applyReach();
-  let n = 0; reach.dist.forEach(() => n++);
-  showToast(`Reach from ${st.name || 'station'}: ${n - 1} connected stations`);
+  let n = 0, inR = 0; reach.dist.forEach(d => { n++; if (d <= reach.half) inR++; });
+  showToast(`Reach from ${st.name || 'station'}: ${inR - 1} stations within ${fmtHalf(reach.half)}, ${n - 1} connected`);
   if (_selMesh && _selMesh._station === st) selectStation(st);   // refresh the panel row
 }
 function reachOff() { reach = null; applyReach(); }
 
 function reachHalfFromSlider() {
-  const v = +document.getElementById('reach-half').value / 100;
+  const v = +document.getElementById('reach-half').value / 1000;      // 1000 steps: ~0.5% each
   return REACH_HALF_MIN * Math.pow(REACH_HALF_MAX / REACH_HALF_MIN, v);
 }
 let _reachRaf = 0;      // big caves: recompute at most once a frame while dragging
@@ -2342,10 +2761,10 @@ function openFind(tab) {
   document.getElementById('btn-find').classList.add('active');
   document.querySelectorAll('#find-panel .fp-tab').forEach(b =>
     b.classList.toggle('active', b.dataset.tab === findTab));
-  ['search', 'leads', 'field'].forEach(t =>
+  ['search', 'leads', 'route'].forEach(t =>
     document.getElementById('fp-' + t).hidden = (t !== findTab));
   if (findTab === 'leads') leadsRender();
-  if (findTab === 'field') fieldRenderList();
+  if (findTab === 'route') routeRenderPanel();
 }
 function closeFind() {
   findPanel.classList.remove('open');
@@ -2477,9 +2896,9 @@ function leadsRender() {
   if (!items.length) { from.textContent = 'No open leads in this export.'; return; }
   from.textContent = leadSort === 'near' ? 'Straight-line distance ' + originName : 'Biggest first (unsized last)';
   items.sort(leadSort === 'near' ? (a, b) => a.d - b.d : (a, b) => b.size - a.size || a.d - b.d);
-  const m = v => v < 1000 ? `${Math.round(v)} m` : `${(v / 1000).toFixed(1)} km`;
+  const m = v => U.len(v);
   items.slice(0, 300).forEach(it => {
-    const sz = it.size ? `${it.size.toFixed(1)} m` : '';
+    const sz = it.size ? U.dim(it.size) : '';
     const sub = ['at ' + (it.st.name || 'station'), m(it.d), sz].filter(Boolean).join(' · ');
     list.appendChild(fpRow('?', it.ld.description || 'Lead', sub, () => goToStation(it.st)));
   });
@@ -2489,6 +2908,463 @@ document.querySelectorAll('#fp-leads .fp-sort button').forEach(b => b.addEventLi
   document.querySelectorAll('#fp-leads .fp-sort button').forEach(x => x.classList.toggle('active', x === b));
   leadsRender();
 }));
+
+// ── Route finding (🚩) ───────────────────────────────────────────────────────
+// Pick a start and an end station (tap them in 3D after 🚩, from a station's
+// panel, or by name in the 🔍 Route tab) and get the shortest route plus up to
+// two distinct alternatives along the survey. "Easiest" weights tight and
+// steep shots so the search avoids them where it can. The selected route is
+// drawn as a tube coloured by difficulty (same palette as 🌈 Difficulty, cyan
+// where it's easy); the rest of the cave dims. The panel lists length, climb
+// and descent, drops, the tightest width and height, how much of the route is
+// narrow / stooping / crawling / tube / steep, and the hard sections in order.
+// Tight and steep come from measured LRUDs only; unmeasured is "unknown".
+let routeEdges = null, _routeAdj = null;
+let routeFrom = null, routeTo = null, routeMode = 'easy';
+let routes = [], routeSel = -1, routePick = null;     // routePick: 'from' | 'to' | null
+const routeGroup = new THREE.Group();
+scene.add(routeGroup);
+const ROUTE_EASY = new THREE.Color('#00e5ff');
+const ROUTE_ALT  = [new THREE.Color('#c9a7ff'), new THREE.Color('#ffd180'), new THREE.Color('#9fe3c2')];   // lilac, light amber, mint
+
+function routeGraph() {
+  if (routeEdges) return;
+  routeEdges = []; _routeAdj = new Map();
+  const P = caveLines ? caveLines.geometry.attributes.position.array : null;
+  caveEdges.forEach(([a, b, len, seg]) => {
+    if (!a || !b || a === b) return;
+    const A = stationMap.get(a), B = stationMap.get(b);
+    if (!A || !B) return;
+    const whA = stationWH(A), whB = stationWH(B);
+    const pick = (x, y) => x == null ? y : y == null ? x : Math.min(x, y);    // the tighter end
+    const W = pick(whA && whA.W, whB && whB.W), H = pick(whA && whA.H, whB && whB.H);
+    const inc = shotInclination(A.pos, B.pos), dz = B.pos.z - A.pos.z;
+    const e = { i: routeEdges.length, a, b, len, seg, W, H, inc, steep: isSteep(inc, dz),
+      w: narrowScore(W), h: lowScore(H), s: steepScore(inc, dz), known: W != null || H != null };
+    routeEdges.push(e);
+    for (const k of [a, b]) { if (!_routeAdj.has(k)) _routeAdj.set(k, []); _routeAdj.get(k).push(e.i); }
+  });
+}
+
+function routeCost(e, mode) {
+  if (mode !== 'easy') return e.len;
+  return e.len * (1 + 4 * e.w + 4 * e.h + 2.5 * e.s);
+}
+
+// Dijkstra src → dst with per-edge penalties; returns {keys, edges} or null.
+function routeDijkstra(src, dst, mode, penalty) {
+  const dist = new Map([[src, 0]]), prev = new Map();
+  const hk = [src], hd = [0];
+  const push = (k, d) => { let i = hk.length; hk.push(k); hd.push(d);
+    while (i > 0) { const p = (i - 1) >> 1; if (hd[p] <= d) break; hk[i] = hk[p]; hd[i] = hd[p]; i = p; } hk[i] = k; hd[i] = d; };
+  const pop = () => { const k = hk[0], d = hd[0], lk = hk.pop(), ld = hd.pop();
+    if (hk.length) { let i = 0; for (;;) { let c = 2 * i + 1; if (c >= hk.length) break;
+      if (c + 1 < hk.length && hd[c + 1] < hd[c]) c++; if (hd[c] >= ld) break; hk[i] = hk[c]; hd[i] = hd[c]; i = c; }
+      hk[i] = lk; hd[i] = ld; } return [k, d]; };
+  while (hk.length) {
+    const [k, d] = pop();
+    if (d > dist.get(k)) continue;
+    if (k === dst) break;
+    for (const ei of _routeAdj.get(k) || []) {
+      const e = routeEdges[ei], nb = e.a === k ? e.b : e.a;
+      const nd = d + routeCost(e, mode) * (penalty.get(ei) || 1);
+      if (nd < (dist.has(nb) ? dist.get(nb) : Infinity)) { dist.set(nb, nd); prev.set(nb, ei); push(nb, nd); }
+    }
+  }
+  if (!dist.has(dst)) return null;
+  const keys = [dst], edges = [];
+  for (let k = dst; k !== src;) { const ei = prev.get(k); edges.push(ei); const e = routeEdges[ei]; k = e.a === k ? e.b : e.a; keys.push(k); }
+  return { keys: keys.reverse(), edges: edges.reverse() };
+}
+
+// Shortest plus up to two alternatives that differ by at least 25% of their
+// length and are no more than 2.5× the best. Alternatives come from re-running
+// with the edges already used made 3× as expensive.
+function routeSearch(src, dst, mode) {
+  routeGraph();
+  const found = [], penalty = new Map();
+  for (let it = 0; it < 8 && found.length < 3; it++) {
+    const p = routeDijkstra(src, dst, mode, penalty);
+    if (!p) break;
+    p.len = p.edges.reduce((t, ei) => t + routeEdges[ei].len, 0);
+    const set = new Set(p.edges);
+    let worst = 0;
+    for (const q of found) {
+      const shared = q.edges.reduce((t, ei) => t + (set.has(ei) ? routeEdges[ei].len : 0), 0);
+      worst = Math.max(worst, shared / Math.max(p.len, 1e-6));
+    }
+    if (!found.length || (worst < 0.75 && p.len <= 2.5 * found[0].len)) found.push(p);
+    p.edges.forEach(ei => penalty.set(ei, (penalty.get(ei) || 1) * 3));
+  }
+  // Always show both answers: the other mode's best route joins the list
+  // (or tags the matching one), so Easiest also shows the shortest way.
+  const tag = { easy: 'easiest', short: 'shortest' };
+  if (found.length) {
+    found[0].tags = [tag[mode]];
+    const other = mode === 'easy' ? 'short' : 'easy';
+    const q = routeDijkstra(src, dst, other, new Map());
+    if (q) {
+      const key = r => r.edges.slice().sort((a, b) => a - b).join(',');
+      const same = found.find(r => key(r) === key(q));
+      if (same) (same.tags || (same.tags = [])).push(tag[other]);
+      else { q.len = q.edges.reduce((t, ei) => t + routeEdges[ei].len, 0); q.tags = [tag[other]]; found.push(q); }
+    }
+  }
+  found.forEach(p => { Object.assign(p, routeStats(p)); p.tags = p.tags || []; });
+  return found;
+}
+
+function routeStats(p) {
+  const S = { climb: 0, descent: 0, steepest: 0, drops: [], minW: null, minH: null,
+    cat: { narrow: 0, stoop: 0, crawl: 0, flat: 0, tube: 0, steep: 0 }, steepShots: 0, knownLen: 0, sections: [] };
+  let run = null;
+  p.edges.forEach((ei, j) => {
+    const e = routeEdges[ei], from = stationMap.get(p.keys[j]), to = stationMap.get(p.keys[j + 1]);
+    const dz = to.pos.z - from.pos.z;
+    if (dz > 0) S.climb += dz; else S.descent -= dz;
+    S.steepest = Math.max(S.steepest, e.inc);
+    if (e.steep) S.drops.push({ from: from.name, to: to.name, dz });
+    if (e.known) S.knownLen += e.len;
+    if (e.W != null && (!S.minW || e.W < S.minW.v)) S.minW = { v: e.W, at: from.name + '–' + to.name };
+    if (e.H != null && (!S.minH || e.H < S.minH.v)) S.minH = { v: e.H, at: from.name + '–' + to.name };
+    if (e.W != null && e.W < 3 * FT) S.cat.narrow += e.len;
+    if (e.H != null && e.H < 6 * FT) S.cat.stoop += e.len;
+    if (e.H != null && e.H < 4 * FT) S.cat.crawl += e.len;
+    if (e.H != null && e.H < 2 * FT) S.cat.flat += e.len;
+    if (e.W != null && e.H != null && e.W < 2 * FT && e.H < 2 * FT) S.cat.tube += e.len;
+    if (e.steep) { S.cat.steep += e.len; S.steepShots++; }
+    // Hard sections: crawl or lower, under 2 ft wide, or steep (≥50°, ≥10 ft).
+    const kinds = [];
+    if (e.W != null && e.H != null && e.W < 2 * FT && e.H < 2 * FT) kinds.push('tube');
+    else {
+      if (e.H != null && e.H < 4 * FT) kinds.push(e.H < 2 * FT ? 'flat crawl' : 'crawl');
+      if (e.W != null && e.W < 2 * FT) kinds.push('narrow');
+    }
+    if (e.steep) kinds.push(dz > 0 ? 'steep up' : 'steep down');
+    if (kinds.length) {
+      const label = kinds.join(' + ');
+      if (run && run.label === label && run.end === j) {
+        run.end = j + 1; run.to = to.name; run.len += e.len;
+        if (e.W != null) run.minW = Math.min(run.minW ?? Infinity, e.W);
+        if (e.H != null) run.minH = Math.min(run.minH ?? Infinity, e.H);
+        run.dz += dz;
+      } else {
+        run = { label, start: j, end: j + 1, from: from.name, to: to.name, len: e.len, minW: e.W, minH: e.H, dz, key: p.keys[j] };
+        S.sections.push(run);
+      }
+    }
+  });
+  return S;
+}
+
+// ── Drawing ──
+function routeClearDrawing() {
+  while (routeGroup.children.length) {
+    const o = routeGroup.children.pop();
+    if (o.geometry) o.geometry.dispose();
+    if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); }
+  }
+}
+// The routes are drawn as lines on top of everything: the selected one
+// bright white, alternatives lilac. Difficulty goes on the passage walls
+// along the selected route (routeApplyAlpha). With no walls in the export
+// the selected line carries the difficulty colours itself (cyan where easy).
+const ROUTE_LINE = new THREE.Color('#ffffff');
+function routeLabel(text, at, color, px) {
+  const { sprite, aspect } = makeTextSprite(text, color);
+  sprite.material.sizeAttenuation = false;
+  sprite.renderOrder = 8;
+  sprite.position.copy(at);
+  sprite.center.set(0.5, -0.4);
+  const h = renderer.domElement.clientHeight || window.innerHeight || 1;
+  const u = 2 * Math.tan(camera.fov * Math.PI / 360) * (px || 15) / h;
+  sprite.scale.set(u * aspect, u, 1);
+  routeGroup.add(sprite);
+}
+function routeExtent() {
+  const box = new THREE.Box3();
+  routes.forEach(p => p.keys.forEach(k => box.expandByPoint(stationMap.get(k).pos)));
+  return box;
+}
+function routeDraw() {
+  routeClearDrawing();
+  if (!routes.length) return;
+  const hasWalls = !!(passageMesh && passageMesh.userData.meshes);
+  const pos = [], col = [], c = new THREE.Color();
+  // Alternatives first, the selected route last so it draws on top.
+  const order = routes.map((_, i) => i).filter(i => i !== routeSel).concat(routeSel >= 0 ? [routeSel] : []);
+  order.forEach(i => {
+    const p = routes[i], selected = i === routeSel;
+    for (let j = 0; j < p.edges.length; j++) {
+      const e = routeEdges[p.edges[j]];
+      for (let end = 0; end < 2; end++) {
+        const st = stationMap.get(p.keys[j + end]);
+        pos.push(st.pos.x, st.pos.y, st.pos.z);
+        if (!selected) { c.copy(ROUTE_ALT[Math.min(i, ROUTE_ALT.length - 1)]); col.push(c.r, c.g, c.b, 0.5); continue; }
+        if (hasWalls) c.copy(ROUTE_LINE);
+        else { const wh = stationWH(st); hardColor(wh ? narrowScore(wh.W) : 0, wh ? lowScore(wh.H) : 0, e.s, true, c, ROUTE_EASY); }
+        col.push(c.r, c.g, c.b, 1);
+      }
+    }
+    // Length label at the middle of the route
+    let acc = 0, half = p.len / 2, mid = stationMap.get(p.keys[0]).pos;
+    for (let j = 0; j < p.edges.length; j++) {
+      acc += routeEdges[p.edges[j]].len;
+      if (acc >= half) { mid = stationMap.get(p.keys[j + 1]).pos; break; }
+    }
+    routeLabel(`${i + 1} · ${fmtLen(p.len)}`, mid, selected ? '#ffffff' : '#a9a9c8', selected ? 15 : 12);
+  });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
+  const lines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false, transparent: true }));
+  lines.renderOrder = 7;               // above walls and terrain
+  routeGroup.add(lines);
+  routeLabel('Start', routeFrom.pos, '#7dff9a', 14);
+  routeLabel('End', routeTo.pos, '#ff8a80', 14);
+}
+const fmtLen = m => U.len(m);
+
+// Routes read against a dimmed cave. Three levels, kept far apart:
+//   selected route  — line white, walls in the difficulty colours, opaque
+//   other routes    — line tinted at half strength, difficulty walls faint
+//   rest of the cave — lines, stations and walls barely there
+// While a route shows, walls (in 'On' mode) are lifted to near-opaque so the
+// difficulty colours read; clearing the route puts the wall mode back.
+const ROUTE_DIM = 0.07, ROUTE_ALT_WALL = 0.28, ROUTE_REST_WALL = 0.04, ROUTE_WALL_OPACITY = 0.9;
+function routeApplyAlpha() {
+  if (!routes.length) { applyWallMode(); applyReach(); return; }
+  const onRoute = new Set();
+  routes.forEach(p => p.edges.forEach(ei => onRoute.add(routeEdges[ei].seg)));
+  const sel = new Set(routeSel >= 0 ? routes[routeSel].edges.map(ei => routeEdges[ei].seg) : []);
+  const keys = new Set(); routes.forEach(p => p.keys.forEach(k => keys.add(k)));
+  const selKeys = new Set(routeSel >= 0 ? routes[routeSel].keys : []);
+  if (caveLines) {
+    const n = caveLines.geometry.attributes.position.count, a = new Float32Array(n);
+    for (let v = 0; v < n; v++) a[v] = sel.has(v >> 1) ? 1 : onRoute.has(v >> 1) ? 0.5 : ROUTE_DIM;
+    caveLines.userData.alpha = a;
+    colourVertices(caveLines, 'baseCol', colourMode);
+  }
+  const wm = passageMesh && passageMesh.userData.meshes && passageMesh.userData.meshes[0];
+  if (wm) {
+    const map = wallShotMap(), nv = wm.geometry.attributes.position.count, a = new Float32Array(nv);
+    wm.userData.rgbOverride = null;
+    colourVertices(wm, 'baseCol', colourMode);           // current mode's rgb, to start from
+    const cur = wm.userData.baseCol;
+    const modeRgb = colourMode === 3 ? difficultyWallColours(wm)
+      : colourMode ? wm.userData['baseCol_m' + colourMode] : cur;
+    const hard = difficultyWallColours(wm), rgb = new Float32Array(nv * 3);
+    for (let v = 0; v < nv; v++) {
+      const sg = map ? map.segIdx[v] : -1;
+      const routed = onRoute.has(sg);
+      const src = routed ? hard : (modeRgb || cur);
+      rgb[3 * v] = src[3 * v]; rgb[3 * v + 1] = src[3 * v + 1]; rgb[3 * v + 2] = src[3 * v + 2];
+      a[v] = sel.has(sg) ? 1 : routed ? ROUTE_ALT_WALL : ROUTE_REST_WALL;
+    }
+    wm.userData.rgbOverride = rgb;
+    wm.userData.alpha = a;
+    applyWallColours();
+    if (wallMode === 0) passageMesh.userData.meshes.forEach(m => { m.material.opacity = Math.max(wallOpacity, ROUTE_WALL_OPACITY); m.material.needsUpdate = true; });
+  }
+  stationMap.forEach(st => {
+    const a = selKeys.has(st._key) ? 1 : keys.has(st._key) ? 0.5 : ROUTE_DIM;
+    st._reachAlpha = a;
+    if (st._mesh && st._mesh !== _selMesh) { st._mesh.material.transparent = a < 1; st._mesh.material.opacity = a; st._mesh.material.needsUpdate = true; }
+    if (st._sprite && st._sprite !== _selSprite) st._sprite.material.opacity = a;
+    if (st._leadSprite) st._leadSprite.material.opacity = a;
+  });
+  areaLabelGroup.children.forEach(sp => { sp.material.opacity = 0.35; });
+  requestRender(); wakeRender();
+}
+
+function routeRun(fly) {
+  if (!routeFrom || !routeTo) { routeRenderPanel(); return; }
+  if (reach) { reach = null; document.getElementById('reach-bar').classList.remove('show'); }
+  routes = routeFrom === routeTo ? [] : routeSearch(routeFrom._key, routeTo._key, routeMode);
+  routeSel = routes.length ? 0 : -1;
+  routeDraw();
+  routeApplyAlpha();
+  routeRenderPanel();
+  if (!routes.length) {
+    showToast(routeFrom === routeTo ? 'Start and end are the same station'
+      : `No connection between ${routeFrom.name} and ${routeTo.name} in the survey`);
+    return;
+  }
+  if (fly) {
+    const box = routeExtent(), c = box.getCenter(new THREE.Vector3()), sz = box.getSize(new THREE.Vector3());
+    flyToPoint(c, Math.max(40, Math.max(sz.x, sz.y, sz.z) * 1.4));
+  }
+  showToast(routes.length === 1 ? `Route: ${fmtLen(routes[0].len)}`
+    : `${routes.length} routes · ${routes[0].tags.join(' & ') || 'best'} ${fmtLen(routes[0].len)}`);
+}
+function routeSelect(i) {
+  if (i < 0 || i >= routes.length) return;
+  routeSel = i;
+  routeDraw();
+  routeApplyAlpha();
+  routeRenderPanel();
+  requestRender(); wakeRender();
+}
+function routeClear() {
+  routes = []; routeSel = -1; routeFrom = null; routeTo = null; routePick = null;
+  routeClearDrawing();
+  document.getElementById('btn-route').classList.remove('active');
+  applyReach();                       // restores full opacity (reach is off)
+  routeRenderPanel();
+}
+function routeSet(which, st) {
+  if (which === 'from') routeFrom = st; else routeTo = st;
+  if (routeFrom && routeTo) routeRun(true);
+  else { routeClearDrawing(); routes = []; routeSel = -1; routeApplyAlpha(); routeRenderPanel(); }
+}
+
+// 🚩: tap the start station, then the end.
+document.getElementById('btn-route').addEventListener('click', function () {
+  if (routePick) { routePick = null; this.classList.remove('active'); return; }
+  measureOn = false; document.getElementById('btn-measure').classList.remove('active');
+  routePick = 'from';
+  this.classList.add('active');
+  openFind('route');
+  findPicked();
+  showToast('Tap the start station');
+});
+// Called from onPointerTap when picking; returns true if it used the tap.
+function routePickTap() {
+  if (!routePick) return false;
+  const hit = _tapRay.intersectObjects(stationMeshes, false)[0];
+  if (!hit) { showToast(routePick === 'from' ? 'Tap a station to start from' : 'Tap the end station'); return true; }
+  const st = hit.object._station;
+  if (routePick === 'from') {
+    routePick = 'to';
+    routeFrom = st; routeTo = null;
+    routeClearDrawing(); routes = []; routeSel = -1; routeApplyAlpha();
+    selectStation(st);
+    routeRenderPanel();
+    showToast(`Start: ${st.name || 'station'} — now tap the end`);
+  } else {
+    routePick = null;
+    document.getElementById('btn-route').classList.remove('active');
+    infoPanel.classList.remove('open'); clearStationHighlight();
+    routeSet('to', st);
+  }
+  return true;
+}
+// A tap within 14 px of a drawn route line selects that route (panel stays shut).
+let _lastTapPx = null;
+function routeHitTap() {
+  if (!routes.length || !_lastTapPx) return false;
+  const r = renderer.domElement.getBoundingClientRect(), v = new THREE.Vector3();
+  const scr = k => { v.copy(stationMap.get(k).pos).project(camera);
+    return v.z > 1 ? null : [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height]; };
+  const [px, py] = _lastTapPx;
+  let best = -1, bestD = 14;
+  routes.forEach((p, i) => {
+    let prev = scr(p.keys[0]);
+    for (let j = 1; j < p.keys.length; j++) {
+      const cur = scr(p.keys[j]);
+      if (prev && cur) {
+        const dx = cur[0] - prev[0], dy = cur[1] - prev[1], L2 = dx * dx + dy * dy;
+        let t = L2 ? ((px - prev[0]) * dx + (py - prev[1]) * dy) / L2 : 0; t = Math.max(0, Math.min(1, t));
+        const d = Math.hypot(prev[0] + t * dx - px, prev[1] + t * dy - py);
+        if (d < bestD || (d === bestD && i === routeSel)) { bestD = d; best = i; }
+      }
+      prev = cur;
+    }
+  });
+  if (best < 0) return false;
+  // Just select it: the full route panel covers a phone screen, so it opens
+  // only from the route tab in the mode bar at the top.
+  routeSelect(best);
+  updateModeBar(true);
+  return true;
+}
+
+// ── Panel (🔍 → Route) ──
+function routeEndpointInput(which) {
+  const inp = document.getElementById(which === 'from' ? 'rt-from' : 'rt-to');
+  const st = which === 'from' ? routeFrom : routeTo;
+  if (document.activeElement !== inp) inp.value = st ? (st.name || '') + (st.cave ? ' · ' + st.cave : '') : '';
+}
+function routeSuggest(which, q) {
+  const box = document.getElementById('rt-suggest');
+  box.textContent = '';
+  const hits = findSearch(q).filter(e => e.kind === 'station').slice(0, 12);
+  hits.forEach(e => box.appendChild(fpRow('◎', e.text, e.sub, () => {
+    box.textContent = '';
+    document.getElementById(which === 'from' ? 'rt-from' : 'rt-to').blur();
+    routeSet(which, e.st);
+  })));
+}
+['from', 'to'].forEach(which => {
+  const inp = document.getElementById('rt-' + which);
+  let t = null;
+  inp.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => routeSuggest(which, inp.value), 120); });
+  inp.addEventListener('focus', () => { inp.select(); if (inp.value) routeSuggest(which, inp.value.split(' · ')[0]); });
+});
+document.getElementById('rt-swap').addEventListener('click', () => { [routeFrom, routeTo] = [routeTo, routeFrom]; routeRun(false); });
+document.getElementById('rt-clear').addEventListener('click', routeClear);
+document.getElementById('rt-pick').addEventListener('click', () => document.getElementById('btn-route').click());
+document.querySelectorAll('#fp-route .fp-sort button').forEach(b => b.addEventListener('click', () => {
+  routeMode = b.dataset.rmode;
+  document.querySelectorAll('#fp-route .fp-sort button').forEach(x => x.classList.toggle('active', x === b));
+  if (routeFrom && routeTo) routeRun(false);
+}));
+
+function routeRenderPanel() {
+  routeEndpointInput('from'); routeEndpointInput('to');
+  const list = document.getElementById('rt-list'), det = document.getElementById('rt-detail');
+  list.textContent = ''; det.textContent = '';
+  const note = document.getElementById('rt-note');
+  note.textContent = routePick === 'from' ? 'Tap the start station in 3D…'
+    : routePick === 'to' ? 'Now tap the end station…'
+    : (!routeFrom || !routeTo) ? 'Pick a start and an end: 🚩 then tap two stations, or type names above.'
+    : !routes.length ? 'No route between these stations in the survey.' : '';
+  routes.forEach((p, i) => {
+    const bits = [`↑${U.z(p.climb)} ↓${U.z(p.descent)}`];
+    if (p.cat.crawl > 0.5) bits.push(`crawl ${U.len(p.cat.crawl)}`);
+    if (p.cat.tube > 0.5) bits.push(`tube ${U.len(p.cat.tube)}`);
+    if (p.drops.length) bits.push(`${p.drops.length} drop${p.drops.length > 1 ? 's' : ''}`);
+    const row = fpRow(String(i + 1), fmtLen(p.len) + (p.tags && p.tags.length ? ' · ' + p.tags.join(', ') : ''), bits.join(' · '), () => routeSelect(i));
+    if (i === routeSel) row.classList.add('sel');
+    list.appendChild(row);
+  });
+  if (routeSel < 0 || !routes[routeSel]) return;
+  const p = routes[routeSel];
+  const rows = [];
+  const add = (l, v) => rows.push([l, v]);
+  add('Length', fmtLen(p.len) + (p.tags && p.tags.length ? ' · ' + p.tags.join(', ') : ''));
+  add('Up / down', `↑ ${U.z(p.climb)} · ↓ ${U.z(p.descent)} (net ${p.climb - p.descent >= 0 ? '+' : '−'}${U.z(Math.abs(p.climb - p.descent))})`);
+  add('Steepest shot', `${Math.round(p.steepest)}°`);
+  if (p.drops.length) add('Drops / climbs', p.drops.slice(0, 6).map(d =>
+    `${d.from}→${d.to} ${d.dz > 0 ? '↑' : '↓'}${U.z(Math.abs(d.dz))}`).join(', ') + (p.drops.length > 6 ? '…' : ''));
+  if (p.minW) add('Narrowest', `${ftm(p.minW.v)} at ${p.minW.at}`);
+  if (p.minH) add('Lowest', `${ftm(p.minH.v)} at ${p.minH.at}`);
+  const c = p.cat, cat = [];
+  if (c.narrow > 0.5) cat.push(`narrow ${U.len(c.narrow)}`);
+  if (c.stoop > 0.5) cat.push(`stooping ${U.len(c.stoop)}`);
+  if (c.crawl > 0.5) cat.push(`crawl ${U.len(c.crawl)}`);
+  if (c.flat > 0.5) cat.push(`flat-out ${U.len(c.flat)}`);
+  if (c.tube > 0.5) cat.push(`tube ${U.len(c.tube)}`);
+  if (c.steep > 0.5) cat.push(`steep ${U.len(c.steep)}`);
+  add('Passage', cat.length ? cat.join(' · ') : 'nothing tight or steep in the measured LRUDs');
+  add('LRUD measured', `${Math.round(100 * p.knownLen / Math.max(p.len, 1e-6))}% of the route`);
+  const h = document.createElement('div'); h.className = 'fp-h'; h.textContent = `Route ${routeSel + 1}`; det.appendChild(h);
+  rows.forEach(([l, v]) => {
+    const r = document.createElement('div'); r.className = 'rt-row';
+    const a = document.createElement('span'); a.className = 'lbl'; a.textContent = l + ': ';
+    const b = document.createElement('span'); b.className = 'val'; b.textContent = v;
+    r.append(a, b); det.appendChild(r);
+  });
+  if (p.sections.length) {
+    const h2 = document.createElement('div'); h2.className = 'fp-h'; h2.textContent = 'Hard sections, in order'; det.appendChild(h2);
+    p.sections.slice(0, 40).forEach(s => {
+      const dims = [s.minW != null ? `${U.dim(s.minW)} wide` : null, s.minH != null ? `${U.dim(s.minH)} high` : null,
+        /steep/.test(s.label) ? `${s.dz > 0 ? '↑' : '↓'}${U.z(Math.abs(s.dz))}` : null].filter(Boolean).join(' · ');
+      det.appendChild(fpRow('!', `${s.label} · ${s.from}→${s.to}`, `${fmtLen(s.len)}` + (dims ? ' · ' + dims : ''),
+        () => { const st = stationMap.get(s.key); if (st) { flyToPoint(st.pos, 20); findPicked(); } }));
+    });
+  }
+}
 
 // ── Tracks & points (surface) ────────────────────────────────────────────────
 // Record a GPS track and drop named points, at your GPS position or by tapping
@@ -2562,7 +3438,7 @@ function trackLengthM(tr) {
   for (let i = 1; i < tr.pts.length; i++) d += haversineM(tr.pts[i - 1][0], tr.pts[i - 1][1], tr.pts[i][0], tr.pts[i][1]);
   return d;
 }
-const fmtKm = m => m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(2)} km`;
+const fmtKm = m => U.len(m);
 const fmtWhen = t => { const d = new Date(t); return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }); };
 
 // Where a lat/lon sits in the scene: on the terrain (+1.5 m so lines don't
@@ -2672,7 +3548,7 @@ function recBadgeUpdate() {
   document.getElementById('rec-stats').textContent = `${hms} · ${fmtKm(trackLengthM(recTrack))}` +
     (fieldLastFix && Date.now() - fieldLastFix.t < 20000 ? '' : ' · no GPS');
   b.classList.add('show');
-  if (findTab === 'field' && findPanel.classList.contains('open')) {
+  if (sheetOpen === 'gps') {
     const st = document.getElementById('fp-rec-stats'); if (st) st.textContent = document.getElementById('rec-stats').textContent;
     const rm = document.getElementById('fp-rec-meta'); if (rm && rm._meta) rm.textContent = rm._meta();
     const has = field.tracks.some(t => t.pts.length) || field.points.length;
@@ -2721,7 +3597,7 @@ function fieldFormOpen(p) {
   const nm = document.getElementById('fp-form-name');
   nm.value = 'Point ' + (field.points.length + 1);
   document.getElementById('fp-form-note').value = '';
-  openFind('field');
+  openGpsSheet();
   nm.focus(); nm.select();
 }
 function fieldFormClose() { fieldPending = null; document.getElementById('fp-form').hidden = true; }
@@ -2738,7 +3614,7 @@ document.getElementById('fp-pt-gps').addEventListener('click', () => {
 document.getElementById('fp-pt-map').addEventListener('click', () => {
   fieldPickOn = !fieldPickOn;
   document.getElementById('fp-pt-map').classList.toggle('active', fieldPickOn);
-  if (fieldPickOn) { showToast('Tap the ground to place a point'); findPicked(); }
+  if (fieldPickOn) { showToast('Tap the ground to place a pin'); closeSheet(); }
 });
 function fieldPickTap() {
   const hit = terrainGroup && _tapRay.intersectObject(terrainGroup, true)[0];
@@ -2826,7 +3702,7 @@ function fieldRenderList() {
   };
   if (field.tracks.length) {
     const h = document.createElement('div'); h.className = 'fp-h'; h.textContent = 'Tracks'; list.appendChild(h);
-    field.tracks.slice().reverse().forEach(tr => {
+    field.tracks.slice().reverse().slice(0, fieldShowAll ? Infinity : 5).forEach(tr => {
       const row = document.createElement('div'); row.className = 'fp-item';
       const tx = document.createElement('div'); tx.className = 'fp-tx';
       tx.appendChild(fpNameInput(tr.name, v => { tr.name = v; saveField(true); }));
@@ -2845,7 +3721,7 @@ function fieldRenderList() {
   }
   if (field.points.length) {
     const h = document.createElement('div'); h.className = 'fp-h'; h.textContent = 'Points'; list.appendChild(h);
-    field.points.slice().reverse().forEach(p => {
+    field.points.slice().reverse().slice(0, fieldShowAll ? Infinity : 5).forEach(p => {
       const row = document.createElement('div'); row.className = 'fp-item';
       const tx = document.createElement('div'); tx.className = 'fp-tx';
       tx.appendChild(fpNameInput(p.name, v => { p.name = v; saveField(true); fieldRebuild(); }));
@@ -2860,6 +3736,11 @@ function fieldRenderList() {
       list.appendChild(row);
     });
   }
+  if (!fieldShowAll && (field.tracks.length > 5 || field.points.length > 5)) {
+    const more = el('button', 'fp-btn', `Show all (${field.tracks.length} tracks, ${field.points.length} pins)`);
+    more.addEventListener('click', () => { fieldShowAll = true; fieldRenderList(); });
+    list.appendChild(more);
+  }
   if (!field.tracks.length && !field.points.length) {
     const n = document.createElement('div'); n.className = 'fp-note';
     n.textContent = 'Nothing recorded yet. Tracks and points stay on this phone until you export them.';
@@ -2870,7 +3751,7 @@ function fieldRenderList() {
   document.getElementById('fp-exp-kml').disabled = !has;
 }
 document.getElementById('fp-rec').addEventListener('click', () => recTrack ? recStop() : recStart());
-document.getElementById('rec-badge').addEventListener('click', () => openFind('field'));
+document.getElementById('rec-badge').addEventListener('click', () => openGpsSheet());
 
 // ── Export ──
 const xmlEsc = s => String(s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
@@ -2941,6 +3822,285 @@ document.getElementById('fp-exp-gpx').addEventListener('click', () =>
 document.getElementById('fp-exp-kml').addEventListener('click', () =>
   fieldSaveFile(fieldFileName('kml'), 'application/vnd.google-earth.kml+xml', fieldKML()));
 
+// ── Toolbar: 📍 GPS · 🔧 Tools · 🎨 Display · ⋯ More ─────────────────────────
+// Four buttons that open small sheets; the older one-function buttons stay in
+// the DOM (hidden) so their handlers and state keep working, and the sheets
+// drive them. One mode bar at the top shows whatever tool is active, with ✕.
+document.querySelectorAll('#toolbar .tb-btn:not(.tb-new)').forEach(b => b.classList.add('legacy'));
+const sheetEl = document.getElementById('ui-sheet');
+const uiHolder = document.getElementById('ui-holder');
+let sheetOpen = null, reachPick = false, fieldShowAll = false;
+let stationNamesOn = true, kmlNames = [];   // names follow the Stations setting (Ends / All / None)
+
+// Nodes that live in a sheet while it is open, parked here otherwise.
+function uiStash() {
+  ['fp-field', 'terrain-opacity-slider', 'terrain-opacity-label', 'terrain-bright-slider', 'terrain-bright-label',
+   'terrain-fog-slider', 'terrain-fog-label'].forEach(id => { const n = document.getElementById(id); if (n) uiHolder.appendChild(n); });
+}
+function closeSheet() {
+  uiStash();
+  sheetEl.textContent = '';
+  sheetEl.classList.remove('open');
+  sheetOpen = null;
+  document.querySelectorAll('#toolbar .tb-new').forEach(b => b.classList.remove('sheet-on'));
+}
+function openSheet(name) {
+  if (sheetOpen === name) { closeSheet(); return; }
+  closeFind();
+  uiStash();
+  sheetEl.textContent = '';
+  sheetOpen = name;
+  ({ gps: renderGpsSheet, tools: renderToolsSheet, display: renderDisplaySheet, more: renderMoreSheet })[name]();
+  sheetEl.classList.add('open');
+  document.querySelectorAll('#toolbar .tb-new').forEach(b => b.classList.toggle('sheet-on', b.id === 'tb-' + name));
+}
+function rerenderSheet() { if (sheetOpen) { const n = sheetOpen; sheetOpen = null; openSheet(n); } }
+['gps', 'tools', 'display', 'more'].forEach(n => document.getElementById('tb-' + n).addEventListener('click', () => openSheet(n)));
+// Tap outside closes (the toolbar buttons toggle on their own).
+document.addEventListener('pointerdown', e => {
+  if (!sheetOpen) return;
+  if (sheetEl.contains(e.target) || (e.target.closest && e.target.closest('#toolbar'))) return;
+  closeSheet();
+}, { capture: true, passive: true });
+
+// Small builders
+const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+function sheetHead(text) { sheetEl.appendChild(el('div', 'sh-h', text)); }
+function sheetSeg(options, active, onPick, disabled) {
+  const seg = el('div', 'sh-seg');
+  options.forEach((o, i) => {
+    const b = el('button', i === active ? 'a' : '', o);
+    if (disabled && disabled[i]) b.disabled = true;
+    b.addEventListener('click', () => onPick(i));
+    seg.appendChild(b);
+  });
+  sheetEl.appendChild(seg);
+  return seg;
+}
+function sheetRow(icon, title, sub, onClick, active) {
+  const r = el('div', 'sh-row' + (active ? ' a' : ''));
+  r.appendChild(el('span', 'sh-i', icon));
+  const t = el('span', 'sh-t', title);
+  if (sub) t.appendChild(el('div', 'sh-s', sub));
+  r.appendChild(t);
+  r.addEventListener('click', onClick);
+  sheetEl.appendChild(r);
+  return r;
+}
+// On/off chips, two to a row: [[icon, label, on, onChange], …]
+function sheetChips(items) {
+  const g = el('div', 'sh-chips');
+  items.forEach(([icon, label, on, onChange]) => {
+    const c = el('button', 'sh-chip' + (on ? ' a' : ''));
+    c.appendChild(el('span', '', icon));
+    c.appendChild(el('span', '', label));
+    c.title = label;
+    c.addEventListener('click', () => { on = !on; c.classList.toggle('a', on); onChange(on); requestRender(); wakeRender(); });
+    g.appendChild(c);
+  });
+  sheetEl.appendChild(g);
+}
+
+// ── 📍 GPS ──
+function gpsSetState(target) {
+  const btn = document.getElementById('btn-gps');
+  if (gpsSuspended && gpsState !== 0) _gpsResume();
+  for (let k = 0; k < 4 && gpsState !== target; k++) btn.click();
+}
+function renderGpsSheet() {
+  sheetSeg(['Off', 'Pin', 'Follow', 'Head-up'], gpsState, i => { gpsSetState(i); rerenderSheet(); });
+  sheetHead('Record');
+  const ff = document.getElementById('fp-field');
+  ff.hidden = false;
+  sheetEl.appendChild(ff);
+  fieldRenderList();
+  sheetHead('Compass');
+  const box = el('div', 'sh-compass'); box.id = 'sh-compass';
+  sheetEl.appendChild(box);
+  gpsSheetRefresh();
+  const tm = el('button', 'fp-btn', gpsOriginOverride ? 'Test mode: on' : 'Test mode');
+  tm.title = 'Centre the terrain on where you are standing';
+  tm.addEventListener('click', () => { _gpsToggleTestOrigin(); rerenderSheet(); });
+  const row = el('div', 'fp-row'); row.style.marginTop = '6px'; row.appendChild(tm);
+  sheetEl.appendChild(row);
+}
+function gpsSheetRefresh() {
+  const box = document.getElementById('sh-compass');
+  if (!box) return;
+  box.textContent = '';
+  const st = _selMesh && _selMesh._station, nb = st && stationNeighbour(st);
+  const status = compassOffset !== null ? `Calibrated ${compassOffset >= 0 ? '+' : ''}${compassOffset.toFixed(1)}°`
+    : `Not calibrated (grid ${(-gridConvergenceDeg()).toFixed(1)}°)`;
+  if (compassHeading === null) box.appendChild(el('div', 'fp-note', 'Runs in Follow or Head-up. ' + status));
+  else if (!nb) box.appendChild(el('div', 'fp-note', 'Select a station to calibrate against. ' + status));
+  else {
+    box.appendChild(el('div', 'fp-note', `At ${st.name || 'this station'}, point the phone at ${nb.name || 'the next station'} (${nb.bearing.toFixed(0)}°), then:`));
+    const row = el('div', 'fp-row');
+    const cal = el('button', 'fp-btn', '🧭 Calibrate');
+    cal.addEventListener('click', () => { if (compassCalibrateAt(st)) showToast('Compass calibrated'); gpsSheetRefresh(); });
+    row.appendChild(cal);
+    if (compassOffset !== null) {
+      const rs = el('button', 'fp-btn', 'Reset');
+      rs.addEventListener('click', () => { setCompassOffset(null); gpsSheetRefresh(); });
+      row.appendChild(rs);
+    }
+    box.appendChild(row);
+    box.appendChild(el('div', 'fp-note', status));
+  }
+}
+function openGpsSheet() { if (sheetOpen !== 'gps') openSheet('gps'); }
+
+// ── 🔧 Tools ──
+function flySet(type) {
+  const btn = document.getElementById('btn-fly');
+  for (let k = 0; k < 3 && flyModeType !== type; k++) btn.click();
+}
+function renderToolsSheet() {
+  const sel = _selMesh && _selMesh._station;
+  const routeOn = !!(routePick || routes.length);
+  sheetRow('🔍', 'Find', 'stations · areas · leads', () => { closeSheet(); openFind('search'); });
+  sheetRow('📏', 'Measure', measureOn ? 'on — tap to stop' : 'tap two points', () => {
+    closeSheet(); document.getElementById('btn-measure').click(); updateModeBar();
+  }, measureOn);
+  sheetRow('🚩', 'Route', routeOn ? 'on — tap to clear' : 'tap a start and an end station', () => {
+    closeSheet();
+    if (routeOn) routeClear(); else document.getElementById('btn-route').click();
+    updateModeBar();
+  }, routeOn);
+  sheetRow('🫥', 'Reach', reach ? 'on — tap to stop' : sel ? `from ${sel.name || 'the selected station'}` : 'or tap a station 3×', () => {
+    closeSheet();
+    if (reach) reachOff();
+    else if (sel) reachFrom(sel);
+    else { reachPick = true; showToast('Tap a station to reach from'); }
+    updateModeBar();
+  }, !!reach);
+  sheetRow('🕹️', 'Fly', null, () => { closeSheet(); flySet(flyModeType === 1 ? 0 : 1); updateModeBar(); }, flyModeType === 1);
+  sheetRow('🏗️', 'Crane', null, () => { closeSheet(); flySet(flyModeType === 2 ? 0 : 2); updateModeBar(); }, flyModeType === 2);
+  sheetRow('📂', 'Import KML / KMZ', null, () => { closeSheet(); document.getElementById('kml-input').click(); });
+}
+
+// ── 🎨 Display: how things look, and what's shown ──
+function renderDisplaySheet() {
+  sheetHead('Colour by');
+  sheetSeg(['Survey', 'Elev', 'Depth', 'Hard'], colourMode, i => {
+    colourMode = i; applyColourMode();
+    if (routes.length) routeApplyAlpha();
+    rerenderSheet();
+  }, [false, false, !_hgrid, false]);
+  if (passageMesh) {
+    sheetHead('Walls');
+    sheetSeg(['On', 'Ghost', 'Off'], wallMode, i => { wallMode = i; applyWallMode(); if (routes.length) routeApplyAlpha(); rerenderSheet(); });
+  }
+  sheetHead('Stations');
+  const smap = [1, 2, 0];
+  sheetSeg(['Ends', 'All', 'None'], smap.indexOf(stationMode), i => {
+    stationMode = smap[i]; applyStationMode(); if (stationMode === 0) clearStationHighlight();
+    requestRender(); wakeRender(); rerenderSheet();
+  });
+  sheetHead('Show');
+  const chips = [
+    ['❓', 'Leads', leadGroup.visible, on => { leadGroup.visible = on; }],
+    ['🏷', 'Area names', areaLabelGroup.visible, on => { areaLabelGroup.visible = on; }],
+    ['📍', 'Tracks & pins', fieldGroup.visible, on => { fieldGroup.visible = on; }],
+  ];
+  if (importGroup.children.length)
+    chips.push(['📂', kmlNames.length ? kmlNames.join(', ') : 'Imported KML', importGroup.visible, on => { importGroup.visible = on; }]);
+  sheetChips(chips);
+  const hsOk = document.getElementById('map-panel-layer').style.display === 'block';
+  if (hsOk) {
+    sheetHead('Imagery');
+    const satOn = document.getElementById('btn-layer-sat').classList.contains('active');
+    sheetSeg(['Satellite', document.getElementById('btn-layer-hs').textContent.includes('LIDAR') ? 'LiDAR shade' : 'Shade'], satOn ? 0 : 1, i => {
+      document.getElementById(i === 0 ? 'btn-layer-sat' : 'btn-layer-hs').click(); rerenderSheet();
+    });
+  }
+  sheetHead('Terrain');
+  [['Opacity', 'terrain-opacity-slider', 'terrain-opacity-label'], ['Brightness', 'terrain-bright-slider', 'terrain-bright-label'],
+   ['Haze', 'terrain-fog-slider', 'terrain-fog-label']].forEach(([lab, s, v]) => {
+    const r = el('div', 'sh-sl');
+    r.appendChild(el('label', '', lab));
+    r.appendChild(document.getElementById(s));
+    r.appendChild(document.getElementById(v));
+    sheetEl.appendChild(r);
+  });
+}
+
+// ── ⋯ More ──
+function renderMoreSheet() {
+  sheetHead('Units');
+  sheetSeg(['Feet', 'Metres'], UNITS === 'm' ? 1 : 0, i => { setUnits(i ? 'm' : 'ft'); rerenderSheet(); });
+  sheetRow('⛶', 'Fullscreen', null, () => { closeSheet(); document.getElementById('btn-fullscreen').click(); });
+  sheetRow('?', 'Help', null, () => { closeSheet(); document.getElementById('btn-help').click(); });
+}
+
+// Everything that shows a length re-renders in the new unit.
+function onUnitsChanged() {
+  updateDepthLegend();
+  if (routes.length) { routeDraw(); }
+  routeRenderPanel();
+  if (reach) applyReach();
+  if (measurePts.length === 2) { clearMeasureGraphicsOnly(); drawMeasure(measurePts[0], measurePts[1]); }
+  leadsRender();
+  fieldRenderList();
+  recBadgeUpdate();
+  const sel = _selMesh && _selMesh._station;
+  if (sel && infoPanel.classList.contains('open')) selectStation(sel);
+  updateModeBar(true);
+}
+
+// ── Mode bar: the active tool, with ✕ ──
+let _modeSig = '';
+function updateModeBar(force) {
+  let icon = '', text = '', off = null, open = null;
+  if (fieldPickOn) { icon = '📍'; text = 'Pin · tap the ground'; off = () => { fieldPickOn = false; document.getElementById('fp-pt-map').classList.remove('active'); }; }
+  else if (reachPick) { icon = '🫥'; text = 'Reach · tap a station'; off = () => { reachPick = false; }; }
+  else if (routePick) { icon = '🚩'; text = routePick === 'from' ? 'Route · tap the start station' : 'Route · tap the end station'; off = () => routeClear(); }
+  else if (routes.length && routeSel >= 0) {
+    const p = routes[routeSel];
+    icon = '🚩'; text = `Route ${routeSel + 1}/${routes.length} · ${fmtLen(p.len)}` + (p.tags.length ? ' · ' + p.tags.join(', ') : '');
+    off = () => routeClear(); open = () => openFind('route');
+  }
+  else if (measureOn) {
+    icon = '📏'; text = measurePts.length === 2 ? 'Measure · ' + fmtLen(measurePts[0].p.distanceTo(measurePts[1].p)) : 'Measure · tap two points';
+    off = () => document.getElementById('btn-measure').click();
+  }
+  else if (flyMode) { icon = craneMode ? '🏗️' : '🕹️'; text = craneMode ? 'Crane' : 'Fly'; off = () => flySet(0); }
+  const bar = document.getElementById('mode-bar');
+  const active = !!(text || reach);
+  document.getElementById('tb-tools').classList.toggle('tool-on', active);
+  const sig = icon + text + (reach ? 'R' : '') + (document.getElementById('rec-badge').classList.contains('show') ? 'C' : '');
+  if (sig === _modeSig && !force) return;
+  _modeSig = sig;
+  bar.classList.toggle('show', !!text);
+  const recOn = document.getElementById('rec-badge').classList.contains('show');
+  const top0 = 46 + (recOn ? 36 : 0);
+  document.getElementById('reach-bar').style.top = top0 + 'px';
+  bar.style.top = (top0 + (reach ? 40 : 0)) + 'px';
+  document.getElementById('mb-text').textContent = text ? icon + ' ' + text : '';
+  bar._off = off; bar._open = open;
+}
+document.getElementById('mb-x').addEventListener('click', e => {
+  e.stopPropagation();
+  const bar = document.getElementById('mode-bar');
+  if (bar._off) bar._off();
+  updateModeBar(true);
+});
+document.getElementById('mb-text').addEventListener('click', () => { const bar = document.getElementById('mode-bar'); if (bar._open) bar._open(); });
+setInterval(updateModeBar, 300);    // cheap: touches the DOM only when something changed
+
+// GPS button mirrors the hidden one's state (pin / follow / heading-up).
+(function mirrorGps() {
+  const src = document.getElementById('btn-gps'), dst = document.getElementById('tb-gps');
+  const sync = () => {
+    ['active', 'follow-active', 'heading-active'].forEach(c => dst.classList.toggle(c, src.classList.contains(c)));
+    dst.textContent = src.textContent;
+  };
+  new MutationObserver(sync).observe(src, { attributes: true, childList: true, characterData: true, subtree: true });
+  sync();
+})();
+
+uiStash();          // the GPS sheet's body and the terrain sliders wait off-screen
+
 function buildCaveLines() {
   buildCavePassages();
   if (!buildCaveLines._field) { buildCaveLines._field = true; fieldRebuild(); fieldRenderList(); }
@@ -2960,7 +4120,8 @@ function buildCaveLines() {
   // Every shot goes into one LineSegments with per-vertex colours: one draw
   // call however big the cave, and 🌈 recolours it in place.
   const _segPos = [], _segCol = [];
-  _segKeys = []; caveEdges = []; _caveAdj = null;
+  _segKeys = []; _segChain = []; caveEdges = []; _caveAdj = null; routeEdges = null; _routeAdj = null;
+  let chainN = 0;
 
   surveys.forEach(sv => {
     let hexColor = sv.color || '#00e5ff';
@@ -2970,6 +4131,7 @@ function buildCaveLines() {
     // Station names are unique within a cave, not across caves.
     const cavePfx = sv.cave ? sv.cave + '|' : '';
 
+    let lastTo = null;
     (sv.lines || []).forEach((line, li) => {
       if (line.length < 2) return;
       const pts = line.map(([x,y,z]) => new THREE.Vector3(x, y, z));
@@ -3000,7 +4162,11 @@ function buildCaveLines() {
       for (let k = 0; k + 1 < pts.length; k++) {
         _segKeys.push(pts.length === 2 ? fromKey : null, pts.length === 2 ? toKey : null);
       }
-      caveEdges.push([fromKey, toKey, pts[0].distanceTo(pts[1])]);
+      // A new chain unless this shot starts where the previous one ended.
+      if (pts.length !== 2 || fromKey !== lastTo) chainN++;
+      for (let k = 0; k + 1 < pts.length; k++) _segChain.push(chainN);
+      lastTo = pts.length === 2 ? toKey : null;
+      caveEdges.push([fromKey, toKey, pts[0].distanceTo(pts[1]), _segPos.length / 6 - (pts.length - 1)]);
     });
 
     // Overlay proper station data (name, lrud, dist) from sv.stations if present
@@ -3181,7 +4347,8 @@ async function handleKMLFile(file) {
     kmlText = await file.text();
   }
   const count = parseKMLCoords(kmlText, colHex);
-  alert(`Imported ${count} feature(s) from ${file.name}`);
+  kmlNames.push(file.name);
+  showToast(`Imported ${count} feature${count === 1 ? '' : 's'} from ${file.name}`);
 }
 
 document.getElementById('kml-input').addEventListener('change', function() {
@@ -3222,7 +4389,7 @@ function applyStationMode() {
     const show = isStationVisible(st);
     if (st._mesh)   st._mesh.visible   = show;
     if (st._sprite) {
-      st._sprite.visible = show;
+      st._sprite.visible = show && stationNamesOn;
       if (show && st._sprite._baseScale) {
         // In ends-only mode labels are 2× bigger
         const factor = (stationMode === 1) ? 2 : 1;
@@ -3251,7 +4418,7 @@ function clearStationHighlight() {
     }
     _selSprite.material.color.set(0xffffff);
     _selSprite.material.opacity = (st && st._reachAlpha) ?? 1;
-    _selSprite.visible = st ? isStationVisible(st) : false;
+    _selSprite.visible = st ? isStationVisible(st) && stationNamesOn : false;
   }
   _selMesh = null; _selSprite = null;
 }
@@ -3290,98 +4457,82 @@ function selectStation(st) {
     }
   }
 
-  // Build FLEX-style HTML
-  let html = '';
-
-  // Distance from entrance
-  if (st.dist !== null && st.dist !== undefined) {
-    html += `<div class="fx-row"><span class="lbl">Distance from entrance:</span> <span class="val">${st.dist.toFixed(1)} m</span></div>`;
-  }
-
-  // Elevation
-  html += `<div class="fx-row"><span class="lbl">Elevation:</span> <span class="val">${st.pos.z.toFixed(1)} m</span></div>`;
+  // Compact card: name, chips (depth, size + type, reach, leads), a one-line
+  // hint; the details scroll below inside a capped panel height.
+  const esc = escHtml;
+  const _wh = stationWH(st);
   const cover = coverAt(st.pos.x, st.pos.y, st.pos.z);
-  if (reach && reach.origin !== st) {
-    const rd = reach.dist.get(st._key);
-    html += `<div class="fx-row"><span class="lbl">Along the survey from ${escHtml(reach.origin.name || 'origin')}:</span> <span class="val">${
-      rd === undefined ? 'not connected' : `${Math.round(rd)} m (${Math.round(rd / 0.3048)} ft)`}</span></div>`;
+  const chips = [];
+  if (isFinite(cover)) chips.push(['', cover > 0.5 ? `${U.z(cover)} deep` : 'at the surface']);
+  if (_wh) {
+    const n = v => v == null ? '?' : U.num(v, 1);
+    chips.push(['', `${n(_wh.W)} × ${n(_wh.H)} ${U.u}`]);
+    let kind = '';
+    if (_wh.W != null && _wh.H != null && _wh.W < 2 * FT && _wh.H < 2 * FT) kind = 'tube';
+    else {
+      const k = [];
+      if (_wh.H != null) k.push(_wh.H < 2 * FT ? 'flat-out' : _wh.H < 4 * FT ? 'crawl' : _wh.H < 6 * FT ? 'stooping' : '');
+      if (_wh.W != null && _wh.W < 3 * FT) k.push(_wh.W < 1 * FT ? 'squeeze' : 'narrow');
+      kind = k.filter(Boolean).join(', ');
+    }
+    if (kind) chips.push([kind === 'tube' ? 'mg' : 'kd', kind]);
   }
-  if (isFinite(cover)) html += `<div class="fx-row"><span class="lbl">Below ground:</span> <span class="val">${
-    cover > 0.5 ? `${cover.toFixed(1)} m (${Math.round(cover / 0.3048)} ft)` : 'at or above the surface'}</span></div>`;
-
-  // Passage dimensions (LRUD)
-  if (bestLrud) {
-    const lr = (Array.isArray(bestLrud) ? bestLrud : [bestLrud.l, bestLrud.r, bestLrud.u, bestLrud.d])
-                .map(v => (typeof v === 'number' ? v.toFixed(1) : v));
-    html += `<div class="fx-row"><span class="lbl">Passage L/R/U/D:</span> <span class="val">${lr[0]} / ${lr[1]} / ${lr[2]} / ${lr[3]} m</span></div>`;
-  }
-
-  // Survey name (and the shot's note, if any); both come from survey text
-  const escTxt = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  html += `<div class="fx-row"><span class="lbl">Survey:</span> <span class="val">${escTxt(st.surveyName || '—')}</span></div>`;
-  if (st.comment) html += `<div class="fx-row"><span class="lbl">Note:</span> <span class="val"><i>${escTxt(st.comment)}</i></span></div>`;
-  (st.leads || []).forEach(ld => {
-    const one = v => `${v.toFixed(1)} m (${(v / 0.3048).toFixed(0)} ft)`;
-    const size = [ld.height != null ? one(ld.height) + ' high' : null,
-                  ld.width  != null ? one(ld.width)  + ' wide' : null].filter(Boolean).join(' × ');
-    html += `<div class="fx-divider" style="color:#ff8f00;opacity:.9">Open lead</div>`;
-    if (ld.description) html += `<div class="fx-row"><span class="val">${escTxt(ld.description)}</span></div>`;
-    if (size) html += `<div class="fx-row"><span class="lbl">Size:</span> <span class="val">${size}</span></div>`;
-    if (ld.date) html += `<div class="fx-row"><span class="lbl">Noted:</span> <span class="val">${escTxt(ld.date)}</span></div>`;
-  });
-
-  // (Adjacent shots removed — not needed in station panel)
-  if (false && st.shots.length) {
-    html += `<div class="fx-divider">Adjacent shots</div>`;
-    st.shots.forEach(s => {
-      const other = (s._role === 'from' ? s.to_name : s.from_name) || '?';
-      const dir   = s._role === 'from' ? '→' : '←';
-      let line = `${dir} ${other}`;
-      if (s.length    !== undefined) line += `   ${s.length.toFixed(2)} m`;
-      if (s.azimuth   !== undefined) line += `   ${s.azimuth.toFixed(1)}°`;
-      if (s.inclination !== undefined) line += `   ${s.inclination.toFixed(1)}°`;
-      html += `<div class="fx-shot">${line}</div>`;
-    });
-  }
-
-  const _caverHere = stationCaver && stationCaver.visible && stationCaver.userData.station === st;
-  html += `<div class="fx-row" style="opacity:.45;font-size:10px;margin-top:6px">${
-    reach && reach.origin === st ? 'Fading by distance along the survey from here — ✕ on the bar turns it off'
-    : _caverHere ? 'Tap again to fade everything by distance along the survey from here'
-    : 'Tap the station again to stand a caver there and orbit it'}</div>`;
-
-  // Compass calibration against a survey shot from this station
-  const nb = stationNeighbour(st);
-  if (nb) {
-    html += `<div class="fx-divider" style="opacity:.6">Compass</div>`;
-    if (compassHeading === null) {
-      html += `<div class="fx-row" style="opacity:.5;font-size:11px">The compass runs in GPS follow mode (tap 📍 until it shows 🧭).</div>`;
-    } else {
-      html += `<div class="fx-row" style="font-size:11px;opacity:.75">Stand here, point the top of the phone at <b>${escTxt(nb.name || 'the next station')}</b> (${nb.bearing.toFixed(0)}°), then:</div>`
-            + `<div class="fx-row"><button id="btn-compass-cal" class="layer-btn" style="flex:1">🧭 Calibrate compass</button>`
-            + (compassOffset !== null ? ` <button id="btn-compass-reset" class="layer-btn">Reset</button>` : '') + `</div>`
-            + `<div class="fx-row" style="opacity:.45;font-size:10px">${compassOffset !== null
-                ? 'Calibrated: ' + (compassOffset >= 0 ? '+' : '') + compassOffset.toFixed(1) + '°'
-                : 'Not calibrated (grid convergence only, ' + (-gridConvergenceDeg()).toFixed(1) + '°)'}</div>`;
+  if (reach) {
+    if (reach.origin === st) chips.push(['rc', 'reach origin']);
+    else {
+      const rd = reach.dist.get(st._key);
+      chips.push(rd === undefined ? ['', 'not connected'] : [rd <= reach.half ? 'rc' : '', `${U.len(rd)} from ${reach.origin.name || 'origin'}`]);
     }
   }
+  (st.leads || []).forEach(ld => {
+    const d = ld.description || 'lead';
+    chips.push(['ld', '? ' + (d.length > 30 ? d.slice(0, 29) + '…' : d)]);
+  });
+  const _caverHere = stationCaver && stationCaver.visible && stationCaver.userData.station === st;
+  const hint = reach && reach.origin === st ? 'tap again: reach off' : _caverHere ? 'tap again: reach' : 'tap again: caver';
+
+  let html = `<div class="st-chips">${chips.map(([c, t]) => `<span class="chip ${c}">${esc(t)}</span>`).join('')}</div>`
+           + `<div class="st-hint">${hint}</div>`;
+
+  // Details
+  html += `<div class="fx-row"><span class="lbl">Elevation:</span> <span class="val">${U.z(st.pos.z)}</span></div>`;
+  if (st.dist !== null && st.dist !== undefined) {
+    html += `<div class="fx-row"><span class="lbl">From entrance:</span> <span class="val">${U.len(st.dist)}</span></div>`;
+  }
+  if (bestLrud) {
+    const lr = (Array.isArray(bestLrud) ? bestLrud : [bestLrud.l, bestLrud.r, bestLrud.u, bestLrud.d])
+                .map(v => (typeof v === 'number' ? U.num(v, 1) : v));
+    html += `<div class="fx-row"><span class="lbl">L/R/U/D:</span> <span class="val">${lr[0]} / ${lr[1]} / ${lr[2]} / ${lr[3]} ${U.u}</span></div>`;
+  }
+  html += `<div class="fx-row"><span class="lbl">Survey:</span> <span class="val">${esc(st.surveyName || '—')}${st.cave ? ' · ' + esc(st.cave) : ''}</span></div>`;
+  if (st.comment) html += `<div class="fx-row"><span class="lbl">Note:</span> <span class="val"><i>${esc(st.comment)}</i></span></div>`;
+  (st.leads || []).forEach(ld => {
+    const size = [ld.height != null ? U.dim(ld.height) + ' high' : null,
+                  ld.width  != null ? U.dim(ld.width)  + ' wide' : null].filter(Boolean).join(' × ');
+    html += `<div class="fx-divider" style="color:#ff8f00;opacity:.9">Open lead</div>`;
+    if (ld.description) html += `<div class="fx-row"><span class="val">${esc(ld.description)}</span></div>`;
+    if (size) html += `<div class="fx-row"><span class="lbl">Size:</span> <span class="val">${size}</span></div>`;
+    if (ld.date) html += `<div class="fx-row"><span class="lbl">Noted:</span> <span class="val">${esc(ld.date)}</span></div>`;
+  });
 
   const titleEl2 = document.getElementById('info-title');
   titleEl2.textContent  = st.name || '(unnamed)';
   titleEl2.style.color  = st.hexColor || '#00e5ff';
-  document.getElementById('info-subtitle').textContent = st.surveyName || '';
+  document.getElementById('info-subtitle').textContent = '';
   document.getElementById('info-rows').innerHTML       = html;
+  infoPanel.scrollTop = 0;
   infoPanel.classList.add('open');
-  const cal = document.getElementById('btn-compass-cal');
-  if (cal && nb) cal.addEventListener('click', () => {
-    if (compassRaw === null) return;
-    let off = nb.bearing - compassRaw;
-    off = ((off + 540) % 360) - 180;
-    setCompassOffset(+off.toFixed(1));
-    selectStation(st);                        // refresh the panel
-  });
-  const rst = document.getElementById('btn-compass-reset');
-  if (rst) rst.addEventListener('click', () => { setCompassOffset(null); selectStation(st); });
+  if (typeof gpsSheetRefresh === 'function') gpsSheetRefresh();   // calibration follows the selection
+}
+
+// Compass calibration against a survey shot from a station (GPS sheet).
+function compassCalibrateAt(st) {
+  const nb = st && stationNeighbour(st);
+  if (!nb || compassRaw === null) return false;
+  let off = nb.bearing - compassRaw;
+  off = ((off + 540) % 360) - 180;
+  setCompassOffset(+off.toFixed(1));
+  return true;
 }
 
 // A station joined to this one by a shot: its name and grid bearing.
@@ -3411,6 +4562,7 @@ function onPointerTap(e) {
     -((clientY - rect.top)  / rect.height) * 2 + 1
   );
   _tapRay.setFromCamera(ndc, camera);
+  _lastTapPx = [clientX, clientY];
 
   // GPS marker check (screen-space)
   if (gpsMarker && gpsScenePos) {
@@ -3427,6 +4579,15 @@ function onPointerTap(e) {
   }
 
   if (fieldPickOn) { fieldPickTap(); return; }
+  if (reachPick) {
+    const h = _tapRay.intersectObjects(stationMeshes, false)[0];
+    if (!h) { showToast('Tap a station to reach from'); return; }
+    reachPick = false;
+    selectStation(h.object._station);
+    reachFrom(h.object._station);
+    return;
+  }
+  if (routePickTap()) return;
   if (measureOn) { measureTap(); return; }
   const fpHit = fieldHitTest(ndc);
   if (fpHit) { fieldShowPoint(fpHit); return; }
@@ -3437,10 +4598,13 @@ function onPointerTap(e) {
     const st = hits[0].object._station;
     if (_selMesh && _selMesh._station === st) {
       // Second tap: caver and orbit. Third tap: reach from here.
-      if (stationCaver && stationCaver.visible && stationCaver.userData.station === st) reachFrom(st);
+      // Fourth tap on the reach origin turns reach off again.
+      if (reach && reach.origin === st) { reachOff(); showToast('Reach off'); selectStation(st); }
+      else if (stationCaver && stationCaver.visible && stationCaver.userData.station === st) reachFrom(st);
       else focusStation(st);
     } else selectStation(st);
   } else {
+    if (routeHitTap()) return;
     infoPanel.classList.remove('open');
     clearStationHighlight();
   }
