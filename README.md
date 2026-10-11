@@ -46,9 +46,13 @@ gitignored.
 - **Globe and terrain** — CesiumJS with several imagery and elevation sources
 - **Point clouds** — Potree, from local or remote EPT datasets. The server can
   start and stop a local EPT host from the UI
-- **Cave surveys** — imports PLT files, draws surveys as coloured lines with
-  stations, and supports georectification: pin stations to world coordinates and
-  warp the survey with IDW rubber-sheeting
+- **Cave surveys** — imports PLT, Breakout and Walls (its shapefile export)
+  surveys, draws them as lines, stations and passage walls from the LRUDs, and
+  supports georectification: pin stations to world coordinates and warp the
+  survey with IDW rubber-sheeting. Caves take the same vertical datum shift as
+  the point clouds, can be saved and loaded as sets, and can be coloured by
+  survey, elevation, depth below ground (3D terrain, or the loaded LiDAR's
+  ground returns) or passage difficulty
 - **CalTopo integration** through an authenticated proxy
 
 ---

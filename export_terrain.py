@@ -1347,6 +1347,8 @@ def main():
     ap.add_argument('--out',         default='export.zip')
     ap.add_argument('--name',        default='',
                     help='Map name, shown in the viewer title bar and used for the app label')
+    ap.add_argument('--z-offset',    type=float, default=None,
+                    help="Vertical shift for the DEM (m), as FLEX shifts its point clouds; default -32*0.766")
     ap.add_argument('--resolution',  type=float, default=0.5, help='DEM cell size in metres')
     ap.add_argument('--percentile',  type=float, default=2,   help='Ground percentile (2=very low)')
     ap.add_argument('--max-triangles', type=int, default=2_000_000)
@@ -1432,7 +1434,9 @@ def main():
         # Default (both usgsRef and egm96 OFF): -32 * 0.766 ~ -24.5 m.
         # Cave survey positions were established against the corrected display,
         # so terrain must be shifted by the same amount to align.
-        FLEX_PC_Z_OFFSET = -32 * 0.766  # metres
+        # FLEX sends the shift its point clouds have now (--z-offset: EGM96 /
+        # USGS / default toggles); without it, the default.
+        FLEX_PC_Z_OFFSET = args.z_offset if args.z_offset is not None else -32 * 0.766  # metres
         dem += FLEX_PC_Z_OFFSET
         print(f"[2/7] Applied FLEX point-cloud Z offset: {FLEX_PC_Z_OFFSET:.3f} m")
 

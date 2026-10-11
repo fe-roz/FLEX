@@ -691,6 +691,7 @@ function handleExportTerrain(req, res) {
             hillshade_mode    = 'lidar',     // 'lidar' | 'url' | 'none'
             hillshade_url     = '',
             name              = '',
+            z_offset          = null,        // the point clouds' vertical shift in FLEX (m)
         } = params;
         const hsMode  = ['lidar', 'url', 'none'].includes(hillshade_mode) ? hillshade_mode : 'lidar';
         // Free text from the UI goes to the exporter as one argv element (spawn,
@@ -732,6 +733,8 @@ function handleExportTerrain(req, res) {
         if (hsMode === 'url' && hillshade_url) args.push('--hillshade-url', hillshade_url);
         if (mapName) args.push('--name', mapName);
         if (cavesFilePath) args.push('--caves', cavesFilePath);
+        if (typeof z_offset === 'number' && Number.isFinite(z_offset) && Math.abs(z_offset) < 200)
+            args.push('--z-offset', String(z_offset));
 
         const proc = spawn(CONDA_PYTHON, args);
         proc.stdout.on('data', d => {

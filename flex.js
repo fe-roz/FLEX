@@ -26,6 +26,12 @@ import {
 } from "./session.js";
 import { initSpaceMouse } from "./spacemouse.js";
 import { breakoutToPlt, isBreakoutFile } from "./breakout.js";
+import { readWallsShapefileSets, wallsToPlt, isWallsSelection } from "./walls.js";
+import { rampColor, rampRgb, rampCss, percentileRange, lazyPick, materialize, installLazyPick,
+         addLinePrimitive, addStationLayer, removePrimitive,
+         lrudWH, steepScore, whRgb, wallHardRgb, hardLegendRows, HARD_UNKNOWN } from "./cave_layers.js";
+import { levelFrame, planGroundGrid, pushFootLine, sampleGroundGrid, gridCovers, depthBelowGround,
+         binLidarGround, mergeLidarGround, gridFromLidar } from "./cave_ground.js";
 
 function isAoiGeometry(geometry) {
   if (!geometry || typeof geometry !== "object") {
@@ -3507,6 +3513,9 @@ _layersReady.then(async () => {
     Cesium.knockout.getObservable(viewModel, key).subscribe(() => {
       saveSession();
       potreeViewer.scene.pointclouds.forEach(applyPcMatrix);
+      // Caves follow the point clouds' datum shift (_pcDatumDz).
+      _caveImports.forEach((imp, i) => { if (imp.georef) window._rerenderCave(i); });
+      _caveColourChanged();
     });
   });
 
@@ -4253,7 +4262,7 @@ let _cwizParsed  = null;     // Holds last-parsed PLT data while wizard is open
 // recents.json stores only lightweight metadata — NO rawText.
 // PLT file contents are stored as individual files via /api/plt-cache so that
 // large PLT files (600KB+) don't bloat the JSON payload and cause silent failures.
-let _recents = { ept: [], plt: [] };
+let _recents = { ept: [], plt: [], pltSets: [] };   // pltSets: saved selections of caves
 const RECENTS_MAX = 12;
 
 async function _loadRecents() {
@@ -4262,9 +4271,10 @@ async function _loadRecents() {
     if (r.ok) _recents = await r.json();
     if (!Array.isArray(_recents.ept)) _recents.ept = [];
     if (!Array.isArray(_recents.plt)) _recents.plt = [];
+    if (!Array.isArray(_recents.pltSets)) _recents.pltSets = [];
   } catch(e) {
     console.warn('[recents] load failed:', e);
-    _recents = { ept: [], plt: [] };
+    _recents = { ept: [], plt: [], pltSets: [] };
   }
   _renderEptRecents();
   _renderPltRecents();
@@ -4275,6 +4285,7 @@ async function _saveRecents() {
   const payload = {
     ept: _recents.ept,
     plt: _recents.plt.map(({ rawText: _drop, ...rest }) => rest),
+    pltSets: _recents.pltSets || [],
   };
   try {
     const r = await fetch('/api/recents', {
@@ -4365,30 +4376,195 @@ function _renderEptRecents() {
   </div>`;
 }
 
+// ── Recent PLT and cave sets ─────────────────────────────────────────────────
+// A set is a named selection of caves, loaded together in one click. It keeps
+// its own copy of each cave's placement (georef) and style (displayOptions);
+// the survey text itself comes from the PLT cache, by cave name, like a
+// recent. Make one from the caves currently loaded (💾 in the cave list) or
+// by ticking recents.
+let _recentTicks = new Set();           // names ticked in Recent PLT
+let _setsOpen = new Set();              // sets shown expanded
+let _setNamePrompt = null;              // { records, value } while naming a new set
+let _recentsNoteMsg = null;             // { text, color }
+
+const _btnCss = (bg, bd, fg) => `font-size:9px;padding:1px 6px;background:${bg};border:1px solid ${bd};color:${fg};border-radius:3px;cursor:pointer;white-space:nowrap;flex-shrink:0;`;
+function _georefLabel(g) {
+  return g ? (g.mode === 'anchor' ? `${Number(g.lat).toFixed(4)}°, ${Number(g.lon).toFixed(4)}°`
+                                  : `UTM ${g.zone}${g.south ? 'S' : 'N'}`) : 'no georef stored';
+}
+function _recentsNote(text, color = '#8fa', ms = 8000) {
+  _recentsNoteMsg = { text, color };
+  _renderPltRecents();
+  setTimeout(() => { if (_recentsNoteMsg && _recentsNoteMsg.text === text) { _recentsNoteMsg = null; _renderPltRecents(); } }, ms);
+}
+
 function _renderPltRecents() {
   const el = document.getElementById('lp-plt-recents');
   if (!el) return;
-  if (!_recents.plt.length) { el.innerHTML = ''; return; }
-  const rows = _recents.plt.map((r, i) => {
-    const georefLabel = r.georef
-      ? (r.georef.mode === 'anchor'
-        ? `${Number(r.georef.lat).toFixed(4)}°, ${Number(r.georef.lon).toFixed(4)}°`
-        : `UTM ${r.georef.zone}${r.georef.south ? 'S' : 'N'}`)
-      : 'no georef stored';
-    return `<div style="display:flex;align-items:center;gap:4px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
-      <div style="flex:1;min-width:0;">
-        <div style="font-size:9px;color:rgba(255,255,255,0.75);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${r.name}</div>
-        <div style="font-size:8px;color:rgba(255,255,255,0.35);">${georefLabel}</div>
-      </div>
-      <button onclick="window._loadPltRecent(${i})" style="font-size:9px;padding:1px 6px;background:rgba(0,200,120,0.15);border:1px solid rgba(0,200,120,0.3);color:#8fa;border-radius:3px;cursor:pointer;white-space:nowrap;flex-shrink:0;">Load</button>
-      <button onclick="window._removePltRecent(${i})" title="Remove" style="font-size:9px;padding:1px 4px;background:none;border:none;color:rgba(255,100,100,0.6);cursor:pointer;flex-shrink:0;">✕</button>
+  const sets = _recents.pltSets || [];
+  if (!_recents.plt.length && !sets.length && !_setNamePrompt && !_recentsNoteMsg) { el.innerHTML = ''; return; }
+  const esc = _escapeHtml;
+  const head = t => `<div style="font-size:9px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.07em;margin:4px 0 3px;">${t}</div>`;
+  let html = '';
+  if (_recentsNoteMsg) {
+    html += `<div style="font-size:10px;color:${_recentsNoteMsg.color};padding:3px 6px;border:1px solid rgba(255,255,255,0.15);border-radius:3px;margin-bottom:4px;">${esc(_recentsNoteMsg.text)}</div>`;
+  }
+  if (_setNamePrompt) {
+    html += `<div style="display:flex;gap:4px;align-items:center;margin:4px 0;">
+      <input id="lp-set-name" type="text" maxlength="60" value="${esc(_setNamePrompt.value || '')}" placeholder="Set name"
+        onkeydown="if(event.key==='Enter')window._caveSetNameSave();if(event.key==='Escape')window._caveSetNameCancel()"
+        style="flex:1;min-width:0;padding:2px 5px;background:#0d1418;border:1px solid rgba(255,255,255,0.2);border-radius:3px;color:#eee;font-size:10px;">
+      <button onclick="window._caveSetNameSave()" style="${_btnCss('rgba(0,200,120,0.15)', 'rgba(0,200,120,0.3)', '#8fa')}">Save ${_setNamePrompt.records.length}</button>
+      <button onclick="window._caveSetNameCancel()" style="${_btnCss('none', 'rgba(255,255,255,0.15)', '#aaa')}">Cancel</button>
     </div>`;
-  }).join('');
-  el.innerHTML = `<div style="margin-top:5px;padding-top:4px;border-top:1px solid rgba(255,255,255,0.08);">
-    <div style="font-size:9px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:3px;">Recent PLT</div>
-    ${rows}
-  </div>`;
+  }
+  if (sets.length) {
+    html += head('Cave sets');
+    html += sets.map((st, i) => {
+      const open = _setsOpen.has(st.name);
+      const members = open ? `<div style="padding:1px 0 3px 16px;">${st.caves.map(c =>
+        `<div style="font-size:8px;color:rgba(255,255,255,0.45);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(c.name)} · ${_georefLabel(c.georef)}</div>`).join('')}</div>` : '';
+      return `<div style="border-bottom:1px solid rgba(255,255,255,0.05);">
+        <div style="display:flex;align-items:center;gap:4px;padding:2px 0;">
+          <button onclick="window._caveSetToggle(${i})" title="Show the caves in this set" style="background:none;border:none;color:rgba(255,255,255,0.5);cursor:pointer;font-size:9px;padding:0;width:10px;">${open ? '▾' : '▸'}</button>
+          <div style="flex:1;min-width:0;font-size:9px;color:rgba(255,255,255,0.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(st.name)}">📁 ${esc(st.name)} <span style="opacity:0.45;">· ${st.caves.length}</span></div>
+          <button onclick="window._caveSetLoad(${i})" title="Load every cave in the set (ones already loaded are skipped)" style="${_btnCss('rgba(0,200,120,0.15)', 'rgba(0,200,120,0.3)', '#8fa')}">Load</button>
+          <button onclick="window._caveSetDelete(${i})" title="Delete the set (its caves stay in Recent)" style="font-size:9px;padding:1px 4px;background:none;border:none;color:rgba(255,100,100,0.6);cursor:pointer;flex-shrink:0;">✕</button>
+        </div>${members}</div>`;
+    }).join('');
+  }
+  if (_recents.plt.length) {
+    for (const n of [..._recentTicks]) if (!_recents.plt.some(r => r.name === n)) _recentTicks.delete(n);
+    html += head('Recent PLT');
+    html += _recents.plt.map((r, i) => `<div style="display:flex;align-items:center;gap:4px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
+      <input type="checkbox" ${_recentTicks.has(r.name) ? 'checked' : ''} ${r.georef ? '' : 'disabled'} onchange="window._recentTick(${i}, this.checked)"
+        title="${r.georef ? 'Tick to load or save several at once' : 'Load it once to place it first'}" style="margin:0;flex-shrink:0;">
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:9px;color:rgba(255,255,255,0.75);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.name)}</div>
+        <div style="font-size:8px;color:rgba(255,255,255,0.35);">${_georefLabel(r.georef)}</div>
+      </div>
+      <button onclick="window._loadPltRecent(${i})" style="${_btnCss('rgba(0,200,120,0.15)', 'rgba(0,200,120,0.3)', '#8fa')}">Load</button>
+      <button onclick="window._removePltRecent(${i})" title="Remove" style="font-size:9px;padding:1px 4px;background:none;border:none;color:rgba(255,100,100,0.6);cursor:pointer;flex-shrink:0;">✕</button>
+    </div>`).join('');
+    if (_recentTicks.size) {
+      html += `<div style="display:flex;gap:4px;justify-content:flex-end;margin-top:4px;">
+        <button onclick="window._recentLoadTicked()" style="${_btnCss('rgba(0,200,120,0.15)', 'rgba(0,200,120,0.3)', '#8fa')}">Load ticked (${_recentTicks.size})</button>
+        <button onclick="window._recentSaveTicked()" style="${_btnCss('rgba(80,220,255,0.12)', 'rgba(80,220,255,0.4)', '#8ee8ff')}">Save ticked as set…</button>
+      </div>`;
+    }
+  }
+  el.innerHTML = `<div style="margin-top:5px;padding-top:4px;border-top:1px solid rgba(255,255,255,0.08);">${html}</div>`;
+  if (_setNamePrompt) {
+    const inp = document.getElementById('lp-set-name');
+    if (inp) { inp.oninput = () => { _setNamePrompt.value = inp.value; }; if (document.activeElement !== inp) inp.focus(); }
+  }
 }
+
+const _jsonCopy = o => (o == null ? null : JSON.parse(JSON.stringify(o)));
+
+// Place one cave from a stored record { name, georef, displayOptions } and its
+// cached survey text. → { entry } or { entry: null, why: 'cache'|'parse'|'georef' }
+async function _placeCaveRecord(r, { recent = true } = {}) {
+  const rawText = await _fetchPltCache(r.name);
+  if (!rawText) return { entry: null, why: 'cache' };
+  let parsed;
+  try { parsed = parsePLT(rawText); } catch (e) { return { entry: null, why: 'parse' }; }
+  parsed._fileName = r.name;
+  parsed._rawText  = rawText;
+  if (!r.georef) return { entry: null, why: 'georef' };
+  const georef = _jsonCopy(r.georef), dopt = _jsonCopy(r.displayOptions);
+  let entry;
+  if (georef.mode === 'anchor') {
+    entry = renderCaveSurveyAnchored(r.name, parsed, georef.station, georef.lat, georef.lon, georef.elev, georef.survey || '', georef.declination ?? null);
+    if (entry) {
+      if (georef.controlPoints && georef.controlPoints.length) entry.georef.controlPoints = georef.controlPoints;
+      if (dopt) entry.displayOptions = dopt;
+      if (dopt || entry.georef.controlPoints) window._rerenderCave(_caveImports.indexOf(entry));
+    }
+  } else {
+    entry = renderCaveSurveyUTM(r.name, parsed, georef.zone, georef.south, dopt, georef.controlPoints || null);
+  }
+  if (!entry) return { entry: null, why: 'georef' };
+  _finishCaveLoad(entry, { recent });
+  return { entry };
+}
+
+// Load several records; caves already loaded (by name) are skipped.
+async function _loadCaveRecords(records, what) {
+  const loaded = new Set(_caveImports.map(c => c.name));
+  const missing = [];
+  let n = 0, skipped = 0;
+  for (const r of records) {
+    if (loaded.has(r.name)) { skipped++; continue; }
+    const res = await _placeCaveRecord(r, { recent: false });
+    if (res.entry) { n++; loaded.add(r.name); continue; }
+    missing.push(r.name + (res.why === 'cache' ? ' (not cached: import its file once)'
+                         : res.why === 'georef' ? ' (not placed yet)' : ' (could not be read)'));
+  }
+  _recentsNote(`${what}: loaded ${n}` + (skipped ? `, ${skipped} already loaded` : '')
+               + (missing.length ? `. Not loaded: ${missing.join(', ')}` : ''), missing.length ? '#fa0' : '#8fa');
+}
+
+window._caveSetToggle = function(i) {
+  const st = (_recents.pltSets || [])[i];
+  if (!st) return;
+  if (_setsOpen.has(st.name)) _setsOpen.delete(st.name); else _setsOpen.add(st.name);
+  _renderPltRecents();
+};
+window._caveSetLoad = function(i) {
+  const st = (_recents.pltSets || [])[i];
+  if (st) _loadCaveRecords(st.caves, `“${st.name}”`);
+};
+window._caveSetDelete = function(i) {
+  const st = (_recents.pltSets || [])[i];
+  if (!st || !confirm(`Delete the set “${st.name}”? Its caves stay in Recent PLT.`)) return;
+  _recents.pltSets.splice(i, 1);
+  _saveRecents();
+  _renderPltRecents();
+};
+window._recentTick = function(i, on) {
+  const r = _recents.plt[i];
+  if (!r) return;
+  if (on) _recentTicks.add(r.name); else _recentTicks.delete(r.name);
+  _renderPltRecents();
+};
+window._recentLoadTicked = function() {
+  const recs = _recents.plt.filter(r => _recentTicks.has(r.name));
+  _recentTicks.clear();
+  _loadCaveRecords(recs, 'Ticked caves');
+};
+window._recentSaveTicked = function() {
+  const recs = _recents.plt.filter(r => _recentTicks.has(r.name) && r.georef);
+  if (!recs.length) return;
+  _setNamePrompt = { records: recs.map(r => ({ name: r.name, georef: r.georef, displayOptions: r.displayOptions })), value: '' };
+  _renderPltRecents();
+};
+// 💾 in the cave list: the caves loaded now, as they are placed and styled now.
+window._caveSetSaveLoaded = function() {
+  const recs = _caveImports.filter(imp => imp.georef && imp.parsed && imp.parsed._rawText).map(imp => {
+    _savePltCache(imp.name, imp.parsed._rawText);           // make sure the set can reload it
+    return { name: imp.name, georef: imp.georef, displayOptions: imp.displayOptions };
+  });
+  if (!recs.length) { _recentsNote('Load some caves first, then save them as a set.', '#fa0'); return; }
+  _setNamePrompt = { records: recs, value: '' };
+  _renderPltRecents();
+};
+window._caveSetNameSave = function() {
+  const p = _setNamePrompt;
+  const inp = document.getElementById('lp-set-name');
+  const name = ((inp && inp.value) || (p && p.value) || '').trim();
+  if (!p || !name) { if (inp) inp.focus(); return; }
+  const set = { name, savedAt: new Date().toISOString(),
+                caves: p.records.map(r => ({ name: r.name, georef: _jsonCopy(r.georef), displayOptions: _jsonCopy(r.displayOptions) })) };
+  const sets = _recents.pltSets || (_recents.pltSets = []);
+  const at = sets.findIndex(x => x.name === name);
+  if (at >= 0) sets[at] = set; else sets.unshift(set);
+  _setNamePrompt = null;
+  _recentTicks.clear();
+  _saveRecents();
+  _recentsNote(`${at >= 0 ? 'Replaced' : 'Saved'} set “${name}” (${set.caves.length} cave${set.caves.length === 1 ? '' : 's'}).`);
+};
+window._caveSetNameCancel = function() { _setNamePrompt = null; _renderPltRecents(); };
 
 window._loadEptRecent = function(i) {
   const r = _recents.ept[i];
@@ -4775,11 +4951,7 @@ function _pltToCartesian(parsed, zoneOverride, southOverride) {
 function setCaveSurveyVisible(visible) {
   for (const imp of _caveImports) {
     imp.visible = visible;
-    for (const id of imp.cesiumIds) {
-      const e = cesiumViewer.entities.getById(id);
-      if (e) e.show = visible && (_caveLeadsVisible || !_isLeadEntity(e));
-    }
-    _setCavePassageVisible(imp, visible);
+    _setCaveLayersVisible(imp);
   }
   notifyCaveVisibilityChanged(visible);
 }
@@ -4856,6 +5028,10 @@ window._toggleCaveInfo = function(i) {
   const panel = document.getElementById(`cave-info-${i}`);
   if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
 };
+
+// Cave lines and station dots are primitives with lazy pick ids: route the
+// viewer's click through cave_layers.js so they still select like entities.
+installLazyPick(cesiumViewer);
 
 // When a cave entity is selected on the globe, expand and highlight its survey in the list
 cesiumViewer.selectedEntityChanged.addEventListener(function(entity) {
@@ -4944,7 +5120,8 @@ const SURVEY_PALETTE = [
 ];
 
 function _defaultDisplayOptions(parsed) {
-  const opts = { surveyColors: {}, hiddenSurveys: {}, surfaceSurveys: {}, showSurface: false, showLabels: false, showStations: true, stationColor: '#ffeb3b', stationSize: 5 };
+  // Stations start off: thousands of dots cost frame rate, and the lines show the survey.
+  const opts = { surveyColors: {}, hiddenSurveys: {}, surfaceSurveys: {}, showSurface: false, showLabels: false, showStations: false, stationColor: '#ffeb3b', stationSize: 5 };
   (parsed.surveys || []).forEach((sv, i) => {
     opts.surveyColors[sv.code] = SURVEY_PALETTE[i % SURVEY_PALETTE.length];
   });
@@ -5124,7 +5301,13 @@ function _passageGroup(groups, hex) {
   if (!groups.has(hex)) groups.set(hex, { pos: [], idx: [] });
   return groups.get(hex);
 }
-function _pushVert(g, c) { g.pos.push(c.x, c.y, c.z); return g.pos.length / 3 - 1; }
+// Colour by difficulty also notes, per vertex, which shot it was built for and
+// how far along it (g.sh / g.tt; the builders set g.cur, or tag a point's _t).
+function _pushVert(g, c) {
+  g.pos.push(c.x, c.y, c.z);
+  if (g.sh) { g.sh.push(g.cur.s < 0 ? -1 : g.base + g.cur.s); g.tt.push(c._t ?? g.cur.t); }
+  return g.pos.length / 3 - 1;
+}
 function _pushQuad(g, a, b, c, d) {
   const i = _pushVert(g, a), j = _pushVert(g, b), k = _pushVert(g, c), l = _pushVert(g, d);
   g.idx.push(i, j, k, i, k, l);
@@ -5151,13 +5334,15 @@ function _buildShaft(g, A, B, wA, wB, d, smooth) {
     : [[r, depth], [-l, depth], [-l, -depth], [r, -depth]];
   const at = ([side, fwd], z, cf) =>
     cf(cy - d.x * side + d.y * fwd, cx + d.y * side + d.x * fwd, z);
-  return { prof, at, zBot, zTop };
+  return { prof, at, zBot, zTop, tBot: A.v <= B.v ? 0 : 1 };   // tBot: the bottom's end of the shot
 }
 
 function _emitShaft(g, sh, convertFn, smooth) {
   const { prof, at, zBot, zTop } = sh, N = prof.length;
   const bot = prof.map(q => at(q, zBot, convertFn)), top = prof.map(q => at(q, zTop, convertFn));
   if (bot.some(x => !x) || top.some(x => !x)) return;
+  for (const c of bot) c._t = sh.tBot;
+  for (const c of top) c._t = 1 - sh.tBot;
   if (!smooth) {
     for (let k = 0; k < N; k++) { const k1 = (k + 1) % N; _pushQuad(g, bot[k], bot[k1], top[k1], top[k]); }
     _pushQuad(g, top[0], top[1], top[2], top[3]);
@@ -5172,6 +5357,7 @@ function _emitShaft(g, sh, convertFn, smooth) {
   for (const [ring, z] of [[top, zTop], [bot, zBot]]) {       // flat caps, own rim
     const c = at([0, 0], z, convertFn);
     if (!c) continue;
+    c._t = z === zTop ? 1 - sh.tBot : sh.tBot;
     const ci = _pushVert(g, c), rim = ring.map(v => _pushVert(g, v));
     for (let k = 0; k < N; k++) g.idx.push(ci, rim[k], rim[(k + 1) % N]);
   }
@@ -5187,6 +5373,7 @@ function _buildBlocky(g, pts, lr, convertFn, perp) {
     const hd = _hdir(A, B);
     const d = hd || prev || { x: 0, y: 1 };
     prev = d;
+    if (g.cur) g.cur.s = i;
     let fr;
     if (perp) {
       const t = _unit3(A, B);
@@ -5204,6 +5391,8 @@ function _buildBlocky(g, pts, lr, convertFn, perp) {
     ];
     const a = sec(A, lr[i]), b = sec(B, lr[i + 1]);
     if (a.some(x => !x) || b.some(x => !x)) continue;
+    for (const c of a) c._t = 0;
+    for (const c of b) c._t = 1;
     for (let k = 0; k < 4; k++) {
       const k1 = (k + 1) % 4;
       _pushQuad(g, a[k], a[k1], b[k1], b[k]);
@@ -5310,6 +5499,7 @@ function _buildSmooth(g, pts, lr, convertFn, perp) {
       if (hd) { lastDir = hd; run.push(i + 1); continue; }
       if (run.length >= 2) runs.push(run);
       const nextDir = (() => { for (let j = i + 1; j + 1 < n; j++) { const h = _hdir(pts[j], pts[j + 1]); if (h) return h; } return null; })();
+      if (g.cur) g.cur.s = i;
       _emitShaft(g, _buildShaft(g, pts[i], pts[i + 1], lr[i], lr[i + 1], lastDir || nextDir || { x: 0, y: 1 }, true), convertFn, true);
       run = [i + 1];
     }
@@ -5329,11 +5519,12 @@ function _buildSmooth(g, pts, lr, convertFn, perp) {
       const K = Math.min(PASSAGE_MAX_RINGS, Math.max(2, Math.ceil(len / PASSAGE_RING_SPACING)));
       for (let s = 0; s < K; s++) {
         const t = s / K;
-        S.push({ c: s === 0 ? p1 : _crPoint(p0, p1, p2, p3, t), w: _lerpLrud(lr[ids[k]], lr[ids[k + 1]], t) });
+        S.push({ c: s === 0 ? p1 : _crPoint(p0, p1, p2, p3, t), w: _lerpLrud(lr[ids[k]], lr[ids[k + 1]], t), si: ids[k], t });
       }
     }
     if (!S.length) continue;
-    S.push({ c: P(ids.length - 1), w: lr[ids[ids.length - 1]] });
+    S.push({ c: P(ids.length - 1), w: lr[ids[ids.length - 1]], si: S[S.length - 1].si, t: 1 });
+    const along = smp => { if (g.cur) { g.cur.s = smp.si; g.cur.t = smp.t; } };
 
     // Frame at each sample from the tangent through its neighbours.
     let prevD = null;
@@ -5347,13 +5538,16 @@ function _buildSmooth(g, pts, lr, convertFn, perp) {
 
     const rings = [];
     for (const s of S) {
+      along(s);
       const r = _smoothRing(g, convertFn, s.c, s.fr, s.w, 1, 0);
       if (!r) return;
       rings.push(r);
     }
     for (let j = 0; j + 1 < rings.length; j++) _stitchRings(g, rings[j], rings[j + 1]);
     const first = S[0], last = S[S.length - 1];
+    along(first);
     _roundCap(g, convertFn, first.c, first.fr, first.w, rings[0], false);
+    along(last);
     _roundCap(g, convertFn, last.c, last.fr, last.w, rings[rings.length - 1], true);
   }
 }
@@ -5378,6 +5572,12 @@ function _buildCavePassages(imp, convertFn) {
   const mode = dopt.passageMode || 'none';
   if (mode === 'none') return;
   const alpha = dopt.passageOpacity ?? 0.55;
+  // Colour by elevation or depth (null in survey colours), from each vertex's
+  // world position.
+  const colourRgb = _caveColourRgb(imp, convertFn);
+  // Difficulty: each shot's measured width/height at both ends and its
+  // steepness; wall vertices point into these (see _pushVert).
+  const hard = _caveColourMode === 'hard' ? { WA: [], HA: [], WB: [], HB: [], st: [] } : null;
   const groups = new Map();
   for (const seg of imp.parsed.segments) {
     if (dopt.hiddenSurveys && dopt.hiddenSurveys[seg.survey]) continue;
@@ -5391,6 +5591,17 @@ function _buildCavePassages(imp, convertFn) {
     const lr = _segmentLruds(pts);
     const hex = dopt.surveyColors[seg.survey] || dopt.surveyColors[''] || '#00e5ff';
     const g = _passageGroup(groups, hex);
+    if (hard) {
+      if (!g.sh) { g.sh = []; g.tt = []; g.cur = { s: -1, t: 0 }; }
+      g.base = hard.st.length; g.cur.s = -1;
+      const num = x => (x == null ? NaN : x);
+      for (let i = 0; i + 1 < pts.length; i++) {
+        const A = pts[i], B = pts[i + 1], a = lrudWH(A.lrud), b = lrudWH(B.lrud);
+        hard.WA.push(num(a && a.W)); hard.HA.push(num(a && a.H));
+        hard.WB.push(num(b && b.W)); hard.HB.push(num(b && b.H));
+        hard.st.push(steepScore(Math.hypot(B.e - A.e, B.n - A.n), B.v - A.v));
+      }
+    }
     const perp = dopt.passageUpAxis === 'shot';
     if (mode === 'smooth') _buildSmooth(g, pts, lr, convertFn, perp);
     else _buildBlocky(g, pts, lr, convertFn, perp);
@@ -5415,6 +5626,23 @@ function _buildCavePassages(imp, convertFn) {
       boundingSphere: Cesium.BoundingSphere.fromVertices(g.pos),
     });
     Cesium.GeometryPipeline.computeNormal(geometry);
+    if (colourRgb || hard) {
+      // A colour per vertex: with no per-instance colour, PerInstanceColorAppearance
+      // reads the geometry's own 'color' attribute.
+      const P = g.pos, nv = P.length / 3, rgba = new Uint8Array(nv * 4), a8 = Math.round(alpha * 255);
+      for (let k = 0; k < nv; k++) {
+        const si = hard ? g.sh[k] : 0;
+        const c = !hard ? colourRgb(P[3 * k], P[3 * k + 1], P[3 * k + 2])
+          : si < 0 ? HARD_UNKNOWN
+          : wallHardRgb(hard.WA[si], hard.HA[si], hard.WB[si], hard.HB[si], hard.st[si], g.tt[k]);
+        rgba[4 * k] = c[0] * 255; rgba[4 * k + 1] = c[1] * 255; rgba[4 * k + 2] = c[2] * 255; rgba[4 * k + 3] = a8;
+      }
+      geometry.attributes.color = new Cesium.GeometryAttribute({
+        componentDatatype: Cesium.ComponentDatatype.UNSIGNED_BYTE, componentsPerAttribute: 4, normalize: true, values: rgba,
+      });
+      instances.push(new Cesium.GeometryInstance({ geometry }));
+      continue;
+    }
     instances.push(new Cesium.GeometryInstance({
       geometry,
       attributes: {
@@ -5462,11 +5690,36 @@ function _latLonToUtm(lat, lon, zone, isNorth = true) {
   return { e, n };
 }
 
+// Survey heights → the globe. Survey files, like LAS, hold heights above sea
+// level; Cesium wants heights above the ellipsoid. Point clouds get a vertical
+// shift for that (applyPcMatrix: EGM96 geoid, USGS −32 m, or the default
+// −32×0.766 m), and a UTM cave gets the same one, so it lines up with the
+// LiDAR and the terrain the LiDAR was matched to. Per cave, "as in file"
+// (georef.heights = 'file') turns it off.
+function _pcDatumDz(lat, lon) {
+  if (viewModel.egm96) return meanSeaLevel(lat, lon);
+  if (viewModel.usgsRef) return -32;
+  return -32 * 0.766;
+}
+window._pcDatumDz = _pcDatumDz;          // the export's terrain shift (index.html)
+
 function _caveUtmConvertFn(imp) {
   const g = imp.georef || {};
   const zone = g.zone ?? imp.parsed.utmZone;
   if (!zone) return null;
   const isNorth = g.south !== undefined ? !g.south : !imp.parsed.utmSouth;
+
+  // Vertical shift (see _pcDatumDz), worked out once at the cave's middle.
+  // It is added to v before anything else, so control points still pin their
+  // stations exactly where they were put.
+  let dz = 0;
+  if (g.heights !== 'file') {
+    const st = imp.parsed.stations;
+    let e = 0, n = 0, k = 0;
+    for (const s of st) if (Number.isFinite(s.e) && Number.isFinite(s.n)) { e += s.e; n += s.n; k++; }
+    if (k) { const ll = utmToLatLon(e / k, n / k, zone, isNorth); dz = _pcDatumDz(ll.lat, ll.lon); }
+  }
+  imp._heightDz = dz;          // drawn height − file height (elevation colours undo it)
 
   // Rectify control points: each pins a station to a picked position. They
   // warp the cave in its own UTM metres with the same method as anchored
@@ -5481,16 +5734,17 @@ function _caveUtmConvertFn(imp) {
     const used = cps.map(cp => ({ cp, st: byName.get(cp.station) })).filter(x => x.st);
     if (used.length) {
       o = { e: 0, n: 0, v: 0 };
-      for (const { st } of used) { o.e += st.e; o.n += st.n; o.v += st.v; }
+      for (const { st } of used) { o.e += st.e; o.n += st.n; o.v += st.v + dz; }
       o.e /= used.length; o.n /= used.length; o.v /= used.length;
       for (const { cp, st } of used) {
         const u = _latLonToUtm(cp.lat, cp.lon, zone, isNorth);
-        pairs.push({ src: { e: st.e - o.e, n: st.n - o.n, v: st.v - o.v },
+        pairs.push({ src: { e: st.e - o.e, n: st.n - o.n, v: st.v + dz - o.v },
                      dst: { e: u.e - o.e, n: u.n - o.n, v: cp.elev - o.v } });
       }
     }
   }
   return (n, e, v) => {
+    v += dz;
     if (pairs.length) {
       const w = _computeWarpedOffset(e - o.e, n - o.n, v - o.v, pairs);
       e = o.e + w.e; n = o.n + w.n; v = o.v + w.v;
@@ -5501,7 +5755,6 @@ function _caveUtmConvertFn(imp) {
 }
 
 // ── Big-cave limits and leads ───────────────────────────────────────────────
-const CAVE_PER_SHOT_LIMIT     = 6000;   // above this many shots: one polyline per segment
 const CAVE_STATION_NEAR_LIMIT = 3000;   // above this many stations: dots only near the camera
 const CAVE_STATION_NEAR_M     = 1500;   // ... within this distance (m)
 const CAVE_LEAD_NEAR_M        = 3000;   // lead markers within this distance (m)
@@ -5594,7 +5847,7 @@ function _addCaveAreaLabels(imp, convertFn) {
     const pos = convertFn(lb.n, lb.e, lb.v);
     if (!pos) continue;
     const e = cesiumViewer.entities.add({
-      name: lb.text, position: pos, show: imp.visible !== false,
+      name: lb.text, position: pos, show: _areaLabelsShown(imp),
       label: { text: lb.text, font: '600 15px sans-serif',
         fillColor: Cesium.Color.fromCssColorString(AREA_LABEL_COLOR),
         outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
@@ -5664,7 +5917,10 @@ function _labelsPanelEl() {
       <div style="font-weight:600;font-size:13px;">🏷 Area Labels</div>
       <button onclick="window._labelsClose()" style="background:none;border:none;color:#888;cursor:pointer;font-size:14px;padding:0 2px;">✕</button>
     </div>
-    <div id="labels-cave-name" style="font-size:11px;opacity:0.5;margin-bottom:8px;"></div>
+    <div id="labels-cave-name" style="font-size:11px;opacity:0.5;margin-bottom:6px;"></div>
+    <label style="display:flex;align-items:center;gap:6px;font-size:11px;margin-bottom:8px;cursor:pointer;" title="The switch in the cave list hides every cave's area names">
+      <input type="checkbox" id="labels-show-cave" onchange="window._labelsShowCave(this.checked)" style="margin:0;"> Show this cave's area names
+    </label>
     <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:8px;">Fly the camera to the spot, type a name and press Add: the label goes where the camera is.</div>
     <div style="display:flex;gap:6px;margin-bottom:6px;">
       <input id="labels-new-text" type="text" maxlength="60" placeholder="Area name"
@@ -5722,6 +5978,7 @@ window._openLabelsPanel = function(i) {
   const el = _labelsPanelEl();
   if (!host || !el) return;
   document.getElementById('labels-cave-name').textContent = imp.name;
+  { const chk = document.getElementById('labels-show-cave'); if (chk) chk.checked = imp.displayOptions.showAreaLabels !== false; }
   _labelsMsg('');
   _labelsRenderList();
   for (const id of ['cave-inline-style', 'cave-inline-rectify']) {
@@ -5731,6 +5988,14 @@ window._openLabelsPanel = function(i) {
   el.style.display = 'block';
   host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   const inp = document.getElementById('labels-new-text'); if (inp) inp.focus();
+};
+
+window._labelsShowCave = function(on) {
+  const imp = _caveImports[_labelsIdx];
+  if (!imp) return;
+  imp.displayOptions.showAreaLabels = !!on;
+  _setCaveLayersVisible(imp);
+  _displayUpdateRecent(imp);
 };
 
 window._labelsClose = function() {
@@ -5802,15 +6067,505 @@ window._setCaveLeadsVisible = function(on) {
   }
 };
 
-window._rerenderCave = function(i) {
-  const imp = _caveImports[i];
-  if (!imp || !imp.georef) return;
-  // Remove old entities
+// ── Cave layers: lines, station dots, colour by ──────────────────────────────
+// Lines and dots are primitives (cave_layers.js), not entities; leads and
+// area labels stay entities (few of them). imp.cesiumIds holds only those.
+function _removeCaveStations(imp) {
+  const L = imp._stationLayer;
+  if (L) { removePrimitive(cesiumViewer.scene, L.points); removePrimitive(cesiumViewer.scene, L.labels); }
+  imp._stationLayer = null;
+}
+function _removeCaveLayers(imp) {
   for (const id of imp.cesiumIds) {
     const e = cesiumViewer.entities.getById(id);
     if (e) cesiumViewer.entities.remove(e);
   }
   imp.cesiumIds = [];
+  removePrimitive(cesiumViewer.scene, imp._linePrim);
+  imp._linePrim = null;
+  _removeCaveStations(imp);
+  _removeCavePassages(imp);
+}
+function _isAreaLabelEntity(e) {
+  return !!(e && e.properties && e.properties.isCaveAreaLabel && e.properties.isCaveAreaLabel.getValue());
+}
+// Area names: the cave visible, the global switch on, and the cave's own switch on.
+let _caveAreaLabelsVisible = (() => { try { return localStorage.getItem('flex.caveAreaLabels') !== '0'; } catch (_) { return true; } })();
+function _areaLabelsShown(imp) {
+  return imp.visible !== false && _caveAreaLabelsVisible && !(imp.displayOptions && imp.displayOptions.showAreaLabels === false);
+}
+function _setCaveLayersVisible(imp) {
+  const vis = imp.visible !== false;
+  for (const id of imp.cesiumIds) {
+    const e = cesiumViewer.entities.getById(id);
+    if (!e) continue;
+    e.show = _isLeadEntity(e) ? vis && _caveLeadsVisible : _isAreaLabelEntity(e) ? _areaLabelsShown(imp) : vis;
+  }
+  if (imp._linePrim) imp._linePrim.show = vis;
+  if (imp._stationLayer) {
+    imp._stationLayer.points.show = vis;
+    if (imp._stationLayer.labels) imp._stationLayer.labels.show = vis;
+  }
+  _setCavePassageVisible(imp, vis);
+}
+window._setCaveAreaLabelsVisible = function(on) {
+  _caveAreaLabelsVisible = !!on;
+  try { localStorage.setItem('flex.caveAreaLabels', on ? '1' : '0'); } catch (_) {}
+  _caveImports.forEach(_setCaveLayersVisible);
+};
+
+function _stationDescHtml(imp, s) {
+  return [
+    `<b>${s.name}</b>`,
+    s.isSurface ? `<span style='color:#ffd93d'>&#9650; Surface shot</span>` : null,
+    s.dist != null ? `Distance from entrance: ${s.dist.toFixed(1)} m` : null,
+    s.comment ? `<i>${s.comment}</i>` : null,
+    _stationHeightHtml(imp, s),
+    (() => { const lr = _stationEffectiveLrud(imp, s); return lr ? `Passage L/R/U/D: ${[lr.l, lr.r, lr.u, lr.d].map(v=>v.toFixed(1)).join(' / ')} m${_lrudAtTo(imp) ? ' (LRUD at To)' : ''}` : null; })(),
+    s.survey ? `Survey: ${s.survey}${s.surveyDesc ? ' — ' + s.surveyDesc : ''}` : null,
+  ].filter(Boolean).join('<br>');
+}
+// Elevation (above sea level, as in the file) and, once the terrain above the
+// cave has been read, depth below ground.
+function _stationHeightHtml(imp, s) {
+  const c = typeof imp._convertFn === 'function' ? imp._convertFn(s.n, s.e, s.v) : null;
+  if (!c) return null;
+  const fmt = m => `${Math.round(m).toLocaleString()} m · ${Math.round(m / 0.3048).toLocaleString()} ft`;
+  const F = _caveFrame(imp), el = F ? _caveElevAt(imp, F, c.x, c.y, c.z) : NaN;
+  const G = _caveGroundValid(imp) && !imp._ground.none ? imp._ground : null;
+  const d = G ? depthBelowGround(G, c.x, c.y, c.z) : NaN;
+  return [Number.isFinite(el) ? `Elevation: ${fmt(el)}` : null,
+          Number.isFinite(d) ? `Depth below ground: ${fmt(d)}` : null].filter(Boolean).join('<br>') || null;
+}
+function _shotDescHtml(imp, A, B, segLabel, surface) {
+  const len = Math.hypot(B.e - A.e, B.n - A.n, B.v - A.v);
+  return [
+    (A.name || B.name) ? `<b>${A.name || '?'} → ${B.name || '?'}</b>` : null,
+    `<b>Survey: ${segLabel}</b>`,
+    surface ? `<span style='color:#ffd93d'>▲ Surface shot</span>` : null,
+    `Length: ${len.toFixed(2)} m`,
+    B.dist != null ? `Distance from entrance: ${B.dist.toFixed(1)} m` : null,
+    (() => { const lr = _effectiveLrud(imp, B, A); return lr ? `Passage L/R/U/D: ${[lr.l, lr.r, lr.u, lr.d].map(v => v.toFixed(1)).join(' / ')} m${_lrudAtTo(imp) ? ' (LRUD at To)' : ''}` : null; })(),
+    B.comment ? `<i>${B.comment}</i>` : null,
+    `File: ${imp.name}`,
+  ].filter(Boolean).join('<br>');
+}
+// Pick id for one chain of shots: a click opens the shot nearest the click.
+function _caveShotPickId(imp, seg, pts, positions, segLabel, surface) {
+  return lazyPick(screenPos => {
+    let k = 0;
+    if (screenPos) {
+      const toWin = Cesium.SceneTransforms.worldToWindowCoordinates || Cesium.SceneTransforms.wgs84ToWindowCoordinates;
+      const scr = positions.map(p => toWin(cesiumViewer.scene, p));
+      let best = Infinity;
+      for (let j = 0; j + 1 < scr.length; j++) {
+        const a = scr[j], b = scr[j + 1];
+        if (!a || !b) continue;
+        const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
+        let t = L2 ? ((screenPos.x - a.x) * dx + (screenPos.y - a.y) * dy) / L2 : 0;
+        t = Math.max(0, Math.min(1, t));
+        const d = Math.hypot(a.x + t * dx - screenPos.x, a.y + t * dy - screenPos.y);
+        if (d < best) { best = d; k = j; }
+      }
+    }
+    const A = pts[k], B = pts[k + 1];
+    return {
+      name: (A.name && B.name) ? `${A.name} → ${B.name}` : segLabel,
+      position: Cesium.Cartesian3.midpoint(positions[k], positions[k + 1], new Cesium.Cartesian3()),
+      description: _shotDescHtml(imp, A, B, segLabel, surface),
+      properties: { isCaveSurvey: true, surveyName: imp.name, surveyCode: seg.survey || '', isSurface: !!surface },
+    };
+  }, true);
+}
+
+// Station dots (and names, only while shown) for one cave, rebuilt on their
+// own when only they change. force: draw even with stations switched off
+// (rectify's "click a station" needs something to click).
+function _buildCaveStations(imp, force = false) {
+  _removeCaveStations(imp);
+  const convertFn = imp._convertFn;
+  const dopt = imp.displayOptions || _defaultDisplayOptions(imp.parsed);
+  if (typeof convertFn !== 'function' || (!force && dopt.showStations === false)) return;
+  const colourAt = _caveColourAt(imp, convertFn), hard = _caveColourMode === 'hard';
+  const base = Cesium.Color.fromCssColorString(dopt.stationColor || '#ffeb3b');
+  const hardColour = st => { const c = whRgb(lrudWH(_stationEffectiveLrud(imp, st))); return new Cesium.Color(c[0], c[1], c[2], 1); };
+  const withShots = new Set(imp.parsed.segments.map(sg => sg.survey));
+  const ddc = imp.parsed.stations.length > CAVE_STATION_NEAR_LIMIT
+    ? new Cesium.DistanceDisplayCondition(0, CAVE_STATION_NEAR_M) : undefined;
+  const seen = new Set(), dots = [];
+  for (const s of imp.parsed.stations) {
+    if (dopt.hiddenSurveys && dopt.hiddenSurveys[s.survey]) continue;
+    const surface = s.isSurface || !!(dopt.surfaceSurveys && dopt.surfaceSurveys[s.survey])
+      || !withShots.has(s.survey);               // survey has no shots → surface landmark
+    if (surface && !dopt.showSurface) continue;
+    const key = s.name + '|' + Math.round(s.n * 100) + '|' + Math.round(s.e * 100) + '|' + Math.round(s.v * 100);
+    if (seen.has(key)) continue;                 // a station listed again where a new chain starts
+    seen.add(key);
+    const pos = convertFn(s.n, s.e, s.v);
+    if (!pos) continue;
+    dots.push({
+      position: pos, color: hard ? hardColour(s) : colourAt ? colourAt(pos, 1) : base, label: s.name || '',
+      id: lazyPick(() => ({ name: s.name || imp.name, position: pos, description: _stationDescHtml(imp, s),
+                            properties: { isCaveSurvey: true, surveyName: imp.name, surveyCode: s.survey || '' } })),
+    });
+  }
+  imp._stationLayer = addStationLayer(cesiumViewer.scene, dots, {
+    pixelSize: dopt.stationSize || 5, labels: !!dopt.showLabels, ddc, show: imp.visible !== false,
+  });
+}
+
+// Colour by: 'survey' (each survey's colour), 'elev' (elevation), 'depth'
+// (depth below ground) or 'hard' (passage difficulty from the LRUDs, scored as
+// in the portable viewer: cave_layers.js). Every loaded cave at once; elevation
+// and depth over one shared range (2nd–98th percentile of all their stations)
+// so caves compare directly. Lines, dots and walls, each vertex from its own
+// drawn position, so it is right however the cave was placed.
+const CAVE_COLOUR_MODES = ['survey', 'elev', 'depth', 'hard'];
+let _caveColourMode = (() => {
+  try { const m = localStorage.getItem('flex.caveColour'); return CAVE_COLOUR_MODES.includes(m) ? m : 'survey'; }
+  catch (_) { return 'survey'; }
+})();
+let _caveColourRange = null;            // { lo, hi } metres: elevation, or depth below ground
+
+// Each drawn station once, with its world position, for one placement of the
+// cave (cached until the cave is re-placed).
+function _caveStationPts(imp) {
+  const conv = imp._convertFn;
+  if (typeof conv !== 'function') return [];
+  if (imp._stPtsFor === conv) return imp._stPts;
+  const dopt = imp.displayOptions || {};
+  const withShots = new Set(imp.parsed.segments.map(sg => sg.survey));
+  const pts = [], seen = new Set();
+  for (const s of imp.parsed.stations) {
+    const key = s.name + '|' + Math.round(s.n * 100) + '|' + Math.round(s.e * 100) + '|' + Math.round(s.v * 100);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const c = conv(s.n, s.e, s.v);
+    if (!c) continue;
+    const surface = s.isSurface || !!(dopt.surfaceSurveys && dopt.surfaceSurveys[s.survey]) || !withShots.has(s.survey);
+    pts.push({ c, surface });
+  }
+  imp._stPts = pts; imp._stPtsFor = conv;
+  return pts;
+}
+
+// A level frame at the cave's middle (cave_ground.js), for elevations.
+function _caveFrame(imp) {
+  if (imp._frameFor === imp._convertFn && imp._frame) return imp._frame;
+  const pts = _caveStationPts(imp);
+  if (!pts.length) return null;
+  const o = new Cesium.Cartesian3();
+  for (const p of pts) Cesium.Cartesian3.add(o, p.c, o);
+  Cesium.Cartesian3.divideByScalar(o, pts.length, o);
+  imp._frame = levelFrame(o); imp._frameFor = imp._convertFn;
+  return imp._frame;
+}
+
+// Elevation of a drawn point: its height on the globe less the cave's datum
+// shift (_heightDz), i.e. back to heights above sea level as in the file.
+function _caveElevAt(imp, F, x, y, z) { return F.at(x, y, z).h - (imp._heightDz || 0); }
+
+// ── Ground grids (depth below ground) ──
+// Sampled from the globe's terrain over each cave's footprint (cave_ground.js),
+// once per placement that leaves the sampled area. Kept on the cave as
+// imp._ground: a grid, or { none: true } when there is no terrain to read.
+const GROUND_STEP_M = 20;               // footprint points along shots this far apart
+function _caveGroundValid(imp) {
+  const G = imp._ground;
+  return !!G && G.tp === cesiumViewer.terrainProvider;
+}
+// Share of the cave's stations inside the sampled area (cached per placement).
+function _caveGroundCover(imp) {
+  const G = imp._ground;
+  if (!G || G.none) return 0;
+  if (G._coverFor === imp._convertFn) return G._cover;
+  const pts = _caveStationPts(imp);
+  let inside = 0;
+  for (const p of pts) { const q = G.frame.at(p.c.x, p.c.y, p.c.z); if (gridCovers(G, q.e, q.n)) inside++; }
+  G._cover = pts.length ? inside / pts.length : 0;
+  G._coverFor = imp._convertFn;
+  return G._cover;
+}
+// The grid to colour with now (possibly one sampled for an older placement),
+// asking for a new one when there is none or the cave has moved off it.
+function _caveGround(imp) {
+  const valid = _caveGroundValid(imp);
+  if (valid && imp._ground.none) return null;
+  if (!valid || _caveGroundCover(imp) < 0.98) _requestCaveGround(imp);
+  return valid ? imp._ground : null;
+}
+function _requestCaveGround(imp) {
+  if (imp._groundPending || imp._groundTriedFor === imp._convertFn) return;
+  imp._groundTriedFor = imp._convertFn;
+  const tp = cesiumViewer.terrainProvider;
+  imp._groundPending = _sampleCaveGround(imp, tp).then(G => {
+    imp._ground = G || { none: true, failed: true, tp };
+    imp._groundTerrain = null;                 // any LiDAR refinement was for the old placement
+  }).catch(err => {
+    console.warn('[cave] terrain sampling failed', err);
+    imp._ground = { none: true, failed: true, tp };
+  }).finally(() => {
+    imp._groundPending = null;
+    if (_caveImports.includes(imp) && _caveColourMode === 'depth') _caveColourChanged(imp);
+  });
+  _renderCaveColourUI();
+}
+async function _sampleCaveGround(imp, tp) {
+  if (!tp || tp instanceof Cesium.EllipsoidTerrainProvider) return { none: true, tp };
+  const plan = _caveGroundPlan(imp);
+  if (!plan) return null;
+  const { G, F } = plan;
+  const t0 = performance.now();
+  const done = await sampleGroundGrid(G, F, tp);
+  if (!done) return null;
+  done.tp = tp;
+  console.log(`[cave] Ground for "${imp.name}": ${G.nodes} terrain samples, ${G.cell.toFixed(1)} m cells, ${Math.round(performance.now() - t0)} ms`);
+  return done;
+}
+// The grid layout for a cave's footprint (stations and shots, in a level frame
+// at its middle); heights not read yet.
+function _caveGroundPlan(imp) {
+  const conv = imp._convertFn, pts = _caveStationPts(imp);
+  if (!pts.length || typeof conv !== 'function') return null;
+  const o = new Cesium.Cartesian3();
+  for (const p of pts) Cesium.Cartesian3.add(o, p.c, o);
+  Cesium.Cartesian3.divideByScalar(o, pts.length, o);
+  const F = levelFrame(o), foot = [];
+  for (const p of pts) { const q = F.at(p.c.x, p.c.y, p.c.z); foot.push(q.e, q.n); }
+  for (const seg of imp.parsed.segments) {            // shots, so long ones are covered between stations
+    const line = [];
+    for (const p of seg.points) {
+      if (p.excluded) continue;
+      const c = conv(p.n, p.e, p.v);
+      if (!c) continue;
+      const q = F.at(c.x, c.y, c.z);
+      line.push({ e: q.e, n: q.n });
+    }
+    pushFootLine(foot, line, GROUND_STEP_M);
+  }
+  const G = planGroundGrid(foot);
+  return G ? { G, F } : null;
+}
+
+// ── Depth from loaded LiDAR (on demand) ──
+// The ground-classified returns of the point clouds in memory replace the
+// terrain on each cave's ground grid where they reach (cave_ground.js), the
+// terrain stays elsewhere. Heights as the clouds are drawn (pc.matrix, i.e.
+// the _pcDatumDz shift), the frame the caves are drawn in. Only what Potree
+// has loaded counts, so it is best done with the clouds streamed in over the
+// caves. Kept until the cave moves off its grid or "Terrain only".
+let _caveLidarBusy = false, _caveLidarNote = '';
+function _loadedClouds() {
+  return ((typeof potreeViewer !== 'undefined' && potreeViewer?.scene?.pointclouds) || []).filter(pc => pc.visible);
+}
+function _lidarClouds() {
+  const scaled = viewModel.egm96 || viewModel.usgsRef;     // applyPcMatrix scales z in these modes
+  return _loadedClouds().map(pc => {
+    let conv;
+    try { conv = proj4(pc.projection || 'EPSG:3857', 'WGS84'); } catch (_) { return null; }
+    const nodes = [];
+    for (const node of pc.visibleNodes || []) {
+      if (!node.sceneNode) continue;
+      const geom = node.geometryNode?.geometry || node.geometry;
+      const pos = geom?.attributes?.position?.array, cls = geom?.attributes?.classification?.array;
+      if (pos && cls) nodes.push({ pos, cls, m: node.sceneNode.matrixWorld.elements.slice() });
+    }
+    return nodes.length ? { nodes, zScale: scaled ? (pc._pcZscale || 1) : 1,
+      toLonLat: (x, y) => conv.forward([x, y]), toScene: (lon, lat) => conv.inverse([lon, lat]) } : null;
+  }).filter(Boolean);
+}
+window._caveDepthFromLidar = async function(on = true) {
+  if (!on) {                                   // back to the terrain only
+    for (const imp of _caveImports) {
+      if (imp._ground && imp._ground.source === 'lidar') {
+        imp._ground = imp._groundTerrain || null;
+        imp._groundTerrain = null;
+        if (!imp._ground) imp._groundTriedFor = null;
+        _caveColourChanged(imp);
+      }
+    }
+    _caveLidarNote = '';
+    _renderCaveColourUI();
+    return;
+  }
+  if (_caveLidarBusy) return;
+  const clouds = _lidarClouds();             // collected now: Potree may unload nodes while we work
+  if (!clouds.length) { _caveLidarNote = 'No classified point cloud loaded.'; _renderCaveColourUI(); return; }
+  _caveLidarBusy = true; _caveLidarNote = '';
+  _renderCaveColourUI();
+  let stations = 0, underLidar = 0, points = 0;
+  try {
+    await Promise.all(_caveImports.map(imp => imp._groundPending).filter(Boolean));
+    for (const imp of _caveImports) {
+      // Start from the terrain grid (again, if this cave was refined before).
+      let base = _caveGroundValid(imp) && !imp._ground.none ? imp._ground : null;
+      if (base && base.source === 'lidar') base = imp._groundTerrain;
+      let G = base;
+      if (!G) {
+        const plan = _caveGroundPlan(imp);
+        if (!plan) continue;
+        G = plan.G; G.frame = plan.F; G.tp = cesiumViewer.terrainProvider;
+      }
+      const bin = await binLidarGround(G, G.frame, clouds);
+      points += bin.points;
+      const { grid } = mergeLidarGround(G, bin.sum, bin.cnt);
+      for (const p of _caveStationPts(imp)) {
+        if (p.surface) continue;
+        const q = grid.frame.at(p.c.x, p.c.y, p.c.z);
+        stations++;
+        if (gridFromLidar(grid, q.e, q.n)) underLidar++;
+      }
+      if (!grid.lidarNodes || !_caveImports.includes(imp)) continue;
+      imp._groundTerrain = base || null;
+      imp._ground = grid;
+      _caveColourChanged(imp);
+    }
+    _caveLidarNote = points
+      ? `Ground from loaded LiDAR over ${underLidar.toLocaleString()} of ${stations.toLocaleString()} stations (${points.toLocaleString()} ground returns); the 3D terrain over the rest.`
+      : 'No ground returns (class 2) over the caves in the LiDAR loaded now: zoom the point cloud in over them and try again.';
+    console.log('[cave] LiDAR ground:', _caveLidarNote);
+  } finally {
+    _caveLidarBusy = false;
+    _renderCaveColourUI();
+  }
+};
+
+// Every loaded cave's stations in the current mode → the shared range.
+function _caveComputeColourRange() {
+  const vals = [];
+  for (const imp of _caveImports) {
+    if (typeof imp._convertFn !== 'function') continue;
+    if (_caveColourMode === 'elev') {
+      const F = _caveFrame(imp);
+      if (!F) continue;
+      for (const p of _caveStationPts(imp)) vals.push(_caveElevAt(imp, F, p.c.x, p.c.y, p.c.z));
+    } else if (_caveColourMode === 'depth') {
+      const G = _caveGround(imp);
+      if (!G) continue;
+      for (const p of _caveStationPts(imp)) if (!p.surface) vals.push(depthBelowGround(G, p.c.x, p.c.y, p.c.z));
+    }
+  }
+  const R = percentileRange(vals);
+  if (R && _caveColourMode === 'depth' && R.lo < 0) R.lo = Math.min(0, R.hi - 1);   // starts at the surface
+  return R;
+}
+
+// The colour of a drawn point for one cave: (x, y, z) → [r, g, b] (0..1), or
+// null in survey colours. Grey where it is unknown (no ground yet, off it).
+function _caveColourRgb(imp, convertFn) {
+  if (_caveColourMode === 'survey' || _caveColourMode === 'hard' || typeof convertFn !== 'function') return null;
+  if (!_caveColourRange) _caveColourRange = _caveComputeColourRange();
+  const R = _caveColourRange;
+  const grey = () => rampRgb(NaN);
+  if (!R) return grey;
+  const lo = R.lo, span = Math.max(1e-6, R.hi - R.lo);
+  if (_caveColourMode === 'elev') {
+    const F = _caveFrame(imp);
+    if (!F) return grey;
+    return (x, y, z) => rampRgb((_caveElevAt(imp, F, x, y, z) - lo) / span);
+  }
+  const G = _caveGround(imp);
+  if (!G) return grey;
+  return (x, y, z) => rampRgb(1 - (depthBelowGround(G, x, y, z) - lo) / span);   // deep = cool
+}
+// The same as a Cesium colour for a world position.
+function _caveColourAt(imp, convertFn) {
+  const f = _caveColourRgb(imp, convertFn);
+  return f && ((c, alpha) => { const [r, g, b] = f(c.x, c.y, c.z); return new Cesium.Color(r, g, b, alpha); });
+}
+
+function _renderCaveColourUI() {
+  document.querySelectorAll('#lp-cave-colour-modes button').forEach(b => {
+    const on = b.dataset.mode === _caveColourMode;
+    b.style.background = on ? 'rgba(0,229,255,0.22)' : 'rgba(255,255,255,0.04)';
+    b.style.color = on ? '#fff' : 'rgba(255,255,255,0.6)';
+  });
+  const lg = document.getElementById('lp-cave-colour-legend');
+  if (!lg) return;
+  if (_caveColourMode === 'survey' || !_caveImports.length) { lg.style.display = 'none'; return; }
+  if (_caveColourMode === 'hard') {
+    lg.innerHTML = hardLegendRows().map(([bg, label]) =>
+      `<div style="display:flex;align-items:center;gap:6px;font-size:9px;opacity:0.8;margin-top:2px;">
+         <span style="flex:0 0 34px;height:7px;border-radius:3px;background:${bg};"></span><span>${label}</span></div>`).join('')
+      + `<div style="font-size:9px;opacity:0.5;margin-top:3px;">Measured LRUDs only; walls ease between stations.</div>`;
+    lg.style.display = 'block';
+    return;
+  }
+  const R = _caveColourRange;
+  const fmt = m => `${Math.round(m).toLocaleString()} m · ${Math.round(m / 0.3048).toLocaleString()} ft`;
+  const note = t => `<div style="font-size:9px;opacity:0.6;margin-top:2px;">${t}</div>`;
+  let html = '';
+  if (_caveColourMode === 'elev') {
+    if (R) html = `<div style="height:7px;border-radius:3px;background:${rampCss()};"></div>
+      <div style="display:flex;justify-content:space-between;font-size:9px;opacity:0.65;margin-top:2px;">
+        <span>${fmt(R.lo)}</span><span>${fmt(R.hi)}</span></div>`;
+  } else {
+    const pending = _caveImports.some(imp => imp._groundPending);
+    const noTerrain = _caveImports.some(imp => imp._ground && imp._ground.none && imp._ground.tp === cesiumViewer.terrainProvider);
+    if (R) html = `<div style="height:7px;border-radius:3px;background:${rampCss(true)};"></div>
+      <div style="display:flex;justify-content:space-between;font-size:9px;opacity:0.65;margin-top:2px;">
+        <span>${R.lo <= 0.5 ? 'surface' : fmt(R.lo)}</span><span>${fmt(R.hi)} deep</span></div>`;
+    const lidar = _caveImports.some(imp => imp._ground && imp._ground.source === 'lidar');
+    const btn = (label, js, title) => `<button type="button" onclick="${js}" title="${title}" style="margin-top:4px;font-size:10px;padding:2px 7px;background:rgba(80,220,255,0.10);border:1px solid rgba(80,220,255,0.35);color:#8ee8ff;border-radius:3px;cursor:pointer;">${label}</button>`;
+    if (pending) html += note('Reading the terrain above the caves…');
+    else if (_caveLidarBusy) html += note('Reading the ground from the loaded LiDAR…');
+    else if (lidar) html += note(_caveLidarNote || 'Ground from loaded LiDAR where it reaches, 3D terrain elsewhere.')
+      + btn('Terrain only', 'window._caveDepthFromLidar(false)', 'Measure depth from the 3D terrain alone again');
+    else {
+      if (noTerrain) html += note(cesiumViewer.terrainProvider instanceof Cesium.EllipsoidTerrainProvider
+        ? 'No 3D terrain loaded: depth below ground needs it, or the LiDAR ground (grey caves).'
+        : 'Could not read the terrain for some caves (grey).');
+      else if (R) html += note('Below the 3D terrain (Cesium), straight above each point.');
+      if (_caveLidarNote) html += note(_caveLidarNote);
+      if (_loadedClouds().length) html += btn('⛰ Use the loaded LiDAR ground', 'window._caveDepthFromLidar(true)',
+        'Measure depth from the ground returns (class 2) of the point clouds loaded now, where they cover the caves');
+    }
+  }
+  lg.innerHTML = html;
+  lg.style.display = html ? 'block' : 'none';
+}
+window._setCaveColourMode = function(mode) {
+  _caveColourMode = CAVE_COLOUR_MODES.includes(mode) ? mode : 'survey';
+  // Depth again: try caves whose terrain read failed once more.
+  if (_caveColourMode === 'depth') _caveImports.forEach(imp => {
+    if (imp._ground && imp._ground.failed) { imp._ground = null; imp._groundTriedFor = null; }
+  });
+  try { localStorage.setItem('flex.caveColour', _caveColourMode); } catch (_) {}
+  _caveColourRange = _caveColourMode === 'survey' ? null : _caveComputeColourRange();
+  _caveImports.forEach((_, i) => window._rerenderCave(i));
+  _renderCaveColourUI();
+};
+// Starting state of the cave-list controls (index.html).
+_renderCaveColourUI();
+{ const chk = document.getElementById('lp-cave-areas-toggle'); if (chk) chk.checked = _caveAreaLabelsVisible; }
+
+// Caves added, removed or re-placed, or a cave's ground arrived (imp): refit
+// the shared range; redraw every cave if it moved, else just `imp`.
+let _caveColourTimer = null, _caveColourDirty = new Set();
+function _caveColourChanged(imp = null) {
+  if (imp) _caveColourDirty.add(imp);
+  clearTimeout(_caveColourTimer);
+  _caveColourTimer = setTimeout(() => {
+    const dirty = _caveColourDirty;
+    _caveColourDirty = new Set();
+    if (_caveColourMode !== 'survey') {
+      const R = _caveComputeColourRange(), old = _caveColourRange;
+      const moved = !R !== !old || (R && (Math.abs(R.lo - old.lo) > 0.5 || Math.abs(R.hi - old.hi) > 0.5));
+      if (moved) {
+        _caveColourRange = R;
+        _caveImports.forEach((_, i) => window._rerenderCave(i));
+      } else {
+        dirty.forEach(d => { const i = _caveImports.indexOf(d); if (i >= 0) window._rerenderCave(i); });
+      }
+    }
+    _renderCaveColourUI();
+  }, 200);
+}
+
+window._rerenderCave = function(i) {
+  const imp = _caveImports[i];
+  if (!imp || !imp.georef) return;
+  _removeCaveLayers(imp);
   // Re-render with updated georef
   const g = imp.georef;
   let convertFn = null;
@@ -5819,6 +6574,9 @@ window._rerenderCave = function(i) {
       ? imp.parsed.segments[0]?.points[0]
       : imp.parsed.stations.find(s => s.name === g.station) || imp.parsed.segments[0]?.points[0];
     if (!anchorLocal) return;
+    // The anchor was picked on the globe (heights above the ellipsoid); the
+    // point clouds' datum shift there turns them back into elevations.
+    imp._heightDz = _pcDatumDz(g.lat, g.lon);
     const anchorCart = Cesium.Cartesian3.fromDegrees(g.lon, g.lat, g.elev);
     let enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(anchorCart);
     const decl = g.declination;
@@ -5860,14 +6618,12 @@ window._rerenderCave = function(i) {
   // names) from the parsed survey instead of reading them back off entities.
   imp._convertFn = convertFn;
   if (convertFn) {
-    // Build entities inline — uses displayOptions for per-survey colors, surface, labels
+    // Lines: one primitive per cave, a polyline per chain of shots with a
+    // colour per vertex (survey colour, or elevation). Each chain's pick id
+    // turns into the clicked shot's info (see cave_layers.js).
     const dopt = imp.displayOptions || _defaultDisplayOptions(imp.parsed);
-    const stationCesiumColor = Cesium.Color.fromCssColorString(dopt.stationColor || '#ffeb3b');
-    // Big caves (tens of thousands of shots) get one polyline per segment
-    // instead of one entity per shot: clicking reports the survey rather than
-    // the shot, but the cave loads in seconds instead of minutes.
-    const _nShots = imp.parsed.segments.reduce((t, sg) => t + Math.max(0, sg.points.length - 1), 0);
-    const _bigCave = _nShots > CAVE_PER_SHOT_LIMIT;
+    const colourAt = _caveColourAt(imp, convertFn), hard = _caveColourMode === 'hard';
+    const chains = [], allPos = [];
     for (const seg of imp.parsed.segments) {
       if (dopt.hiddenSurveys && dopt.hiddenSurveys[seg.survey]) continue;
       const _segSurface = seg.isSurface || !!(dopt.surfaceSurveys && dopt.surfaceSurveys[seg.survey]);
@@ -5875,86 +6631,42 @@ window._rerenderCave = function(i) {
       const _activePts = seg.points.filter(p => !p.excluded);
       if (_activePts.length < 2) continue;
       const hexColor = dopt.surveyColors[seg.survey] || dopt.surveyColors[''] || '#00e5ff';
-      const segColor = Cesium.Color.fromCssColorString(hexColor).withAlpha(_segSurface ? 0.45 : 0.9);
+      const alpha = _segSurface ? 0.45 : 0.9;
+      const segColor = Cesium.Color.fromCssColorString(hexColor).withAlpha(alpha);
       const _segLabel = seg.survey ? (seg.survey + (seg.surveyDesc ? ' — ' + seg.surveyDesc : '')) : imp.name;
-      if (_bigCave) {
-        const _segPos = _activePts.map(p => convertFn(p.n, p.e, p.v)).filter(Boolean);
-        if (_segPos.length < 2) continue;
-        const e = cesiumViewer.entities.add({
-          name: _segLabel,
-          polyline: { positions: _segPos, width: _segSurface ? 1 : 1.5, arcType: Cesium.ArcType.NONE,
-            material: new Cesium.ColorMaterialProperty(segColor), clampToGround: false },
-          description: [`<b>Survey: ${_segLabel}</b>`,
-            `${_segPos.length - 1} shots, ${_activePts[0].name || '?'} → ${_activePts[_activePts.length - 1].name || '?'}`,
-            _segSurface ? `<span style='color:#ffd93d'>▲ Surface shot</span>` : null,
-            `File: ${imp.name}`].filter(Boolean).join('<br>'),
-          properties: { isCaveSurvey: true, surveyName: imp.name, surveyCode: seg.survey || '', isSurface: _segSurface || false },
+      let run = [], runPos = [];
+      const width = _segSurface ? 1 : 1.5;
+      const eff = hard ? new Map(seg.points.map((p, i) => [p, _effectiveLrud(imp, p, seg.points[i - 1])])) : null;
+      const flush = () => {
+        if (runPos.length >= 2 && hard) {
+          // Difficulty: a line per shot, so each end shows its station's size
+          // and the whole shot its own steepness.
+          for (let k = 0; k + 1 < run.length; k++) {
+            const A = run[k], B = run[k + 1], pos = [runPos[k], runPos[k + 1]];
+            const st = steepScore(Math.hypot(B.e - A.e, B.n - A.n), B.v - A.v);
+            chains.push({
+              positions: pos, width,
+              colors: [A, B].map(p => { const c = whRgb(lrudWH(eff.get(p)), st); return new Cesium.Color(c[0], c[1], c[2], alpha); }),
+              id: _caveShotPickId(imp, seg, [A, B], pos, _segLabel, _segSurface),
+            });
+          }
+        } else if (runPos.length >= 2) chains.push({
+          positions: runPos, width,
+          colors: colourAt ? runPos.map(c => colourAt(c, alpha)) : run.map(() => segColor),
+          id: _caveShotPickId(imp, seg, run, runPos, _segLabel, _segSurface),
         });
-        imp.cesiumIds.push(e.id);
-        continue;
+        run = []; runPos = [];
+      };
+      for (const p of _activePts) {
+        const c = convertFn(p.n, p.e, p.v);
+        if (!c) { flush(); continue; }
+        run.push(p); runPos.push(c); allPos.push(c);
       }
-      for (let _si = 0; _si < _activePts.length - 1; _si++) {
-        const _ptA = _activePts[_si], _ptB = _activePts[_si + 1];
-        const _posA = convertFn(_ptA.n, _ptA.e, _ptA.v), _posB = convertFn(_ptB.n, _ptB.e, _ptB.v);
-        if (!_posA || !_posB) continue;
-        const _dx = _ptB.e - _ptA.e, _dy = _ptB.n - _ptA.n, _dz = _ptB.v - _ptA.v;
-        const _shotLen = Math.sqrt(_dx*_dx + _dy*_dy + _dz*_dz);
-        const _fromName = _ptA.name || '';
-        const _toName = _ptB.name || '';
-        const _shotLabel = (_fromName && _toName) ? `${_fromName} → ${_toName}` : _segLabel;
-        const _shotDesc = [
-          (_fromName || _toName) ? `<b>${_fromName || '?'} → ${_toName || '?'}</b>` : null,
-          `<b>Survey: ${_segLabel}</b>`,
-          _segSurface ? `<span style='color:#ffd93d'>▲ Surface shot</span>` : null,
-          `Length: ${_shotLen.toFixed(2)} m`,
-          _ptB.dist != null ? `Distance from entrance: ${_ptB.dist.toFixed(1)} m` : null,
-          (() => { const lr = _effectiveLrud(imp, _ptB, _ptA); return lr ? `Passage L/R/U/D: ${[lr.l, lr.r, lr.u, lr.d].map(v => v.toFixed(1)).join(' / ')} m${_lrudAtTo(imp) ? ' (LRUD at To)' : ''}` : null; })(),
-          _ptB.comment ? `<i>${_ptB.comment}</i>` : null,
-          `File: ${imp.name}`,
-        ].filter(Boolean).join('<br>');
-        const e = cesiumViewer.entities.add({
-          name: _shotLabel,
-          polyline: { positions: [_posA, _posB], width: _segSurface ? 1 : 1.5, arcType: Cesium.ArcType.NONE,
-            material: new Cesium.ColorMaterialProperty(segColor), clampToGround: false },
-          description: _shotDesc,
-          properties: { isCaveSurvey: true, surveyName: imp.name, surveyCode: seg.survey || '', isSurface: _segSurface || false },
-        });
-        imp.cesiumIds.push(e.id);
-      }
+      flush();
     }
-    const _surveysWithShots = new Set(imp.parsed.segments.map(sg => sg.survey));
-    // Large caves: station dots and labels only near the camera.
-    const _stnDDC = imp.parsed.stations.length > CAVE_STATION_NEAR_LIMIT
-      ? new Cesium.DistanceDisplayCondition(0, CAVE_STATION_NEAR_M) : undefined;
-    if (dopt.showStations !== false) {
-      for (const s of imp.parsed.stations) {
-        if (dopt.hiddenSurveys && dopt.hiddenSurveys[s.survey]) continue;
-        const _stnSurface = s.isSurface
-          || !!(dopt.surfaceSurveys && dopt.surfaceSurveys[s.survey])
-          || !_surveysWithShots.has(s.survey);   // survey has no shots → surface landmark
-        if (_stnSurface && !dopt.showSurface) continue;
-        const pos = convertFn(s.n, s.e, s.v);
-        if (!pos) continue;
-        const desc = [
-          `<b>${s.name}</b>`,
-          s.isSurface ? `<span style='color:#ffd93d'>&#9650; Surface shot</span>` : null,
-          s.dist != null ? `Distance from entrance: ${s.dist.toFixed(1)} m` : null,
-          s.comment ? `<i>${s.comment}</i>` : null,
-          (() => { const lr = _stationEffectiveLrud(imp, s); return lr ? `Passage L/R/U/D: ${[lr.l, lr.r, lr.u, lr.d].map(v=>v.toFixed(1)).join(' / ')} m${_lrudAtTo(imp) ? ' (LRUD at To)' : ''}` : null; })(),
-          s.survey ? `Survey: ${s.survey}${s.surveyDesc ? ' — ' + s.surveyDesc : ''}` : null,
-        ].filter(Boolean).join('<br>');
-        const e = cesiumViewer.entities.add({
-          name: s.name || imp.name, position: pos,
-          point: { pixelSize: dopt.stationSize || 5, color: stationCesiumColor, outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: 5000, distanceDisplayCondition: _stnDDC },
-          label: { text: s.name || '', show: dopt.showLabels, font: '10px sans-serif',
-            fillColor: Cesium.Color.WHITE, style: Cesium.LabelStyle.FILL,
-            pixelOffset: new Cesium.Cartesian2(0, -14), disableDepthTestDistance: 5000, distanceDisplayCondition: _stnDDC },
-          description: desc,
-          properties: { isCaveSurvey: true, surveyName: imp.name, surveyCode: s.survey || '' },
-        });
-        imp.cesiumIds.push(e.id);
-      }
-    }
+    imp._linePrim = addLinePrimitive(cesiumViewer.scene, chains, { show: imp.visible !== false });
+    imp._bounds = allPos.length ? Cesium.BoundingSphere.fromPoints(allPos) : null;
+    _buildCaveStations(imp);
     _addCaveLeads(imp, convertFn);
     _addCaveAreaLabels(imp, convertFn);
     _buildCavePassages(imp, convertFn);
@@ -5962,14 +6674,13 @@ window._rerenderCave = function(i) {
   _renderCaveList();
   console.log(g.mode === 'anchor'
     ? `[cave] Re-rendered "${imp.name}" at (${g.lat.toFixed(5)}, ${g.lon.toFixed(5)}, ${g.elev.toFixed(0)}m)`
-    : `[cave] Rendered "${imp.name}" (UTM zone ${g.zone ?? imp.parsed.utmZone}): ${imp.cesiumIds.length} entities`);
+    : `[cave] Rendered "${imp.name}" (UTM zone ${g.zone ?? imp.parsed.utmZone})`);
 };
 
 window._flyToCave = function(i) {
   const imp = _caveImports[i];
-  if (!imp) return;
-  const ents = imp.cesiumIds.map(id => cesiumViewer.entities.getById(id)).filter(Boolean);
-  if (ents.length) cesiumViewer.flyTo(ents,
+  if (!imp || !imp._bounds) return;
+  cesiumViewer.camera.flyToBoundingSphere(imp._bounds,
     { duration: 2.5, offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), 0) });
 };
 
@@ -5977,23 +6688,16 @@ window._toggleCaveImport = function(i, visible) {
   const imp = _caveImports[i];
   if (!imp) return;
   imp.visible = visible;
-  for (const id of imp.cesiumIds) {
-    const e = cesiumViewer.entities.getById(id);
-    if (e) e.show = visible && (_caveLeadsVisible || !_isLeadEntity(e));
-  }
-  _setCavePassageVisible(imp, visible);
+  _setCaveLayersVisible(imp);
 };
 
 window._removeCaveImport = function(i) {
   const imp = _caveImports[i];
   if (!imp) return;
-  for (const id of imp.cesiumIds) {
-    const e = cesiumViewer.entities.getById(id);
-    if (e) cesiumViewer.entities.remove(e);
-  }
-  _removeCavePassages(imp);
+  _removeCaveLayers(imp);
   _caveImports.splice(i, 1);
   _renderCaveList();
+  _caveColourChanged();
   if (_caveImports.length === 0) {
     const chk = document.getElementById('lp-cave-toggle');
     if (chk) chk.checked = false;
@@ -6123,64 +6827,30 @@ function _onCavePickClick(windowPos) {
 // surveyName: the survey the station belongs to (for multi-survey PLTs), or ''
 // declinationDeg: magnetic declination correction in degrees (positive = east), or null
 function renderCaveSurveyAnchored(name, parsed, anchorStationName, anchorLat, anchorLon, anchorElevM, surveyName = '', declinationDeg = null) {
-  // Find anchor station local coords (metres in survey space)
-  let anchorLocal;
+  // Find the anchor station (metres in survey space)
+  let anchorLocal = null, resolved = '__first__';
   if (!anchorStationName) {
-    anchorLocal = parsed.segments[0]?.points[0];
     console.warn('[cave] No station specified; falling back to first point');
   } else {
     const nameNorm = String(anchorStationName).trim();
     anchorLocal = parsed.stations.find(s => s.name === nameNorm || s.name === nameNorm.split(/[./]/)[1]);
-    if (!anchorLocal) {
-      anchorLocal = parsed.segments[0]?.points[0];
-      console.warn(`[cave] Station "${anchorStationName}" not found; using first point`);
-    }
+    if (anchorLocal) resolved = anchorLocal.name;
+    else console.warn(`[cave] Station "${anchorStationName}" not found; using first point`);
   }
-  if (!anchorLocal) { console.error('[cave] No anchor point available'); return null; }
+  if (!anchorLocal && !parsed.segments[0]?.points[0]) { console.error('[cave] No anchor point available'); return null; }
 
-  // World position of anchor
-  const anchorCart = Cesium.Cartesian3.fromDegrees(anchorLon, anchorLat, anchorElevM);
-
-  // ENU frame at anchor — gives East/North/Up axes as world vectors
-  // Optionally rotate by magnetic declination so survey north matches geographic north
-  let enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(anchorCart);
-  if (declinationDeg != null && declinationDeg !== 0) {
-    const declRad = Cesium.Math.toRadians(declinationDeg);
-    const rotZ = Cesium.Matrix4.fromRotationTranslation(
-      Cesium.Matrix3.fromRotationZ(declRad),
-      Cesium.Cartesian3.ZERO
-    );
-    enuMatrix = Cesium.Matrix4.multiply(enuMatrix, rotZ, new Cesium.Matrix4());
-  }
-
-  const convert = (n, e, v) => {
-    const dE = e - anchorLocal.e;   // metres east  of anchor
-    const dN = n - anchorLocal.n;   // metres north of anchor
-    const dU = v - anchorLocal.v;   // metres up    of anchor
-    // ENU: column 0 = East, column 1 = North, column 2 = Up
-    const offset = new Cesium.Cartesian4(dE, dN, dU, 0);
-    const worldOff = Cesium.Matrix4.multiplyByVector(enuMatrix, offset, new Cesium.Cartesian4());
-    return new Cesium.Cartesian3(
-      anchorCart.x + worldOff.x,
-      anchorCart.y + worldOff.y,
-      anchorCart.z + worldOff.z
-    );
+  // Drawn by _rerenderCave like UTM caves (per-survey colours, fast layers),
+  // which places the anchor station at lat/lon/elev, turned by the declination.
+  // The station is stored as the name actually matched, so every re-render
+  // finds the same one.
+  const entry = {
+    name, parsed, cesiumIds: [], visible: true,
+    georef: { mode: 'anchor', station: resolved, survey: surveyName, lat: anchorLat, lon: anchorLon,
+              elev: anchorElevM, declination: declinationDeg },
+    displayOptions: _defaultDisplayOptions(parsed),
   };
-
-  const entry = _buildCaveEntities(name, parsed, convert);
-  if (entry) {
-    entry.georef = {
-      mode: 'anchor',
-      station: anchorStationName,
-      survey: surveyName,
-      lat: anchorLat,
-      lon: anchorLon,
-      elev: anchorElevM,
-      declination: declinationDeg,
-    };
-    if (!entry.displayOptions) entry.displayOptions = _defaultDisplayOptions(entry.parsed);
-    _renderCaveList();
-  }
+  _caveImports.push(entry);
+  window._rerenderCave(_caveImports.length - 1);
   return entry;
 }
 
@@ -6201,49 +6871,6 @@ function renderCaveSurveyUTM(name, parsed, zoneOverride, southOverride, displayO
   };
   _caveImports.push(entry);
   window._rerenderCave(_caveImports.length - 1);
-  return entry;
-}
-
-// ── Shared entity builder (used by anchor mode) ───────────────────────────────
-function _buildCaveEntities(name, parsed, convertFn) {
-  const color = Cesium.Color.fromCssColorString('#00e5ff').withAlpha(0.9);
-  const stationColor = Cesium.Color.fromCssColorString('#ffeb3b');
-  const ids = [];
-
-  for (const seg of parsed.segments) {
-    const positions = seg.points
-      .filter(p => !p.excluded)
-      .map(p => convertFn(p.n, p.e, p.v))
-      .filter(Boolean);
-    if (positions.length < 2) continue;
-    const e = cesiumViewer.entities.add({
-      name, polyline: {
-        positions, width: 1.5, arcType: Cesium.ArcType.NONE,
-        material: new Cesium.ColorMaterialProperty(color), clampToGround: false,
-      },
-      properties: { isCaveSurvey: true, surveyName: name },
-    });
-    ids.push(e.id);
-  }
-
-  for (const s of parsed.stations) {
-    const pos = convertFn(s.n, s.e, s.v);
-    if (!pos) continue;
-    const e = cesiumViewer.entities.add({
-      name: s.name || name, position: pos,
-      point: { pixelSize: 5, color: stationColor, outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: 5000 },
-      label: { text: s.name || '', show: false, font: '10px sans-serif', fillColor: Cesium.Color.WHITE, style: Cesium.LabelStyle.FILL, pixelOffset: new Cesium.Cartesian2(0, -14), disableDepthTestDistance: 5000 },
-      description: s.dist != null ? `<b>${s.name}</b><br>Distance from entrance: ${s.dist.toFixed(1)} m` : `<b>${s.name}</b>`,
-      properties: { isCaveSurvey: true, surveyName: name },
-    });
-    ids.push(e.id);
-  }
-
-  const entry = { name, parsed, cesiumIds: ids, visible: true, georef: null };
-  // georef filled in by renderCaveSurveyAnchored after calling this
-  _caveImports.push(entry);
-  _renderCaveList();
-  console.log(`[cave] Anchored render "${name}": ${ids.length} entities`);
   return entry;
 }
 
@@ -6288,22 +6915,22 @@ window._importCavePLT = function() {
   anchorRadio.onchange = updateModeUI;
 
   fileInput.onchange = () => {
-    const file = fileInput.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
+    const files = [...fileInput.files];
+    if (!files.length) return;
+    // PLT text (or a Breakout JSON file) from `fileName`: parse and offer georeferencing.
+    const showText = (text, fileName) => {
       try {
         // A Breakout JSON file: every cave in it is placed from its
         // own UTM coordinates, so there is nothing to ask — load and close.
-        if (/^\s*\{/.test(ev.target.result)) {
-          const n = _loadBreakoutText(ev.target.result);
+        if (/^\s*\{/.test(text)) {
+          const n = _loadBreakoutText(text);
           if (n) { overlay.style.display = 'none'; _cwizParsed = null; return; }
           throw new Error('no cave in the file could be placed');
         }
-        const parsed = parsePLT(ev.target.result);
+        const parsed = parsePLT(text);
         _cwizParsed = parsed;
-        _cwizParsed._fileName = file.name.replace(/\.plt$/i, '');
-        _cwizParsed._rawText  = ev.target.result;
+        _cwizParsed._fileName = fileName.replace(/\.plt$/i, '').replace(/ \(Walls\)$/, '');
+        _cwizParsed._rawText  = text;
 
         // Stats
         const totalPts = parsed.segments.reduce((s, seg) => s + seg.points.length, 0);
@@ -6391,7 +7018,7 @@ window._importCavePLT = function() {
 
         updateModeUI();
         georef.style.display = 'block';
-        fileInfo.textContent = `✓ ${file.name}`;
+        fileInfo.textContent = `✓ ${fileName}`;
         errDiv.style.display = 'none';
         loadBtn.disabled = false;
       } catch(e) {
@@ -6400,6 +7027,25 @@ window._importCavePLT = function() {
         loadBtn.disabled = true;
       }
     };
+    // Walls: the shapefile set Walls exports from a compiled project
+    // (walls.js). Sets with a UTM zone load straight away; one exported
+    // without a .prj comes back as PLT text, so the usual step asks for
+    // its zone.
+    if (isWallsSelection(files)) {
+      _loadWallsFiles(files).then(({ placed, needZone }) => {
+        if (needZone) showText(needZone.plt, needZone.name + ' (Walls)');
+        else if (placed) { overlay.style.display = 'none'; _cwizParsed = null; }
+        else throw new Error('no cave in the selection could be placed');
+      }).catch(e => {
+        errDiv.textContent = 'Walls import: ' + e.message;
+        errDiv.style.display = 'block';
+        loadBtn.disabled = true;
+      });
+      return;
+    }
+    const file = files[0];
+    const reader = new FileReader();
+    reader.onload = ev => showText(ev.target.result, file.name);
     reader.readAsText(file);
   };
 
@@ -6568,14 +7214,41 @@ function _loadBreakoutText(text) {
   return placed;
 }
 
-function _finishCaveLoad(entry) {
+// Load every Walls shapefile set in the selection (walls.js): one cave per
+// set, placed from its UTM coordinates and kept as PLT text so it renders,
+// caches and reloads from recents like a .plt. A set with no zone (exported
+// without a .prj) is handed back for the wizard to ask about.
+async function _loadWallsFiles(files) {
+  const sets = await readWallsShapefileSets(files);
+  let placed = 0, needZone = null;
+  for (const set of sets) {
+    const c = wallsToPlt(set, window.proj4);
+    c.warnings.forEach(w => console.warn('[walls]', `"${c.name}":`, w));
+    if (!c.zone) { needZone = needZone || c; continue; }
+    const parsed = parsePLT(c.plt);
+    parsed._fileName = c.name;
+    parsed._rawText  = c.plt;
+    const entry = renderCaveSurveyUTM(c.name, parsed, c.zone, c.south);
+    if (!entry) continue;
+    _finishCaveLoad(entry);
+    placed++;
+    const st = c.stats;
+    console.log(`[walls] "${c.name}": ${st.surveys} survey files, ${st.shots} shots, ${st.stations} stations, ` +
+                `${st.notes} notes, ${st.leads} leads, LRUD in ${st.units}, ${st.datum}` +
+                (st.skipped ? `, ${st.skipped} vectors left out` : ''));
+  }
+  return { placed, needZone };
+}
+
+function _finishCaveLoad(entry, { recent = true } = {}) {
   if (!entry) return;
+  _caveColourChanged();
   const chk = document.getElementById('lp-cave-toggle');
   if (chk && !chk.checked) { chk.checked = true; notifyCaveVisibilityChanged(true); }
   // Loading a cave leaves the camera where it is; the ⌖ button in the cave
   // list flies to it on demand.
   // Persist to PLT recents (raw text stored in parsed._rawText)
-  if (entry.parsed && entry.parsed._rawText) {
+  if (recent && entry.parsed && entry.parsed._rawText) {
     _addPltRecent(entry.name, entry.parsed?._rawText || '', entry.georef || null, entry.displayOptions || null);
   }
 }
@@ -8952,11 +9625,7 @@ window._styleToggleLabels = function(chk) {
   const imp = _caveImports[_styleIdx];
   if (!imp) return;
   imp.displayOptions.showLabels = chk.checked;
-  // Update label visibility live without full re-render
-  for (const id of imp.cesiumIds) {
-    const e = cesiumViewer.entities.getById(id);
-    if (e && e.label) e.label.show = chk.checked;
-  }
+  _buildCaveStations(imp);                 // names are created only while shown
   _displayUpdateRecent(imp);
 };
 
@@ -8964,7 +9633,7 @@ window._styleToggleStations = function(chk) {
   const imp = _caveImports[_styleIdx];
   if (!imp) return;
   imp.displayOptions.showStations = chk.checked;
-  _rerenderCave(_styleIdx);
+  _buildCaveStations(imp);
   _displayUpdateRecent(imp);
 };
 
@@ -8972,7 +9641,7 @@ window._styleStationColor = function(input) {
   const imp = _caveImports[_styleIdx];
   if (!imp) return;
   imp.displayOptions.stationColor = input.value;
-  _rerenderCave(_styleIdx);
+  _buildCaveStations(imp);
   _displayUpdateRecent(imp);
 };
 
@@ -8981,7 +9650,7 @@ window._styleStationSize = function(input) {
   if (!imp) return;
   imp.displayOptions.stationSize = parseInt(input.value);
   document.getElementById('style-station-size-val').textContent = input.value + 'px';
-  _rerenderCave(_styleIdx);
+  _buildCaveStations(imp);
   _displayUpdateRecent(imp);
 };
 
@@ -9076,8 +9745,44 @@ window._rectifyClose = function() {
   _rectifyIdx = null;
 };
 
+// Heights row (UTM caves only): shift with the point clouds, or as in the file.
+function _rectifyRenderHeights() {
+  const imp = _caveImports[_rectifyIdx];
+  const box = document.getElementById('rectify-heights');
+  if (!box || !imp || !imp.georef) return;
+  const utm = imp.georef.mode !== 'anchor';
+  box.style.display = utm ? 'block' : 'none';
+  if (!utm) return;
+  const mode = imp.georef.heights === 'file' ? 'file' : 'pc';
+  document.querySelectorAll('#rectify-heights-modes button').forEach(b => {
+    const on = b.dataset.h === mode;
+    b.style.background = on ? 'rgba(0,229,255,0.22)' : 'rgba(255,255,255,0.04)';
+    b.style.color = on ? '#fff' : 'rgba(255,255,255,0.6)';
+  });
+  const note = document.getElementById('rectify-heights-note');
+  if (!note) return;
+  const dz = imp._heightDz || 0;
+  const which = viewModel.egm96 ? 'EGM96 geoid' : viewModel.usgsRef ? 'USGS' : 'default';
+  let t = mode === 'pc'
+    ? `${dz <= 0 ? 'Lowered' : 'Raised'} ${Math.abs(dz).toFixed(1)} m, the same shift as the point clouds (${which}), so the cave sits with the LiDAR and the terrain.`
+    : "The file's heights, unchanged.";
+  if ((imp.georef.controlPoints || []).length) t += ' Control points keep their stations where you put them either way.';
+  note.textContent = t;
+}
+window._rectifyHeights = function(h) {
+  const imp = _caveImports[_rectifyIdx];
+  if (!imp || !imp.georef) return;
+  if (h === 'file') imp.georef.heights = 'file'; else delete imp.georef.heights;
+  _rerenderCave(_rectifyIdx);
+  _caveColourChanged();
+  _rectifyRenderHeights();
+  _displayUpdateRecent(imp);
+  _sessionSave && _sessionSave();
+};
+
 // Render the control point list inside the panel
 function _rectifyRenderCPList() {
+  _rectifyRenderHeights();
   const imp = _caveImports[_rectifyIdx];
   const list = document.getElementById('rectify-cp-list');
   if (!list || !imp) return;
@@ -9133,6 +9838,9 @@ window._rectifyRemoveCP = function(ci) {
 window._rectifyPickStationOnMap = function() {
   { const _xr=document.getElementById('cave-inline-rectify'); if(_xr)_xr.style.display='none'; const _xs=document.getElementById('cave-inline-style'); if(!_xs||_xs.style.display==='none'){const _xp=document.getElementById('cave-inline-panel');if(_xp)_xp.style.display='none';} }
   _rectifyStationPickMode = true;
+  // Stations switched off: show this cave's dots while picking.
+  const imp = _caveImports[_rectifyIdx];
+  if (imp && !imp._stationLayer) { _buildCaveStations(imp, true); imp._tempStations = true; }
   const banner = document.getElementById('rectify-station-pick-banner');
   if (banner) banner.style.display = 'block';
   cesiumViewer.canvas.style.cursor = 'pointer';
@@ -9140,6 +9848,8 @@ window._rectifyPickStationOnMap = function() {
 
 function _rectifyExitStationPickMode() {
   _rectifyStationPickMode = false;
+  const imp = _caveImports[_rectifyIdx];
+  if (imp && imp._tempStations) { imp._tempStations = false; _buildCaveStations(imp); }
   const banner = document.getElementById('rectify-station-pick-banner');
   if (banner) banner.style.display = 'none';
   cesiumViewer.canvas.style.cursor = '';
@@ -9289,7 +9999,7 @@ window._rectifyReset = function() {
     if (_rectifyStationPickMode) {
       const picked = cesiumViewer.scene.pick(click.position);
       if (picked && picked.id) {
-        const entity = picked.id;
+        const entity = materialize(picked.id, click.position);
         const imp = _caveImports[_rectifyIdx];
         if (imp && entity.properties && entity.properties.surveyName &&
             entity.properties.surveyName.getValue() === imp.name) {

@@ -986,7 +986,7 @@
                 <div id="lp-cave-list" style="margin-bottom:4px;"></div>
                 <div id="cave-inline-panel" style="display:none;margin:4px 0 8px;"></div>
                 <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:2px;">
-                  <button class="btn btn-sm btn-primary lp-add-btn" onclick="window._importCavePLT()" style="font-size:11px;" title="Compass .plt, or a Breakout .json">+ Import PLT / Breakout</button>
+                  <button class="btn btn-sm btn-primary lp-add-btn" onclick="window._importCavePLT()" style="font-size:11px;" title="Compass .plt, a Breakout .json, or a Walls shapefile export (select all its files)">+ Import PLT / Breakout / Walls</button>
                   <label class="lp-row" style="margin:0; cursor:pointer;">
                     <input type="checkbox" id="lp-cave-toggle" style="margin:0;">
                     <span style="font-size:10px; opacity:0.7; margin-left:4px;">Show all</span>
@@ -995,7 +995,22 @@
                     <input type="checkbox" id="lp-cave-leads-toggle" checked style="margin:0;" onchange="window._setCaveLeadsVisible(this.checked)">
                     <span style="font-size:10px; opacity:0.7; margin-left:4px;">Leads</span>
                   </label>
+                  <label class="lp-row" style="margin:0; cursor:pointer;" title="Area names placed with 🏷 Labels, for every cave (each cave also has its own switch in its Labels panel)">
+                    <input type="checkbox" id="lp-cave-areas-toggle" checked style="margin:0;" onchange="window._setCaveAreaLabelsVisible(this.checked)">
+                    <span style="font-size:10px; opacity:0.7; margin-left:4px;">Area names</span>
+                  </label>
+                  <button onclick="window._caveSetSaveLoaded()" title="Save the caves loaded now (placement and style) as a set, to load together later from Recent" style="font-size:10px;padding:2px 7px;background:rgba(80,220,255,0.10);border:1px solid rgba(80,220,255,0.35);color:#8ee8ff;border-radius:3px;cursor:pointer;">💾 Save as set…</button>
                 </div>
+                <div style="display:flex; align-items:center; gap:6px; margin-top:5px; font-size:10px;">
+                  <span style="opacity:0.7;" title="How every loaded cave's lines, station dots and walls are coloured">Colour</span>
+                  <div id="lp-cave-colour-modes" style="display:flex; flex:1;">
+                    <button type="button" data-mode="survey" onclick="window._setCaveColourMode('survey')" title="Each survey in its own colour (set in 🎨 Style)" style="flex:1;padding:2px 0;font-size:10px;cursor:pointer;border:1px solid rgba(255,255,255,0.18);border-radius:4px 0 0 4px;">Survey</button>
+                    <button type="button" data-mode="elev" onclick="window._setCaveColourMode('elev')" title="By elevation (above sea level, as in the survey), one range across all loaded caves" style="flex:1;padding:2px 0;font-size:10px;cursor:pointer;border:1px solid rgba(255,255,255,0.18);border-left:none;">Elevation</button>
+                    <button type="button" data-mode="depth" onclick="window._setCaveColourMode('depth')" title="By depth below ground: the 3D terrain straight above each point, less its height. One range across all loaded caves" style="flex:1;padding:2px 0;font-size:10px;cursor:pointer;border:1px solid rgba(255,255,255,0.18);border-left:none;">Depth</button>
+                    <button type="button" data-mode="hard" onclick="window._setCaveColourMode('hard')" title="By passage difficulty from the measured LRUDs: narrow (blue), low (red), both (magenta), steep (green), as in the portable viewer" style="flex:1;padding:2px 0;font-size:10px;cursor:pointer;border:1px solid rgba(255,255,255,0.18);border-left:none;border-radius:0 4px 4px 0;">Difficulty</button>
+                  </div>
+                </div>
+                <div id="lp-cave-colour-legend" style="display:none; margin-top:4px;"></div>
                 <div id="lp-plt-recents"></div>
               </div>
             </div>
@@ -1813,12 +1828,16 @@
     padding:20px; width:440px; max-width:95vw; color:rgba(255,255,255,0.9);
     font-family:inherit; font-size:12px; box-shadow:0 8px 32px rgba(0,0,0,0.6);">
     <div style="font-size:14px; font-weight:600; margin-bottom:14px; border-bottom:1px solid rgba(255,255,255,0.15); padding-bottom:8px;">
-      Import Compass PLT Survey
+      Import Cave Survey
+    </div>
+    <div style="font-size:10px; color:rgba(255,255,255,0.45); margin:-6px 0 10px; line-height:1.45;">
+      Compass .plt, Breakout .json, or a Walls shapefile export: in Walls, Segments tab &rarr; Details / Rpts&hellip; &rarr; Shapefile&hellip;
+      (UTM, 3D, Vectors + Stations, plus Notes and Flags), then select all the files it wrote.
     </div>
 
     <!-- Step 1: File -->
     <div style="margin-bottom:8px;">
-      <input type="file" id="cwiz-file-input" accept=".plt,.PLT,.txt,.json" style="
+      <input type="file" id="cwiz-file-input" multiple accept=".plt,.PLT,.txt,.json,.dbf,.DBF,.prj,.PRJ,.shp,.SHP,.shx,.SHX" title="A Compass .plt, a Breakout .json, or all the files of a Walls shapefile export" style="
         width:100%; background:#111; border:1px solid rgba(255,255,255,0.2);
         border-radius:4px; padding:6px; color:#ddd; font-size:11px; cursor:pointer; box-sizing:border-box;">
       <div id="cwiz-file-info" style="margin-top:5px; font-size:11px; color:#8f8; min-height:14px;"></div>
@@ -2083,6 +2102,16 @@
         <button onclick="window._rectifyClose()" style="background:none;border:none;color:#888;cursor:pointer;font-size:14px;padding:0 2px;">✕</button>
       </div>
       <div id="rectify-survey-name" style="font-size:11px;opacity:0.5;margin-bottom:8px;"></div>
+      <div id="rectify-heights" style="display:none;margin-bottom:10px;padding:7px 9px;background:rgba(255,255,255,0.04);border-radius:6px;">
+        <div style="display:flex;align-items:center;gap:8px;font-size:12px;">
+          <span style="opacity:0.7;" title="Survey files hold heights above sea level; the globe uses heights above the ellipsoid. Point clouds get a shift for that (EGM96 / USGS toggles), and the cave can take the same one.">Heights</span>
+          <div id="rectify-heights-modes" style="display:flex;flex:1;">
+            <button type="button" data-h="pc" onclick="window._rectifyHeights('pc')" title="Shift the cave by the same amount as the point clouds, so it sits with the LiDAR and the terrain" style="flex:1;padding:3px 0;font-size:11px;cursor:pointer;border:1px solid rgba(255,255,255,0.18);border-radius:4px 0 0 4px;">Match point clouds</button>
+            <button type="button" data-h="file" onclick="window._rectifyHeights('file')" title="Use the file's heights unchanged" style="flex:1;padding:3px 0;font-size:11px;cursor:pointer;border:1px solid rgba(255,255,255,0.18);border-left:none;border-radius:0 4px 4px 0;">As in file</button>
+          </div>
+        </div>
+        <div id="rectify-heights-note" style="font-size:10px;color:rgba(255,255,255,0.45);margin-top:4px;"></div>
+      </div>
       <div style="font-size:11px;opacity:0.55;margin-bottom:8px;">Pin a station to a known world position — the survey warps to fit.</div>
       <div id="rectify-cp-list" style="max-height:200px;overflow-y:auto;margin-bottom:10px;"></div>
       <div style="display:flex;gap:6px;margin-bottom:8px;">
@@ -2870,6 +2899,8 @@
         hillshade_url: hillshadeMode === 'url' ? hillshadeUrl : '',
         name: mapName,
         caves,
+        // The terrain takes the point clouds' vertical shift, as the caves do.
+        z_offset: window._pcDatumDz ? window._pcDatumDz((s + n) / 2, (w + e) / 2) : null,
       };
 
       document.getElementById('export_run_btn').disabled = true;
