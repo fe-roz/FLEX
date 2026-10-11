@@ -2039,10 +2039,17 @@
           <button type="button" data-mode="smooth" onclick="window._stylePassageMode('smooth')" style="flex:1;padding:4px 0;font-size:12px;cursor:pointer;border:1px solid rgba(255,255,255,0.18);border-left:none;border-radius:0 4px 4px 0;">Smooth</button>
         </div>
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:7px;font-size:12px;">
-          <span title="Direction U and D are measured in">U/D</span>
+          <span title="Direction U and D are measured in" style="min-width:46px;">U/D</span>
           <div id="style-passage-axis" style="display:flex;flex:1;">
             <button type="button" data-axis="vertical" onclick="window._stylePassageAxis('vertical')" title="U/D straight up and down (plumb); L/R level" style="flex:1;padding:3px 0;font-size:11px;cursor:pointer;border:1px solid rgba(255,255,255,0.18);border-radius:4px 0 0 4px;">Vertical</button>
             <button type="button" data-axis="shot" onclick="window._stylePassageAxis('shot')" title="U/D perpendicular to the shot, tilting with its inclination; L/R level" style="flex:1;padding:3px 0;font-size:11px;cursor:pointer;border:1px solid rgba(255,255,255,0.18);border-left:none;border-radius:0 4px 4px 0;">&perp; Shot</button>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:7px;font-size:12px;">
+          <span title="Which station each L/R/U/D reading belongs to" style="min-width:46px;">LRUD at</span>
+          <div id="style-passage-lrudat" style="display:flex;flex:1;">
+            <button type="button" data-at="from" onclick="window._stylePassageLrudAt('from')" title="Each reading drawn at the station it was imported on (default)" style="flex:1;padding:3px 0;font-size:11px;cursor:pointer;border:1px solid rgba(255,255,255,0.18);border-radius:4px 0 0 4px;">From stn</button>
+            <button type="button" data-at="to" onclick="window._stylePassageLrudAt('to')" title="Each reading moved one shot along the survey, to the far end of the shot leaving its station (Compass: LRUD at To station)" style="flex:1;padding:3px 0;font-size:11px;cursor:pointer;border:1px solid rgba(255,255,255,0.18);border-left:none;border-radius:0 4px 4px 0;">To stn</button>
           </div>
         </div>
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
@@ -2375,7 +2382,9 @@
             const p = ll(s);
             if (!p || !inBox(p[0], p[1])) continue;
             const st = { name: s.name || '', lon: p[0], lat: p[1], elev: p[2] };
-            if (s.lrud) st.lrud = [s.lrud.l, s.lrud.r, s.lrud.u, s.lrud.d];
+            // The reading the walls use here (Style → Passage → LRUD at From/To).
+            const lr = window._caveStationLrud ? window._caveStationLrud(imp, s) : s.lrud;
+            if (lr) st.lrud = [lr.l, lr.r, lr.u, lr.d];
             if (s.dist != null && isFinite(s.dist)) st.dist = s.dist;
             if (s.comment) st.comment = s.comment;
             entryFor(code).stations.push(st);
@@ -2501,7 +2510,8 @@
             if (!surveyMap[key] || !surveyMap[key].stations) return;
             const match = surveyMap[key].stations.find(st => st.name === s.name);
             if (!match) return;
-            if (s.lrud) match.lrud = [s.lrud.l, s.lrud.r, s.lrud.u, s.lrud.d];
+            const lr = window._caveStationLrud ? window._caveStationLrud(imp, s) : s.lrud;
+            if (lr) match.lrud = [lr.l, lr.r, lr.u, lr.d];
             if (s.dist !== undefined) match.dist = s.dist;
           });
         });

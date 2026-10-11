@@ -4971,12 +4971,16 @@ const PASSAGE_SMOOTH_SIDES = 16;
 function _lrudValid(x) { return Number.isFinite(x) && x >= 0 && x < 300; }
 
 // A station's LRUD, or null. All four at zero is a placeholder, not a
-// measurement (a real passage is never 0x0), so it counts as unmeasured: it is
-// interpolated from its neighbours, or takes the 1 ft default like any gap.
+// measurement (a real passage is never 0x0): it never feeds the blending of
+// other stations, and is itself drawn as the plain 2 ft tube (see
+// _segmentLruds) rather than guessed from its neighbours.
+function _isLrudPlaceholder(p) {
+  const w = p.lrud;
+  return !!w && ['l', 'r', 'u', 'd'].every(k => Math.abs(w[k]) < 1e-6);
+}
 function _stationLrud(p) {
   const w = p.lrud;
-  if (!w) return null;
-  if (['l', 'r', 'u', 'd'].every(k => Math.abs(w[k]) < 1e-6)) return null;
+  if (!w || _isLrudPlaceholder(p)) return null;
   return w;
 }
 
@@ -4988,10 +4992,18 @@ function _countLrudStations(parsed) {
   return n;
 }
 
-// Every station of a segment gets all four dimensions. A missing value is
-// interpolated between the nearest measured stations either side (held flat
-// past the ends). A dimension never measured anywhere in the segment defaults
-// to 1 ft, so a leg with no LRUD at all still draws as a 2 ft x 2 ft passage.
+// Every station of a segment gets all four dimensions:
+//   * measured value                → as measured (floored at 5 cm)
+//   * 0/0/0/0 placeholder station   → 1 ft each side, a plain 2 ft x 2 ft tube.
+//     No guessing: blending a neighbour's size in used to copy one tall
+//     canyon's U/D down a whole run of placeholder stations (drawn as big
+//     cylinders over steep pitches).
+//   * a missing value (blank, Compass -9.9 / 999 sentinel, or a station with
+//     no LRUD at all) → interpolated by station count between the nearest
+//     measured stations either side, held flat past the ends; 1 ft if that
+//     dimension is never measured in the segment.
+// Between two stations the tube then eases from one size to the other along
+// the shot (smoothstep, _lerpLrud).
 const PASSAGE_DEFAULT_LRUD = 0.3048;   // 1 ft each side
 
 function _segmentLruds(pts) {
@@ -5012,12 +5024,56 @@ function _segmentLruds(pts) {
       else out[i][k] = val(lo) + (val(hi) - val(lo)) * (i - lo) / (hi - lo);
     }
   }
-  for (const o of out) {
+  out.forEach((o, i) => {
+    const ph = _isLrudPlaceholder(pts[i]);
     // Floor, so a wall measured at zero reads as a thin sheet, not nothing.
-    for (const k of keys) o[k] = Math.max(o[k] ?? PASSAGE_DEFAULT_LRUD, 0.05);
-  }
+    for (const k of keys) o[k] = ph ? PASSAGE_DEFAULT_LRUD : Math.max(o[k] ?? PASSAGE_DEFAULT_LRUD, 0.05);
+  });
   return out;
 }
+
+// "LRUD at" (Style → Passage, per cave). 'from' (default) draws every reading
+// at the station it was imported on. 'to' moves each reading one shot along
+// the survey, onto the far end of the shot leaving its station — for data
+// whose LRUDs describe the shot's to-station (Compass's "LRUD at To station")
+// but landed on the from-station. A station no shot arrives at (the start of
+// a survey) is then left without a reading and filled like any other gap.
+// The export sends the same shifted readings, so the portable viewer agrees.
+const _lrudToCache = new WeakMap();      // parsed → Map(station name → reading)
+function _lrudAtTo(imp) { return !!imp && (imp.displayOptions || {}).passageLrudAt === 'to'; }
+// Station name → the reading of the from-station of a shot arriving at it.
+// Tie-ins can arrive from several shots: the first with a measurement wins.
+function _lrudToMap(parsed) {
+  let m = _lrudToCache.get(parsed);
+  if (m) return m;
+  m = new Map();
+  const measured = lr => !!lr && _stationLrud({ lrud: lr }) && ['l', 'r', 'u', 'd'].some(k => _lrudValid(lr[k]));
+  for (const seg of parsed.segments || []) {
+    const P = seg.points;
+    for (let i = 1; i < P.length; i++) {
+      const to = P[i].name;
+      if (!to) continue;
+      const lr = P[i - 1].lrud || null;
+      if (!m.has(to) || (!measured(m.get(to)) && measured(lr))) m.set(to, lr);
+    }
+  }
+  _lrudToCache.set(parsed, m);
+  return m;
+}
+// The reading drawn at point p (prev: the point before it on its chain).
+function _effectiveLrud(imp, p, prev) {
+  if (!_lrudAtTo(imp)) return p.lrud;
+  const m = _lrudToMap(imp.parsed);
+  if (p.name && m.has(p.name)) return m.get(p.name) || undefined;
+  return p.name ? undefined : (prev ? prev.lrud : undefined);   // unnamed: its own shot's from-station
+}
+// For a station record (parsed.stations): what the walls use at it.
+function _stationEffectiveLrud(imp, s) {
+  if (!_lrudAtTo(imp)) return s.lrud;
+  const m = _lrudToMap(imp.parsed);
+  return (s.name && m.get(s.name)) || undefined;
+}
+window._caveStationLrud = _stationEffectiveLrud;     // export collector (index.html)
 
 // Unit horizontal direction a→b in survey space, or null for a vertical shot.
 function _hdir(a, b) {
@@ -5327,7 +5383,10 @@ function _buildCavePassages(imp, convertFn) {
     if (dopt.hiddenSurveys && dopt.hiddenSurveys[seg.survey]) continue;
     const surface = seg.isSurface || !!(dopt.surfaceSurveys && dopt.surfaceSurveys[seg.survey]);
     if (surface) continue;                       // no walls on surface shots
-    const pts = seg.points.filter(p => !p.excluded);
+    const raw = _lrudAtTo(imp)
+      ? seg.points.map((p, i) => ({ ...p, lrud: _effectiveLrud(imp, p, seg.points[i - 1]) }))
+      : seg.points;
+    const pts = raw.filter(p => !p.excluded);
     if (pts.length < 2) continue;
     const lr = _segmentLruds(pts);
     const hex = dopt.surveyColors[seg.survey] || dopt.surveyColors[''] || '#00e5ff';
@@ -5849,7 +5908,7 @@ window._rerenderCave = function(i) {
           _segSurface ? `<span style='color:#ffd93d'>▲ Surface shot</span>` : null,
           `Length: ${_shotLen.toFixed(2)} m`,
           _ptB.dist != null ? `Distance from entrance: ${_ptB.dist.toFixed(1)} m` : null,
-          _ptB.lrud ? `Passage L/R/U/D: ${[_ptB.lrud.l, _ptB.lrud.r, _ptB.lrud.u, _ptB.lrud.d].map(v => v.toFixed(1)).join(' / ')} m` : null,
+          (() => { const lr = _effectiveLrud(imp, _ptB, _ptA); return lr ? `Passage L/R/U/D: ${[lr.l, lr.r, lr.u, lr.d].map(v => v.toFixed(1)).join(' / ')} m${_lrudAtTo(imp) ? ' (LRUD at To)' : ''}` : null; })(),
           _ptB.comment ? `<i>${_ptB.comment}</i>` : null,
           `File: ${imp.name}`,
         ].filter(Boolean).join('<br>');
@@ -5881,7 +5940,7 @@ window._rerenderCave = function(i) {
           s.isSurface ? `<span style='color:#ffd93d'>&#9650; Surface shot</span>` : null,
           s.dist != null ? `Distance from entrance: ${s.dist.toFixed(1)} m` : null,
           s.comment ? `<i>${s.comment}</i>` : null,
-          s.lrud ? `Passage L/R/U/D: ${[s.lrud.l, s.lrud.r, s.lrud.u, s.lrud.d].map(v=>v.toFixed(1)).join(' / ')} m` : null,
+          (() => { const lr = _stationEffectiveLrud(imp, s); return lr ? `Passage L/R/U/D: ${[lr.l, lr.r, lr.u, lr.d].map(v=>v.toFixed(1)).join(' / ')} m${_lrudAtTo(imp) ? ' (LRUD at To)' : ''}` : null; })(),
           s.survey ? `Survey: ${s.survey}${s.surveyDesc ? ' — ' + s.surveyDesc : ''}` : null,
         ].filter(Boolean).join('<br>');
         const e = cesiumViewer.entities.add({
@@ -8817,6 +8876,12 @@ function _syncPassageControls(imp) {
     btn.style.background = on ? 'rgba(0,229,255,0.22)' : 'rgba(255,255,255,0.04)';
     btn.style.color = on ? '#fff' : 'rgba(255,255,255,0.6)';
   });
+  const at = dopt.passageLrudAt === 'to' ? 'to' : 'from';
+  document.querySelectorAll('#style-passage-lrudat button').forEach(btn => {
+    const on = btn.dataset.at === at;
+    btn.style.background = on ? 'rgba(0,229,255,0.22)' : 'rgba(255,255,255,0.04)';
+    btn.style.color = on ? '#fff' : 'rgba(255,255,255,0.6)';
+  });
   const op = Math.round((dopt.passageOpacity ?? 0.55) * 100);
   const slider = document.getElementById('style-passage-opacity');
   if (slider) slider.value = op;
@@ -8826,7 +8891,8 @@ function _syncPassageControls(imp) {
   if (note) {
     const total = imp.parsed.segments.reduce((s, sg) => s + sg.points.length, 0);
     note.textContent = nLrud
-      ? `LRUD at ${nLrud} of ${total} stations; gaps are interpolated along each leg, legs with none default to 1 ft each side.`
+      ? `LRUD at ${nLrud} of ${total} stations${at === 'to' ? ', each drawn one shot further on (To)' : ''}. ` +
+        '0/0/0/0 draws a plain 2 ft tube; other gaps blend between measured stations along each leg; legs with none get 1 ft each side.'
       : 'No LRUD data in this file; passages drawn at 1 ft each side.';
   }
 }
@@ -8845,6 +8911,15 @@ window._stylePassageAxis = function(axis) {
   if (!imp) return;
   imp.displayOptions.passageUpAxis = axis;
   if ((imp.displayOptions.passageMode || 'none') !== 'none') _rerenderCave(_styleIdx);
+  _syncPassageControls(imp);
+  _displayUpdateRecent(imp);
+};
+
+window._stylePassageLrudAt = function(at) {
+  const imp = _caveImports[_styleIdx];
+  if (!imp) return;
+  imp.displayOptions.passageLrudAt = at === 'to' ? 'to' : 'from';
+  _rerenderCave(_styleIdx);                 // walls, and the LRUD lines in the popups
   _syncPassageControls(imp);
   _displayUpdateRecent(imp);
 };
