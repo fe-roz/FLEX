@@ -1365,13 +1365,36 @@
               </div>
             </div>
 
-            <!-- EPT source -->
+            <!-- Terrain source: LiDAR point cloud, or the map's own 3D terrain -->
             <div class="lp-section">
               <div class="lp-section-header" onclick="window._lpToggle(this)">
-                <span class="lp-section-arrow">▾</span> Point Cloud
+                <span class="lp-section-arrow">▾</span> Terrain
               </div>
               <div class="lp-section-body open" id="lp-export-ept-body">
-                <div style="padding:2px 0;">
+                <label style="display:block; margin-bottom:6px; font-size:11px;">
+                  From:
+                  <select id="export_terrain_source" onchange="window._exportSyncTerrainSource && window._exportSyncTerrainSource()"
+                    style="margin-left:4px; background:#222; color:#eee; border:1px solid #444; border-radius:3px; padding:2px 4px;">
+                    <option value="lidar" selected>LiDAR point cloud (finest)</option>
+                    <option value="map">Map terrain (fast, any size)</option>
+                  </select>
+                </label>
+                <div id="export_map_rows" style="display:none; padding:2px 0;">
+                  <label style="display:block; margin-bottom:4px; font-size:11px;">
+                    Cell:
+                    <select id="export_map_cell" style="margin-left:4px; background:#222; color:#eee; border:1px solid #444; border-radius:3px; padding:2px 4px;">
+                      <option value="auto" selected>Auto</option>
+                      <option value="5">5 m</option>
+                      <option value="10">10 m</option>
+                      <option value="20">20 m</option>
+                      <option value="30">30 m</option>
+                    </select>
+                  </label>
+                  <div style="font-size:10px; color:rgba(255,255,255,0.4);">
+                    The 3D terrain the map shows (Cesium), read here in the browser: no point cloud needed. Auto keeps it to about 2.5 million heights (5 m cells up to ~6 km across). Coarser than LiDAR — fine for big areas; the Terrain hillshade shades it.
+                  </div>
+                </div>
+                <div id="export_lidar_rows" style="padding:2px 0;">
                   <label style="display:block; margin-bottom:4px; font-size:11px; color:rgba(255,255,255,0.7);">
                     Dataset:
                   </label>
@@ -1422,10 +1445,17 @@
                       <option value="16384" selected>16384×16384</option>
                     </select>
                   </label>
-                  <label style="display:block;">
-                    <input type="checkbox" id="export_include_caves" checked>
-                    Include cave survey lines
+                  <label style="display:block; margin-bottom:3px;">
+                    Caves:
+                    <select id="export_caves_mode" style="margin-left:4px; background:#222; color:#eee; border:1px solid #444; border-radius:3px; padding:2px 4px;">
+                      <option value="walls" selected>Lines and walls</option>
+                      <option value="lines">Lines only</option>
+                      <option value="none">None</option>
+                    </select>
                   </label>
+                  <div style="font-size:10px; color:rgba(255,255,255,0.4);">
+                    Walls go as drawn in FLEX (🎨 Style → Passage), so a cave with walls off sends lines either way. Lines only makes a smaller export.
+                  </div>
                 </div>
               </div>
             </div>
@@ -1450,8 +1480,9 @@
                       onchange="document.getElementById('export_hillshade_url_wrap').style.display = this.value === 'url' ? 'block' : 'none';"
                       style="margin-left:4px; background:#222; color:#eee; border:1px solid #444; border-radius:3px; padding:2px 4px;">
                       <option value="lidar" selected>From LiDAR (highest res)</option>
+                      <option value="dem">From the terrain (fast)</option>
                       <option value="url">Tile URL</option>
-                      <option value="none">None</option>
+                      <option value="none">None (skip it, faster)</option>
                     </select>
                   </label>
                   <div id="export_hillshade_url_wrap" style="display:none;">
@@ -1460,7 +1491,7 @@
                       style="width:100%; box-sizing:border-box; background:#1a1a1a; color:#eee; border:1px solid #444; border-radius:3px; padding:4px 6px; font-size:11px; font-family:monospace;" />
                   </div>
                   <div style="font-size:10px; color:rgba(255,255,255,0.4); margin-top:3px;">
-                    From LiDAR shades the ground returns directly, from several light directions, at the finest resolution the data supports.
+                    From LiDAR shades the ground returns directly, from several light directions, at the finest resolution the data supports. From the terrain shades the export's own terrain: quick, and what map terrain uses. None skips it.
                   </div>
                 </div>
               </div>
@@ -2333,7 +2364,8 @@
     }
 
     // ── Collect cave shots within bbox ───────────────────────────────────────
-    function _collectCavesInBbox(minLon, minLat, maxLon, maxLat) {
+    // walls: false sends the survey lines without the passage walls.
+    function _collectCavesInBbox(minLon, minLat, maxLon, maxLat, { walls = true } = {}) {
       // Access the global cave import state from flex.js
       let surveys = [];
       const surveyMap = {};
@@ -2555,7 +2587,7 @@
       try {
         const imports = window._caveImports || [];
         imports.forEach(imp => {
-          const mesh = imp && imp._passageMesh;
+          const mesh = walls && imp && imp._passageMesh;
           if (!mesh || imp.visible === false) return;
           mesh.groups.forEach(g => {
             const nv = g.pos.length / 3;
@@ -2853,6 +2885,99 @@
       document.getElementById('lidar_status_text').textContent = 'Done.';
     }
 
+    // ── Terrain from the map (Cesium) instead of the LiDAR ──────────────────
+    // Show the rows for the chosen source. LiDAR hillshade needs the LiDAR, so
+    // with map terrain it becomes "From the terrain".
+    window._exportSyncTerrainSource = function() {
+      const map = document.getElementById('export_terrain_source').value === 'map';
+      document.getElementById('export_map_rows').style.display = map ? 'block' : 'none';
+      document.getElementById('export_lidar_rows').style.display = map ? 'none' : 'block';
+      const res = document.getElementById('export_resolution');
+      if (res && res.closest('label')) res.closest('label').style.display = map ? 'none' : 'block';
+      const hs = document.getElementById('export_hillshade_mode');
+      const opt = hs && hs.querySelector('option[value="lidar"]');
+      if (opt) opt.disabled = map;
+      if (map && hs.value === 'lidar') hs.value = 'dem';
+    };
+
+    // Heights of the map's 3D terrain on a regular lon/lat grid over the box
+    // (plus a margin: the export's UTM rectangle reaches past a lat/lon box),
+    // read in chunks with progress. Tiles are read at about the level the cell
+    // needs, not the finest there is, so a big box stays quick; anything that
+    // level lacks is retried at the most detailed. → { lon0, lat0, dlon, dlat,
+    // nx, ny, cell, heights: Float32Array (row 0 = lat0, NaN = nothing) }.
+    const MAP_DEM_AUTO_SAMPLES = 2.5e6, MAP_DEM_MAX_SAMPLES = 5e6;
+    async function _sampleMapTerrain(w, s, e, n, cellPref, onProgress) {
+      const tp = cesiumViewer.terrainProvider;
+      if (!tp || tp instanceof Cesium.EllipsoidTerrainProvider)
+        throw new Error('The map has no 3D terrain to take heights from.');
+      const mLat = 111320, mLon = 111320 * Math.cos((s + n) / 2 * Math.PI / 180);
+      const W = (e - w) * mLon, H = (n - s) * mLat;
+      const span = Math.max(W, H);
+      const layout = cell => {
+        const pad = 0.06 * span + 3 * cell;
+        return { cell, pad, nx: Math.ceil((W + 2 * pad) / cell) + 1, ny: Math.ceil((H + 2 * pad) / cell) + 1 };
+      };
+      let L = layout(cellPref === 'auto' ? Math.max(5, Math.sqrt(W * H / MAP_DEM_AUTO_SAMPLES)) : +cellPref);
+      const cap = cellPref === 'auto' ? MAP_DEM_AUTO_SAMPLES * 1.4 : MAP_DEM_MAX_SAMPLES;
+      while (L.nx * L.ny > cap) L = layout(L.cell * Math.sqrt(L.nx * L.ny / cap) * 1.01);
+      const cell = Math.ceil(L.cell * 2) / 2;                       // to 0.5 m
+      L = layout(cell);
+      const { nx, ny, pad } = L;
+      const lon0 = w - pad / mLon, lat0 = s - pad / mLat, dlon = cell / mLon, dlat = cell / mLat;
+      // Geographic tiles of about 64 posts: the level whose posts are ~ one cell apart.
+      const want = Math.max(8, Math.min(20, Math.ceil(Math.log2(20037508 / (64 * cell)))));
+      const heights = new Float32Array(nx * ny).fill(NaN);
+      const rowsPer = Math.max(1, Math.floor(150000 / nx));
+      let missing = 0;
+      for (let j0 = 0; j0 < ny; j0 += rowsPer) {
+        const j1 = Math.min(ny, j0 + rowsPer), cartos = [];
+        for (let j = j0; j < j1; j++) for (let i = 0; i < nx; i++)
+          cartos.push(Cesium.Cartographic.fromDegrees(lon0 + i * dlon, lat0 + j * dlat));
+        let level = want;
+        if (tp.availability) {
+          const mid = cartos[cartos.length >> 1];
+          level = Math.min(want, tp.availability.computeMaximumLevelAtPosition(mid));
+        }
+        await Cesium.sampleTerrain(tp, level, cartos);
+        const retry = cartos.filter(c => !Number.isFinite(c.height));
+        if (retry.length && tp.availability) await Cesium.sampleTerrainMostDetailed(tp, retry);
+        for (let k = 0; k < cartos.length; k++) {
+          const h = cartos[k].height;
+          if (Number.isFinite(h)) heights[j0 * nx + k] = h; else missing++;
+        }
+        onProgress && onProgress(j1 / ny, cell, nx * ny);
+      }
+      if (missing > 0.5 * nx * ny) throw new Error('The map terrain could not be read for most of the box.');
+      return { lon0, lat0, dlon, dlat, nx, ny, cell, heights };
+    }
+    function _floatsToBase64(arr) {
+      return new Promise((res, rej) => {
+        const fr = new FileReader();
+        fr.onload = () => res(String(fr.result).split(',')[1] || '');
+        fr.onerror = () => rej(fr.error);
+        fr.readAsDataURL(new Blob([arr.buffer]));
+      });
+    }
+
+    // Export choices stick between sessions (not the hillshade tile URL).
+    (function _rememberExportChoices() {
+      const ids = ['export_terrain_source', 'export_map_cell', 'export_resolution', 'export_max_tri',
+                   'export_tex_size', 'export_caves_mode', 'export_satellite_source', 'export_hillshade_mode'];
+      for (const id of ids) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        let v = null;
+        try { v = localStorage.getItem('flex.export.' + id); } catch (_) {}
+        if (v != null && [...el.options].some(o => o.value === v)) {
+          el.value = v;
+          if (el.onchange) el.onchange();      // the hillshade URL field follows its mode
+        }
+        el.addEventListener('change', () => { try { localStorage.setItem('flex.export.' + id, el.value); } catch (_) {} });
+      }
+      window._exportSyncTerrainSource();
+    })();
+
     window._exportRun = function() {
       const nameEl  = document.getElementById('export_map_name');
       const mapName = nameEl.value.trim();
@@ -2871,22 +2996,26 @@
       const [w, s] = [Math.min(_bboxCorner1[0], _bboxCorner2[0]), Math.min(_bboxCorner1[1], _bboxCorner2[1])];
       const [e, n] = [Math.max(_bboxCorner1[0], _bboxCorner2[0]), Math.max(_bboxCorner1[1], _bboxCorner2[1])];
 
-      const eptPath          = document.getElementById('export_ept_select').value;
+      const mapTerrain       = document.getElementById('export_terrain_source').value === 'map';
+      const mapCell          = document.getElementById('export_map_cell').value;
+      const eptPath          = mapTerrain ? '' : document.getElementById('export_ept_select').value;
       const resolution       = parseFloat(document.getElementById('export_resolution').value);
       const maxTri           = parseInt(document.getElementById('export_max_tri').value);
       const texSize          = parseInt(document.getElementById('export_tex_size').value);
-      const includeCaves     = document.getElementById('export_include_caves').checked;
+      const cavesMode        = document.getElementById('export_caves_mode').value;   // walls | lines | none
       const satelliteSource  = document.getElementById('export_satellite_source').value;
-      const hillshadeMode    = document.getElementById('export_hillshade_mode').value;
+      let   hillshadeMode    = document.getElementById('export_hillshade_mode').value;
+      if (mapTerrain && hillshadeMode === 'lidar') hillshadeMode = 'dem';
       const hillshadeUrl     = document.getElementById('export_hillshade_url').value.trim();
       if (hillshadeMode === 'url' && !hillshadeUrl) {
         document.getElementById('export_hillshade_url').style.borderColor = '#ff5a5a';
         document.getElementById('export_hillshade_url').focus();
         return;
       }
-      if (!eptPath) { alert('Select a point cloud dataset first.'); document.getElementById('export_run_btn').disabled = false; return; }
+      if (!mapTerrain && !eptPath) { alert('No point cloud selected: load one in the LiDAR panel, or set Terrain to "Map terrain".'); document.getElementById('export_run_btn').disabled = false; return; }
 
-      const caves = includeCaves ? _collectCavesInBbox(w, s, e, n) : { surveys: [] };
+      const caves = cavesMode === 'none' ? { surveys: [] }
+                  : _collectCavesInBbox(w, s, e, n, { walls: cavesMode === 'walls' });
 
       const body = {
         bbox: [w, s, e, n],
@@ -2906,13 +3035,25 @@
       document.getElementById('export_run_btn').disabled = true;
       document.getElementById('export_progress_wrap').style.display = 'block';
       document.getElementById('export_download_wrap').style.display = 'none';
-      _setProgress(0, 'Submitting…');
+      _setProgress(0, mapTerrain ? 'Reading the map terrain…' : 'Submitting…');
 
-      fetch('/api/export/terrain', {
+      // Map terrain: read the heights here first, then send them with the job.
+      const ready = !mapTerrain ? Promise.resolve(body)
+        : _sampleMapTerrain(w, s, e, n, mapCell, (f, cell, count) =>
+            _setProgress(Math.round(f * 10), `Reading the map terrain: ${Math.round(f * 100)}% of ${count.toLocaleString()} heights (${cell} m)…`))
+          .then(async g => {
+            body.dem_grid = { lon0: g.lon0, lat0: g.lat0, dlon: g.dlon, dlat: g.dlat, nx: g.nx, ny: g.ny, cell: g.cell,
+                              heights: await _floatsToBase64(g.heights) };
+            body.resolution = g.cell;
+            _setProgress(10, 'Submitting…');
+            return body;
+          });
+
+      ready.then(b => fetch('/api/export/terrain', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      })
+        body: JSON.stringify(b)
+      }))
       .then(r => r.json())
       .then(data => {
         if (data.error) throw new Error(data.error);

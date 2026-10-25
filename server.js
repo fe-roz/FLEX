@@ -692,13 +692,28 @@ function handleExportTerrain(req, res) {
             hillshade_url     = '',
             name              = '',
             z_offset          = null,        // the point clouds' vertical shift in FLEX (m)
+            dem_grid          = null,        // terrain from the map instead of the LiDAR (see below)
         } = params;
-        const hsMode  = ['lidar', 'url', 'none'].includes(hillshade_mode) ? hillshade_mode : 'lidar';
+        const hsMode  = ['lidar', 'dem', 'url', 'none'].includes(hillshade_mode) ? hillshade_mode : 'lidar';
+        // Map terrain: heights FLEX sampled from its own 3D terrain on a lon/lat
+        // grid, base64 float32 (row 0 = lat0). Then no point cloud is needed.
+        let demGrid = null;
+        if (dem_grid) {
+            const g = dem_grid, nx = g.nx | 0, ny = g.ny | 0;
+            const num = v => typeof v === 'number' && Number.isFinite(v);
+            if (!(nx >= 2 && ny >= 2 && nx * ny <= 20e6 && [g.lon0, g.lat0, g.dlon, g.dlat, g.cell].every(num)
+                  && g.dlon > 0 && g.dlat > 0 && g.cell > 0 && typeof g.heights === 'string'))
+                return jsonResponse(res, { ok: false, error: 'dem_grid is malformed' }, 400);
+            const bytes = Buffer.from(g.heights, 'base64');
+            if (bytes.length !== nx * ny * 4)
+                return jsonResponse(res, { ok: false, error: `dem_grid holds ${bytes.length} bytes, expected ${nx * ny * 4}` }, 400);
+            demGrid = { bytes, header: { lon0: g.lon0, lat0: g.lat0, dlon: g.dlon, dlat: g.dlat, nx, ny, cell: g.cell } };
+        }
         // Free text from the UI goes to the exporter as one argv element (spawn,
         // no shell), so only length and control characters need policing.
         const mapName = String(name || '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 60);
         if (!bbox || bbox.length !== 4) return jsonResponse(res, { ok: false, error: 'bbox required: [minLon,minLat,maxLon,maxLat]' }, 400);
-        if (!eptPath) return jsonResponse(res, { ok: false, error: 'eptPath is required — select a dataset in the export panel' }, 400);
+        if (!eptPath && !demGrid) return jsonResponse(res, { ok: false, error: 'eptPath is required — select a dataset in the export panel, or take the terrain from the map' }, 400);
 
         const jobId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
         if (!fs.existsSync(EXPORT_OUT_DIR)) fs.mkdirSync(EXPORT_OUT_DIR, { recursive: true });
@@ -719,9 +734,18 @@ function handleExportTerrain(req, res) {
             fs.writeFileSync(cavesFilePath, JSON.stringify(caves));
         }
 
+        // Map terrain grid: the heights and a small header next to them.
+        let demFiles = [];
+        if (demGrid) {
+            const bin = path.join(EXPORT_OUT_DIR, `dem_${jobId}.bin`), hdr = path.join(EXPORT_OUT_DIR, `dem_${jobId}.json`);
+            fs.writeFileSync(bin, demGrid.bytes);
+            fs.writeFileSync(hdr, JSON.stringify({ ...demGrid.header, file: path.basename(bin) }));
+            demFiles = [bin, hdr];
+        }
+
         const args = [
             EXPORT_SCRIPT,
-            '--ept',               ept,
+            ...(demGrid ? ['--dem-grid', demFiles[1]] : ['--ept', ept]),
             '--bbox',              ...bbox.map(String),
             '--out',               outZip,
             '--resolution',        String(resolution),
@@ -754,9 +778,9 @@ function handleExportTerrain(req, res) {
             });
         });
         proc.on('close', code => {
-            // Clean up temp caves file
-            if (cavesFilePath && fs.existsSync(cavesFilePath)) {
-                try { fs.unlinkSync(cavesFilePath); } catch(_) {}
+            // Clean up temp caves and map-terrain files
+            for (const f of [cavesFilePath, ...demFiles]) {
+                if (f && fs.existsSync(f)) { try { fs.unlinkSync(f); } catch(_) {} }
             }
             if (code === 0 && fs.existsSync(outZip)) {
                 _exportJobs[jobId].status = 'done';

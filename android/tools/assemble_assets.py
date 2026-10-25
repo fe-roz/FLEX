@@ -78,13 +78,21 @@ def main():
     os.makedirs(os.path.join(out_dir, 'libs'), exist_ok=True)
 
     # ── textures: sidecars if the export has them, else dig them out ─────────
-    need_html_scan = []
+    # `made` is what THIS export provided: a texture left in out_dir by the
+    # previous cave must not be picked up (an export without a hillshade once
+    # got the last cave's hillshade draped over its terrain).
+    need_html_scan, made = [], set()
     for const, out_name in (('TERRAIN_TEX_B64', 'tex_sat.jpg'),
                             ('TERRAIN_HS_B64',  'tex_hs.jpg')):
         src = os.path.join(export_dir, out_name)
         if os.path.exists(src):
             shutil.copyfile(src, os.path.join(out_dir, out_name))
+            made.add(out_name)
             print('  sidecar %-14s %s' % (out_name, human(os.path.getsize(src))))
+        elif os.path.exists(os.path.join(export_dir, 'tex_sat.jpg')):
+            # An export with sidecars has every texture it made beside it:
+            # no tex_hs.jpg means no hillshade, not one to dig out of the HTML.
+            print('  no %s in this export' % out_name)
         else:
             need_html_scan.append((const, out_name))
 
@@ -101,6 +109,7 @@ def main():
                 continue
             raw = base64.b64decode(b64)
             io.open(os.path.join(out_dir, out_name), 'wb').write(raw)
+            made.add(out_name)
             print('    %-16s %s base64 -> %s %s'
                   % (const, human(len(b64)), out_name, human(len(raw))))
             del b64, raw
@@ -136,8 +145,16 @@ def main():
             has_walls = True
             print('  packed  %-14s %s (from JSON walls in caves.json)' % ('walls.bin', human(len(data))))
     caves_json = json.dumps(caves, separators=(',', ':'))
-    io.open(os.path.join(out_dir, 'caves.json'), 'w', encoding='utf-8').write(caves_json)
-    print('  wrote  %-15s %s' % ('caves.json', human(os.path.getsize(os.path.join(out_dir, 'caves.json')))))
+    # The survey data goes inside the shell (below), which is all the viewer
+    # reads; a caves.json beside it was a second, unused copy -- 65 MB of APK
+    # for a large cave set.
+    stale_cj = os.path.join(out_dir, 'caves.json')
+    if os.path.exists(stale_cj):
+        try:
+            os.remove(stale_cj)
+        except OSError:
+            print('  (left an old caves.json in place: unused, delete it to save space)')
+    print('  caves         %s, inlined in viewer.html' % human(len(caves_json)))
 
     # ── three.js and friends: prefer the export's own copy ──────────────────
     libs_src = os.path.join(export_dir, 'libs')
@@ -156,7 +173,13 @@ def main():
     # Inside a <script>, "</" in any name would end the block early.
     caves_json = caves_json.replace('</', '<\\/')
 
-    has_hs = os.path.exists(os.path.join(out_dir, 'tex_hs.jpg'))
+    has_hs = 'tex_hs.jpg' in made
+    stale_hs = os.path.join(out_dir, 'tex_hs.jpg')
+    if not has_hs and os.path.exists(stale_hs):
+        try:
+            os.remove(stale_hs)              # the previous cave's; unreferenced either way
+        except OSError:
+            print('  (left the previous tex_hs.jpg in place: unreferenced, delete it to save space)')
     for old, new in [('"PLACEHOLDER_GLB_B64"', '"terrain.glb"'),
                      ('"PLACEHOLDER_TEX_B64"', '"tex_sat.jpg"'),
                      ('"PLACEHOLDER_HS_B64"',  '"tex_hs.jpg"' if has_hs else '"PLACEHOLDER_HS_B64"'),

@@ -2016,7 +2016,7 @@ function clearMeasure() {
 
 // The point under the tap: a station if one is hit, else the terrain surface.
 function measurePick() {
-  const st = _tapRay.intersectObjects(stationMeshes, false)[0];
+  const st = stationRayHits()[0];
   if (st) return { p: st.object._station.pos.clone(), name: st.object._station.name || 'station' };
   if (terrainGroup) {
     const t = _tapRay.intersectObject(terrainGroup, true)[0];
@@ -3231,7 +3231,7 @@ document.getElementById('btn-route').addEventListener('click', function () {
 // Called from onPointerTap when picking; returns true if it used the tap.
 function routePickTap() {
   if (!routePick) return false;
-  const hit = _tapRay.intersectObjects(stationMeshes, false)[0];
+  const hit = stationRayHits()[0];
   if (!hit) { showToast(routePick === 'from' ? 'Tap a station to start from' : 'Tap the end station'); return true; }
   const st = hit.object._station;
   if (routePick === 'from') {
@@ -4228,40 +4228,15 @@ function buildCaveLines() {
   // Mark end stations (only one connecting shot = survey terminus / splay end)
   stationMap.forEach(st => { st._isEnd = st.shots.length <= 1; });
 
-  // Build sphere + label for each unique station (in stationGroup, toggleable)
-  const stGeo    = new THREE.SphereGeometry(stR, 8, 8);
-  const hitGeo   = new THREE.SphereGeometry(stR * 4, 6, 6);   // 4× radius — easy finger tap
-  const hitMat   = new THREE.MeshBasicMaterial({ visible: false });  // invisible hit volume
+  // Station dots and names are made when first shown (ensureStationMesh /
+  // ensureStationLabel), not here: an export of a cave set can carry 150,000
+  // stations, and a mesh, a material and a canvas label for every one of them
+  // ran the page out of memory before the terrain ever appeared. Taps find
+  // stations along the tap ray (stationRayHits), so hidden ones still answer.
+  _stGeo = new THREE.SphereGeometry(stR, 8, 8);
+  _stR = stR; _lblH = lblH;
   stationMap.forEach((st, key) => {
     st._key = key;
-    const stMat = new THREE.MeshBasicMaterial({ color: st.hexColor, depthTest: false });
-    stMat.renderOrder = 2;
-    const mesh = new THREE.Mesh(stGeo, stMat);
-    mesh.renderOrder = -1;           // stays ahead of the terrain when reach makes it translucent
-    mesh.position.copy(st.pos);
-    mesh._station = st;
-    stationGroup.add(mesh);
-
-    // Invisible larger hit sphere — lives in stationHitGroup (always in scene,
-    // never toggled off) so raycasting always works regardless of display mode
-    const hitMesh = new THREE.Mesh(hitGeo, hitMat);
-    hitMesh.position.copy(st.pos);
-    hitMesh._station = st;
-    stationHitGroup.add(hitMesh);
-    stationMeshes.push(hitMesh);
-
-    // Label (only if station has a name)
-    let sprite = null;
-    if (st.name) {
-      const { sprite: sp, aspect } = makeTextSprite(st.name, st.hexColor);
-      sprite = sp;
-      sprite.position.copy(st.pos);
-      sprite.position.z += stR + lblH * 0.6;   // tight — just above the dot
-      sprite.scale.set(lblH * aspect, lblH, 1);
-      sprite._baseScale = sprite.scale.clone();  // store for mode/highlight scaling
-      stationGroup.add(sprite);
-    }
-
     // Lead marker: in leadGroup, shown and hidden with the area names (🏷️)
     if (st.leads && st.leads.length) {
       const lead = makeLeadSprite();
@@ -4269,10 +4244,8 @@ function buildCaveLines() {
       leadGroup.add(lead);
       st._leadSprite = lead;
     }
-
-    // Store refs on station for highlight/restore
-    st._mesh   = mesh;
-    st._sprite = sprite;
+    st._mesh = null;
+    st._sprite = null;
     st._baseScale = new THREE.Vector3(1, 1, 1);
   });
 
@@ -4384,12 +4357,84 @@ function isStationVisible(st) {
   return stationMode === 2 || (stationMode === 1 && st._isEnd);
 }
 
-function applyStationMode() {
+// Station dots and names, made on first show. One material per dot, since
+// colour modes, reach and routes tint and fade each on its own.
+let _stGeo = null, _stR = 0.3, _lblH = 0.8;
+const STATION_HIT_R = 4;          // tap target, × the dot radius
+const STATION_SHOW_CAP = 8000;    // dots shown at once; past it, those nearest the view
+const STATION_LABEL_CAP = 1500;   // names shown at once (each is its own texture), nearest first
+let _stationCapped = false, _stationCapTimer = null;
+function ensureStationMesh(st) {
+  if (st._mesh || !_stGeo) return st._mesh;
+  const mat = new THREE.MeshBasicMaterial({ color: st._dispColor || st.hexColor, depthTest: false });
+  const a = st._reachAlpha ?? 1;
+  mat.opacity = a; mat.transparent = a < 1;
+  const mesh = new THREE.Mesh(_stGeo, mat);
+  mesh.renderOrder = -1;             // stays ahead of the terrain when reach makes it translucent
+  mesh.position.copy(st.pos);
+  mesh._station = st;
+  stationGroup.add(mesh);
+  return (st._mesh = mesh);
+}
+function ensureStationLabel(st) {
+  if (st._sprite || !st.name) return st._sprite;
+  const { sprite, aspect } = makeTextSprite(st.name, st.hexColor);
+  sprite.position.copy(st.pos);
+  sprite.position.z += _stR + _lblH * 0.6;   // tight — just above the dot
+  sprite.scale.set(_lblH * aspect, _lblH, 1);
+  sprite._baseScale = sprite.scale.clone();  // for mode/highlight scaling
+  sprite.material.opacity = st._reachAlpha ?? 1;
+  stationGroup.add(sprite);
+  return (st._sprite = sprite);
+}
+function stationShown(st) { return isStationVisible(st) && !st._capHidden; }
+function stationNamed(st) { return stationShown(st) && stationNamesOn && !st._labelHidden; }
+
+// Stations under the tap ray, nearest first, shaped like Raycaster hits
+// ({ object: { _station }, distance, point }). Each station answers within
+// STATION_HIT_R dot radii, shown or not, as the old invisible hit spheres did.
+function stationRayHits() {
+  const ray = _tapRay.ray, o = ray.origin, d = ray.direction;
+  const R = _stR * STATION_HIT_R, R2 = R * R, out = [];
   stationMap.forEach(st => {
-    const show = isStationVisible(st);
+    const p = st.pos, vx = p.x - o.x, vy = p.y - o.y, vz = p.z - o.z;
+    const t = vx * d.x + vy * d.y + vz * d.z;
+    if (t < 0) return;
+    const m2 = vx * vx + vy * vy + vz * vz - t * t;
+    if (m2 > R2) return;
+    const dist = Math.max(0, t - Math.sqrt(R2 - m2));
+    out.push({ object: { _station: st }, distance: dist, point: ray.at(dist, new THREE.Vector3()) });
+  });
+  return out.sort((a, b) => a.distance - b.distance);
+}
+
+function applyStationMode() {
+  // Past STATION_SHOW_CAP, show the stations nearest the view (re-picked when
+  // the camera settles), so a whole cave set never builds 150,000 dots at once.
+  // Names have a tighter cap: each is a texture of its own, and thousands
+  // at once are unreadable anyway.
+  const want = [];
+  stationMap.forEach(st => { st._capHidden = false; st._labelHidden = false; if (isStationVisible(st)) want.push(st); });
+  _stationCapped = want.length > STATION_LABEL_CAP;
+  if (_stationCapped) {
+    const t = controls.target, dd = new Float64Array(want.length);
+    want.forEach((st, i) => { dd[i] = st.pos.distanceToSquared(t); });
+    const sorted = Float64Array.from(dd).sort();
+    const cutDot = want.length > STATION_SHOW_CAP ? sorted[STATION_SHOW_CAP - 1] : Infinity;
+    const cutName = sorted[STATION_LABEL_CAP - 1];
+    want.forEach((st, i) => { if (dd[i] > cutDot) st._capHidden = true; if (dd[i] > cutName) st._labelHidden = true; });
+    if (want.length > STATION_SHOW_CAP && !applyStationMode._told) {
+      applyStationMode._told = true;
+      showToast(`${want.length.toLocaleString()} stations: showing the ${STATION_SHOW_CAP.toLocaleString()} nearest the view`);
+    }
+  }
+  stationMap.forEach(st => {
+    const show = stationShown(st), named = stationNamed(st);
+    if (show) ensureStationMesh(st);
+    if (named) ensureStationLabel(st);
     if (st._mesh)   st._mesh.visible   = show;
     if (st._sprite) {
-      st._sprite.visible = show && stationNamesOn;
+      st._sprite.visible = named;
       if (show && st._sprite._baseScale) {
         // In ends-only mode labels are 2× bigger
         const factor = (stationMode === 1) ? 2 : 1;
@@ -4406,7 +4451,7 @@ function clearStationHighlight() {
     _selMesh.material.color.set(st._dispColor || st.hexColor);
     const ra = st._reachAlpha ?? 1;
     _selMesh.material.opacity = ra; _selMesh.material.transparent = ra < 1;
-    _selMesh.visible = isStationVisible(st);
+    _selMesh.visible = stationShown(st);
   }
   if (_selSprite) {
     const st = _selMesh ? _selMesh._station : null;
@@ -4418,7 +4463,7 @@ function clearStationHighlight() {
     }
     _selSprite.material.color.set(0xffffff);
     _selSprite.material.opacity = (st && st._reachAlpha) ?? 1;
-    _selSprite.visible = st ? isStationVisible(st) && stationNamesOn : false;
+    _selSprite.visible = st ? stationNamed(st) : false;
   }
   _selMesh = null; _selSprite = null;
 }
@@ -4426,6 +4471,8 @@ function clearStationHighlight() {
 function selectStation(st) {
   // Restore previous selection
   clearStationHighlight();
+  ensureStationMesh(st);
+  ensureStationLabel(st);
 
   // Highlight: 2× scale + white tint; always force-visible regardless of display mode
   if (st._mesh) {
@@ -4580,7 +4627,7 @@ function onPointerTap(e) {
 
   if (fieldPickOn) { fieldPickTap(); return; }
   if (reachPick) {
-    const h = _tapRay.intersectObjects(stationMeshes, false)[0];
+    const h = stationRayHits()[0];
     if (!h) { showToast('Tap a station to reach from'); return; }
     reachPick = false;
     selectStation(h.object._station);
@@ -4592,8 +4639,8 @@ function onPointerTap(e) {
   const fpHit = fieldHitTest(ndc);
   if (fpHit) { fieldShowPoint(fpHit); return; }
 
-  // Raycast against station sphere meshes
-  const hits = _tapRay.intersectObjects(stationMeshes, false);
+  // Stations along the tap ray
+  const hits = stationRayHits();
   if (hits.length) {
     const st = hits[0].object._station;
     if (_selMesh && _selMesh._station === st) {
@@ -5283,6 +5330,11 @@ function requestRender() { _needsRender = true; }
 // Wake triggers. OrbitControls' 'change' covers orbit/pan/zoom including the
 // damping tail, so the view still eases to a stop after the finger lifts.
 controls.addEventListener('change', () => wakeRender());
+controls.addEventListener('end', () => {
+  if (!_stationCapped) return;
+  clearTimeout(_stationCapTimer);
+  _stationCapTimer = setTimeout(() => { applyStationMode(); requestRender(); wakeRender(); }, 400);
+});
 ['pointerdown','pointermove','pointerup','wheel','touchstart','touchmove','keydown']
   .forEach(ev => window.addEventListener(ev, () => wakeRender(), { passive: true }));
 

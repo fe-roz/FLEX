@@ -29,6 +29,8 @@ VIEWER_LIBS = {
         'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
 }
 
+from viewer_inline import build_inline_viewer   # stdlib only (tools/rebuild_viewer.py)
+
 import numpy as np
 from scipy.interpolate import NearestNDInterpolator
 from scipy.stats import binned_statistic_2d
@@ -1008,6 +1010,71 @@ def build_lidar_hillshade(x, y, z, grid, covered_m2, mode='classified',
     return img, cell
 
 
+def dem_hillshade(dem, cell, grid, max_px=16384, target_cell=2.5, progress=print):
+    """Multi-directional hillshade of the terrain DEM itself, pixel-aligned with
+    the mesh. Quick, and the only hillshade there is when the terrain came from
+    the map rather than the LiDAR. A coarse DEM is upsampled (cubic) toward
+    `target_cell` first, so its pixels don't shade as blocks.
+    `dem` is build_dem's layout, [x, y] with y northward.
+    Returns (PIL grayscale image, cell size m).
+    """
+    from scipy.ndimage import zoom
+    surf = np.asarray(dem, dtype=np.float32).T[::-1]        # rows north -> south
+    long_side = max(surf.shape)
+    k = int(max(1, min(4, math.floor(cell / target_cell), max_px // max(1, long_side))))
+    if k > 1:
+        surf = zoom(surf, k, order=3)
+    pw, ph = grid.width / surf.shape[1], grid.height / surf.shape[0]
+    shade = multidirectional_hillshade(surf, pw, ph)
+    img = Image.fromarray(shade)
+    progress(f"  Hillshade from the terrain: {img.size[0]}x{img.size[1]} px, {cell / k:.2f} m")
+    return img, cell / k
+
+
+def load_map_dem(dem_grid_path, rect, cell, zone, south=False, progress=print):
+    """The terrain FLEX's map shows (Cesium), sampled in the browser on a
+    regular lon/lat grid, resampled onto the export's UTM cells (bilinear at
+    each cell centre). Heights are already in the map's frame, so no vertical
+    shift is applied. Returns (dem [x, y], x_bins, y_bins, x0, y0, valid).
+
+    `dem_grid_path`: JSON {lon0, lat0, dlon, dlat, nx, ny, file}; `file` (next
+    to it) holds ny rows of nx little-endian float32, row 0 = lat0, NaN where
+    the map had nothing.
+    """
+    hdr = json.loads(Path(dem_grid_path).read_text())
+    nx, ny = int(hdr['nx']), int(hdr['ny'])
+    raw = np.fromfile(Path(dem_grid_path).parent / hdr['file'], dtype='<f4')
+    if raw.size != nx * ny:
+        sys.exit(f"ERROR: map terrain grid holds {raw.size} heights, expected {nx}x{ny}")
+    H = raw.reshape(ny, nx).astype(np.float64)
+    x_min, y_min, x_max, y_max = rect
+    nxc = max(1, int(round((x_max - x_min) / cell)))
+    nyc = max(1, int(round((y_max - y_min) / cell)))
+    x_bins = x_min + np.arange(nxc + 1) * cell
+    y_bins = y_min + np.arange(nyc + 1) * cell
+    progress(f"  Map terrain: {nx}x{ny} samples -> {nxc}x{nyc} cells of {cell:g} m")
+    E, N = np.meshgrid(x_bins[:-1] + cell / 2, y_bins[:-1] + cell / 2, indexing='ij')
+    lat, lon = utm_to_latlon(E, N, zone, south)
+    fx = (lon - float(hdr['lon0'])) / float(hdr['dlon'])
+    fy = (lat - float(hdr['lat0'])) / float(hdr['dlat'])
+    inside = (fx >= 0) & (fy >= 0) & (fx <= nx - 1) & (fy <= ny - 1)
+    i0 = np.clip(np.floor(fx).astype(np.int64), 0, max(0, nx - 2))
+    j0 = np.clip(np.floor(fy).astype(np.int64), 0, max(0, ny - 2))
+    u = np.clip(fx - i0, 0, 1); v = np.clip(fy - j0, 0, 1)
+    i1 = np.minimum(i0 + 1, nx - 1); j1 = np.minimum(j0 + 1, ny - 1)
+    dem = (H[j0, i0] * (1 - u) * (1 - v) + H[j0, i1] * u * (1 - v)
+           + H[j1, i0] * (1 - u) * v + H[j1, i1] * u * v)
+    dem[~inside] = np.nan
+    valid = np.isfinite(dem)
+    if not valid.any():
+        sys.exit("ERROR: the map terrain grid does not cover the export rectangle")
+    if not valid.all():
+        rows, cols = dem.shape
+        xi, yi = np.meshgrid(np.arange(rows), np.arange(cols), indexing='ij')
+        dem[~valid] = NearestNDInterpolator(list(zip(xi[valid], yi[valid])), dem[valid])(xi[~valid], yi[~valid])
+    return dem, x_bins, y_bins, x_min, y_min, valid
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Step 5 — Compute UV coordinates
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1120,74 +1187,6 @@ def get_viewer_libs(progress=print):
             progress(f"  {fname}: cached ({local.stat().st_size//1024} KB)")
         result[zip_path] = local
     return result
-
-
-def build_inline_viewer(glb_path, tex_b64, caves_data, viewer_libs, progress=print,
-                        hs_b64=None, walls_bytes=None):
-    """
-    Build a fully self-contained HTML file:
-      - Three.js libs inlined as <script> blocks
-      - terrain.glb (geometry only) embedded as base64
-      - satellite texture embedded as separate base64 (flipY=false in viewer)
-      - optional hillshade texture embedded as TERRAIN_HS_B64
-      - caves_data embedded as a JSON literal
-
-    The result opens directly in any mobile browser with no server needed.
-    """
-    import base64
-
-    viewer_html_path = VIEWER_BUILD_DIR / 'viewer.html'
-    if not viewer_html_path.exists():
-        progress("  WARNING: viewer.html not found in viewer_build/")
-        return '<p>viewer.html missing. Run export from FLEX directory.</p>'
-
-    html = viewer_html_path.read_text(encoding='utf-8')
-
-    # 1. Inline Three.js lib <script src=...> tags
-    for zip_path, local in viewer_libs.items():
-        fname = Path(zip_path).name
-        src_tag = f'<script src="libs/{fname}"></script>'
-        if src_tag not in html:
-            continue
-        if local and local.exists():
-            js = local.read_text(encoding='utf-8', errors='replace')
-            html = html.replace(src_tag, f'<script>\n{js}\n</script>')
-            progress(f"  Inlined {fname} ({len(js)//1024} KB)")
-        else:
-            progress(f"  WARNING: {fname} not available — viewer may not work offline")
-
-    # 2. Embed terrain.glb as base64
-    progress(f"  Encoding terrain.glb as base64...")
-    glb_bytes = Path(glb_path).read_bytes()
-    glb_b64   = base64.b64encode(glb_bytes).decode('ascii')
-    progress(f"  GLB base64: {len(glb_b64)//1024} KB")
-    html = html.replace('"PLACEHOLDER_GLB_B64"', f'"{glb_b64}"')
-
-    # 3. Embed satellite texture as separate base64 (viewer applies with flipY=false)
-    progress(f"  Embedding satellite texture ({len(tex_b64)//1024} KB)...")
-    html = html.replace('"PLACEHOLDER_TEX_B64"', f'"{tex_b64}"')
-
-    # 4. Embed hillshade texture if provided
-    if hs_b64:
-        progress(f"  Embedding hillshade texture ({len(hs_b64)//1024} KB)...")
-        html = html.replace('"PLACEHOLDER_HS_B64"', f'"{hs_b64}"')
-    # (if not provided the placeholder stays, viewer JS will detect and hide the toggle)
-
-    # 4b. Embed passage walls (walls.bin) as base64 — same bytes as the sidecar
-    if walls_bytes:
-        walls_b64 = base64.b64encode(walls_bytes).decode('ascii')
-        progress(f"  Embedding passage walls ({len(walls_b64)//1024} KB)...")
-        html = html.replace('"PLACEHOLDER_WALLS_B64"', f'"{walls_b64}"')
-
-    # 5. Embed caves data as JSON literal
-    caves_json = json.dumps(caves_data, separators=(',', ':'))
-    # Inside a <script>, "</" in any string (a survey or map name) would end
-    # the block early. "<\/" is the same string to JavaScript.
-    caves_json = caves_json.replace('</', '<\\/')
-    html = html.replace('PLACEHOLDER_CAVES_JSON', caves_json)
-
-    progress(f"  Viewer HTML total: {len(html)//1024} KB")
-    return html
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1340,7 +1339,10 @@ def convert_caves(caves_path, utm_center_e, utm_center_n, progress=print, zone=N
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--ept',         required=True, help='Path to ept.json')
+    ap.add_argument('--ept',         default=None, help='Path to ept.json (the LiDAR terrain)')
+    ap.add_argument('--dem-grid',    default=None,
+                    help='Terrain from the map instead of the LiDAR: a grid FLEX sampled '
+                         '(JSON header; see load_map_dem). No point cloud is read.')
     ap.add_argument('--bbox',        required=True, nargs=4, type=float,
                     metavar=('minLon','minLat','maxLon','maxLat'))
     ap.add_argument('--caves',       default=None,  help='Path to caves.json (PLT lines)')
@@ -1358,20 +1360,30 @@ def main():
                          '(10m radius window). Set to 0 to disable. Default: 1.5')
     ap.add_argument('--satellite-source', default='bing', choices=['esri', 'bing'],
                     help='Satellite imagery source: esri (default) or bing')
-    ap.add_argument('--hillshade', default=None, choices=['none', 'lidar', 'url'],
+    ap.add_argument('--hillshade', default=None, choices=['none', 'lidar', 'dem', 'url'],
         help='Hillshade layer: lidar (built from the ground returns; default), '
-             'url (tiles from --hillshade-url) or none. If omitted: url when '
-             '--hillshade-url is given, otherwise lidar.')
+             'dem (shaded terrain DEM, quick), url (tiles from --hillshade-url) '
+             'or none. If omitted: url when --hillshade-url is given, otherwise '
+             'lidar. With --dem-grid, lidar becomes dem.')
     ap.add_argument('--hillshade-url', default='',
         help='XYZ tile URL template for --hillshade url (use {z}/{x}/{y}).')
     ap.add_argument('--hillshade-max-px', type=int, default=16384,
         help='Longest side of the LiDAR hillshade texture (default 16384, the '
              'largest single texture most GPUs accept).')
     args = ap.parse_args()
+    map_terrain = bool(args.dem_grid)
+    if not map_terrain and not args.ept:
+        sys.exit("ERROR: give --ept (LiDAR terrain) or --dem-grid (map terrain)")
     hs_mode = args.hillshade or ('url' if args.hillshade_url else 'lidar')
     if hs_mode == 'url' and not args.hillshade_url:
-        print("[export] --hillshade url without --hillshade-url; building it from LiDAR instead")
+        print("[export] --hillshade url without --hillshade-url; building it from the terrain instead")
         hs_mode = 'lidar'
+    if map_terrain and hs_mode == 'lidar':
+        hs_mode = 'dem'                    # no LiDAR read: shade the map's terrain
+    if map_terrain:
+        hdr = json.loads(Path(args.dem_grid).read_text())
+        args.resolution = float(hdr.get('cell') or args.resolution)
+        print(f"[export] Terrain from the map, {args.resolution:g} m cells (no point cloud read)")
     map_name = (args.name or '').strip()
 
     minLon, minLat, maxLon, maxLat = args.bbox
@@ -1402,43 +1414,57 @@ def main():
         print("[0/7] Downloading viewer libs...")
         viewer_libs = get_viewer_libs(progress=lambda m: print(f"[0/7] {m}"))
 
-        # 1. Fetch points
-        x, y, z, r, g, b, ground_mode = fetch_ept_points(
-            args.ept, q_rect, bbox_latlon=q_ll,
-            progress=lambda m: print(f"[1/7] {m}"),
-            zone=zone, south=south, with_mode=True,
-        )
-        del r, g, b
-
-        # 2. Build DEM on the rectangle, and find where the dataset runs out
-        dem, x_bins, y_bins, x0, y0, valid = build_dem(
-            x, y, z, args.resolution,
-            progress=lambda m: print(f"[2/7] {m}"),
-            extent=rect, return_valid=True,
-        )
-        drop = border_nodata_mask(valid, args.resolution,
-                                  progress=lambda m: print(f"[2/7] {m}"))
-        covered_m2 = float((~drop).sum()) * args.resolution ** 2
-        del valid
-
-        # Spike filter: remove upward outliers (trees/buildings) while preserving
-        # downward features (caves, sinkholes).
-        if args.spike_threshold > 0:
-            dem = filter_spikes(
-                dem, args.resolution,
-                radius_m=10.0, threshold_m=args.spike_threshold,
-                progress=lambda m: print(f"[2/7] {m}")
-            )
-
-        # Apply the same Z correction FLEX applies to Potree point clouds.
-        # Default (both usgsRef and egm96 OFF): -32 * 0.766 ~ -24.5 m.
-        # Cave survey positions were established against the corrected display,
-        # so terrain must be shifted by the same amount to align.
-        # FLEX sends the shift its point clouds have now (--z-offset: EGM96 /
-        # USGS / default toggles); without it, the default.
         FLEX_PC_Z_OFFSET = args.z_offset if args.z_offset is not None else -32 * 0.766  # metres
-        dem += FLEX_PC_Z_OFFSET
-        print(f"[2/7] Applied FLEX point-cloud Z offset: {FLEX_PC_Z_OFFSET:.3f} m")
+        if map_terrain:
+            # 1-2. The map's terrain, sampled by FLEX: already a bare-earth DEM in
+            # the frame the caves are drawn in, so no cloth, spikes or shift.
+            print("[1/7] Terrain from the map: no point cloud to read")
+            x = y = z = None
+            ground_mode = 'map'
+            dem, x_bins, y_bins, x0, y0, valid = load_map_dem(
+                args.dem_grid, rect, args.resolution, zone, south,
+                progress=lambda m: print(f"[2/7] {m}"))
+            drop = border_nodata_mask(valid, args.resolution,
+                                      progress=lambda m: print(f"[2/7] {m}"))
+            covered_m2 = float((~drop).sum()) * args.resolution ** 2
+            del valid
+        else:
+            # 1. Fetch points
+            x, y, z, r, g, b, ground_mode = fetch_ept_points(
+                args.ept, q_rect, bbox_latlon=q_ll,
+                progress=lambda m: print(f"[1/7] {m}"),
+                zone=zone, south=south, with_mode=True,
+            )
+            del r, g, b
+
+            # 2. Build DEM on the rectangle, and find where the dataset runs out
+            dem, x_bins, y_bins, x0, y0, valid = build_dem(
+                x, y, z, args.resolution,
+                progress=lambda m: print(f"[2/7] {m}"),
+                extent=rect, return_valid=True,
+            )
+            drop = border_nodata_mask(valid, args.resolution,
+                                      progress=lambda m: print(f"[2/7] {m}"))
+            covered_m2 = float((~drop).sum()) * args.resolution ** 2
+            del valid
+
+            # Spike filter: remove upward outliers (trees/buildings) while preserving
+            # downward features (caves, sinkholes).
+            if args.spike_threshold > 0:
+                dem = filter_spikes(
+                    dem, args.resolution,
+                    radius_m=10.0, threshold_m=args.spike_threshold,
+                    progress=lambda m: print(f"[2/7] {m}")
+                )
+
+            # Apply the same Z correction FLEX applies to Potree point clouds.
+            # Default (both usgsRef and egm96 OFF): -32 * 0.766 ~ -24.5 m.
+            # Cave survey positions were established against the corrected display,
+            # so terrain must be shifted by the same amount to align.
+            # FLEX sends the shift its point clouds have now (--z-offset: EGM96 /
+            # USGS / default toggles); without it, the default.
+            dem += FLEX_PC_Z_OFFSET
+            print(f"[2/7] Applied FLEX point-cloud Z offset: {FLEX_PC_Z_OFFSET:.3f} m")
 
         # Terrain centre in UTM (for cave coordinate conversion)
         utm_center_e = (x_bins[0] + x_bins[-1]) / 2
@@ -1478,6 +1504,18 @@ def main():
                 del hs_img
             except Exception as e:
                 print(f"[4b/7] WARNING: LiDAR hillshade failed ({e}) - skipping")
+        elif hs_mode == 'dem':
+            print("[4b/7] Building hillshade from the terrain...")
+            try:
+                hs_img, hs_cell = dem_hillshade(dem, args.resolution, grid,
+                                                max_px=args.hillshade_max_px,
+                                                progress=lambda m: print(f"[4b/7] {m}"))
+                hs_buf = _hs_io.BytesIO()
+                hs_img.save(hs_buf, format='JPEG', quality=90)
+                hs_bytes = hs_buf.getvalue()
+                del hs_img
+            except Exception as e:
+                print(f"[4b/7] WARNING: terrain hillshade failed ({e}) - skipping")
         elif hs_mode == 'url':
             print("[4b/7] Fetching hillshade tiles...")
             try:
@@ -1561,6 +1599,8 @@ def main():
                 "extent_utm":   [float(grid.e0), float(grid.n0), float(grid.e1), float(grid.n1)],
                 "hillshade":    (hs_mode if hs_bytes else None),
                 "hillshade_cell_m": (float(hs_cell) if hs_cell else None),
+                "terrain":      ('map' if map_terrain else 'lidar'),
+                "terrain_cell_m": float(args.resolution),
             }
             # Passage walls travel as a binary sidecar (cave_walls.py), not as
             # JSON: a third of the size, and the viewer loads it with no parse.

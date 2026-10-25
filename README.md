@@ -60,7 +60,8 @@ gitignored.
 ## Portable offline viewer
 
 The export dialog bakes the current area into a standalone viewer: a terrain
-mesh from LiDAR, satellite and optional hillshade imagery, and the cave surveys.
+mesh from LiDAR (or, for big areas, the map's own 3D terrain, with no point
+cloud needed), satellite and optional hillshade imagery, and the cave surveys.
 
 ```
 python export_terrain.py --ept <ept.json> --bbox <minLon> <minLat> <maxLon> <maxLat> \

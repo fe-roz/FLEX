@@ -19,11 +19,11 @@ opened and the app declares no `INTERNET` permission, so it is provably offline.
 
 ```
 app/src/main/assets/flex/
-├── viewer.html      slim shell (~75 KB) — assets referenced, not inlined
+├── viewer.html      shell with the survey data inlined; other assets referenced
 ├── terrain.glb      terrain geometry
 ├── tex_sat.jpg      satellite texture
-├── tex_hs.jpg       hillshade texture
-├── caves.json       survey data
+├── tex_hs.jpg       hillshade texture (when the export has one)
+├── walls.bin        passage walls (when the export has them)
 └── libs/            three.js, OrbitControls, GLTFLoader, jszip
 ```
 
