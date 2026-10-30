@@ -39,6 +39,8 @@ On Windows, `FLEX.bat` starts the server and a browser together. Copy
 `Tokens.js.example` to `Tokens.js` and fill in your own API keys; both are
 gitignored.
 
+**Your own caves:** [docs/GETTING-STARTED-CAVES.md](docs/GETTING-STARTED-CAVES.md) walks through projects, importing and placing surveys, surface features, CalTopo and sharing. An AI agent setting FLEX up with someone's data can follow [docs/AGENT-CONVERT-SURVEYS.md](docs/AGENT-CONVERT-SURVEYS.md): `tools/shots_to_plt.py` turns a CSV of shots into a Compass `.plt`, and `tools/make_flex_project.py` builds a whole project (caves placed, surface features, leads, estimated passages) as one file FLEX imports.
+
 ---
 
 ## What it does
