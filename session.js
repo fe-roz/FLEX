@@ -2,6 +2,10 @@
 // Saves camera position, layer state, loaded point cloud URLs, and misc settings to localStorage.
 
 const SESSION_KEY          = 'flex_session_v1';
+// One session per project (camera, layers, styles… are personal, per project);
+// "no project" keeps the original key, so FLEX without projects is unchanged.
+const _pidNow = () => { try { return localStorage.getItem('flex.project') || ''; } catch (_) { return ''; } };
+const _key = pid => SESSION_KEY + (pid ? '@' + pid : '');
 const SCHEMA_VERSION       = 3;  // v3: unified layer list (no base/overlay split)
 const AUTOSAVE_INTERVAL_MS = 15_000;  // periodic save every 15s
 const CAMERA_SETTLE_MS     = 2_000;   // debounce after camera stops moving
@@ -111,7 +115,8 @@ export function saveSession() {
       savedAt:         Date.now(),
       camera:          _collectCamera(),
       layers:          _collectLayers(),
-      pointClouds:     Array.from(_loadedPcUrls),
+      pointClouds:     window._ws ? window._ws.pointClouds() : Array.from(_loadedPcUrls),
+      caves:           window._ws ? window._ws.caveState() : undefined,   // names + personal style
       caltopoUrl:      _caltopoUrl,
       caltopoInterval: _caltopoInterval,
       dataFiles:       _dataFiles,
@@ -121,8 +126,11 @@ export function saveSession() {
       pointBudget:     _pointBudget,
       searchPins:      _searchPins,
     };
-    localStorage.setItem(SESSION_KEY, JSON.stringify(snapshot));
+    localStorage.setItem(_key(_pidNow()), JSON.stringify(snapshot));
     _flashIndicator(true);
+    // A project open: what it loads (caves and their placement, point clouds,
+    // CalTopo, data files) is saved into the project too — only what changed.
+    if (window._pjWs && _pidNow()) window._pjWs.autosave();
   } catch (e) {
     console.warn('[session] save failed:', e);
     _flashIndicator(false);
@@ -133,9 +141,9 @@ export function saveSession() {
  * Read and parse the saved session from localStorage.
  * Returns the parsed object or null. Pure / stateless.
  */
-export function loadSession() {
+export function loadSession(pid) {
   try {
-    const raw = localStorage.getItem(SESSION_KEY);
+    const raw = localStorage.getItem(_key(pid === undefined ? _pidNow() : pid));
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || parsed.schemaVersion !== SCHEMA_VERSION) return null;

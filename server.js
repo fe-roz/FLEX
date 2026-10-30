@@ -7,6 +7,8 @@ const { exec } = require('child_process');
 const os = require('os');
 
 const settings = require('./settings');
+const library = require('./library');
+const caltopoApi = require('./caltopo_api');   // private CalTopo maps (signed requests; key in user_files)
 
 // ── CalTopo session cookie (stored in memory + persisted to file) ─────────────
 const COOKIE_FILE = path.join(__dirname, '.caltopo_session');
@@ -102,6 +104,11 @@ const server = http.createServer((req, res) => {
         handleLidarStatus(req, res, sanitizedPath.slice('/api/lidar/status/'.length));
     } else if (sanitizedPath.startsWith('/api/lidar/result/') && req.method === 'GET') {
         handleLidarResult(req, res, sanitizedPath.slice('/api/lidar/result/'.length));
+    // ── Project library (notes, leads, documents; library.js) ────────────────
+    } else if (sanitizedPath.startsWith('/api/caltopo/')) {
+        caltopoApi.handle(req, res, sanitizedPath.slice('/api/caltopo/'.length), parsedUrl.query);
+    } else if (sanitizedPath.startsWith('/api/lib/')) {
+        library.handle(req, res, sanitizedPath.slice('/api/lib/'.length), parsedUrl.query);
     // ── CORS preflight ────────────────────────────────────────────────────────
     } else if (req.method === 'OPTIONS') {
         res.writeHead(204, {
@@ -304,79 +311,82 @@ function getContentType(filePath) {
 // GET /api/declination?lat=XX&lon=YY&year=YYYY (year optional, defaults to now)
 
 function wmmDeclination(latDeg, lonDeg, altM, yearDecimal) {
-    // WMM2025 Gauss coefficients [n, m, g(nT), h(nT), gdot(nT/yr), hdot(nT/yr)]
-    // Source: NOAA NCEI WMM2025 (released Dec 2024), epoch 2025.0
-    const COF = [
-        [1,0,-29351.8,0.0,12.5,0.0],[1,1,-1410.8,4545.4,4.9,-20.8],
-        [2,0,-2556.6,0.0,-12.5,0.0],[2,1,2951.6,-3133.4,-5.7,-7.4],[2,2,1649.3,-815.1,-0.7,10.4],
-        [3,0,1249.2,0.0,0.0,0.0],[3,1,-603.0,-56.2,-1.0,0.3],[3,2,482.0,237.7,-0.2,-0.6],[3,3,-43.5,-547.4,-1.1,0.1],
-        [4,0,427.2,0.0,-1.0,0.0],[4,1,-185.8,282.0,0.7,-0.1],[4,2,-88.6,221.8,-2.0,-2.8],[4,3,-88.4,-27.6,0.4,0.5],[4,4,72.3,-198.2,0.7,0.1],
-        [5,0,-166.7,0.0,-0.4,0.0],[5,1,-70.1,-28.2,0.1,-0.3],[5,2,-40.1,50.5,0.4,0.0],[5,3,80.5,20.5,0.2,0.6],[5,4,-12.6,80.6,0.0,-0.1],[5,5,-14.6,-25.6,-0.2,0.1],
-        [6,0,-23.6,0.0,0.0,0.0],[6,1,73.9,-27.8,-0.3,-0.2],[6,2,118.5,-34.2,0.5,0.7],[6,3,-90.0,31.9,-0.9,0.1],[6,4,0.3,6.2,0.3,-0.1],[6,5,12.9,-13.3,-0.3,-0.2],[6,6,-17.8,-8.3,0.1,0.5],
-        [7,0,79.1,0.0,0.1,0.0],[7,1,-48.5,8.3,-0.2,0.1],[7,2,23.5,-15.3,-0.5,0.0],[7,3,-0.6,-1.5,-0.2,0.1],[7,4,-15.7,12.9,0.1,-0.2],[7,5,2.4,-1.6,0.1,0.0],[7,6,7.1,-18.0,0.2,0.1],[7,7,7.6,-11.5,0.0,0.2],
-        [8,0,24.9,0.0,0.0,0.0],[8,1,14.4,-7.9,-0.4,0.0],[8,2,-3.3,-7.0,0.0,0.0],[8,3,6.3,1.7,0.1,-0.1],[8,4,-5.0,9.8,0.0,0.1],[8,5,-3.0,0.7,0.0,0.0],[8,6,-1.2,-0.9,0.0,0.0],[8,7,4.3,-9.3,0.0,0.0],[8,8,-1.7,3.4,-0.1,0.0],
-        [9,0,5.0,0.0,0.0,0.0],[9,1,-29.1,5.4,0.5,0.0],[9,2,-8.6,-2.4,0.2,0.1],[9,3,6.6,-7.5,-0.2,0.0],[9,4,-4.0,1.2,0.0,0.0],[9,5,0.5,4.8,0.0,0.0],[9,6,1.5,-4.2,0.0,0.0],[9,7,-8.7,-1.3,-0.1,0.0],[9,8,-3.1,0.0,0.0,0.0],[9,9,0.0,-3.1,0.0,0.0],
-        [10,0,-0.2,0.0,0.0,0.0],[10,1,4.1,1.7,0.0,0.0],[10,2,1.0,-0.8,0.0,0.0],[10,3,3.3,2.8,0.0,0.0],[10,4,0.0,2.3,0.0,0.0],[10,5,-0.3,-2.7,0.0,0.0],[10,6,0.5,-1.0,0.0,0.0],[10,7,0.2,-2.5,0.0,0.0],[10,8,0.0,0.2,0.0,0.0],[10,9,0.4,-0.1,0.0,0.0],[10,10,-0.7,0.5,0.0,0.0],
-        [11,0,-0.2,0.0,0.0,0.0],[11,1,0.0,0.9,0.0,0.0],[11,2,0.1,0.3,0.0,0.0],[11,3,0.7,-0.9,0.0,0.0],[11,4,0.6,0.2,0.0,0.0],[11,5,-0.4,0.8,0.0,0.0],[11,6,-0.4,0.2,0.0,0.0],[11,7,0.2,-0.2,0.0,0.0],[11,8,0.0,0.2,0.0,0.0],[11,9,0.4,-0.3,0.0,0.0],[11,10,0.2,0.1,0.0,0.0],[11,11,-0.1,0.0,0.0,0.0],
-        [12,0,0.1,0.0,0.0,0.0],[12,1,0.0,0.1,0.0,0.0],[12,2,-0.2,0.1,0.0,0.0],[12,3,0.5,-0.2,0.0,0.0],[12,4,-0.2,0.1,0.0,0.0],[12,5,0.5,0.2,0.0,0.0],[12,6,0.2,-0.1,0.0,0.0],[12,7,0.1,-0.2,0.0,0.0],[12,8,0.0,0.0,0.0,0.0],[12,9,-0.1,0.1,0.0,0.0],[12,10,0.1,0.0,0.0,0.0],[12,11,0.0,-0.1,0.0,0.0],[12,12,0.0,0.0,0.0,0.0],
-    ];
-    const EPOCH = 2025.0, NMAX = 12, R0 = 6371.2, D2R = Math.PI / 180;
-    const dt = (yearDecimal || EPOCH) - EPOCH;
+  const COF = [
+    [1,0,-29351.8,0.0,12.0,0.0],[1,1,-1410.8,4545.4,9.7,-21.5],[2,0,-2556.6,0.0,-11.6,0.0],[2,1,2951.1,-3133.6,-5.2,-27.7],
+    [2,2,1649.3,-815.1,-8.0,-12.1],[3,0,1361.0,0.0,-1.3,0.0],[3,1,-2404.1,-56.6,-4.2,4.0],[3,2,1243.8,237.5,0.4,-0.3],
+    [3,3,453.6,-549.5,-15.6,-4.1],[4,0,895.0,0.0,-1.6,0.0],[4,1,799.5,278.6,-2.4,-1.1],[4,2,55.7,-133.9,-6.0,4.1],
+    [4,3,-281.1,212.0,5.6,1.6],[4,4,12.1,-375.6,-7.0,-4.4],[5,0,-233.2,0.0,0.6,0.0],[5,1,368.9,45.4,1.4,-0.5],
+    [5,2,187.2,220.2,0.0,2.2],[5,3,-138.7,-122.9,0.6,0.4],[5,4,-142.0,43.0,2.2,1.7],[5,5,20.9,106.1,0.9,1.9],
+    [6,0,64.4,0.0,-0.2,0.0],[6,1,63.8,-18.4,-0.4,0.3],[6,2,76.9,16.8,0.9,-1.6],[6,3,-115.7,48.8,1.2,-0.4],
+    [6,4,-40.9,-59.8,-0.9,0.9],[6,5,14.9,10.9,0.3,0.7],[6,6,-60.7,72.7,0.9,0.9],[7,0,79.5,0.0,-0.0,0.0],[7,1,-77.0,-48.9,-0.1,0.6],
+    [7,2,-8.8,-14.4,-0.1,0.5],[7,3,59.3,-1.0,0.5,-0.8],[7,4,15.8,23.4,-0.1,0.0],[7,5,2.5,-7.4,-0.8,-1.0],[7,6,-11.1,-25.1,-0.8,0.6],
+    [7,7,14.2,-2.3,0.8,-0.2],[8,0,23.2,0.0,-0.1,0.0],[8,1,10.8,7.1,0.2,-0.2],[8,2,-17.5,-12.6,0.0,0.5],[8,3,2.0,11.4,0.5,-0.4],
+    [8,4,-21.7,-9.7,-0.1,0.4],[8,5,16.9,12.7,0.3,-0.5],[8,6,15.0,0.7,0.2,-0.6],[8,7,-16.8,-5.2,-0.0,0.3],[8,8,0.9,3.9,0.2,0.2],
+    [9,0,4.6,0.0,-0.0,0.0],[9,1,7.8,-24.8,-0.1,-0.3],[9,2,3.0,12.2,0.1,0.3],[9,3,-0.2,8.3,0.3,-0.3],[9,4,-2.5,-3.3,-0.3,0.3],
+    [9,5,-13.1,-5.2,0.0,0.2],[9,6,2.4,7.2,0.3,-0.1],[9,7,8.6,-0.6,-0.1,-0.2],[9,8,-8.7,0.8,0.1,0.4],[9,9,-12.9,10.0,-0.1,0.1],
+    [10,0,-1.3,0.0,0.1,0.0],[10,1,-6.4,3.3,0.0,0.0],[10,2,0.2,0.0,0.1,-0.0],[10,3,2.0,2.4,0.1,-0.2],[10,4,-1.0,5.3,-0.0,0.1],
+    [10,5,-0.6,-9.1,-0.3,-0.1],[10,6,-0.9,0.4,0.0,0.1],[10,7,1.5,-4.2,-0.1,0.0],[10,8,0.9,-3.8,-0.1,-0.1],
+    [10,9,-2.7,0.9,-0.0,0.2],[10,10,-3.9,-9.1,-0.0,-0.0],[11,0,2.9,0.0,0.0,0.0],[11,1,-1.5,0.0,-0.0,-0.0],
+    [11,2,-2.5,2.9,0.0,0.1],[11,3,2.4,-0.6,0.0,-0.0],[11,4,-0.6,0.2,0.0,0.1],[11,5,-0.1,0.5,-0.1,-0.0],[11,6,-0.6,-0.3,0.0,-0.0],
+    [11,7,-0.1,-1.2,-0.0,0.1],[11,8,1.1,-1.7,-0.1,-0.0],[11,9,-1.0,-2.9,-0.1,0.0],[11,10,-0.2,-1.8,-0.1,0.0],
+    [11,11,2.6,-2.3,-0.1,0.0],[12,0,-2.0,0.0,0.0,0.0],[12,1,-0.2,-1.3,0.0,-0.0],[12,2,0.3,0.7,-0.0,0.0],[12,3,1.2,1.0,-0.0,-0.1],
+    [12,4,-1.3,-1.4,-0.0,0.1],[12,5,0.6,-0.0,-0.0,-0.0],[12,6,0.6,0.6,0.1,-0.0],[12,7,0.5,-0.1,-0.0,-0.0],
+    [12,8,-0.1,0.8,0.0,0.0],[12,9,-0.4,0.1,0.0,-0.0],[12,10,-0.2,-1.0,-0.1,-0.0],[12,11,-1.3,0.1,-0.0,0.0],
+    [12,12,-0.7,0.2,-0.1,-0.1],
+  ];
+  const EPOCH = 2025.0, NMAX = 12, A = 6371.2, D2R = Math.PI / 180;
+  const dt = (yearDecimal || EPOCH) - EPOCH;
+  const G = [], H = [];
+  for (let n = 0; n <= NMAX; n++) { G.push(new Float64Array(NMAX + 1)); H.push(new Float64Array(NMAX + 1)); }
+  for (const [n, m, g, h, gd, hd] of COF) { G[n][m] = g + gd * dt; H[n][m] = h + hd * dt; }
 
-    // Apply secular variation to get time-adjusted coefficients
-    const G = [], H = [];
-    for (let i = 0; i <= NMAX+1; i++) { G.push(new Float64Array(NMAX+2)); H.push(new Float64Array(NMAX+2)); }
-    for (const [n, m, g, h, gd, hd] of COF) { G[n][m] = g + gd*dt; H[n][m] = h + hd*dt; }
+  // Geodetic (WGS84) to geocentric spherical.
+  const a = 6378.137, f = 1 / 298.257223563, e2 = f * (2 - f);
+  const phi = latDeg * D2R, lam = lonDeg * D2R, hKm = (altM || 0) / 1000;
+  const sP = Math.sin(phi), cP = Math.cos(phi);
+  const Rc = a / Math.sqrt(1 - e2 * sP * sP);
+  const p = (Rc + hKm) * cP, z = (Rc * (1 - e2) + hKm) * sP;
+  const r = Math.hypot(p, z);
+  const latC = Math.asin(z / r);                       // geocentric latitude
+  const CT = Math.sin(latC), ST = Math.cos(latC);      // cos/sin of colatitude
 
-    // WGS84 geodetic -> geocentric spherical
-    const a = 6378.137, f = 1/298.257223563, e2 = 2*f - f*f;
-    const phi = latDeg * D2R, lam = lonDeg * D2R, altKm = (altM || 0) / 1000;
-    const sinPhi = Math.sin(phi), cosPhi = Math.cos(phi);
-    const Nell = a / Math.sqrt(1 - e2 * sinPhi * sinPhi);
-    const p = (Nell + altKm) * cosPhi;
-    const zc = (Nell * (1 - e2) + altKm) * sinPhi;
-    const r = Math.sqrt(p*p + zc*zc);
-    const theta = Math.acos(zc / r); // geocentric colatitude
-    const ST = Math.sin(theta), CT = Math.cos(theta);
-
-    // Schmidt quasi-normal Legendre polynomials P[n][m] and derivatives dP/dtheta
-    const P = [], DP = [];
-    for (let i = 0; i <= NMAX+1; i++) { P.push(new Float64Array(NMAX+2)); DP.push(new Float64Array(NMAX+2)); }
-    P[0][0]=1; DP[0][0]=0; P[1][0]=CT; DP[1][0]=-ST; P[1][1]=ST; DP[1][1]=CT;
-    for (let n = 2; n <= NMAX; n++) {
-        // m=0: standard Legendre recursion (Schmidt=Legendre for m=0)
-        P[n][0]  = ((2*n-1)*CT*P[n-1][0] - (n-1)*P[n-2][0]) / n;
-        DP[n][0] = ((2*n-1)*(CT*DP[n-1][0] - ST*P[n-1][0]) - (n-1)*DP[n-2][0]) / n;
-        // m=n diagonal
-        const c1 = Math.sqrt((2*n-1)/(2*n));
-        P[n][n]  = P[n-1][n-1] * ST * c1;
-        DP[n][n] = (DP[n-1][n-1]*ST + P[n-1][n-1]*CT) * c1;
-        // m=n-1 sub-diagonal
-        const c2 = Math.sqrt(2*n-1);
-        P[n][n-1]  = P[n-1][n-1] * CT * c2;
-        DP[n][n-1] = (-P[n-1][n-1]*ST + DP[n-1][n-1]*CT) * c2;
-        // m=n-2 down to 1
-        for (let m = n-2; m >= 1; m--) {
-            const K1 = Math.sqrt(((2*n-1)*(2*n+1)) / ((n-m)*(n+m)));
-            const K2 = Math.sqrt(((2*n+1)*(n+m-1)*(n-m-1)) / ((2*n-3)*(n-m)*(n+m)));
-            P[n][m]  = K1*CT*P[n-1][m] - K2*P[n-2][m];
-            DP[n][m] = K1*(-ST*P[n-1][m] + CT*DP[n-1][m]) - K2*DP[n-2][m];
-        }
+  // Schmidt semi-normalised associated Legendre functions and d/dtheta.
+  const P = [], DP = [];
+  for (let n = 0; n <= NMAX; n++) { P.push(new Float64Array(NMAX + 1)); DP.push(new Float64Array(NMAX + 1)); }
+  P[0][0] = 1;
+  for (let n = 1; n <= NMAX; n++) {
+    for (let m = 0; m <= n; m++) {
+      if (n === m) {
+        const k = n === 1 ? 1 : Math.sqrt((2 * n - 1) / (2 * n));
+        P[n][n] = k * ST * P[n - 1][n - 1];
+        DP[n][n] = k * (CT * P[n - 1][n - 1] + ST * DP[n - 1][n - 1]);
+      } else {
+        const d = Math.sqrt(n * n - m * m);
+        const k2 = n >= 2 ? Math.sqrt((n - 1) * (n - 1) - m * m) : 0;
+        const p2 = n >= 2 ? P[n - 2][m] : 0, dp2 = n >= 2 ? DP[n - 2][m] : 0;
+        P[n][m] = ((2 * n - 1) * CT * P[n - 1][m] - k2 * p2) / d;
+        DP[n][m] = ((2 * n - 1) * (CT * DP[n - 1][m] - ST * P[n - 1][m]) - k2 * dp2) / d;
+      }
     }
+  }
 
-    // Sum spherical harmonic field components: B_theta (southward), B_phi (eastward)
-    let Btheta = 0, Bphi = 0;
-    for (let n = 1; n <= NMAX; n++) {
-        const ratio = Math.pow(R0/r, n+2);
-        for (let m = 0; m <= n; m++) {
-            const gm = G[n][m], hm = H[n][m];
-            const cosML = Math.cos(m*lam), sinML = Math.sin(m*lam);
-            Btheta -= ratio * DP[n][m] * (gm*cosML + hm*sinML);
-            if (ST > 1e-6) Bphi += ratio * P[n][m] * m * (gm*sinML - hm*cosML) / ST;
-        }
+  // Field in the geocentric frame: X' north, Y' east, Z' down.
+  let Xp = 0, Yp = 0, Zp = 0;
+  for (let n = 1; n <= NMAX; n++) {
+    const ar = Math.pow(A / r, n + 2);
+    for (let m = 0; m <= n; m++) {
+      const cm = Math.cos(m * lam), sm = Math.sin(m * lam);
+      const gh = G[n][m] * cm + H[n][m] * sm;
+      Xp += ar * gh * DP[n][m];
+      Yp += ar * m * (G[n][m] * sm - H[n][m] * cm) * P[n][m];
+      Zp -= ar * (n + 1) * gh * P[n][m];
     }
-    // X=northward=-Btheta, Y=eastward=Bphi; Declination=atan2(Y,X)
-    return Math.atan2(Bphi, -Btheta) * 180 / Math.PI;
+  }
+  Yp = ST > 1e-9 ? Yp / ST : 0;
+  // Rotate to the geodetic frame (Z doesn't affect D except through X).
+  const psi = latC - phi;
+  const X = Xp * Math.cos(psi) - Zp * Math.sin(psi);
+  return Math.atan2(Yp, X) / D2R;
 }
 
 function handleDeclinationLocal(req, res) {
@@ -693,6 +703,7 @@ function handleExportTerrain(req, res) {
             name              = '',
             z_offset          = null,        // the point clouds' vertical shift in FLEX (m)
             dem_grid          = null,        // terrain from the map instead of the LiDAR (see below)
+            polygon           = null,        // [[lon, lat], ...]: export only inside it (hard cut)
         } = params;
         const hsMode  = ['lidar', 'dem', 'url', 'none'].includes(hillshade_mode) ? hillshade_mode : 'lidar';
         // Map terrain: heights FLEX sampled from its own 3D terrain on a lon/lat
@@ -713,6 +724,15 @@ function handleExportTerrain(req, res) {
         // no shell), so only length and control characters need policing.
         const mapName = String(name || '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 60);
         if (!bbox || bbox.length !== 4) return jsonResponse(res, { ok: false, error: 'bbox required: [minLon,minLat,maxLon,maxLat]' }, 400);
+        // Export area polygon: plain numbers only, lon/lat ranges, a sane size.
+        let poly = null;
+        if (polygon != null) {
+            const okPt = p => Array.isArray(p) && p.length >= 2 && Number.isFinite(p[0]) && Number.isFinite(p[1])
+                              && Math.abs(p[0]) <= 180 && Math.abs(p[1]) <= 90;
+            if (!Array.isArray(polygon) || polygon.length < 3 || polygon.length > 20000 || !polygon.every(okPt))
+                return jsonResponse(res, { ok: false, error: 'polygon must be 3 to 20000 [lon, lat] points' }, 400);
+            poly = polygon.map(p => [+p[0], +p[1]]);
+        }
         if (!eptPath && !demGrid) return jsonResponse(res, { ok: false, error: 'eptPath is required — select a dataset in the export panel, or take the terrain from the map' }, 400);
 
         const jobId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -732,6 +752,12 @@ function handleExportTerrain(req, res) {
         if (caves && caves.surveys && caves.surveys.length > 0) {
             cavesFilePath = path.join(EXPORT_OUT_DIR, `caves_${jobId}.json`);
             fs.writeFileSync(cavesFilePath, JSON.stringify(caves));
+        }
+
+        let polyFile = null;
+        if (poly) {
+            polyFile = path.join(EXPORT_OUT_DIR, `polygon_${jobId}.json`);
+            fs.writeFileSync(polyFile, JSON.stringify(poly));
         }
 
         // Map terrain grid: the heights and a small header next to them.
@@ -757,6 +783,7 @@ function handleExportTerrain(req, res) {
         if (hsMode === 'url' && hillshade_url) args.push('--hillshade-url', hillshade_url);
         if (mapName) args.push('--name', mapName);
         if (cavesFilePath) args.push('--caves', cavesFilePath);
+        if (polyFile) args.push('--polygon', polyFile);
         if (typeof z_offset === 'number' && Number.isFinite(z_offset) && Math.abs(z_offset) < 200)
             args.push('--z-offset', String(z_offset));
 
@@ -779,7 +806,7 @@ function handleExportTerrain(req, res) {
         });
         proc.on('close', code => {
             // Clean up temp caves and map-terrain files
-            for (const f of [cavesFilePath, ...demFiles]) {
+            for (const f of [cavesFilePath, polyFile, ...demFiles]) {
                 if (f && fs.existsSync(f)) { try { fs.unlinkSync(f); } catch(_) {} }
             }
             if (code === 0 && fs.existsSync(outZip)) {

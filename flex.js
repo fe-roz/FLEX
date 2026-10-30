@@ -3523,8 +3523,11 @@ _layersReady.then(async () => {
 });
 
 // Restore saved state after full init (addPC interceptor and CalTopo fns are defined below this point)
+const _projectAtStart = (() => { try { return localStorage.getItem('flex.project') || ''; } catch (_) { return ''; } })();
 setTimeout(() => {
-  if (_savedSession?.pointClouds?.length) {
+  // With a project open, project_workspace.js loads its point clouds, CalTopo
+  // maps and data files; the prompts below are for FLEX without a project.
+  if (_savedSession?.pointClouds?.length && !_projectAtStart) {
     showPcRestorePrompt(_savedSession.pointClouds);
   }
   // Check if server still has an active CalTopo session
@@ -3545,7 +3548,7 @@ setTimeout(() => {
   }, 3000);
 
   // Auto-restore CalTopo KML (no prompt — it's a live feed, should just resume)
-  if (_savedSession?.caltopoUrl) {
+  if (_savedSession?.caltopoUrl && !_projectAtStart) {
     const input = document.getElementById('caltopo_url_input');
     const sel   = document.getElementById('caltopo_interval_select');
     if (input) input.value = _savedSession.caltopoUrl;
@@ -3556,7 +3559,7 @@ setTimeout(() => {
   }
 
   // Auto-restore URL-sourced data files silently
-  if (_savedSession?.dataFiles?.length) {
+  if (_savedSession?.dataFiles?.length && !_projectAtStart) {
     for (const f of _savedSession.dataFiles) {
       addDataFile(f.url, f.label).catch(e => console.warn('[session] data file restore failed:', e));
     }
@@ -3839,7 +3842,9 @@ Potree.loadPointCloud(url, _pcName, function(e){
 
 // Intercept addPC to track loaded URLs for session persistence and update panel
 const _origAddPC = window.addPC;
+const _pcUrlByName = {};       // cloud name → the URL it was loaded from (project workspace)
 window.addPC = function(url) {
+  try { _pcUrlByName[url.replace(/\/ept\.json.*$/i, '').split('/').filter(Boolean).pop() || url] = url; } catch (_) {}
   notifyPcLoaded(url);
   const pcsBefore = (potreeViewer?.scene?.pointclouds || []).length;
   const statusEl = document.getElementById('lp-pc-status');
@@ -3928,8 +3933,79 @@ function _setCaltopoStatus(msg, color) {
   if (el) { el.textContent = msg; el.style.color = color || '#ccc'; }
 }
 
+// A private map: with a CalTopo key on this computer (🔑), the map is read
+// through CalTopo's API by the FLEX server (signed; caltopo_api.js) — its
+// folders become folders here. Without a key, the KML link (public maps).
+let _caltopoKeySet = null;
+async function _caltopoHasKey(force) {
+  if (_caltopoKeySet === null || force) { try { _caltopoKeySet = !!(await (await fetch('/api/caltopo/key')).json()).set; } catch (_) { _caltopoKeySet = false; } }
+  return _caltopoKeySet;
+}
+const _caltopoMapId = u => (String(u || '').match(/\/m\/([A-Za-z0-9]+)/) || [])[1] || null;
+const _ctColor = (c, d) => { c = String(c || '').replace(/^#/, ''); return /^[0-9a-f]{6}$/i.test(c) ? Cesium.Color.fromCssColorString('#' + c) : Cesium.Color.fromCssColorString(d); };
+// CalTopo map JSON (result.state.features) → a data source; folders are parent
+// entities, so hiding one hides what is in it.
+function _caltopoJsonToDataSource(result) {
+  const ds = new Cesium.CustomDataSource('CalTopo');
+  const feats = (result && result.state && result.state.features) || [];
+  const folders = new Map();
+  feats.filter(f => f.properties && f.properties.class === 'Folder').forEach(f => {
+    folders.set(f.id, ds.entities.add(new Cesium.Entity({ id: 'ctf-' + f.id, name: f.properties.title || 'Folder' })));
+  });
+  feats.filter(f => f.properties && f.properties.class === 'Folder' && f.properties.folderId && folders.has(f.properties.folderId))
+    .forEach(f => { folders.get(f.id).parent = folders.get(f.properties.folderId); });
+  let n = 0;
+  feats.forEach(f => {
+    const p = f.properties || {}, g = f.geometry;
+    if (!g || p.class === 'Folder' || !g.coordinates) return;
+    const base = { id: 'ct-' + f.id, name: p.title || '', description: p.description || '', parent: folders.get(p.folderId) };
+    const P = c => Cesium.Cartesian3.fromDegrees(c[0], c[1], 0);
+    try {
+      if (g.type === 'Point') {
+        const col = _ctColor(p['marker-color'], '#ff8800');
+        ds.entities.add(Object.assign(base, { position: P(g.coordinates),
+          point: { pixelSize: 9, color: col, outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: 5000 },
+          label: window._pjfLabel ? window._pjfLabel(p.title || '') : { text: p.title || '', font: '15px sans-serif', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
+                   style: Cesium.LabelStyle.FILL_AND_OUTLINE, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -10),
+                   heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 8000), disableDepthTestDistance: 5000 } }));
+      } else if (g.type === 'LineString') {
+        ds.entities.add(Object.assign(base, { polyline: { positions: g.coordinates.map(P), width: Math.max(1, +p['stroke-width'] || 2), material: _ctColor(p.stroke, '#ff0000'), clampToGround: true } }));
+      } else if (g.type === 'Polygon') {
+        const ring = (g.coordinates[0] || []).map(P);
+        const col = _ctColor(p.stroke || p.fill, '#ff0000');
+        ds.entities.add(Object.assign(base, { polygon: { hierarchy: ring, material: _ctColor(p.fill || p.stroke, '#ff0000').withAlpha(+p['fill-opacity'] || 0.15), heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
+          polyline: { positions: ring, width: Math.max(1, +p['stroke-width'] || 2), material: col, clampToGround: true } }));
+      } else return;
+      n++;
+    } catch (e) { console.warn('[caltopo] feature skipped', f.id, e); }
+  });
+  ds._ctCount = n;
+  return ds;
+}
+
 async function _fetchCaltopoKml() {
   if (!caltopoState.url) return;
+  const mapId = _caltopoMapId(caltopoState.url);
+  if (mapId && await _caltopoHasKey()) {
+    try {
+      _setCaltopoStatus('updating (private map)…', '#aaa');
+      const r = await fetch('/api/caltopo/map?id=' + encodeURIComponent(mapId));
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || r.statusText);
+      const ds = _caltopoJsonToDataSource(j);
+      if (caltopoState.dataSource) cesiumViewer.dataSources.remove(caltopoState.dataSource, true);
+      cesiumViewer.dataSources.add(ds);
+      caltopoState.dataSource = ds;
+      try { syncMinimapCaltopoFeatures(ds); } catch (_) {}
+      if (window._onVectorSourcesChanged) window._onVectorSourcesChanged();
+      _setCaltopoStatus(`✓ private map, ${ds._ctCount} feature(s), ${new Date().toLocaleTimeString()}`, '#8f8');
+    } catch (e) {
+      console.warn('[caltopo] private map failed:', e);
+      _setCaltopoStatus('⚠ ' + (e.message || e), '#f88');
+    }
+    renderCaltopoStatus();
+    return;
+  }
   const proxiedUrl = ProxyUrlGenerator.generateProxyUrl(caltopoState.url);
   try {
     _setCaltopoStatus('updating…', '#aaa');
@@ -3945,6 +4021,7 @@ async function _fetchCaltopoKml() {
     cesiumViewer.dataSources.add(ds);
     caltopoState.dataSource = ds;
     syncMinimapCaltopoFeatures(ds);
+    if (window._onVectorSourcesChanged) window._onVectorSourcesChanged();   // folders, cave tags (project_features.js)
     const t = new Date().toLocaleTimeString();
     _setCaltopoStatus(`✓ loaded ${t}`, '#8f8');
     renderCaltopoStatus();
@@ -3972,6 +4049,7 @@ async function loadCaltopoKml(rawUrl, intervalSecs) {
   }
 
   notifyCaltopoChanged(kmlUrl, intervalSecs);
+  if (window._pjWs && !(window._pj && window._pj.pid)) window._pjWs.placeCaltopo(null);
 }
 
 function _clearCaltopoTimers() {
@@ -3982,6 +4060,7 @@ function _clearCaltopoTimers() {
 }
 
 function clearCaltopo() {
+  if (caltopoState.url && window._pjWs && !window._ws.switching) window._pjWs.removed('caltopo', caltopoState.url);
   _clearCaltopoTimers();
   if (caltopoState.dataSource) {
     cesiumViewer.dataSources.remove(caltopoState.dataSource, true);
@@ -3989,6 +4068,7 @@ function clearCaltopo() {
   }
   if (miniMapCaltopoSource) miniMapCaltopoSource.clear();
   caltopoState.url = null;
+  if (window._onVectorSourcesChanged) window._onVectorSourcesChanged();
   _setCaltopoStatus('', '');
   notifyCaltopoChanged(null, 30);
   renderCaltopoStatus();
@@ -4035,6 +4115,7 @@ function renderPcList() {
 }
 
 function removePc(pc) {
+  if (window._pjWs && !window._ws.switching && _pcUrlByName[pc.name]) window._pjWs.removed('pointcloud', _pcUrlByName[pc.name]);
   const pcs = potreeViewer.scene.pointclouds;
   const children = potreeViewer.scene.scenePointCloud.children;
   const ci = children.indexOf(pc);
@@ -4123,6 +4204,7 @@ async function addDataFile(fileOrUrl, label) {
     };
     loadedDataFiles.push(entry);
     renderDataFileList();
+    if (window._onVectorSourcesChanged) window._onVectorSourcesChanged();
     notifyDataFilesChanged(loadedDataFiles);
   } catch (err) {
     console.error('[layers] addDataFile failed:', err);
@@ -4134,9 +4216,11 @@ function removeDataFile(id) {
   const idx = loadedDataFiles.findIndex(e => e.id === id);
   if (idx === -1) return;
   const entry = loadedDataFiles[idx];
+  if (entry.url && window._pjWs && !window._ws.switching) window._pjWs.removed('file', entry.url);
   if (entry.dataSource) cesiumViewer.dataSources.remove(entry.dataSource, true);
   loadedDataFiles.splice(idx, 1);
   renderDataFileList();
+  if (window._onVectorSourcesChanged) window._onVectorSourcesChanged();
   notifyDataFilesChanged(loadedDataFiles);
 }
 
@@ -4464,8 +4548,8 @@ const _jsonCopy = o => (o == null ? null : JSON.parse(JSON.stringify(o)));
 
 // Place one cave from a stored record { name, georef, displayOptions } and its
 // cached survey text. → { entry } or { entry: null, why: 'cache'|'parse'|'georef' }
-async function _placeCaveRecord(r, { recent = true } = {}) {
-  const rawText = await _fetchPltCache(r.name);
+async function _placeCaveRecord(r, { recent = true, rawText: text = null } = {}) {
+  const rawText = text ?? await _fetchPltCache(r.name);
   if (!rawText) return { entry: null, why: 'cache' };
   let parsed;
   try { parsed = parsePLT(rawText); } catch (e) { return { entry: null, why: 'parse' }; }
@@ -4474,6 +4558,12 @@ async function _placeCaveRecord(r, { recent = true } = {}) {
   if (!r.georef) return { entry: null, why: 'georef' };
   const georef = _jsonCopy(r.georef), dopt = _jsonCopy(r.displayOptions);
   let entry;
+  if (georef.mode === 'anchor' && !_caveFindStation(parsed, georef.station) && georef.station !== '__first__') {
+    // Was placed silently at the first point; say so (Replace survey… / Rectify fix it).
+    _flexDialog({ title: 'Anchor station not found',
+      html: `“${_escH(r.name)}” is anchored at station ${_escH(georef.station)}, which its survey file no longer has, so it was placed at the first station instead. ` +
+            `Use ⟳ Replace survey… (re-pick the anchor) or 🎯 Rectify to fix it.` });
+  }
   if (georef.mode === 'anchor') {
     entry = renderCaveSurveyAnchored(r.name, parsed, georef.station, georef.lat, georef.lon, georef.elev, georef.survey || '', georef.declination ?? null);
     if (entry) {
@@ -4487,6 +4577,221 @@ async function _placeCaveRecord(r, { recent = true } = {}) {
   if (!entry) return { entry: null, why: 'georef' };
   _finishCaveLoad(entry, { recent });
   return { entry };
+}
+
+// ── Replace a placed cave's survey, keeping its placement ────────────────────
+// A cave's placement is stored apart from its survey text, and refers to
+// stations by name: the anchor station (anchor mode) and every control point.
+// So a newer survey file can take the old one's place and be put exactly where
+// the old one was, as Recent and cave sets already do with cached text. What
+// can go wrong is a station the placement names that the new file doesn't
+// have (renumbered, or a different file): that is shown before anything
+// changes, with Cancel / Proceed (drop those control points) / Re-pick.
+
+// The station the anchor or a control point names, by the same rule as
+// renderCaveSurveyAnchored (full name, or the part after a survey prefix).
+function _caveFindStation(parsed, name) {
+  const n = String(name ?? '').trim();
+  if (!n) return null;
+  return parsed.stations.find(s => s.name === n || s.name === n.split(/[./]/)[1]) || null;
+}
+
+// What replacing `oldParsed` with `newParsed` under `georef` does: stations
+// added / removed / moved (in the file's own frame, lined up on the anchor
+// when both have it), and which placement stations the new file is missing,
+// each with a suggested stand-in (the new station nearest where it was).
+function _replaceSurveyPlan(oldParsed, newParsed, georef) {
+  const byName = p => { const m = new Map(); p.stations.forEach(s => { if (s.name && !m.has(s.name)) m.set(s.name, s); }); return m; };
+  const A = byName(oldParsed), B = byName(newParsed);
+  const added = [...B.keys()].filter(n => !A.has(n));
+  const removed = [...A.keys()].filter(n => !B.has(n));
+  let off = { n: 0, e: 0, v: 0 };
+  if (georef && georef.mode === 'anchor') {
+    const a = _caveFindStation(oldParsed, georef.station), b = _caveFindStation(newParsed, georef.station);
+    if (a && b) off = { n: a.n - b.n, e: a.e - b.e, v: a.v - b.v };
+  }
+  const moved = [];
+  A.forEach((a, n) => {
+    const b = B.get(n);
+    if (!b) return;
+    const d = Math.hypot(b.n + off.n - a.n, b.e + off.e - a.e, b.v + off.v - a.v);
+    if (d > 0.05) moved.push({ name: n, d });
+  });
+  moved.sort((x, y) => y.d - x.d);
+  const suggest = name => {
+    const a = _caveFindStation(oldParsed, name);
+    if (!a) return '';
+    let best = '', bd = Infinity;
+    B.forEach((b, n) => { const d = Math.hypot(b.n + off.n - a.n, b.e + off.e - a.e, b.v + off.v - a.v); if (d < bd) { bd = d; best = n; } });
+    return bd < 5 ? best : '';                       // only a near one is a real guess
+  };
+  const missing = [];
+  if (georef && georef.mode === 'anchor' && !_caveFindStation(newParsed, georef.station))
+    missing.push({ role: 'anchor', name: georef.station, suggestion: suggest(georef.station) });
+  ((georef && georef.controlPoints) || []).forEach((cp, k) => {
+    if (!_caveFindStation(newParsed, cp.station)) missing.push({ role: 'cp', index: k, name: cp.station, suggestion: suggest(cp.station) });
+  });
+  return { added, removed, moved, missing };
+}
+
+// The placement for the new file: renamed stations where re-picked
+// ({ role, index } → new name), missing control points dropped.
+function _replaceGeoref(georef, newParsed, picks) {
+  const g = _jsonCopy(georef);
+  const pick = (role, index) => (picks || []).find(p => p.role === role && (role === 'anchor' || p.index === index));
+  if (g.mode === 'anchor' && !_caveFindStation(newParsed, g.station)) {
+    const p = pick('anchor');
+    if (!p || !_caveFindStation(newParsed, p.to)) return null;          // nothing to place it by
+    g.station = _caveFindStation(newParsed, p.to).name;
+  }
+  if (g.controlPoints) {
+    g.controlPoints = g.controlPoints.map((cp, k) => {
+      if (_caveFindStation(newParsed, cp.station)) return cp;
+      const p = pick('cp', k), st = p && _caveFindStation(newParsed, p.to);
+      return st ? { ...cp, station: st.name } : null;
+    }).filter(Boolean);
+    if (!g.controlPoints.length) delete g.controlPoints;
+  }
+  return g;
+}
+
+// A small modal in the panels' style. buttons: [{ label, value, primary, danger, disabled }]
+function _flexDialog({ title, html, buttons, wide }) {
+  return new Promise(resolve => {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;font:12px system-ui,sans-serif;';
+    const box = document.createElement('div');
+    box.style.cssText = `width:min(${wide ? 520 : 420}px,calc(100vw - 32px));max-height:calc(100vh - 40px);overflow:auto;background:rgba(18,18,30,.98);color:#e8e8ee;border:1px solid rgba(255,255,255,.18);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;`;
+    box.innerHTML = `<div style="font-size:14px;font-weight:700">${title}</div><div style="line-height:1.45;color:rgba(255,255,255,.8)">${html || ''}</div>`;
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap';
+    (buttons || [{ label: 'OK', value: 'ok', primary: true }]).forEach(b => {
+      const el = document.createElement('button');
+      el.textContent = b.label;
+      el.disabled = !!b.disabled;
+      el.style.cssText = `font-size:12px;padding:6px 12px;border-radius:5px;cursor:pointer;color:${b.danger ? '#ffb0b0' : '#eee'};` +
+        `background:${b.primary ? 'rgba(33,150,243,.35)' : 'rgba(255,255,255,.07)'};border:1px solid ${b.primary ? '#2196F3' : b.danger ? 'rgba(255,107,107,.6)' : 'rgba(255,255,255,.2)'};` +
+        (b.disabled ? 'opacity:.35;cursor:default;' : '');
+      el.onclick = () => { if (b.disabled) return; wrap.remove(); resolve({ button: b.value, box }); };
+      row.appendChild(el);
+    });
+    box.appendChild(row);
+    wrap.appendChild(box);
+    wrap.addEventListener('mousedown', e => { if (e.target === wrap) { wrap.remove(); resolve(null); } });
+    document.body.appendChild(wrap);
+  });
+}
+const _escH = t => String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// Survey text from a file selection: a .plt, a Breakout .json, or a Walls
+// shapefile set. Several caves in one file: the one named like this cave.
+async function _surveyTextFromFiles(files, caveName) {
+  const pickNamed = list => list.find(c => c.name === caveName) || (list.length === 1 ? list[0] : null);
+  if (isWallsSelection(files)) {
+    const sets = await readWallsShapefileSets(files);
+    const cs = sets.map(s => wallsToPlt(s, window.proj4));
+    const c = pickNamed(cs);
+    if (!c) throw new Error(`these Walls files hold ${cs.length} caves and none is named “${caveName}”`);
+    return c.plt;
+  }
+  const f = files[0];
+  const text = await f.text();
+  if (/^\s*\{/.test(text)) {
+    let data; try { data = JSON.parse(text); } catch (e) { throw new Error('not valid JSON'); }
+    if (!isBreakoutFile(data)) throw new Error('this JSON is not a Breakout file');
+    const cs = [...breakoutToPlt(data)];
+    const c = pickNamed(cs);
+    if (!c) throw new Error(`this file holds ${cs.length} caves and none is named “${caveName}”`);
+    return c.plt;
+  }
+  return text;
+}
+
+window._replaceCaveSurvey = function(i) {
+  const imp = _caveImports[i];
+  if (!imp) return;
+  let inp = document.getElementById('cave-replace-input');
+  if (!inp) {
+    inp = document.createElement('input');
+    inp.type = 'file'; inp.id = 'cave-replace-input'; inp.multiple = true; inp.style.display = 'none';
+    inp.accept = '.plt,.PLT,.txt,.json,.dbf,.DBF,.prj,.PRJ,.shp,.SHP,.shx,.SHX';
+    document.body.appendChild(inp);
+    inp.addEventListener('change', () => {
+      const files = [...inp.files]; inp.value = '';
+      const target = _caveImports.find(c => c === inp._imp);
+      if (files.length && target) _replaceCaveSurveyWith(target, files);
+    });
+  }
+  inp._imp = imp;
+  inp.click();
+};
+
+async function _replaceCaveSurveyWith(imp, files) {
+  let text, parsed;
+  try {
+    text = await _surveyTextFromFiles(files, imp.name);
+    parsed = parsePLT(text);
+    if (!parsed.segments.length) throw new Error('no survey lines in it');
+  } catch (e) {
+    await _flexDialog({ title: 'Can’t use that file', html: _escH(e.message || String(e)) });
+    return;
+  }
+  const g = imp.georef;
+  if (!g) { await _flexDialog({ title: 'No placement stored', html: 'This cave has no stored placement to keep.' }); return; }
+  const plan = _replaceSurveyPlan(imp.parsed, parsed, g);
+  const list = (arr, f, max = 12) => arr.slice(0, max).map(f).join(', ') + (arr.length > max ? `, … (${arr.length - max} more)` : '');
+  const moveTxt = plan.moved.length
+    ? `${plan.moved.length} moved — most: ${list(plan.moved, m => `${_escH(m.name)} ${m.d < 10 ? m.d.toFixed(2) : m.d.toFixed(0)} m`, 4)}`
+    : 'none moved';
+  let html = `<b>${_escH(imp.name)}</b>: ${parsed.stations.length} stations in the new file (${imp.parsed.stations.length} before).<br>` +
+    `${plan.added.length} added${plan.added.length ? ' (' + list(plan.added, _escH, 6) + ')' : ''}; ` +
+    `${plan.removed.length} gone${plan.removed.length ? ' (' + list(plan.removed, _escH, 6) + ')' : ''}; ${moveTxt}.<br>` +
+    `The cave keeps its placement (${g.mode === 'anchor' ? 'anchored at ' + _escH(g.station) : 'UTM zone ' + _escH(g.zone ?? parsed.utmZone ?? '?')}` +
+    `${g.controlPoints && g.controlPoints.length ? ', ' + g.controlPoints.length + ' control point' + (g.controlPoints.length > 1 ? 's' : '') : ''}) and its style.`;
+  const anchorMissing = plan.missing.some(m => m.role === 'anchor');
+  let picks = [];
+  if (plan.missing.length) {
+    html += `<div style="margin-top:8px;padding:8px;border-radius:6px;background:rgba(255,143,0,.12);color:#ffc266">` +
+      `<b>The new file doesn’t have ${plan.missing.length === 1 ? 'a station' : 'stations'} the placement uses:</b><br>` +
+      plan.missing.map(m => `${m.role === 'anchor' ? 'Anchor' : 'Control point'} <b>${_escH(m.name)}</b>` +
+        (m.suggestion ? ` (nearest in the new file: ${_escH(m.suggestion)})` : '')).join('<br>') +
+      (anchorMissing ? '<br>Without the anchor the cave can’t be placed: re-pick it.' : '<br>Proceed drops those control points; Re-pick lets you name their new stations.') +
+      `</div>`;
+    const r = await _flexDialog({ title: 'Replace the survey of ' + _escH(imp.name) + '?', html, wide: true, buttons: [
+      { label: 'Cancel', value: null }, { label: 'Proceed', value: 'proceed', disabled: anchorMissing, danger: true },
+      { label: 'Re-pick…', value: 'repick', primary: true }] });
+    if (!r || !r.button) return;
+    if (r.button === 'repick') {
+      const names = parsed.stations.map(s => s.name).filter(Boolean);
+      const dl = `<datalist id="cave-replace-names">${names.slice(0, 5000).map(n => `<option value="${_escH(n)}">`).join('')}</datalist>`;
+      const rows = plan.missing.map((m, k) => `<div style="display:flex;gap:8px;align-items:center;margin:4px 0">` +
+        `<span style="width:150px">${m.role === 'anchor' ? 'Anchor' : 'Control point'} ${_escH(m.name)} →</span>` +
+        `<input data-k="${k}" list="cave-replace-names" value="${_escH(m.suggestion)}" placeholder="station in the new file" ` +
+        `style="flex:1;padding:4px 6px;background:rgba(0,0,0,.4);color:#eee;border:1px solid rgba(255,255,255,.25);border-radius:4px"></div>`).join('');
+      const r2 = await _flexDialog({ title: 'Re-pick stations', wide: true,
+        html: `Which station in the new file is each of these? Leave a control point empty to drop it.${dl}${rows}`,
+        buttons: [{ label: 'Cancel', value: null }, { label: 'Replace', value: 'ok', primary: true }] });
+      if (!r2 || r2.button !== 'ok') return;
+      picks = plan.missing.map((m, k) => ({ role: m.role, index: m.index, to: (r2.box.querySelector(`input[data-k="${k}"]`).value || '').trim() }));
+    }
+  } else {
+    const r = await _flexDialog({ title: 'Replace the survey of ' + _escH(imp.name) + '?', html, wide: true,
+      buttons: [{ label: 'Cancel', value: null }, { label: 'Replace', value: 'ok', primary: true }] });
+    if (!r || r.button !== 'ok') return;
+  }
+  const georef = _replaceGeoref(g, parsed, picks);
+  if (!georef) { await _flexDialog({ title: 'Not replaced', html: 'The anchor station has to be one of the new file’s stations.' }); return; }
+  // Place the new one first; the old one goes only once that worked. Recent
+  // (and the cached text) then hold the new file with the same placement.
+  const rec = { name: imp.name, georef, displayOptions: _jsonCopy(imp.displayOptions) };
+  const res = await _placeCaveRecord(rec, { recent: true, rawText: text });
+  if (!res.entry) {
+    await _flexDialog({ title: 'Couldn’t place the new survey', html: `(${_escH(res.why)}) Nothing was changed.` });
+    return;
+  }
+  const at = _caveImports.indexOf(imp);
+  if (at >= 0) window._removeCaveImport(at);
+  _renderCaveList();
 }
 
 // Load several records; caves already loaded (by name) are skipped.
@@ -4669,25 +4974,73 @@ window._loadPltRecent = async function(i) {
     return;
   }
   // Georef saved — skip wizard and place directly
+  _finishCaveLoad(_placeCave(r.name, parsed, r.georef, r.displayOptions || null));
+};
+
+// Place a parsed survey with a saved georef (anchor or UTM) and display options.
+function _placeCave(name, parsed, georef, displayOptions) {
   let entry;
-  if (r.georef.mode === 'anchor') {
-    entry = renderCaveSurveyAnchored(r.name, parsed, r.georef.station, r.georef.lat, r.georef.lon, r.georef.elev, r.georef.survey || '', r.georef.declination ?? null);
+  if (georef.mode === 'anchor') {
+    entry = renderCaveSurveyAnchored(name, parsed, georef.station, georef.lat, georef.lon, georef.elev, georef.survey || '', georef.declination ?? null);
     // Restore saved control points and re-warp
-    if (entry && r.georef.controlPoints && r.georef.controlPoints.length) {
-      entry.georef.controlPoints = r.georef.controlPoints;
+    if (entry && georef.controlPoints && georef.controlPoints.length) {
+      entry.georef.controlPoints = georef.controlPoints;
     }
+    if (entry && georef.heights) entry.georef.heights = georef.heights;
     // Restore saved display options
-    if (entry && r.displayOptions) {
-      entry.displayOptions = r.displayOptions;
+    if (entry && displayOptions) {
+      entry.displayOptions = displayOptions;
     } else if (entry) {
       entry.displayOptions = _defaultDisplayOptions(entry.parsed);
     }
     if (entry) _rerenderCave(_caveImports.indexOf(entry));
   } else {
-    entry = renderCaveSurveyUTM(r.name, parsed, r.georef.zone, r.georef.south, r.displayOptions || null,
-                                r.georef.controlPoints || null);
+    entry = renderCaveSurveyUTM(name, parsed, georef.zone, georef.south, displayOptions || null,
+                                georef.controlPoints || null);
+    if (entry && georef.heights) { entry.georef.heights = georef.heights; _rerenderCave(_caveImports.indexOf(entry)); }
   }
-  _finishCaveLoad(entry);
+  return entry;
+}
+
+// ── Workspace hooks for projects (project_workspace.js) ──────────────────────
+// What is loaded (caves with their survey text and placement, point clouds,
+// CalTopo, URL data files), and loading / unloading them. "switching" is set
+// while a project opens or closes, so unloading isn't taken as removing.
+window._ws = {
+  switching: false,
+  caves: () => _caveImports.filter(i => i && i.parsed).map(imp => ({
+    name: imp.name, text: imp.parsed._rawText || '', georef: imp.georef ? JSON.parse(JSON.stringify(imp.georef)) : null,
+    displayOptions: imp.displayOptions || null })),
+  caveState: () => _caveImports.filter(i => i && i.parsed).map(imp => ({ name: imp.name, displayOptions: imp.displayOptions || null, visible: imp.visible !== false })),
+  loadCave(name, text, georef, displayOptions) {
+    let parsed;
+    try { parsed = parsePLT(text); } catch (e) { console.error('[ws] PLT parse failed:', name, e); return null; }
+    parsed._fileName = name; parsed._rawText = text;
+    if (!georef) { _cwizParsed = parsed; window._importCavePLT(); return null; }   // not placed yet: the wizard
+    const entry = _placeCave(name, parsed, georef, displayOptions || null);
+    _finishCaveLoad(entry, { recent: false });
+    return entry;
+  },
+  removeCave(name) { const i = _caveImports.findIndex(x => x && x.name === name); if (i >= 0) window._removeCaveImport(i); },
+  pointClouds: () => (window.potreeViewer?.scene?.pointclouds || []).map(pc => _pcUrlByName[pc.name]).filter(Boolean),
+  addPointCloud: url => window.addPC(url),
+  removePointCloud(url) { const pc = (potreeViewer.scene.pointclouds || []).find(p => _pcUrlByName[p.name] === url); if (pc) removePc(pc); },
+  caltopo: () => caltopoState.url ? { url: caltopoState.url, interval: caltopoState.interval } : null,
+  setCaltopo(url, interval) {
+    const input = document.getElementById('caltopo_url_input'), sel = document.getElementById('caltopo_interval_select');
+    if (input) input.value = url;
+    if (sel && interval != null) sel.value = String(interval);
+    return loadCaltopoKml(url, interval ?? 30);
+  },
+  clearCaltopo: () => clearCaltopo(),
+  dataFiles: () => loadedDataFiles.filter(f => f.url).map(f => ({ url: f.url, label: f.label })),
+  addDataFile: (url, label) => addDataFile(url, label),
+  removeDataFile(url) { const f = loadedDataFiles.find(x => x.url === url); if (f) removeDataFile(f.id); },
+  // Map overlays with their folders (CalTopo map, KML / GeoJSON data files).
+  vectorSources: () => [].concat(caltopoState.dataSource ? [{ kind: 'caltopo', name: 'CalTopo map', url: caltopoState.url, ds: caltopoState.dataSource }] : [],
+    loadedDataFiles.filter(f => f.dataSource).map(f => ({ kind: 'file', name: f.label, url: f.url, ds: f.dataSource }))),
+    restoreView(snap) { if (!snap) return; if (snap.camera) restoreCamera(snap, cesiumViewer); if (snap.layers) restoreLayerState(snap, viewModel); },
+  recentCave(name) { const i = (_recents.plt || []).findIndex(r => r.name === name); return i >= 0 ? window._loadPltRecent(i) : null; },
 };
 
 // ── UTM → WGS84 (Transverse Mercator inverse, WGS84 ellipsoid) ───────────────
@@ -4984,6 +5337,9 @@ function _renderCaveList() {
                 🏷 Labels${(imp.displayOptions && imp.displayOptions.areaLabels && imp.displayOptions.areaLabels.length) ? ' (' + imp.displayOptions.areaLabels.length + ')' : ''}
               </button>
             </div>
+            <button onclick="window._replaceCaveSurvey(${i})" style="margin-top:5px;width:100%;font-size:11px;padding:4px 10px;background:rgba(120,220,120,0.10);border:1px solid rgba(120,220,120,0.35);color:#b8f0b8;border-radius:4px;cursor:pointer;" title="Load a newer survey file (PLT, Breakout or Walls) in place of this one, keeping where it is placed, its control points and its style">
+              ⟳ Replace survey file…
+            </button>
           </div>`;
       } else if (g.mode === 'utm') {
         const cpCount = (g.controlPoints && g.controlPoints.length) || 0;
@@ -5004,6 +5360,9 @@ function _renderCaveList() {
                 🏷 Labels${(imp.displayOptions && imp.displayOptions.areaLabels && imp.displayOptions.areaLabels.length) ? ' (' + imp.displayOptions.areaLabels.length + ')' : ''}
               </button>
             </div>
+            <button onclick="window._replaceCaveSurvey(${i})" style="margin-top:5px;width:100%;font-size:11px;padding:4px 10px;background:rgba(120,220,120,0.10);border:1px solid rgba(120,220,120,0.35);color:#b8f0b8;border-radius:4px;cursor:pointer;" title="Load a newer survey file (PLT, Breakout or Walls) in place of this one, keeping where it is placed, its control points and its style">
+              ⟳ Replace survey file…
+            </button>
           </div>`;
       }
     } else {
@@ -5788,6 +6147,8 @@ function _leadBillboardProps() {
            verticalOrigin: Cesium.VerticalOrigin.BOTTOM };
 }
 
+window._leadBillboardProps = () => _leadBillboardProps();   // project.js: the same "?" as file leads and FLEX Field
+
 function _isLeadEntity(e) {
   return !!(e && e.properties && e.properties.isCaveLead && e.properties.isCaveLead.getValue());
 }
@@ -6206,7 +6567,7 @@ function _buildCaveStations(imp, force = false) {
     dots.push({
       position: pos, color: hard ? hardColour(s) : colourAt ? colourAt(pos, 1) : base, label: s.name || '',
       id: lazyPick(() => ({ name: s.name || imp.name, position: pos, description: _stationDescHtml(imp, s),
-                            properties: { isCaveSurvey: true, surveyName: imp.name, surveyCode: s.survey || '' } })),
+                            properties: { isCaveSurvey: true, surveyName: imp.name, surveyCode: s.survey || '', stationName: s.name || '' } })),
     });
   }
   imp._stationLayer = addStationLayer(cesiumViewer.scene, dots, {
@@ -6220,7 +6581,11 @@ function _buildCaveStations(imp, force = false) {
 // and depth over one shared range (2nd–98th percentile of all their stations)
 // so caves compare directly. Lines, dots and walls, each vertex from its own
 // drawn position, so it is right however the cave was placed.
-const CAVE_COLOUR_MODES = ['survey', 'elev', 'depth', 'hard'];
+// 'review' / 'segment': by the open project's segments — their review state,
+// or a colour each (project_segments.js sets window._caveShotColour; without
+// it, survey colours).
+const CAVE_COLOUR_MODES = ['survey', 'elev', 'depth', 'hard', 'review', 'segment'];
+const _caveHookMode = () => _caveColourMode === 'review' || _caveColourMode === 'segment';
 let _caveColourMode = (() => {
   try { const m = localStorage.getItem('flex.caveColour'); return CAVE_COLOUR_MODES.includes(m) ? m : 'survey'; }
   catch (_) { return 'survey'; }
@@ -6453,7 +6818,7 @@ function _caveComputeColourRange() {
 // The colour of a drawn point for one cave: (x, y, z) → [r, g, b] (0..1), or
 // null in survey colours. Grey where it is unknown (no ground yet, off it).
 function _caveColourRgb(imp, convertFn) {
-  if (_caveColourMode === 'survey' || _caveColourMode === 'hard' || typeof convertFn !== 'function') return null;
+  if (_caveColourMode === 'survey' || _caveColourMode === 'hard' || _caveHookMode() || typeof convertFn !== 'function') return null;
   if (!_caveColourRange) _caveColourRange = _caveComputeColourRange();
   const R = _caveColourRange;
   const grey = () => rampRgb(NaN);
@@ -6483,6 +6848,12 @@ function _renderCaveColourUI() {
   const lg = document.getElementById('lp-cave-colour-legend');
   if (!lg) return;
   if (_caveColourMode === 'survey' || !_caveImports.length) { lg.style.display = 'none'; return; }
+  if (_caveHookMode()) {
+    const h = typeof window._caveReviewLegendHtml === 'function' ? window._caveReviewLegendHtml(_caveColourMode) : '';
+    lg.innerHTML = h || `<div style="font-size:9px;opacity:0.6;margin-top:2px;">Open a project (📁) to colour by its review state.</div>`;
+    lg.style.display = 'block';
+    return;
+  }
   if (_caveColourMode === 'hard') {
     lg.innerHTML = hardLegendRows().map(([bg, label]) =>
       `<div style="display:flex;align-items:center;gap:6px;font-size:9px;opacity:0.8;margin-top:2px;">
@@ -6524,6 +6895,7 @@ function _renderCaveColourUI() {
   lg.innerHTML = html;
   lg.style.display = html ? 'block' : 'none';
 }
+window._caveColourModeNow = () => _caveColourMode;
 window._setCaveColourMode = function(mode) {
   _caveColourMode = CAVE_COLOUR_MODES.includes(mode) ? mode : 'survey';
   // Depth again: try caves whose terrain read failed once more.
@@ -6531,7 +6903,7 @@ window._setCaveColourMode = function(mode) {
     if (imp._ground && imp._ground.failed) { imp._ground = null; imp._groundTriedFor = null; }
   });
   try { localStorage.setItem('flex.caveColour', _caveColourMode); } catch (_) {}
-  _caveColourRange = _caveColourMode === 'survey' ? null : _caveComputeColourRange();
+  _caveColourRange = _caveColourMode === 'survey' || _caveHookMode() ? null : _caveComputeColourRange();
   _caveImports.forEach((_, i) => window._rerenderCave(i));
   _renderCaveColourUI();
 };
@@ -6548,7 +6920,7 @@ function _caveColourChanged(imp = null) {
   _caveColourTimer = setTimeout(() => {
     const dirty = _caveColourDirty;
     _caveColourDirty = new Set();
-    if (_caveColourMode !== 'survey') {
+    if (_caveColourMode !== 'survey' && !_caveHookMode()) {
       const R = _caveComputeColourRange(), old = _caveColourRange;
       const moved = !R !== !old || (R && (Math.abs(R.lo - old.lo) > 0.5 || Math.abs(R.hi - old.hi) > 0.5));
       if (moved) {
@@ -6623,6 +6995,7 @@ window._rerenderCave = function(i) {
     // turns into the clicked shot's info (see cave_layers.js).
     const dopt = imp.displayOptions || _defaultDisplayOptions(imp.parsed);
     const colourAt = _caveColourAt(imp, convertFn), hard = _caveColourMode === 'hard';
+    const review = _caveHookMode() && typeof window._caveShotColour === 'function' ? window._caveShotColour(imp, _caveColourMode) : null;
     const chains = [], allPos = [];
     for (const seg of imp.parsed.segments) {
       if (dopt.hiddenSurveys && dopt.hiddenSurveys[seg.survey]) continue;
@@ -6638,7 +7011,15 @@ window._rerenderCave = function(i) {
       const width = _segSurface ? 1 : 1.5;
       const eff = hard ? new Map(seg.points.map((p, i) => [p, _effectiveLrud(imp, p, seg.points[i - 1])])) : null;
       const flush = () => {
-        if (runPos.length >= 2 && hard) {
+        if (runPos.length >= 2 && review) {
+          // Review: a line per shot, coloured by the state of what it belongs to.
+          for (let k = 0; k + 1 < run.length; k++) {
+            const A = run[k], B = run[k + 1], pos = [runPos[k], runPos[k + 1]];
+            const c = review(A.name, B.name, seg.survey || '') || [0.4, 0.42, 0.45];
+            const col = new Cesium.Color(c[0], c[1], c[2], alpha);
+            chains.push({ positions: pos, width: c[3] || width, colors: [col, col], id: _caveShotPickId(imp, seg, [A, B], pos, _segLabel, _segSurface) });
+          }
+        } else if (runPos.length >= 2 && hard) {
           // Difficulty: a line per shot, so each end shows its station's size
           // and the whole shot its own steepness.
           for (let k = 0; k + 1 < run.length; k++) {
@@ -6694,6 +7075,7 @@ window._toggleCaveImport = function(i, visible) {
 window._removeCaveImport = function(i) {
   const imp = _caveImports[i];
   if (!imp) return;
+  if (window._pjWs && !window._ws.switching) window._pjWs.removed('cave', imp.name);
   _removeCaveLayers(imp);
   _caveImports.splice(i, 1);
   _renderCaveList();
@@ -7501,6 +7883,76 @@ window._loadCaltopo = () => {
   if (url) loadCaltopoKml(url, interval);
 };
 window._clearCaltopo = () => clearCaltopo();
+// 🔑 The CalTopo key for private maps (stays on this computer's FLEX server).
+async function _renderCaltopoKey() {
+  const box = document.getElementById('caltopo_key_section');
+  if (!box) return;
+  let k = { set: false };
+  try { k = await (await fetch('/api/caltopo/key')).json(); } catch (_) {}
+  _caltopoKeySet = !!k.set;
+  const b = (label, fn) => `<button onclick="${fn}" class="btn btn-sm btn-secondary" style="font-size:10px; padding:1px 6px;">${label}</button>`;
+  box.innerHTML = k.set
+    ? `<span style="color:#8f8;">🔑 Key ${k.id}${k.accountId ? ' · account ' + k.accountId : ''}: private maps are read through the CalTopo API</span>
+       <div style="display:flex; gap:4px; margin-top:3px; flex-wrap:wrap;">${k.accountId ? b('Pick a map…', 'window._caltopoPickMap()') : ''}${b('Change key…', 'window._caltopoKeyDialog()')}${b('Remove key', 'window._caltopoKeyClear()')}</div>`
+    : `<span style="opacity:0.7;">Private maps need a CalTopo key (Team service account, or your account's key).</span>
+       <div style="margin-top:3px;">${b('🔑 Add a CalTopo key…', 'window._caltopoKeyDialog()')}</div>`;
+}
+window._caltopoKeyDialog = function () {
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100001;display:flex;align-items:center;justify-content:center;';
+  const inp = (id, ph, type = 'text') => `<input id="${id}" type="${type}" placeholder="${ph}" autocomplete="off" style="width:100%;box-sizing:border-box;margin:3px 0 8px;padding:5px 7px;background:#111;color:#fff;border:1px solid #555;border-radius:4px;font-size:12px;">`;
+  ov.innerHTML = `<div style="background:#1b1b28;color:#eee;padding:16px 18px;border-radius:8px;width:440px;max-width:92vw;font:12px system-ui,sans-serif;">
+    <div style="font-size:14px;font-weight:600;margin-bottom:6px;">CalTopo key for private maps</div>
+    <div style="opacity:.7;line-height:1.45;margin-bottom:10px;">Stored only on this computer's FLEX server (user_files, not in git, not in projects or sync files). FLEX reads maps with it; it never writes.<br>
+      <b>Team:</b> Team Admin → Details → add a service account (READ): credential ID, secret, team ID.<br>
+      <b>Personal:</b> the credential from caltopo.com/api/v1/activate (code = credential ID, key, account id) — unofficial.</div>
+    Credential ID ${inp('ctk-id', 'e.g. 12 characters')}
+    Key / secret ${inp('ctk-key', '~44 characters', 'password')}
+    Account or team ID (optional — to pick maps from a list) ${inp('ctk-acct', '6 characters')}
+    <div id="ctk-msg" style="color:#f88;min-height:14px;margin-bottom:6px;"></div>
+    <div style="display:flex;justify-content:flex-end;gap:6px;"><button id="ctk-cancel" class="btn btn-sm btn-secondary">Cancel</button><button id="ctk-save" class="btn btn-sm btn-primary">Save</button></div></div>`;
+  document.body.appendChild(ov);
+  const $ = id => ov.querySelector('#' + id);
+  $('ctk-cancel').onclick = () => ov.remove();
+  $('ctk-save').onclick = async () => {
+    const r = await fetch('/api/caltopo/key', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: $('ctk-id').value.trim(), key: $('ctk-key').value.trim(), accountId: $('ctk-acct').value.trim() }) });
+    const j = await r.json();
+    if (!r.ok) { $('ctk-msg').textContent = j.error || 'Could not save'; return; }
+    ov.remove();
+    await _renderCaltopoKey();
+    if (j.accountId) window._caltopoPickMap(); else if (caltopoState.url) _fetchCaltopoKml();
+  };
+  setTimeout(() => $('ctk-id').focus(), 30);
+};
+window._caltopoKeyClear = async function () {
+  if (!confirmDialogFree('Remove the CalTopo key from this computer? Private maps stop loading until a key is added again.')) return;
+  await fetch('/api/caltopo/key', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  _renderCaltopoKey();
+};
+function confirmDialogFree(msg) { return window.confirm ? window.confirm(msg) : true; }
+window._caltopoPickMap = async function () {
+  const box = document.getElementById('caltopo_key_section');
+  const st = document.createElement('div'); st.textContent = 'Reading your maps…'; st.style.cssText = 'opacity:.7;margin-top:3px;';
+  box.appendChild(st);
+  let j;
+  try { const r = await fetch('/api/caltopo/maps'); j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); }
+  catch (e) { st.textContent = '⚠ ' + (e.message || e); st.style.color = '#f88'; return; }
+  st.remove();
+  const sel = document.createElement('select');
+  sel.style.cssText = 'width:100%;margin-top:4px;font-size:11px;background:#1a1a2e;color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:4px;';
+  sel.innerHTML = '<option value="">— choose a map (' + j.maps.length + ') —</option>' + j.maps.map(m =>
+    `<option value="${m.id}">${(m.folder ? m.folder + ' / ' : '') + String(m.title).replace(/</g, '&lt;')}</option>`).join('');
+  sel.onchange = () => {
+    if (!sel.value) return;
+    const input = document.getElementById('caltopo_url_input');
+    if (input) input.value = 'https://caltopo.com/m/' + sel.value;
+    window._loadCaltopo();
+    sel.remove();
+  };
+  box.appendChild(sel);
+};
+setTimeout(_renderCaltopoKey, 500);
 
 // ── CalTopo authentication (bookmarklet-based) ────────────────────────────────
 
