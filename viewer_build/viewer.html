@@ -318,6 +318,76 @@
   #reach-off { background: none; border: none; color: #aaa; font-size: 14px; cursor: pointer; padding: 0 4px; }
   #rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #fff; margin-right: 6px; animation: gpsPulse 1.2s infinite; }
   .tb-btn.fly-active { background: rgba(255,160,0,.35); border-color: #ffa000; }
+  /* ── FLEX Field: dialogs, notes, survey note pages, field survey panel ── */
+  .ff-modal { position: fixed; inset: 0; z-index: 80; background: rgba(0,0,0,.55); display: flex;
+    align-items: center; justify-content: center; padding: 16px; pointer-events: all; }
+  .ff-modal-box { width: min(380px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; background: rgba(14,14,26,.98);
+    border: 1px solid rgba(255,255,255,.16); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
+  .ff-modal-title { font-size: 15px; font-weight: 700; }
+  .ff-modal-text { opacity: .75; line-height: 1.4; }
+  .ff-modal-btns { justify-content: flex-end; }
+  .ff-modal-btns .fp-btn { padding: 8px 12px; font-size: 13px; }
+  .ff-input { width: 100%; padding: 7px 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,.18);
+    background: rgba(0,0,0,.35); color: #eee; font-size: 14px; font-family: inherit; min-width: 0; box-sizing: border-box; }
+  textarea.ff-input { resize: vertical; }
+  .ff-input.bad { border-color: #ff6b6b; background: rgba(255,60,60,.12); }
+  .ff-small { width: 92px; padding: 4px 6px; font-size: 12px; }
+  .fp-btn.ff-danger { border-color: rgba(255,107,107,.6); color: #ffb0b0; }
+  .ff-card { margin: 4px 0 6px; display: flex; flex-direction: column; gap: 6px; }
+  .ff-card .fp-btn { font-size: 12px; padding: 6px 9px; }
+  .ff-note { background: rgba(198,255,0,.08); border-left: 3px solid #c6ff00; border-radius: 4px; padding: 5px 8px; cursor: pointer; }
+  .ff-note-t { white-space: pre-wrap; font-size: 13px; }
+  .ff-note-m { font-size: 10px; opacity: .5; margin-top: 2px; }
+  #ff-panel { display: none; position: fixed; top: 58px; left: 12px; z-index: 35;
+    width: min(380px, calc(100vw - 80px)); max-height: calc(100vh - 120px);
+    background: rgba(10,10,20,.97); border: 1px solid rgba(255,255,255,.13); border-radius: 10px;
+    flex-direction: column; overflow: hidden; pointer-events: all; font-size: 12px; }
+  #ff-panel.open { display: flex; }
+  .ff-ptitle { flex: 1; min-width: 0; font-weight: 700; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ff-x { background: none; border: none; color: #aaa; font-size: 16px; cursor: pointer; padding: 2px 6px; }
+  .ff-settings { display: flex; flex-direction: column; gap: 5px; }
+  .ff-set { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+  .ff-set-l { width: 72px; opacity: .6; font-size: 11px; }
+  .ff-form { border: 1px solid rgba(198,255,0,.25); border-radius: 8px; padding: 6px 8px 8px; display: flex; flex-direction: column; gap: 6px; }
+  .ff-frow { display: flex; gap: 6px; }
+  .ff-cell { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .ff-cell.w2 { flex: 1.4; }
+  .ff-cell > span { font-size: 10px; opacity: .55; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ff-cell .ff-input { padding: 7px 6px; font-size: 15px; }
+  .ff-flags { display: flex; flex-direction: column; gap: 2px; }
+  .ff-flag { color: #ffb36b; font-size: 11px; }
+  .ff-flag.info { color: #9cf3ff; }
+  .ff-closure { font-size: 12px; padding: 4px 6px; border-radius: 6px; background: rgba(0,229,255,.1); }
+  .ff-closure.bad { background: rgba(255,143,0,.15); color: #ffc266; }
+  .ff-logrow { cursor: default; }
+  .ff-logrow.undone .fp-t1 { text-decoration: line-through; opacity: .55; }
+  #ff-gallery { display: none; position: fixed; inset: 0; z-index: 70; background: #000; flex-direction: column; pointer-events: all; }
+  #ff-gallery.open { display: flex; }
+  .ffg-top { display: flex; align-items: center; gap: 6px; padding: 8px 10px; background: rgba(20,20,30,.95); z-index: 2; }
+  .ffg-title { font-weight: 700; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ffg-count { flex: 1; font-size: 11px; opacity: .55; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ffg-x { background: none; border: none; color: #ddd; font-size: 20px; padding: 2px 8px; cursor: pointer; }
+  .ffg-stage { flex: 1; overflow: hidden; display: flex; align-items: center; justify-content: center; touch-action: none; position: relative; }
+  .ffg-img { max-width: 100%; max-height: 100%; transform-origin: center center; user-select: none; -webkit-user-drag: none; }
+  .ffg-empty { color: #aaa; font-size: 13px; padding: 24px; text-align: center; }
+  .ffg-nav { position: fixed; top: 50%; transform: translateY(-50%); z-index: 3; background: rgba(0,0,0,.4); border: none;
+    color: #fff; font-size: 34px; width: 44px; height: 64px; cursor: pointer; }
+  .ffg-prev { left: 0; border-radius: 0 8px 8px 0; } .ffg-next { right: 0; border-radius: 8px 0 0 8px; }
+  .ffg-tags { padding: 3px 10px 6px; font-size: 11px; opacity: .7; background: rgba(20,20,30,.95); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; z-index: 2; }
+  .ff-modal-box.wide { width: min(520px, 100%); }
+  .ff-choices { display: flex; flex-direction: column; gap: 6px; }
+  .ff-choices .fp-btn { text-align: left; padding: 8px 10px; font-size: 13px; }
+  .ff-choice-sub { font-size: 11px; opacity: .6; }
+  .ff-lead { background: rgba(255,160,0,.10); border-left: 3px solid #ffa000; border-radius: 4px; padding: 5px 8px; cursor: pointer; }
+  .ff-lead.closed { opacity: .55; border-left-color: #888; }
+  .ff-note.conflict, .ff-lead.conflict { box-shadow: inset 0 0 0 1px #ff8f00; }
+  .ff-leadform { display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto; }
+  .ff-lf { display: flex; flex-direction: column; gap: 3px; }
+  .ff-lf-l { font-size: 11px; opacity: .6; }
+  .ff-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .fp-btn.ff-chip { padding: 4px 8px; font-size: 12px; }
+  .ff-tagbox { display: flex; flex-direction: column; gap: 8px; }
+  .ff-tagadd .ff-input { flex: 1; }
 </style>
 </head>
 <body>
@@ -395,17 +465,18 @@
 <!-- Help overlay -->
 <div id="help-overlay">
   <div id="help-box">
-    <h2>FLEX Portable Viewer</h2>
+    <h2 id="help-title">FLEX Portable Viewer</h2>
     <div class="help-section">GESTURES</div>
     <div class="help-row"><span class="help-icon">☝️</span><span class="help-desc">Drag to orbit · Two-finger drag to pan</span></div>
     <div class="help-row"><span class="help-icon">🤏</span><span class="help-desc">Pinch to zoom</span></div>
     <div class="help-section">TOOLBAR</div>
     <div class="help-row"><span class="help-icon">📍</span><span class="help-desc">GPS: off / pin / follow / heading-up · record a track · drop pins · export GPX/KML · compass calibration</span></div>
-    <div class="help-row"><span class="help-icon">🔧</span><span class="help-desc">Tools: find, measure, route, reach, fly, crane, import KML</span></div>
+    <div class="help-row"><span class="help-icon">🔧</span><span class="help-desc">Tools: find (stations, leads — active / closed), measure, route, reach, fly, crane, import KML · 📐 field survey · 📚 documents · 📝 change log (undo)</span></div>
     <div class="help-row"><span class="help-icon">🎨</span><span class="help-desc">Display: colour by survey / elevation / depth / difficulty (narrow blue, low red, steep green), walls, stations (with their names); show or hide leads, area names, tracks, imported layers; imagery and terrain</span></div>
-    <div class="help-row"><span class="help-icon">⋯</span><span class="help-desc">Units (ft / m), fullscreen, help</span></div>
+    <div class="help-row"><span class="help-icon">⋯</span><span class="help-desc">Units (ft / m), who is entering data, ⇄ project & sync files (share with other phones and FLEX), export project data, fullscreen, help</span></div>
     <div class="help-section">STATIONS</div>
     <div class="help-row"><span class="help-icon">👆</span><span class="help-desc">Tap: info · again: caver for scale · again: reach (what's within range along the survey) · again: off</span></div>
+    <div class="help-row"><span class="help-icon">✏️</span><span class="help-desc">On a station's card: ✏️ notes · ❓ leads (status, what it needs, air, size…) · 📄 documents tagged to the station, its survey or cave (photos, scans incl. TIFF, PDF) · 📐 survey new passage from here</span></div>
   </div>
   <div id="help-dismiss">Tap anywhere to dismiss</div>
 </div>
@@ -456,8 +527,14 @@
   </div>
   <div id="fp-leads" class="fp-body" hidden>
     <div class="fp-sort">
+      <button data-show="active" class="active">Active</button>
+      <button data-show="closed">Closed</button>
+      <button data-show="all">All</button>
+    </div>
+    <div class="fp-sort">
       <button data-sort="near" class="active">Nearest</button>
       <button data-sort="size">Biggest</button>
+      <button data-sort="pri">Priority</button>
     </div>
     <div id="fp-leads-from" class="fp-note"></div>
     <div id="fp-lead-list" class="fp-list"></div>
@@ -513,6 +590,26 @@
   <div id="info-rows"></div>
 </div>
 
+<!-- ═══ FLEX Field (the Android app) ══════════════════════════════════════════ -->
+<!-- The app serves this page at /map/<id>/viewer.html with the export's files
+     beside it, and fills the placeholders below with those file names; the
+     survey data come from caves.json through ffSidecarJson. In a browser the
+     placeholders hold inline data instead and none of this is used. -->
+<script>
+window.FF_MAP_ID = (function () {
+  var m = /\/map\/([A-Za-z0-9_-]+)\//.exec(location.pathname);
+  return m && window.AndroidHost ? m[1] : null;
+})();
+function ffSidecarJson(name) {
+  try {
+    var x = new XMLHttpRequest();
+    x.open('GET', name, false);          // the page can't draw anything without it
+    x.send(null);
+    if ((x.status === 200 || x.status === 0) && x.responseText) return JSON.parse(x.responseText);
+  } catch (e) { console.error(name + ' not loaded:', e); }
+  return { surveys: [] };
+}
+</script>
 <!-- ═══ EMBEDDED DATA (injected by export_terrain.py) ═══════════════════════ -->
 <!-- Each in its own block so a huge string can't kill the others -->
 <script>const TERRAIN_GLB_B64 = "PLACEHOLDER_GLB_B64";</script>
@@ -528,6 +625,8 @@ catch(e) { console.error('CAVES_DATA parse error:', e); window.CAVES_DATA = {sur
 <script src="libs/OrbitControls.js"></script>
 <script src="libs/GLTFLoader.js"></script>
 <script src="libs/jszip.min.js"></script>
+<script src="libs/flexlib.js"></script>
+<script src="libs/utif.js"></script>
 
 <script>
 'use strict';
@@ -588,6 +687,12 @@ window.addEventListener('resize', () => {
 
 // ── Coordinate conversion (mirrors Python latlon_to_utm) ─────────────────────
 const META = (CAVES_DATA && CAVES_DATA.meta) || {};
+// What this phone's saved data (compass offset, tracks, notes, field surveys)
+// is filed under. In the app, the map's id, which stays the same when a newer
+// export of the map is imported over it; in a browser, the map's name and
+// centre, as before.
+const MAP_KEY = window.FF_MAP_ID ? 'map:' + window.FF_MAP_ID
+  : (META.name || '') + '|' + (META.center_lon || 0).toFixed(3) + '|' + (META.center_lat || 0).toFixed(3);
 
 // ── Units: feet by default, metres switchable (⋯ More). One unit at a time
 // keeps labels short on a phone. ───────────────────────────────────────────
@@ -615,6 +720,7 @@ function setUnits(u) {
 
 // The name typed in FLEX's export panel titles the viewer (and the app).
 function applyMapName() {
+  if (window.FF_MAP_ID) { const ht = document.getElementById('help-title'); if (ht) ht.textContent = 'FLEX Field'; }
   const name = (META.name || '').trim();
   if (!name) return;
   document.title = name + ' \u2014 FLEX';
@@ -1380,8 +1486,7 @@ document.addEventListener('visibilitychange', () => {
 // one-tap calibration: stand at a station, point the phone along the survey
 // shot to a neighbouring station, tap. The offset is kept per map.
 let compassRaw = null;            // smoothed, uncorrected phone heading
-const COMPASS_KEY = 'flex_compass_offset_' + ((META.name || '') + '|' +
-  (META.center_lon || 0).toFixed(3) + '|' + (META.center_lat || 0).toFixed(3));
+const COMPASS_KEY = 'flex_compass_offset_' + MAP_KEY;
 let compassOffset = (() => {      // degrees added to the phone heading, or null
   try { const v = localStorage.getItem(COMPASS_KEY); return v === null ? null : +v; }
   catch (_) { return null; }
@@ -1394,6 +1499,89 @@ function gridConvergenceDeg() {
   const dl = (lon - (zone * 6 - 183)) * Math.PI / 180;
   return Math.atan(Math.tan(dl) * Math.sin(lat * Math.PI / 180)) * 180 / Math.PI;
 }
+// World Magnetic Model WMM2025 (NOAA NCEI, epoch 2025.0, valid 2025-2030),
+// declination only. Coefficients copied from the official WMM_2025.COF;
+// checked against an independent implementation (tools/test_wmm.js).
+// Returns degrees, east positive.
+function wmmDeclination(latDeg, lonDeg, altM, yearDecimal) {
+  const COF = [
+    [1,0,-29351.8,0.0,12.0,0.0],[1,1,-1410.8,4545.4,9.7,-21.5],[2,0,-2556.6,0.0,-11.6,0.0],[2,1,2951.1,-3133.6,-5.2,-27.7],
+    [2,2,1649.3,-815.1,-8.0,-12.1],[3,0,1361.0,0.0,-1.3,0.0],[3,1,-2404.1,-56.6,-4.2,4.0],[3,2,1243.8,237.5,0.4,-0.3],
+    [3,3,453.6,-549.5,-15.6,-4.1],[4,0,895.0,0.0,-1.6,0.0],[4,1,799.5,278.6,-2.4,-1.1],[4,2,55.7,-133.9,-6.0,4.1],
+    [4,3,-281.1,212.0,5.6,1.6],[4,4,12.1,-375.6,-7.0,-4.4],[5,0,-233.2,0.0,0.6,0.0],[5,1,368.9,45.4,1.4,-0.5],
+    [5,2,187.2,220.2,0.0,2.2],[5,3,-138.7,-122.9,0.6,0.4],[5,4,-142.0,43.0,2.2,1.7],[5,5,20.9,106.1,0.9,1.9],
+    [6,0,64.4,0.0,-0.2,0.0],[6,1,63.8,-18.4,-0.4,0.3],[6,2,76.9,16.8,0.9,-1.6],[6,3,-115.7,48.8,1.2,-0.4],
+    [6,4,-40.9,-59.8,-0.9,0.9],[6,5,14.9,10.9,0.3,0.7],[6,6,-60.7,72.7,0.9,0.9],[7,0,79.5,0.0,-0.0,0.0],[7,1,-77.0,-48.9,-0.1,0.6],
+    [7,2,-8.8,-14.4,-0.1,0.5],[7,3,59.3,-1.0,0.5,-0.8],[7,4,15.8,23.4,-0.1,0.0],[7,5,2.5,-7.4,-0.8,-1.0],[7,6,-11.1,-25.1,-0.8,0.6],
+    [7,7,14.2,-2.3,0.8,-0.2],[8,0,23.2,0.0,-0.1,0.0],[8,1,10.8,7.1,0.2,-0.2],[8,2,-17.5,-12.6,0.0,0.5],[8,3,2.0,11.4,0.5,-0.4],
+    [8,4,-21.7,-9.7,-0.1,0.4],[8,5,16.9,12.7,0.3,-0.5],[8,6,15.0,0.7,0.2,-0.6],[8,7,-16.8,-5.2,-0.0,0.3],[8,8,0.9,3.9,0.2,0.2],
+    [9,0,4.6,0.0,-0.0,0.0],[9,1,7.8,-24.8,-0.1,-0.3],[9,2,3.0,12.2,0.1,0.3],[9,3,-0.2,8.3,0.3,-0.3],[9,4,-2.5,-3.3,-0.3,0.3],
+    [9,5,-13.1,-5.2,0.0,0.2],[9,6,2.4,7.2,0.3,-0.1],[9,7,8.6,-0.6,-0.1,-0.2],[9,8,-8.7,0.8,0.1,0.4],[9,9,-12.9,10.0,-0.1,0.1],
+    [10,0,-1.3,0.0,0.1,0.0],[10,1,-6.4,3.3,0.0,0.0],[10,2,0.2,0.0,0.1,-0.0],[10,3,2.0,2.4,0.1,-0.2],[10,4,-1.0,5.3,-0.0,0.1],
+    [10,5,-0.6,-9.1,-0.3,-0.1],[10,6,-0.9,0.4,0.0,0.1],[10,7,1.5,-4.2,-0.1,0.0],[10,8,0.9,-3.8,-0.1,-0.1],
+    [10,9,-2.7,0.9,-0.0,0.2],[10,10,-3.9,-9.1,-0.0,-0.0],[11,0,2.9,0.0,0.0,0.0],[11,1,-1.5,0.0,-0.0,-0.0],
+    [11,2,-2.5,2.9,0.0,0.1],[11,3,2.4,-0.6,0.0,-0.0],[11,4,-0.6,0.2,0.0,0.1],[11,5,-0.1,0.5,-0.1,-0.0],[11,6,-0.6,-0.3,0.0,-0.0],
+    [11,7,-0.1,-1.2,-0.0,0.1],[11,8,1.1,-1.7,-0.1,-0.0],[11,9,-1.0,-2.9,-0.1,0.0],[11,10,-0.2,-1.8,-0.1,0.0],
+    [11,11,2.6,-2.3,-0.1,0.0],[12,0,-2.0,0.0,0.0,0.0],[12,1,-0.2,-1.3,0.0,-0.0],[12,2,0.3,0.7,-0.0,0.0],[12,3,1.2,1.0,-0.0,-0.1],
+    [12,4,-1.3,-1.4,-0.0,0.1],[12,5,0.6,-0.0,-0.0,-0.0],[12,6,0.6,0.6,0.1,-0.0],[12,7,0.5,-0.1,-0.0,-0.0],
+    [12,8,-0.1,0.8,0.0,0.0],[12,9,-0.4,0.1,0.0,-0.0],[12,10,-0.2,-1.0,-0.1,-0.0],[12,11,-1.3,0.1,-0.0,0.0],
+    [12,12,-0.7,0.2,-0.1,-0.1],
+  ];
+  const EPOCH = 2025.0, NMAX = 12, A = 6371.2, D2R = Math.PI / 180;
+  const dt = (yearDecimal || EPOCH) - EPOCH;
+  const G = [], H = [];
+  for (let n = 0; n <= NMAX; n++) { G.push(new Float64Array(NMAX + 1)); H.push(new Float64Array(NMAX + 1)); }
+  for (const [n, m, g, h, gd, hd] of COF) { G[n][m] = g + gd * dt; H[n][m] = h + hd * dt; }
+
+  // Geodetic (WGS84) to geocentric spherical.
+  const a = 6378.137, f = 1 / 298.257223563, e2 = f * (2 - f);
+  const phi = latDeg * D2R, lam = lonDeg * D2R, hKm = (altM || 0) / 1000;
+  const sP = Math.sin(phi), cP = Math.cos(phi);
+  const Rc = a / Math.sqrt(1 - e2 * sP * sP);
+  const p = (Rc + hKm) * cP, z = (Rc * (1 - e2) + hKm) * sP;
+  const r = Math.hypot(p, z);
+  const latC = Math.asin(z / r);                       // geocentric latitude
+  const CT = Math.sin(latC), ST = Math.cos(latC);      // cos/sin of colatitude
+
+  // Schmidt semi-normalised associated Legendre functions and d/dtheta.
+  const P = [], DP = [];
+  for (let n = 0; n <= NMAX; n++) { P.push(new Float64Array(NMAX + 1)); DP.push(new Float64Array(NMAX + 1)); }
+  P[0][0] = 1;
+  for (let n = 1; n <= NMAX; n++) {
+    for (let m = 0; m <= n; m++) {
+      if (n === m) {
+        const k = n === 1 ? 1 : Math.sqrt((2 * n - 1) / (2 * n));
+        P[n][n] = k * ST * P[n - 1][n - 1];
+        DP[n][n] = k * (CT * P[n - 1][n - 1] + ST * DP[n - 1][n - 1]);
+      } else {
+        const d = Math.sqrt(n * n - m * m);
+        const k2 = n >= 2 ? Math.sqrt((n - 1) * (n - 1) - m * m) : 0;
+        const p2 = n >= 2 ? P[n - 2][m] : 0, dp2 = n >= 2 ? DP[n - 2][m] : 0;
+        P[n][m] = ((2 * n - 1) * CT * P[n - 1][m] - k2 * p2) / d;
+        DP[n][m] = ((2 * n - 1) * (CT * DP[n - 1][m] - ST * P[n - 1][m]) - k2 * dp2) / d;
+      }
+    }
+  }
+
+  // Field in the geocentric frame: X' north, Y' east, Z' down.
+  let Xp = 0, Yp = 0, Zp = 0;
+  for (let n = 1; n <= NMAX; n++) {
+    const ar = Math.pow(A / r, n + 2);
+    for (let m = 0; m <= n; m++) {
+      const cm = Math.cos(m * lam), sm = Math.sin(m * lam);
+      const gh = G[n][m] * cm + H[n][m] * sm;
+      Xp += ar * gh * DP[n][m];
+      Yp += ar * m * (G[n][m] * sm - H[n][m] * cm) * P[n][m];
+      Zp -= ar * (n + 1) * gh * P[n][m];
+    }
+  }
+  Yp = ST > 1e-9 ? Yp / ST : 0;
+  // Rotate to the geodetic frame (Z doesn't affect D except through X).
+  const psi = latC - phi;
+  const X = Xp * Math.cos(psi) - Zp * Math.sin(psi);
+  return Math.atan2(Yp, X) / D2R;
+}
+
 function compassCorrection() {
   return compassOffset !== null && isFinite(compassOffset) ? compassOffset : -gridConvergenceDeg();
 }
@@ -1555,6 +1743,8 @@ setTimeout(() => {
     const ctr  = box.getCenter(new THREE.Vector3());
     const dim  = Math.max(size.x, size.y);
     terrainScale = dim;
+    _orbitTerrainZ = [box.min.z, box.max.z];
+    _orbitXY = [box.min.x, box.min.y, box.max.x, box.max.y];
 
     // Build the height lookup before anything asks for a ground elevation.
     setP(70, 'Indexing terrain heights...');
@@ -1763,8 +1953,10 @@ function buildPassageMesh(groups) {
   const pos = new Float32Array(nv * 3), col = new Float32Array(nv * 4);   // RGBA: reach fades per vertex
   const idx = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
   let vo = 0, io = 0;
+  const ranges = [];
   groups.forEach(g => {
     const P = g.pos, I = g.idx, n = P.length / 3;
+    ranges.push({ color: g.color, i0: io, ni: I.length });
     let hex = g.color || '#00e5ff';
     if (/^#[0-9a-f]{8}$/i.test(hex)) hex = hex.slice(0, 7);
     const c = new THREE.Color(hex);
@@ -1802,7 +1994,10 @@ function buildPassageMesh(groups) {
   passageMesh = new THREE.Group();
   passageMesh.add(back, front);
   passageMesh.userData.meshes = [back, front];
+  passageMesh.userData.groupRanges = ranges;          // per survey colour (FLEX Field hides a replaced cave's)
+  passageMesh.userData.fullIndex = idx;
   scene.add(passageMesh);
+  if (typeof ffApplyWallHiding === 'function' && Object.keys(ffState.caveUpdates || {}).length) ffApplyWallHiding();
   const btn = document.getElementById('btn-walls');
   if (btn) btn.style.display = '';
   applyWallMode();
@@ -1812,7 +2007,7 @@ function buildPassageMesh(groups) {
 }
 
 function applyWallMode() {
-  if (!passageMesh) return;
+  if (!passageMesh) { if (typeof ffApplyWallMode === 'function') ffApplyWallMode(); return; }
   passageMesh.visible = wallMode !== 2;
   passageMesh.userData.meshes.forEach(mesh => {
     const m = mesh.material;
@@ -1820,6 +2015,7 @@ function applyWallMode() {
     m.depthWrite = wallMode !== 1;        // ghost: see every wall at once
     m.needsUpdate = true;
   });
+  if (typeof ffApplyWallMode === 'function') ffApplyWallMode();   // field-survey walls follow
   const btn = document.getElementById('btn-walls');
   if (btn) {
     btn.classList.toggle('off',    wallMode === 2);
@@ -2877,8 +3073,10 @@ document.getElementById('fp-q').addEventListener('input', ev => {
   }, 120);
 });
 
-// Leads list: nearest to the selected station (or you, or the view centre), or biggest.
-let leadSort = 'near';
+// Leads list: the export's leads and the project's (FLEX Field), active by
+// default; nearest to the selected station (or you, or the view centre),
+// biggest, or by priority.
+let leadSort = 'near', leadShow = 'active';
 function leadsRender() {
   const list = document.getElementById('fp-lead-list'), from = document.getElementById('fp-leads-from');
   list.textContent = '';
@@ -2888,24 +3086,36 @@ function leadsRender() {
   else if (gpsScenePos) { origin = new THREE.Vector3(gpsScenePos.x, gpsScenePos.y, gpsScenePos.z); originName = 'from you'; }
   else { origin = controls.target; originName = 'from the view centre'; }
   const items = [];
-  stationMap.forEach(st => (st.leads || []).forEach(ld => {
-    const size = Math.max(ld.width || 0, ld.height || 0);
-    items.push({ st, ld, d: st.pos.distanceTo(origin), size });
+  let nActive = 0;
+  stationMap.forEach(st => (typeof ffLeadsAt === 'function' ? ffLeadsAt(st) : (st.leads || []).map(ld => ({ fields: { desc: ld.description, w: ld.width, h: ld.height }, active: true }))).forEach(it => {
+    if (it.active) nActive++;
+    if (leadShow === 'active' ? !it.active : leadShow === 'closed' ? it.active : false) return;
+    const f = it.fields || {};
+    items.push({ st, it, d: st.pos.distanceTo(origin), size: Math.max(Number(f.w) || 0, Number(f.h) || 0), pri: Number(f.priority) || 9 });
   }));
-  document.querySelector('#find-panel .fp-tab[data-tab="leads"]').textContent = items.length ? `Leads (${items.length})` : 'Leads';
-  if (!items.length) { from.textContent = 'No open leads in this export.'; return; }
-  from.textContent = leadSort === 'near' ? 'Straight-line distance ' + originName : 'Biggest first (unsized last)';
-  items.sort(leadSort === 'near' ? (a, b) => a.d - b.d : (a, b) => b.size - a.size || a.d - b.d);
-  const m = v => U.len(v);
-  items.slice(0, 300).forEach(it => {
-    const sz = it.size ? U.dim(it.size) : '';
-    const sub = ['at ' + (it.st.name || 'station'), m(it.d), sz].filter(Boolean).join(' · ');
-    list.appendChild(fpRow('?', it.ld.description || 'Lead', sub, () => goToStation(it.st)));
+  document.querySelector('#find-panel .fp-tab[data-tab="leads"]').textContent = nActive ? `Leads (${nActive})` : 'Leads';
+  if (!items.length) { from.textContent = leadShow === 'closed' ? 'No closed leads.' : 'No open leads.'; return; }
+  from.textContent = leadSort === 'near' ? 'Straight-line distance ' + originName : leadSort === 'size' ? 'Biggest first (unsized last)' : 'Priority 1 first, then nearest';
+  items.sort(leadSort === 'near' ? (a, b) => a.d - b.d : leadSort === 'size' ? (a, b) => b.size - a.size || a.d - b.d : (a, b) => a.pri - b.pri || a.d - b.d);
+  items.slice(0, 300).forEach(x => {
+    const f = x.it.fields || {};
+    const sub = [typeof ffLeadSummary === 'function' ? ffLeadSummary(f) : '', 'at ' + (x.st.name || 'station'), U.len(x.d)].filter(Boolean).join(' · ');
+    let edit = null;
+    if (typeof ffEditLead === 'function') {
+      edit = el('button', 'fp-btn', '✏️');
+      edit.addEventListener('click', ev => { ev.stopPropagation(); ffEditLead(x.st, x.it); });
+    }
+    list.appendChild(fpRow(x.it.active ? '?' : '✓', f.desc || 'Lead', sub, () => goToStation(x.st), edit));
   });
 }
-document.querySelectorAll('#fp-leads .fp-sort button').forEach(b => b.addEventListener('click', () => {
+document.querySelectorAll('#fp-leads .fp-sort button[data-sort]').forEach(b => b.addEventListener('click', () => {
   leadSort = b.dataset.sort;
-  document.querySelectorAll('#fp-leads .fp-sort button').forEach(x => x.classList.toggle('active', x === b));
+  document.querySelectorAll('#fp-leads .fp-sort button[data-sort]').forEach(x => x.classList.toggle('active', x === b));
+  leadsRender();
+}));
+document.querySelectorAll('#fp-leads .fp-sort button[data-show]').forEach(b => b.addEventListener('click', () => {
+  leadShow = b.dataset.show;
+  document.querySelectorAll('#fp-leads .fp-sort button[data-show]').forEach(x => x.classList.toggle('active', x === b));
   leadsRender();
 }));
 
@@ -3372,8 +3582,7 @@ function routeRenderPanel() {
 // terrain, and exported as GPX (CalTopo, Gaia, GPS units) or KML (FLEX).
 // Recording runs while the viewer is open: the phone's browser/WebView gets no
 // GPS with the app in the background or the screen off.
-const FIELD_KEY = 'flex_field_v1|' + ((META.name || '') + '|' +
-  (META.center_lon || 0).toFixed(3) + '|' + (META.center_lat || 0).toFixed(3));
+const FIELD_KEY = 'flex_field_v1|' + MAP_KEY;
 const FIELD_COL = '#ff4fa3';
 const FIELD_PIN_PX = 26, FIELD_LABEL_PX = 14;
 const fieldGroup = new THREE.Group();
@@ -3847,6 +4056,7 @@ function closeSheet() {
 function openSheet(name) {
   if (sheetOpen === name) { closeSheet(); return; }
   closeFind();
+  if (typeof ffClosePanel === 'function') ffClosePanel();
   uiStash();
   sheetEl.textContent = '';
   sheetOpen = name;
@@ -3977,6 +4187,15 @@ function renderToolsSheet() {
   sheetRow('🕹️', 'Fly', null, () => { closeSheet(); flySet(flyModeType === 1 ? 0 : 1); updateModeBar(); }, flyModeType === 1);
   sheetRow('🏗️', 'Crane', null, () => { closeSheet(); flySet(flyModeType === 2 ? 0 : 2); updateModeBar(); }, flyModeType === 2);
   sheetRow('📂', 'Import KML / KMZ', null, () => { closeSheet(); document.getElementById('kml-input').click(); });
+  const nff = ffState.order.filter(id => ffState.surveys[id]).length;
+  sheetRow('📐', 'Field survey', nff ? `${nff} on this map` : sel ? `add shots from ${sel.name || 'the selected station'}` : 'select a station to tie into',
+    () => { closeSheet(); if (!nff && sel) ffNewSurvey(sel); else ffOpenPanel(); });
+  const nup = Object.keys(ffState.caveUpdates || {}).length;
+  sheetRow('⟳', 'Update a cave from a file', nup ? `${nup} updated here · undo in the change log` : 'Compass .plt · approximate', () => { closeSheet(); ffUpdateCaveStart(); });
+  const ndocs = ffPid ? FL.docsOf(ffD, ffP).length : 0;
+  sheetRow('📚', 'Documents', ffPid ? `${ndocs} in ${ffP.name || 'the project'}${sel ? ' · ' + (sel.name || 'station') + '’s first' : ''}` : 'needs a project (⋯ More)',
+    () => { closeSheet(); ffOpenDocs(sel || null, sel ? 'station' : null); });
+  sheetRow('📝', 'Change log', ffLog.length ? `${ffLog.length} change${ffLog.length > 1 ? 's' : ''} · undo` : 'everything added to the project', () => { closeSheet(); ffOpenLog(); });
 }
 
 // ── 🎨 Display: how things look, and what's shown ──
@@ -3987,7 +4206,7 @@ function renderDisplaySheet() {
     if (routes.length) routeApplyAlpha();
     rerenderSheet();
   }, [false, false, !_hgrid, false]);
-  if (passageMesh) {
+  if (passageMesh || ffWallGroup.children.length) {
     sheetHead('Walls');
     sheetSeg(['On', 'Ghost', 'Off'], wallMode, i => { wallMode = i; applyWallMode(); if (routes.length) routeApplyAlpha(); rerenderSheet(); });
   }
@@ -4029,6 +4248,11 @@ function renderDisplaySheet() {
 function renderMoreSheet() {
   sheetHead('Units');
   sheetSeg(['Feet', 'Metres'], UNITS === 'm' ? 1 : 0, i => { setUnits(i ? 'm' : 'ft'); rerenderSheet(); });
+  sheetHead('Entering data as');
+  const ar = el('div', 'fp-row'); ar.appendChild(ffAuthorChip()); sheetEl.appendChild(ar);
+  sheetRow('⇄', 'Project & sync', ffPid ? (ffP.name || 'project') + ' · sync files to other phones and FLEX' : 'pick or start this map’s project', () => { ffOpenProject(); });
+  sheetRow('⇪', 'Export project data', 'notes, leads, documents list, field surveys, the log (JSON)', () => { closeSheet(); ffExportData(); });
+  if (window.FF_MAP_ID) sheetRow('🗂', 'Maps', 'back to the list of maps', () => { location.href = '../../assets/flexfield/index.html'; });
   sheetRow('⛶', 'Fullscreen', null, () => { closeSheet(); document.getElementById('btn-fullscreen').click(); });
   sheetRow('?', 'Help', null, () => { closeSheet(); document.getElementById('btn-help').click(); });
 }
@@ -4045,6 +4269,7 @@ function onUnitsChanged() {
   recBadgeUpdate();
   const sel = _selMesh && _selMesh._station;
   if (sel && infoPanel.classList.contains('open')) selectStation(sel);
+  if (ffPanelOpen) ffRenderPanel();
   updateModeBar(true);
 }
 
@@ -4099,14 +4324,1971 @@ setInterval(updateModeBar, 300);    // cheap: touches the DOM only when somethin
   sync();
 })();
 
+// ══ FLEX Field: change log, notes, survey note folders, field survey ═══════════
+// Everything added on the phone is an entry in one append-only change log per
+// map (who, when, what, before → after). The state — station notes and field
+// surveys — is rebuilt by replaying the log, so nothing is overwritten and any
+// entry can be undone (an undo is itself a new entry). In the FLEX Field app
+// the log and the note files live in the app's private storage through
+// AndroidHost; in a browser the log is in localStorage and note files in
+// IndexedDB, both on this device only.
+//
+// Field surveys are stored as raw shots tied to station names, never as
+// positions: positions are computed at load, so they follow the cave when a
+// newer export of the map is imported, even if its frame changed.
+
+const FL = window.FlexLib;
+const FF_APP = !!(window.FF_MAP_ID && window.AndroidHost && typeof window.AndroidHost.libRead === 'function');
+const FF_COLOR = '#c6ff00';
+const FF_FT = 0.3048;
+// What people add belongs to the map's project (an area), not to the map:
+// notes, leads, field surveys and cave updates in the project's log, documents
+// in the shared documents log. The viewer works with the export's own cave
+// names; the logs with cave ids. ffLinks maps between them for this map.
+let ffDev = '', ffPid = null, ffReady = false;
+let ffEntries = { proj: [], docs: [], map: [] };
+let ffP = FL.replayProject([], ''), ffD = FL.replayDocs([]);
+let ffSeq = {};                          // scope → this device's last seq
+let ffLinks = { byName: {}, byId: {} };  // export cave name ↔ cave id
+let ffLog = [];                          // this project's entries + its documents' + the map's, oldest first
+let ffState = { surveys: {}, order: [], caveUpdates: {} };   // field survey with export cave names
+let ffBuilt = [];                        // field surveys as viewer survey objects (buildCaveLines appends them)
+let ffBuiltInfo = {};                    // survey id → { placed, closures[], loose[], stations Map }
+const ffWallGroup = new THREE.Group();
+scene.add(ffWallGroup);
+
+const ffNowIso = () => new Date().toISOString();
+const ffUid = () => FL.uid(12);
+function ffFnv(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16).padStart(8, '0');
+}
+function ffWhen(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' }) + ' ' +
+         d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+const ffClone = o => o == null ? o : JSON.parse(JSON.stringify(o));
+const ffLines = text => String(text || '').split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch (_) { return null; } }).filter(Boolean);
+
+// ── Author: switchable, last used by default, always visible ──────────────────
+function ffAuthor() { try { return localStorage.getItem('flexfield_author') || ''; } catch (_) { return ''; } }
+function ffAuthors() {
+  try { const a = JSON.parse(localStorage.getItem('flexfield_authors') || '[]'); return Array.isArray(a) ? a : []; }
+  catch (_) { return []; }
+}
+function ffSetAuthor(name) {
+  name = String(name || '').trim().slice(0, 40);
+  if (!name) return;
+  try {
+    localStorage.setItem('flexfield_author', name);
+    localStorage.setItem('flexfield_authors', JSON.stringify([name, ...ffAuthors().filter(a => a !== name)].slice(0, 8)));
+  } catch (_) { /* storage off: the name lasts this session */ }
+  ffAuthorMem = name;
+  document.querySelectorAll('.ff-author').forEach(b => { b.textContent = '✍ ' + name; });
+}
+let ffAuthorMem = '';
+const ffWho = () => ffAuthor() || ffAuthorMem;
+async function ffChangeAuthor() {
+  const names = ffAuthors();
+  const r = await ffDialog({
+    title: 'Who is entering data?',
+    text: 'Everything you add is logged under this name. It stays until you change it.',
+    input: { value: ffWho(), placeholder: 'Your name', list: names },
+    buttons: [{ label: 'Cancel', value: null }, { label: 'Use this name', value: 'ok', primary: true }],
+  });
+  if (r && r.button === 'ok' && r.value.trim()) ffSetAuthor(r.value);
+  return ffWho();
+}
+async function ffEnsureAuthor() { return ffWho() || (await ffChangeAuthor()); }
+function ffAuthorChip() {
+  const b = el('button', 'fp-btn ff-author', '✍ ' + (ffWho() || 'Set name'));
+  b.title = 'Who is entering data — tap to change';
+  b.addEventListener('click', e => { e.stopPropagation(); ffChangeAuthor(); });
+  return b;
+}
+
+// ── A small modal: title, text, optional input, buttons → Promise ─────────────
+// `body`: an element (a form) placed under the text; `wide` for forms.
+function ffDialog({ title, text, html, input, textarea, buttons, body, wide }) {
+  return new Promise(resolve => {
+    const wrap = el('div', 'ff-modal');
+    const box = el('div', 'ff-modal-box' + (wide ? ' wide' : ''));
+    if (title) box.appendChild(el('div', 'ff-modal-title', title));
+    if (text) box.appendChild(el('div', 'ff-modal-text', text));
+    if (html) { const d = el('div', 'ff-modal-text'); d.innerHTML = html; box.appendChild(d); }
+    if (body) box.appendChild(body);
+    let field = null;
+    if (input || textarea) {
+      const o = input || textarea;
+      field = el(textarea ? 'textarea' : 'input', 'ff-input');
+      field.value = o.value || '';
+      field.placeholder = o.placeholder || '';
+      if (textarea) field.rows = 5;
+      box.appendChild(field);
+      if (o.list && o.list.length) {
+        const row = el('div', 'fp-row ff-modal-list');
+        o.list.forEach(v => {
+          const c = el('button', 'fp-btn', v);
+          c.addEventListener('click', () => { field.value = v; });
+          row.appendChild(c);
+        });
+        box.appendChild(row);
+      }
+    }
+    const row = el('div', 'fp-row ff-modal-btns');
+    (buttons || [{ label: 'OK', value: 'ok', primary: true }]).forEach(bt => {
+      const b = el('button', 'fp-btn' + (bt.primary ? ' active' : '') + (bt.danger ? ' ff-danger' : ''), bt.label);
+      b.addEventListener('click', () => { wrap.remove(); resolve(bt.value === null ? null : { button: bt.value, value: field ? field.value : '', box }); });
+      row.appendChild(b);
+    });
+    box.appendChild(row);
+    wrap.appendChild(box);
+    wrap.addEventListener('pointerdown', e => { if (e.target === wrap) { wrap.remove(); resolve(null); } });
+    document.body.appendChild(wrap);
+    if (field) setTimeout(() => field.focus(), 50);
+  });
+}
+// Pick one of several (a list of buttons) → value or null.
+async function ffChoose(title, text, options, cancel = 'Cancel') {
+  const body = el('div', 'ff-choices');
+  let picked = null, wrapResolve = null;
+  const p = new Promise(res => { wrapResolve = res; });
+  options.forEach(o => {
+    const b = el('button', 'fp-btn' + (o.primary ? ' active' : ''), o.label);
+    if (o.sub) { b.appendChild(el('div', 'ff-choice-sub', o.sub)); }
+    b.addEventListener('click', () => { picked = o.value; const m = b.closest('.ff-modal'); if (m) m.remove(); wrapResolve(o.value); });
+    body.appendChild(b);
+  });
+  ffDialog({ title, text, body, buttons: [{ label: cancel, value: null }] }).then(r => { if (picked === null) wrapResolve(null); });
+  return p;
+}
+
+// ── Storage hosts ─────────────────────────────────────────────────────────────
+// The same operations on the phone (FLEX Field's library through AndroidHost)
+// and in a plain browser (IndexedDB, this browser only).
+const ffHostApp = {
+  dev: () => window.AndroidHost.libDevice(),
+  read: async scope => ffLines(window.AndroidHost.libRead(scope)),
+  append: async (scope, e) => window.AndroidHost.libAppend(scope, JSON.stringify(e)) !== false,
+  blobUrl: async (h, ext) => '/lib/blob/' + h + '.' + (ext || 'jpg'),
+  putBlobB64: async (b64, ext) => JSON.parse(window.AndroidHost.libPutBlob(b64, ext) || 'null'),
+  projects: async () => { try { return JSON.parse(window.AndroidHost.libProjects() || '[]'); } catch (_) { return []; } },
+  setProject: async (pid, name) => window.AndroidHost.libSetProject(pid, name || ''),
+  mapProject: async () => window.AndroidHost.libMapProject(window.FF_MAP_ID) || null,
+  setMapProject: async pid => window.AndroidHost.libSetMapProject(window.FF_MAP_ID, pid),
+  mapLog: async () => ffLines(window.AndroidHost.logRead(window.FF_MAP_ID)),
+  kvGet: async k => window.AndroidHost.libKvGet(k) || null,
+  kvSet: async (k, v) => window.AndroidHost.libKvSet(k, v),
+  pickPages: async ctx => { window.AndroidHost.libPickPages(JSON.stringify(ctx)); },          // → ffPagesPicked
+  syncWrite: async (name, manifest, entries, blobs) =>
+    window.AndroidHost.libSyncWrite(name, JSON.stringify(manifest), JSON.stringify(entries), JSON.stringify(blobs)) !== false,
+  syncImport: async () => { window.AndroidHost.libSyncImport(); },                            // → ffSyncImported
+};
+let _ffIdb = null;
+function ffIdbOpen() {
+  if (_ffIdb) return _ffIdb;
+  _ffIdb = new Promise((res, rej) => {
+    if (!window.indexedDB) { rej(new Error('no IndexedDB')); return; }
+    const rq = indexedDB.open('flexlib', 1);
+    rq.onupgradeneeded = () => {
+      const db = rq.result;
+      const s = db.createObjectStore('entries', { keyPath: 'k' }); s.createIndex('scope', 'scope');
+      db.createObjectStore('blobs', { keyPath: 'h' });
+      db.createObjectStore('kv', { keyPath: 'k' });
+    };
+    rq.onsuccess = () => res(rq.result);
+    rq.onerror = () => rej(rq.error);
+  });
+  return _ffIdb;
+}
+async function ffIdb(stores, mode, fn) {
+  const db = await ffIdbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(stores, mode);
+    let out;
+    Promise.resolve(fn(tx, v => { out = v; })).catch(rej);
+    tx.oncomplete = () => res(out);
+    tx.onerror = () => rej(tx.error);
+  });
+}
+const ffReq = rq => new Promise((res, rej) => { rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); });
+const _ffBlobUrls = {};
+const ffHostIdb = {
+  dev: async () => {
+    let d = await ffHostIdb.kvGet('device');
+    if (!d) { d = 'b' + FL.uid(10); await ffHostIdb.kvSet('device', d); }
+    return d;
+  },
+  read: async scope => ffIdb(['entries'], 'readonly', async (tx, set) =>
+    set((await ffReq(tx.objectStore('entries').index('scope').getAll(scope))).map(r => r.e))),
+  append: async (scope, e) => { await ffIdb(['entries'], 'readwrite', tx => { tx.objectStore('entries').put({ k: scope + '|' + e.id, scope, e }); }); return true; },
+  blobUrl: async (h, ext) => {
+    if (_ffBlobUrls[h]) return _ffBlobUrls[h];
+    const r = await ffIdb(['blobs'], 'readonly', async (tx, set) => set(await ffReq(tx.objectStore('blobs').get(h))));
+    return r ? (_ffBlobUrls[h] = URL.createObjectURL(r.blob)) : null;
+  },
+  putBlob: async (blob, ext, meta) => {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const h = FL.sha256(bytes);
+    await ffIdb(['blobs'], 'readwrite', tx => { tx.objectStore('blobs').put({ h, ext, blob, t: Date.now() }); });
+    return Object.assign({ h, ext }, meta || {});
+  },
+  projects: async () => (await ffHostIdb.kvGet('projects')) ? JSON.parse(await ffHostIdb.kvGet('projects')) : [],
+  setProject: async (pid, name) => {
+    const list = await ffHostIdb.projects();
+    const i = list.findIndex(p => p.id === pid);
+    if (i >= 0) list[i].name = name || list[i].name; else list.push({ id: pid, name: name || '' });
+    await ffHostIdb.kvSet('projects', JSON.stringify(list));
+  },
+  mapProject: async () => ffHostIdb.kvGet('map|' + MAP_KEY),
+  setMapProject: async pid => ffHostIdb.kvSet('map|' + MAP_KEY, pid),
+  mapLog: async () => [],
+  kvGet: async k => { try { return await ffIdb(['kv'], 'readonly', async (tx, set) => { const r = await ffReq(tx.objectStore('kv').get(k)); set(r ? r.v : null); }); } catch (_) { return null; } },
+  kvSet: async (k, v) => ffIdb(['kv'], 'readwrite', tx => { tx.objectStore('kv').put({ k, v }); }),
+  pickPages: async ctx => ffBrowserPick(ctx),
+  syncWrite: async (name, manifest, entries, blobs) => {
+    if (typeof JSZip === 'undefined') { showToast('No zip library here'); return false; }
+    const zip = new JSZip();
+    zip.file('manifest.json', JSON.stringify(manifest, null, 1));
+    Object.keys(entries).forEach(sc => {
+      const byDev = {};
+      entries[sc].forEach(e => (byDev[e.dev] || (byDev[e.dev] = [])).push(e));
+      Object.keys(byDev).forEach(d => zip.file(`logs/${sc}/log-${d}.jsonl`, byDev[d].map(e => JSON.stringify(e)).join('\n') + '\n'));
+    });
+    for (const b of blobs) {
+      const h = b.split('.')[0];
+      const r = await ffIdb(['blobs'], 'readonly', async (tx, set) => set(await ffReq(tx.objectStore('blobs').get(h))));
+      if (r) zip.file('blobs/' + b, r.blob);
+    }
+    const out = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
+    const url = URL.createObjectURL(out), a = document.createElement('a');
+    a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 20000);
+    return true;
+  },
+  syncImport: async () => {
+    let inp = document.getElementById('ff-sync-input');
+    if (!inp) {
+      inp = el('input'); inp.type = 'file'; inp.id = 'ff-sync-input'; inp.accept = '.zip,application/zip'; inp.style.display = 'none';
+      document.body.appendChild(inp);
+      inp.addEventListener('change', async () => {
+        const f = inp.files && inp.files[0]; inp.value = '';
+        if (!f) return;
+        try { window.ffSyncImported(JSON.stringify(await ffIdbMergeZip(f))); }
+        catch (e) { window.ffSyncImported(JSON.stringify({ ok: false, error: String(e.message || e) })); }
+      });
+    }
+    inp.click();
+  },
+};
+// A sync file into IndexedDB: entries this browser lacks, pages it lacks.
+async function ffIdbMergeZip(file) {
+  const zip = await JSZip.loadAsync(file);
+  const mf = zip.file('manifest.json');
+  if (!mf) throw new Error('not a FLEX sync file (no manifest.json)');
+  const manifest = JSON.parse(await mf.async('string'));
+  if (manifest.format !== 'flex-sync') throw new Error('not a FLEX sync file');
+  let added = 0, pages = 0;
+  const scopes = {};
+  for (const name of Object.keys(zip.files)) {
+    const m = /^logs\/([^/]+)\/log-([^/]+)\.jsonl$/.exec(name);
+    if (!m || !/^(docs|p-[A-Za-z0-9_-]+)$/.test(m[1])) continue;
+    (scopes[m[1]] || (scopes[m[1]] = [])).push(...ffLines(await zip.file(name).async('string')));
+  }
+  for (const sc of Object.keys(scopes)) {
+    const have = new Set((await ffHostIdb.read(sc)).map(e => e.id));
+    const nw = FL.newEntries(have, scopes[sc]);
+    await ffIdb(['entries'], 'readwrite', tx => { const st = tx.objectStore('entries'); nw.forEach(e => st.put({ k: sc + '|' + e.id, scope: sc, e })); });
+    added += nw.length;
+  }
+  for (const name of Object.keys(zip.files)) {
+    const m = /^blobs\/([0-9a-f]{64})\.([a-z0-9]{1,5})$/.exec(name);
+    if (!m) continue;
+    const have = await ffIdb(['blobs'], 'readonly', async (tx, set) => set(await ffReq(tx.objectStore('blobs').getKey(m[1]))));
+    if (have) continue;
+    const blob = await zip.file(name).async('blob');
+    await ffIdb(['blobs'], 'readwrite', tx => { tx.objectStore('blobs').put({ h: m[1], ext: m[2], blob, t: Date.now() }); });
+    pages++;
+  }
+  if (manifest.project && manifest.project.id) await ffHostIdb.setProject(manifest.project.id, manifest.project.name);
+  return { ok: true, project: manifest.project, from: manifest.from, entries: added, pages };
+}
+const ffHost = FF_APP ? ffHostApp : ffHostIdb;
+
+// ── Pages: photos, scans, PDFs → stored page images ───────────────────────────
+// Pages are kept at most 2400 px on the long side (JPEG), so a sync file stays
+// reasonable. PDFs: page images on the phone (the app renders them); in a plain
+// browser a PDF is kept as is. TIFF scans are decoded here (UTIF).
+const FF_PAGE_PX = 2400;
+async function ffCanvasToJpeg(cv) {
+  return new Promise(res => cv.toBlob(b => res(b), 'image/jpeg', 0.85));
+}
+function ffFitCanvas(w, h) {
+  const k = Math.min(1, FF_PAGE_PX / Math.max(w, h));
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.round(w * k)); cv.height = Math.max(1, Math.round(h * k));
+  return cv;
+}
+// TIFF bytes → canvases (one per page).
+function ffTiffPages(buf) {
+  if (typeof UTIF === 'undefined') throw new Error('TIFF reader missing');
+  const ifds = UTIF.decode(buf), out = [];
+  ifds.forEach(ifd => {
+    if (!ifd.width && !ifd.t256) return;
+    UTIF.decodeImage(buf, ifd);
+    const w = ifd.width, h = ifd.height;
+    if (!w || !h) return;
+    const rgba = UTIF.toRGBA8(ifd);
+    const src = document.createElement('canvas'); src.width = w; src.height = h;
+    src.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(rgba.buffer, rgba.byteOffset, w * h * 4), w, h), 0, 0);
+    const cv = ffFitCanvas(w, h);
+    cv.getContext('2d').drawImage(src, 0, 0, cv.width, cv.height);
+    out.push(cv);
+  });
+  return out;
+}
+const ffBlobToB64 = blob => new Promise((res, rej) => {
+  const fr = new FileReader();
+  fr.onload = () => res(String(fr.result).split(',')[1] || '');
+  fr.onerror = () => rej(fr.error);
+  fr.readAsDataURL(blob);
+});
+async function ffStoreCanvas(cv, name) {
+  const jpg = await ffCanvasToJpeg(cv);
+  const meta = { w: cv.width, ht: cv.height, name };
+  if (FF_APP) return Object.assign(await ffHostApp.putBlobB64(await ffBlobToB64(jpg), 'jpg'), meta);
+  return ffHostIdb.putBlob(jpg, 'jpg', meta);
+}
+// Browser: pick files, turn them into pages here.
+async function ffBrowserPick(ctx) {
+  let inp = document.getElementById('ff-file-input');
+  if (!inp) {
+    inp = el('input'); inp.type = 'file'; inp.id = 'ff-file-input'; inp.multiple = true;
+    inp.accept = 'image/*,.tif,.tiff,application/pdf'; inp.style.display = 'none';
+    document.body.appendChild(inp);
+    inp.addEventListener('change', async () => {
+      const files = Array.from(inp.files || []), c = inp._ctx;
+      inp.value = '';
+      if (!files.length) return;
+      const pages = [];
+      for (const f of files) {
+        try {
+          if (/\.tiff?$/i.test(f.name) || f.type === 'image/tiff') {
+            const cvs = ffTiffPages(await f.arrayBuffer());
+            for (let i = 0; i < cvs.length; i++) pages.push(await ffStoreCanvas(cvs[i], f.name + (cvs.length > 1 ? ` (${i + 1})` : '')));
+          } else if (/\.pdf$/i.test(f.name) || f.type === 'application/pdf') {
+            pages.push(await ffHostIdb.putBlob(f, 'pdf', { name: f.name }));
+          } else {
+            const bmp = await createImageBitmap(f);
+            const cv = ffFitCanvas(bmp.width, bmp.height);
+            cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+            pages.push(await ffStoreCanvas(cv, f.name));
+          }
+        } catch (e) { showToast('Could not read ' + f.name); }
+      }
+      window.ffPagesPicked(JSON.stringify(c), JSON.stringify({ pages }));
+    });
+  }
+  inp._ctx = ctx;
+  inp.click();
+}
+// The app calls this when picked files are stored. TIFFs come back raw (the
+// phone can't decode them): turned into pages here, then stored.
+window.ffPagesPicked = async function (ctxJson, resJson) {
+  let ctx = {}, res = {};
+  try { ctx = JSON.parse(ctxJson || '{}'); res = JSON.parse(resJson || '{}'); } catch (_) {}
+  const pages = (res.pages || []).slice();
+  for (const t of res.tiffs || []) {
+    try {
+      const buf = await (await fetch('/lib/tmp/' + encodeURIComponent(t.token))).arrayBuffer();
+      const cvs = ffTiffPages(buf);
+      for (let i = 0; i < cvs.length; i++) pages.push(await ffStoreCanvas(cvs[i], t.name + (cvs.length > 1 ? ` (${i + 1})` : '')));
+    } catch (e) { showToast('Could not read ' + (t.name || 'a TIFF')); }
+    try { window.AndroidHost.libTmpDone(t.token); } catch (_) {}
+  }
+  (res.failed || []).forEach(n => showToast('Could not read ' + n));
+  if (!pages.length) return;
+  await ffEnsureAuthor();
+  if (ctx.doc && ffD.docs[ctx.doc]) {
+    ffRecord('doc.pages', { doc: ctx.doc, add: pages }, null, 'docs');
+    showToast(`Added ${pages.length} page${pages.length > 1 ? 's' : ''}`);
+    if (ffGallery && ffGallery.doc === ctx.doc) ffDocOpen(ctx.doc, ffD.docs[ctx.doc].pages.length - pages.length);
+  } else {
+    const d = new Date();
+    const title = ctx.title || (pages.length === 1 ? pages[0].name.replace(/\.[^.]*$/, '') : `${pages[0].name.replace(/\.[^.]*$/, '')} +${pages.length - 1}`);
+    const id = ffUid();
+    ffRecord('doc.add', { doc: id, title: title.slice(0, 80), kind: ctx.kind || '', date: d.toISOString().slice(0, 10), pages,
+      tags: (ctx.tags && ctx.tags.length ? ctx.tags : [FL.T.project(ffPid)]) }, null, 'docs');
+    showToast(`New document, ${pages.length} page${pages.length > 1 ? 's' : ''}`);
+    if (ctx.open !== false) ffDocOpen(id, 0);
+  }
+  if (ffDocsOpen) ffRenderDocs();
+  ffRefreshCard();
+};
+
+// ── The log: record and replay ────────────────────────────────────────────────
+// Field-survey entries name caves by id in the log, by export name here.
+function ffCaveId(name) {
+  if (name == null) return name;
+  if (ffP.caves[name]) return name;                 // already an id
+  return ffLinks.byName[name] || name;
+}
+const ffCaveName = cid => (cid != null && ffLinks.byId[cid] != null ? ffLinks.byId[cid] : null);
+function ffToLog(op, data) {
+  const d = ffClone(data);
+  if ((op === 'survey.add' || op === 'survey.restore') && d.survey) d.survey.cave = ffCaveId(d.survey.cave || '');
+  if (op === 'survey.delete' && d.prev) d.prev.cave = ffCaveId(d.prev.cave || '');
+  if (op === 'cave.update' || op === 'cave.revert') d.cave = ffCaveId(d.cave || '');
+  return d;
+}
+let _ffSaveWarned = false;
+// Record a change: log it, replay, redraw what it touches.
+function ffRecord(op, data, extra, where) {
+  if (!ffPid && where !== 'docs') { showToast('No project for this map yet'); return null; }
+  const scope = where === 'docs' ? FL.DOCS : FL.projScope(ffPid);
+  const seq = (ffSeq[scope] || 0) + 1;
+  ffSeq[scope] = seq;
+  const entry = Object.assign({ id: ffDev + '.' + seq, dev: ffDev, seq, t: ffNowIso(), who: ffWho() || (FF_APP ? 'FLEX Field' : 'viewer'), op }, ffToLog(op, data || {}), extra || {});
+  (where === 'docs' ? ffEntries.docs : ffEntries.proj).push(entry);
+  ffHost.append(scope, entry).then(ok => {
+    if (!ok && !_ffSaveWarned) { _ffSaveWarned = true; showToast('Could not save on this device — export your field data'); }
+  }).catch(() => { if (!_ffSaveWarned) { _ffSaveWarned = true; showToast('Could not save on this device — export your field data'); } });
+  ffReplay();
+  ffAfterChange(entry);
+  return entry;
+}
+function ffReplay() {
+  ffP = FL.replayProject(ffEntries.proj, ffPid || '');
+  ffD = FL.replayDocs(ffEntries.docs);
+  // Field survey and cave updates, with the export's cave names.
+  ffState = { surveys: {}, order: [], caveUpdates: {} };
+  ffP.order.forEach(id => {
+    const sv = ffP.surveys[id];
+    if (!sv) return;
+    const name = ffCaveName(sv.cave);
+    if (name == null) return;                       // a cave not on this map
+    ffState.surveys[id] = Object.assign(ffClone(sv), { cave: name });
+    ffState.order.push(id);
+  });
+  Object.keys(ffP.caveUpdates).forEach(cid => {
+    const name = ffCaveName(cid);
+    if (name != null) ffState.caveUpdates[name] = ffP.caveUpdates[cid];
+  });
+  const mine = new Set(FL.docsOf(ffD, ffP, {}).map(d => d.id).concat(FL.docsOf(ffD, ffP, { deleted: true }).map(d => d.id)));
+  ffLog = FL.sortEntries(ffEntries.proj.concat(ffEntries.docs.filter(e => mine.has(e.doc)), ffEntries.map));
+}
+// The entry that undoes `e`, or null when it can't be undone.
+function ffInverse(e) {
+  if (e.proposed) return null;                    // a suggestion changed nothing: turn it down instead
+  switch (e.op) {
+    case 'note.set':     return { op: 'note.set', note: e.note, text: e.prev || '', prev: e.text || '', base: [e.id] };
+    case 'lead.set': {
+      if (!e.prev) return null;
+      return { op: 'lead.set', lead: e.lead, fields: e.prev, prev: e.fields, base: [e.id] };
+    }
+    case 'lead.del':     return { op: 'lead.restore', lead: e.lead, base: [e.id] };
+    case 'lead.restore': return { op: 'lead.del', lead: e.lead, base: [e.id] };
+    case 'doc.add':      return { op: 'doc.del', doc: e.doc, _where: 'docs' };
+    case 'doc.del':      return { op: 'doc.restore', doc: e.doc, _where: 'docs' };
+    case 'doc.restore':  return { op: 'doc.del', doc: e.doc, _where: 'docs' };
+    case 'doc.tag':      return { op: 'doc.untag', doc: e.doc, target: e.target, _where: 'docs' };
+    case 'doc.untag':    return { op: 'doc.tag', doc: e.doc, target: e.target, _where: 'docs' };
+    case 'doc.rotate':   return e.prev != null ? { op: 'doc.rotate', doc: e.doc, h: e.h, rot: e.prev, prev: e.rot, _where: 'docs' } : null;
+    case 'doc.set':      return e.prev ? { op: 'doc.set', doc: e.doc, fields: e.prev, prev: e.fields, _where: 'docs' } : null;
+    case 'doc.droppage': return e.page ? { op: 'doc.pages', doc: e.doc, add: [e.page], at: e.at, _where: 'docs' } : null;
+    case 'survey.add':   return { op: 'survey.delete', id: e.survey.id, prev: ffClone(ffP.surveys[e.survey.id] || e.survey) };
+    case 'survey.restore': return { op: 'survey.delete', id: e.survey.id, prev: ffClone(e.survey) };
+    case 'survey.delete': return e.prev ? { op: 'survey.restore', survey: e.prev } : null;
+    case 'survey.set':   return { op: 'survey.set', id: e.id, patch: e.prev, prev: e.patch };
+    case 'shot.add':     return { op: 'shot.delete', sid: e.sid, shotId: e.shot.id, prev: e.shot };
+    case 'shot.set':     return { op: 'shot.set', sid: e.sid, shot: e.prev, prev: e.shot };
+    case 'shot.delete':  return e.prev ? { op: 'shot.add', sid: e.sid, shot: e.prev, index: e.index } : null;
+    case 'cave.update': {
+      const cur = { file: e.file, plt: e.plt, fit: e.fit, id: e.id };
+      return e.prev ? { op: 'cave.update', cave: e.cave, file: e.prev.file, plt: e.prev.plt, fit: e.prev.fit, prev: cur }
+                    : { op: 'cave.revert', cave: e.cave, prev: cur };
+    }
+    case 'cave.revert':  return e.prev ? { op: 'cave.update', cave: e.cave, file: e.prev.file, plt: e.prev.plt, fit: e.prev.fit, prev: null } : null;
+    default: return null;
+  }
+}
+function ffUndo(e) {
+  const inv = ffInverse(e);
+  if (!inv) { showToast('That change can’t be undone'); return; }
+  const { op, _where, ...data } = inv;
+  ffRecord(op, data, { undoOf: e.id }, _where || (e.scope === 'docs' || /^doc\./.test(e.op) ? 'docs' : null));
+  showToast('Undone');
+}
+// Labels for targets and entries.
+function ffTargetLabel(t) {
+  const p = FL.parseTarget(t);
+  const caveName = cid => (ffP.caves[cid] && ffP.caves[cid].name) || ffCaveName(cid) || 'a cave';
+  switch (p.kind) {
+    case 'project': return p.pid === ffPid ? (ffP.name || 'this project') : 'another project';
+    case 'cave': return caveName(p.cave);
+    case 'survey': return `survey ${p.code} · ${caveName(p.cave)}`;
+    case 'station': return `${p.name} · ${caveName(p.cave)}`;
+    case 'area': return `stations ${p.spec.replace(/~/g, '–')} · ${caveName(p.cave)}`;
+    case 'lead': { const L = ffP.leads[p.lead]; return 'lead' + (L && L.target ? ' at ' + ffTargetLabel(L.target) : ''); }
+    case 'doc': return '“' + ((ffD.docs[p.doc] && ffD.docs[p.doc].title) || 'document') + '”';
+    default: return t;
+  }
+}
+function ffDescribe(e) {
+  if (e.proposed) return `Suggested by ${e.proposed.by || e.who || '?'}${e.proposed.confidence != null ? ' (' + Math.round(e.proposed.confidence * 100) + '%)' : ''}: ` + ffDescribeOp(e);
+  return ffDescribeOp(e);
+}
+function ffDescribeOp(e) {
+  const svName = id => (ffP.surveys[id] && ffP.surveys[id].name) || 'survey';
+  const shotTxt = s => s ? `${s.from || '?'} → ${s.to || '?'}` : '';
+  const docName = id => '“' + ((ffD.docs[id] && ffD.docs[id].title) || 'document') + '”';
+  const noteAt = id => { const n = ffP.notes[id]; return n && n.target ? ffTargetLabel(n.target) : 'a station'; };
+  const leadAt = id => { const L = ffP.leads[id]; return L && L.target ? ffTargetLabel(L.target) : 'a station'; };
+  switch (e.op) {
+    case 'project.set':  return `Project ${e.name != null ? '“' + e.name + '”' : 'details'}`;
+    case 'project.lists': return `Added to lists: ${Object.values(e.add || {}).flat().join(', ')}`;
+    case 'cave.set':     return `Cave “${e.name || (ffP.caves[e.cave] && ffP.caves[e.cave].name) || ''}”${e.sources ? ' (sources)' : ''}`;
+    case 'cave.alias':   return `“${e.alias}” is ${(ffP.caves[e.cave] && ffP.caves[e.cave].name) || 'a cave'}`;
+    case 'note.set':     return e.text ? (e.prev ? `Edited note at ${noteAt(e.note)}` : `Note at ${noteAt(e.note)}`) : `Removed note at ${noteAt(e.note)}`;
+    case 'lead.set':     return (e.prev ? 'Lead at ' : 'New lead at ') + leadAt(e.lead) + (e.fields ? ': ' + Object.keys(e.fields).map(k => k === 'status' ? FL.statusLabel(e.fields.status) : k).join(', ') : '');
+    case 'lead.del':     return `Removed lead at ${leadAt(e.lead)}`;
+    case 'lead.restore': return `Restored lead at ${leadAt(e.lead)}`;
+    case 'doc.add':      return `Document ${docName(e.doc)}, ${(e.pages || []).length} page${(e.pages || []).length === 1 ? '' : 's'}`;
+    case 'doc.pages':    return `Added ${(e.add || []).length} page(s) to ${docName(e.doc)}`;
+    case 'doc.droppage': return `Removed a page from ${docName(e.doc)}`;
+    case 'doc.rotate':   return `Turned a page of ${docName(e.doc)}`;
+    case 'doc.tag':      return `Tagged ${docName(e.doc)}: ${ffTargetLabel(e.target)}`;
+    case 'doc.untag':    return `Untagged ${docName(e.doc)}: ${ffTargetLabel(e.target)}`;
+    case 'doc.set':      return `Edited ${docName(e.doc)} (${Object.keys(e.fields || {}).join(', ')})`;
+    case 'doc.del':      return `Deleted ${docName(e.doc)}`;
+    case 'doc.restore':  return `Restored ${docName(e.doc)}`;
+    case 'survey.add':   return `New field survey “${e.survey.name}”`;
+    case 'survey.restore': return `Restored survey “${e.survey.name}”`;
+    case 'survey.set':   return `Changed survey “${svName(e.id)}” (${Object.keys(e.patch || {}).join(', ')})`;
+    case 'survey.delete': return `Deleted survey “${(e.prev && e.prev.name) || 'survey'}”`;
+    case 'shot.add':     return `Shot ${shotTxt(e.shot)} in “${svName(e.sid)}”`;
+    case 'shot.set':     return `Edited shot ${shotTxt(e.shot)} in “${svName(e.sid)}”`;
+    case 'shot.delete':  return `Deleted shot ${shotTxt(e.prev)} in “${svName(e.sid)}”`;
+    case 'accept':       return `Accepted ${[].concat(e.ref != null ? [e.ref] : [], e.refs || []).length} suggestion(s)`;
+    case 'reject':       return `Turned down ${[].concat(e.ref != null ? [e.ref] : [], e.refs || []).length} suggestion(s)${e.why ? ': ' + e.why : ''}`;
+    case 'survey.version': return `New version of survey ${e.code} (${e.version || 'transcribed'}), kept beside the original`;
+    case 'map.import':   return `Imported map ${e.name ? '“' + e.name + '”' : ''}${e.export ? ' (' + e.export + ')' : ''}`;
+    case 'map.update':   return `Updated the map from a newer export${e.export ? ' (' + e.export + ')' : ''}`;
+    case 'cave.update':  return `Updated cave “${(ffP.caves[e.cave] && ffP.caves[e.cave].name) || ffCaveName(e.cave) || ''}” from ${e.file || 'a file'} on the phone (approximate)`;
+    case 'cave.revert':  return `Put cave “${(ffP.caves[e.cave] && ffP.caves[e.cave].name) || ffCaveName(e.cave) || ''}” back as exported`;
+    default:             return e.op;
+  }
+}
+function ffAfterChange(e) {
+  if (/^(survey|shot|cave)\./.test(e.op)) { ffCompute(); ffRebuildCave(); if (/^cave\./.test(e.op)) ffApplyWallHiding(); }
+  if (/^lead\./.test(e.op)) { ffDecorateLeads(); if (typeof leadsRender === 'function' && document.getElementById('fp-lead-list')) leadsRender(); }
+  if (ffPanelOpen && !ffDocsOpen) ffRenderPanel();
+  if (ffDocsOpen) ffRenderDocs();
+  if (/^(note|lead|doc)\./.test(e.op)) ffRefreshCard();
+}
+function ffRefreshCard() {
+  const sel = _selMesh && _selMesh._station;
+  if (sel && infoPanel.classList.contains('open')) selectStation(sel);
+}
+
+// ── Project and caves for this map ────────────────────────────────────────────
+// The export names its caves (by file); the project knows caves by id. An
+// export from FLEX that carries ids links silently; otherwise the first time a
+// cave turns up, ask which of the project's caves it is (or a new one). The
+// answer is a cave.alias entry, so every later map with that name links too.
+const ffExportCaves = () => [...new Set(((CAVES_DATA && CAVES_DATA.surveys) || []).map(s => s.cave || ''))];
+// A question at load goes in front of the help card.
+function ffClearHelp() { try { const h = document.getElementById('help-overlay'); if (h && !h.classList.contains('hidden')) dismissHelp(); } catch (_) {} }
+async function ffPickProject() {
+  const metaP = META.project && META.project.id ? META.project : null;
+  let pid = await ffHost.mapProject();
+  if (pid) return pid;
+  const list = await ffHost.projects();
+  if (metaP) {
+    if (!list.some(p => p.id === metaP.id)) await ffHost.setProject(metaP.id, metaP.name || META.name || '');
+    await ffHost.setMapProject(metaP.id);
+    return metaP.id;
+  }
+  ffClearHelp();
+  const opts = list.map(p => ({ label: p.name || p.id, value: p.id }));
+  opts.push({ label: '＋ New project', sub: META.name ? `“${META.name}”` : '', value: '__new', primary: true });
+  opts.push({ label: '⇩ Import a sync file', sub: 'a project someone shared with you', value: '__import' });
+  pid = await ffChoose('Which project is this map part of?',
+    'A project is an area: its caves, documents, notes, leads and field survey, shared by every map of that area.', opts, 'Not now');
+  if (!pid) return null;
+  if (pid === '__import') { ffHost.syncImport(); return null; }
+  if (pid === '__new') {
+    const r = await ffDialog({ title: 'New project', text: 'Usually the name of the area.', input: { value: META.name || '', placeholder: 'Project name' },
+      buttons: [{ label: 'Cancel', value: null }, { label: 'Create', value: 'ok', primary: true }] });
+    if (!r || !r.value.trim()) return null;
+    pid = FL.uid(10);
+    await ffHost.setProject(pid, r.value.trim().slice(0, 60));
+    ffPendingProjectName = r.value.trim().slice(0, 60);
+  }
+  await ffHost.setMapProject(pid);
+  return pid;
+}
+let ffPendingProjectName = null;
+async function ffLinkCaves() {
+  ffLinks = { byName: {}, byId: {} };
+  const metaCaves = (META.caves || []).reduce((m, c) => { if (c && c.name != null && c.id) m[c.name] = c; return m; }, {});
+  for (const name of ffExportCaves()) {
+    let cid = null;
+    const mc = metaCaves[name];
+    if (mc) {
+      cid = mc.id;
+      if (!ffP.caves[cid]) ffRecord('cave.set', { cave: cid, name: mc.label || mc.name || name });
+      if (ffP.aliases[name] !== cid) ffRecord('cave.alias', { cave: cid, alias: name });
+    } else cid = FL.caveForName(ffP, name);
+    if (!cid) {
+      const caves = FL.liveCaves(ffP);
+      const label = name || META.name || 'this map';
+      let pick = '__new';
+      if (caves.length) {
+        ffClearHelp();
+        pick = await ffChoose(`Cave “${label}” on this map`, `Is it one of the caves of ${ffP.name || 'this project'}? Your answer is remembered for every map.`,
+          caves.map(c => ({ label: c.name, value: c.id })).concat([{ label: '＋ A new cave', sub: `“${label}”`, value: '__new', primary: true }]), 'Skip for now');
+        if (!pick) continue;
+      }
+      if (pick === '__new') {
+        cid = FL.uid(10);
+        ffRecord('cave.set', { cave: cid, name: String(label).replace(/\.(plt|PLT)$/, '') });
+      } else cid = pick;
+      ffRecord('cave.alias', { cave: cid, alias: name });
+    }
+    ffLinks.byName[name] = cid;
+    ffLinks.byId[cid] = name;
+  }
+}
+// Station ↔ cave id
+const ffStCave = st => (st ? ffLinks.byName[st.cave || ''] || null : null);
+const ffStTarget = st => { const c = ffStCave(st); return c && st.name ? FL.T.station(c, st.name) : null; };
+const ffStCodes = st => [FL.surveyCode(st.surveyName)].filter(Boolean);
+
+async function ffLoadAll() {
+  ffEntries.proj = ffPid ? await ffHost.read(FL.projScope(ffPid)) : [];
+  ffEntries.docs = await ffHost.read(FL.DOCS);
+  ffEntries.map = await ffHost.mapLog();
+  ffSeq = {};
+  [[FL.projScope(ffPid), ffEntries.proj], [FL.DOCS, ffEntries.docs]].forEach(([sc, list]) =>
+    list.forEach(e => { if (e.dev === ffDev && e.seq > (ffSeq[sc] || 0)) ffSeq[sc] = e.seq; }));
+  ffReplay();
+}
+
+// ── Notes ─────────────────────────────────────────────────────────────────────
+async function ffEditNote(target, noteId) {
+  await ffEnsureAuthor();
+  const cur = noteId ? ffP.notes[noteId] : null;
+  const html = cur && cur.conflict ? '<b>Edited on two devices:</b><br>' + cur.conflict.map(c => `• ${escHtml(c.text || '(removed)')} <span style="opacity:.6">— ${escHtml(c.who || '?')}, ${escHtml(ffWhen(c.t))}</span>`).join('<br>') + '<br>Save the version to keep (edit it to combine).' : null;
+  const r = await ffDialog({
+    title: (cur ? 'Note at ' : 'New note at ') + ffTargetLabel(target),
+    html,
+    textarea: { value: cur ? cur.text : '', placeholder: 'What’s here?' },
+    buttons: [{ label: 'Cancel', value: null }, ...(cur ? [{ label: 'Remove', value: 'rm', danger: true }] : []),
+              { label: 'Save', value: 'ok', primary: true }],
+  });
+  if (!r) return;
+  const text = r.button === 'rm' ? '' : r.value.trim();
+  if (!cur && !text) return;
+  if (cur && cur.text === text && !cur.conflict) return;
+  ffRecord('note.set', { note: cur ? cur.id : ffUid(), target, text, prev: cur ? cur.text : '', base: cur ? cur.heads : [] });
+}
+function ffNoteEl(n) {
+  const d = el('div', 'ff-note' + (n.conflict ? ' conflict' : ''));
+  d.appendChild(el('div', 'ff-note-t', n.text || '(removed on one device)'));
+  d.appendChild(el('div', 'ff-note-m', `${n.who || '?'} · ${ffWhen(n.t)}${n.history.length > 1 ? ' · edited' : ''}${n.conflict ? ' · ⚠ edited on two devices' : ''}`));
+  d.addEventListener('click', () => ffEditNote(n.target, n.id));
+  return d;
+}
+
+// ── Leads ─────────────────────────────────────────────────────────────────────
+// A lead from the export (Breakout / Walls import) becomes a project lead the
+// first time someone saves it; its id comes from cave, station and
+// description, so two phones adopting the same lead make the same record.
+const ffExportLeadId = (cid, ld) => 'x' + ffFnv(cid + '|' + (ld.station || '') + '|' + (ld.description || ''));
+function ffExportLeadFields(ld) {
+  const f = { status: 'open' };
+  if (ld.description) f.desc = ld.description;
+  if (ld.width != null && isFinite(ld.width)) f.w = +(+ld.width).toFixed(2);
+  if (ld.height != null && isFinite(ld.height)) f.h = +(+ld.height).toFixed(2);
+  if (ld.date) f.found = String(ld.date);
+  return f;
+}
+// Every lead at a station: { id, fields, active, rec (project record or null), ld (export lead or null) }.
+function ffLeadsAt(st) {
+  const cid = ffStCave(st), out = [];
+  if (!cid) return (st.leads || []).map(ld => ({ id: null, fields: ffExportLeadFields(ld), active: true, rec: null, ld }));
+  const target = FL.T.station(cid, st.name);
+  const seen = new Set();
+  (st.leads || []).forEach(ld => {
+    const id = ffExportLeadId(cid, ld), rec = ffP.leads[id];
+    seen.add(id);
+    if (rec && rec.deleted) return;
+    out.push({ id, rec, ld, fields: rec ? rec.fields : ffExportLeadFields(ld), active: rec ? FL.leadActive(rec) : true });
+  });
+  Object.values(ffP.leads).forEach(L => {
+    if (L.target !== target || seen.has(L.id) || L.deleted) return;
+    out.push({ id: L.id, rec: L, ld: null, fields: L.fields, active: FL.leadActive(L) });
+  });
+  return out;
+}
+function ffLeadSummary(f) {
+  return [FL.statusLabel(f.status || 'open'), ...(f.types || []).slice(0, 2), f.priority ? 'P' + f.priority : '',
+          f.w || f.h ? `${f.w ? U.dim(f.w) : '?'}×${f.h ? U.dim(f.h) : '?'}` : ''].filter(Boolean).join(' · ');
+}
+async function ffEditLead(st, item) {
+  await ffEnsureAuthor();
+  const cid = ffStCave(st);
+  if (!cid) { showToast('Link this cave to the project first (⋯ → Project & sync)'); return; }
+  const lists = FL.leadLists(ffP);
+  const rec = item && item.rec;
+  const cur = Object.assign({}, item ? item.fields : { status: 'open' });
+  const vals = ffClone(cur);
+  const form = el('div', 'ff-leadform');
+  const conflicts = (rec && rec.conflicts) || {};
+  FL.LEAD_FIELDS.forEach(fd => {
+    const row = el('div', 'ff-lf');
+    row.appendChild(el('div', 'ff-lf-l', fd.label));
+    const choices = fd.choices ? fd.choices.map(c => [c, c]) : fd.list ? lists[fd.list] : null;
+    if (fd.kind === 'one' || fd.kind === 'many') {
+      const box = el('div', 'ff-chips');
+      const paint = () => box.querySelectorAll('button[data-v]').forEach(b => {
+        const v = b.dataset.v, on = fd.kind === 'one' ? vals[fd.k] === v : (vals[fd.k] || []).includes(v);
+        b.classList.toggle('active', on);
+      });
+      choices.forEach(([v, label]) => {
+        const b = el('button', 'fp-btn ff-chip', label); b.dataset.v = v;
+        b.addEventListener('click', () => {
+          if (fd.kind === 'one') vals[fd.k] = vals[fd.k] === v ? undefined : v;
+          else { const a = new Set(vals[fd.k] || []); a.has(v) ? a.delete(v) : a.add(v); vals[fd.k] = [...a]; }
+          paint();
+        });
+        box.appendChild(b);
+      });
+      if (fd.list && fd.list !== 'status') {
+        const add = el('button', 'fp-btn ff-chip', '＋');
+        add.title = 'Add a choice to this project’s list';
+        add.addEventListener('click', async () => {
+          const r = await ffDialog({ title: 'Add to “' + fd.label + '”', text: 'Added for everyone in this project.', input: { value: '' },
+            buttons: [{ label: 'Cancel', value: null }, { label: 'Add', value: 'ok', primary: true }] });
+          if (!r || !r.value.trim()) return;
+          const v = r.value.trim().slice(0, 40);
+          ffRecord('project.lists', { add: { [fd.list]: [v] } });
+          const b = el('button', 'fp-btn ff-chip', v); b.dataset.v = v;
+          b.addEventListener('click', () => { if (fd.kind === 'one') vals[fd.k] = vals[fd.k] === v ? undefined : v;
+            else { const a = new Set(vals[fd.k] || []); a.has(v) ? a.delete(v) : a.add(v); vals[fd.k] = [...a]; } paint(); });
+          box.insertBefore(b, add);
+          b.click();
+        });
+        box.appendChild(add);
+      }
+      paint();
+      row.appendChild(box);
+    } else {
+      const inp = el(fd.kind === 'area' ? 'textarea' : 'input', 'ff-input');
+      if (fd.kind === 'num') { inp.inputMode = 'decimal'; }
+      if (fd.kind === 'area') inp.rows = 3;
+      inp.value = vals[fd.k] != null ? vals[fd.k] : '';
+      inp.addEventListener('input', () => { const t = inp.value.trim(); vals[fd.k] = fd.kind === 'num' ? (t === '' ? undefined : (isFinite(Number(t.replace(',', '.'))) ? Number(t.replace(',', '.')) : t)) : (t || undefined); });
+      row.appendChild(inp);
+    }
+    if (conflicts[fd.k]) row.appendChild(el('div', 'ff-flag', '⚠ two devices: ' + conflicts[fd.k].map(c => `${Array.isArray(c.v) ? c.v.join(', ') : c.v} (${c.who})`).join(' / ')));
+    form.appendChild(row);
+  });
+  if (rec) {
+    const hist = el('button', 'fp-btn', `History (${rec.history.length})`);
+    hist.addEventListener('click', () => ffLeadHistory(rec));
+    form.appendChild(hist);
+  }
+  const r = await ffDialog({ title: (rec ? 'Lead at ' : (item ? 'Lead at ' : 'New lead at ')) + (st.name || 'station'), body: form, wide: true,
+    text: rec ? `Found ${rec.created.who}, ${ffWhen(rec.created.t)} · last change ${rec.updated.who}, ${ffWhen(rec.updated.t)}` : null,
+    buttons: [{ label: 'Cancel', value: null }, ...(rec ? [{ label: 'Remove', value: 'rm', danger: true }] : []), { label: 'Save', value: 'ok', primary: true }] });
+  if (!r) return;
+  const id = (item && item.id) || ffUid();
+  if (r.button === 'rm') { ffRecord('lead.del', { lead: id, base: rec ? rec.heads : [] }); return; }
+  const changed = {}, prev = {};
+  FL.LEAD_FIELDS.forEach(fd => {
+    const a = vals[fd.k], b = cur[fd.k];
+    const norm = v => (v === undefined || v === '' || (Array.isArray(v) && !v.length)) ? null : v;
+    if (JSON.stringify(norm(a)) !== JSON.stringify(norm(b)) || (!rec && norm(a) != null)) { changed[fd.k] = norm(a); prev[fd.k] = norm(b); }
+  });
+  if (!Object.keys(changed).length && rec && !rec.conflicts) return;
+  if (rec && rec.conflicts) Object.keys(rec.conflicts).forEach(k => { if (!(k in changed)) changed[k] = vals[k] == null ? null : vals[k]; });
+  const data = { lead: id, fields: changed, base: rec ? rec.heads : [] };
+  if (!rec) { data.target = FL.T.station(cid, st.name); if (item && item.ld) data.source = 'export'; }
+  else data.prev = prev;
+  ffRecord('lead.set', data);
+}
+function ffLeadHistory(rec) {
+  const body = el('div', 'fp-list');
+  rec.history.map(id => ffP.byId.get(id)).filter(Boolean).reverse().forEach(e => {
+    body.appendChild(fpRow('·', ffDescribe(e), `${e.who || '?'} · ${ffWhen(e.t)}` +
+      (e.fields ? ' · ' + Object.entries(e.fields).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v == null ? '—' : v}`).join('; ') : '')));
+  });
+  ffDialog({ title: 'Lead history', body, wide: true });
+}
+// Lead markers: stations with an active lead (export or project) show the "?".
+function ffDecorateLeads() {
+  if (typeof stationMap === 'undefined' || !stationMap) return;
+  const byKey = new Map();
+  stationMap.forEach(st => byKey.set(st, ffLeadsAt(st).filter(x => x.active).length));
+  // Project leads at stations whose leads weren't in the export.
+  stationMap.forEach((st, key) => {
+    const n = byKey.get(st) || 0;
+    if (n && !st._leadSprite) {
+      const sp = makeLeadSprite(); sp.position.copy(st.pos); leadGroup.add(sp); st._leadSprite = sp;
+    }
+    if (st._leadSprite) st._leadSprite.visible = n > 0;
+  });
+  if (typeof requestRender === 'function') { requestRender(); wakeRender(); }
+}
+
+// ── Documents ─────────────────────────────────────────────────────────────────
+// Panel: the project's documents — inbox (tagged to the project only), all,
+// or the ones of a station. A document opens in the gallery.
+let ffDocsOpen = false, ffDocsTab = 'all', ffDocsFor = null;   // ffDocsFor: station or null
+function ffOpenDocs(st, tab) {
+  closeSheet(); closeFind();
+  ffDocsFor = st || null;
+  ffDocsTab = tab || (st ? 'station' : (FL.docsOf(ffD, ffP).some(d => FL.docInbox(d, ffP)) ? 'inbox' : 'all'));
+  ffPanelOpen = true; ffDocsOpen = true;
+  ffPanel().classList.add('open');
+  ffRenderDocs();
+}
+function ffDocSub(d) {
+  const tags = d.tagList.filter(t => t !== FL.T.project(ffPid)).map(ffTargetLabel);
+  return `${d.pages.length} page${d.pages.length === 1 ? '' : 's'}${d.kind ? ' · ' + (FL.DOC_KIND_LABELS[d.kind] || d.kind) : ''}${d.date ? ' · ' + d.date : ''} · ` +
+    (tags.length ? tags.slice(0, 3).join(', ') + (tags.length > 3 ? ` +${tags.length - 3}` : '') : 'inbox') +
+    (d.conflicts ? ' · ⚠ edited on two devices' : '');
+}
+function ffRenderDocs() {
+  const p = ffPanel();
+  if (!ffDocsOpen) return;
+  p.textContent = '';
+  const head = el('div', 'fp-head');
+  head.appendChild(el('div', 'ff-ptitle', '📚 Documents' + (ffP.name ? ' · ' + ffP.name : '')));
+  head.appendChild(ffAuthorChip());
+  const x = el('button', null, '✕'); x.className = 'ff-x'; x.addEventListener('click', ffClosePanel);
+  head.appendChild(x);
+  p.appendChild(head);
+  const body = el('div', 'fp-body');
+  p.appendChild(body);
+  if (!ffPid) { body.appendChild(el('div', 'fp-note', 'This map has no project yet: ⋯ More → Project & sync.')); return; }
+  const all = FL.docsOf(ffD, ffP);
+  const tabs = el('div', 'fp-sort');
+  const tabList = [['inbox', `Inbox (${all.filter(d => FL.docInbox(d, ffP)).length})`], ['all', `All (${all.length})`]];
+  if (ffDocsFor) tabList.unshift(['station', ffDocsFor.name || 'Station']);
+  tabList.forEach(([k, label]) => {
+    const b = el('button', ffDocsTab === k ? 'active' : '', label);
+    b.addEventListener('click', () => { ffDocsTab = k; ffRenderDocs(); });
+    tabs.appendChild(b);
+  });
+  body.appendChild(tabs);
+  const add = el('button', 'fp-btn active', '＋ Add pages');
+  add.addEventListener('click', () => ffAddPages(ffDocsTab === 'station' ? ffDocsFor : null));
+  const row = el('div', 'fp-row'); row.appendChild(add); body.appendChild(row);
+  const list = el('div', 'fp-list');
+  const put = (title, docs) => {
+    if (!docs.length) return;
+    if (title) list.appendChild(el('div', 'fp-h', title));
+    docs.forEach(d => list.appendChild(fpRow('📄', d.title || 'Untitled', ffDocSub(d), () => ffDocOpen(d.id, 0))));
+  };
+  if (ffDocsTab === 'station' && ffDocsFor) {
+    const cid = ffStCave(ffDocsFor);
+    const fs = cid ? FL.docsForStation(ffD, ffP, cid, ffDocsFor.name, ffStCodes(ffDocsFor)) : { station: [], survey: [], cave: [] };
+    put('This station', fs.station);
+    put('Pages covering this area', fs.area || []);
+    put('Survey ' + (ffStCodes(ffDocsFor)[0] || ''), fs.survey);
+    put('The cave', fs.cave);
+    if (!fs.station.length && !(fs.area || []).length && !fs.survey.length && !fs.cave.length) list.appendChild(el('div', 'fp-note', 'Nothing tagged here yet. ＋ Add pages, or tag a document from the Inbox.'));
+  } else if (ffDocsTab === 'inbox') {
+    const inbox = all.filter(d => FL.docInbox(d, ffP));
+    put(null, inbox);
+    if (!inbox.length) list.appendChild(el('div', 'fp-note', 'Inbox empty: every document is tagged to a cave, survey, station or lead.'));
+  } else {
+    put(null, all);
+    if (!all.length) list.appendChild(el('div', 'fp-note', 'No documents yet. ＋ Add pages: photos, scans (TIFF too) or PDFs of survey notes, trip reports, maps…'));
+  }
+  body.appendChild(list);
+}
+async function ffAddPages(st, docId) {
+  await ffEnsureAuthor();
+  if (!ffPid) { showToast('No project for this map yet'); return; }
+  const tags = [FL.T.project(ffPid)];
+  const t = st && ffStTarget(st);
+  if (t) tags.push(t);
+  try { await ffHost.pickPages(docId ? { doc: docId } : { tags }); }
+  catch (e) { showToast('Could not open the file picker'); }
+}
+
+// Gallery: one page at a time; pinch / wheel zoom, drag, swipe; turn pages.
+let ffGallery = null;
+async function ffDocOpen(docId, index) {
+  const d = ffD.docs[docId];
+  if (!d) return;
+  let g = document.getElementById('ff-gallery');
+  if (!g) {
+    g = el('div'); g.id = 'ff-gallery';
+    g.innerHTML = '<div class="ffg-top"><span class="ffg-title"></span><span class="ffg-count"></span>' +
+      '<button class="fp-btn ffg-rl" title="Turn left">⟲</button><button class="fp-btn ffg-rr" title="Turn right">⟳</button>' +
+      '<button class="fp-btn ffg-tag">🏷 Tags</button><button class="fp-btn ffg-more">⋯</button><button class="ffg-x">✕</button></div>' +
+      '<div class="ffg-tags"></div>' +
+      '<div class="ffg-stage"><img class="ffg-img" alt=""><div class="ffg-empty"></div></div>' +
+      '<button class="ffg-nav ffg-prev">‹</button><button class="ffg-nav ffg-next">›</button>';
+    document.body.appendChild(g);
+    g.querySelector('.ffg-x').addEventListener('click', ffGalleryClose);
+    g.querySelector('.ffg-prev').addEventListener('click', () => ffGalleryShow(ffGallery.i - 1));
+    g.querySelector('.ffg-next').addEventListener('click', () => ffGalleryShow(ffGallery.i + 1));
+    g.querySelector('.ffg-rl').addEventListener('click', () => ffRotatePage(-90));
+    g.querySelector('.ffg-rr').addEventListener('click', () => ffRotatePage(90));
+    g.querySelector('.ffg-tag').addEventListener('click', () => ffEditTags(ffGallery.doc));
+    g.querySelector('.ffg-more').addEventListener('click', () => ffDocMenu(ffGallery.doc));
+    ffGalleryGestures(g.querySelector('.ffg-stage'));
+  }
+  ffGallery = { doc: docId, i: Math.max(0, Math.min(index || 0, d.pages.length - 1)), z: 1, x: 0, y: 0 };
+  g.classList.add('open');
+  ffGalleryShow(ffGallery.i);
+}
+function ffGalleryClose() { const g = document.getElementById('ff-gallery'); if (g) g.classList.remove('open'); ffGallery = null; }
+async function ffGalleryShow(i) {
+  const g = document.getElementById('ff-gallery'), G = ffGallery;
+  if (!g || !G) return;
+  const d = ffD.docs[G.doc];
+  if (!d) { ffGalleryClose(); return; }
+  g.querySelector('.ffg-title').textContent = d.title || 'Untitled';
+  const tg = g.querySelector('.ffg-tags');
+  tg.textContent = d.tagList.filter(t => t !== FL.T.project(ffPid)).map(ffTargetLabel).join(' · ') || 'inbox — 🏷 to tag a survey or station';
+  const n = d.pages.length;
+  const img = g.querySelector('.ffg-img'), empty = g.querySelector('.ffg-empty');
+  g.querySelector('.ffg-prev').style.display = n > 1 ? '' : 'none';
+  g.querySelector('.ffg-next').style.display = n > 1 ? '' : 'none';
+  if (!n) { img.style.display = 'none'; empty.style.display = ''; empty.textContent = 'No pages. ⋯ → Add pages.'; g.querySelector('.ffg-count').textContent = ''; return; }
+  G.i = ((i % n) + n) % n; G.z = 1; G.x = 0; G.y = 0;
+  const pg = d.pages[G.i];
+  const url = await ffHost.blobUrl(pg.h, pg.ext);
+  g.querySelector('.ffg-count').textContent = `${G.i + 1} / ${n}${pg.name ? ' · ' + pg.name : ''}`;
+  empty.style.display = 'none';
+  if (pg.ext === 'pdf') {
+    img.style.display = 'none'; empty.style.display = ''; empty.innerHTML = '';
+    const a = el('a', 'fp-btn', 'Open ' + (pg.name || 'PDF')); a.href = url || '#'; a.target = '_blank'; a.rel = 'noopener';
+    empty.appendChild(a);
+    return;
+  }
+  img.style.display = '';
+  img.src = url || '';
+  ffGalleryXf();
+}
+function ffGalleryXf() {
+  const g = document.getElementById('ff-gallery'), G = ffGallery;
+  if (!g || !G) return;
+  const d = ffD.docs[G.doc], pg = d && d.pages[G.i];
+  const rot = pg ? pg.rot || 0 : 0;
+  const img = g.querySelector('.ffg-img');
+  // A page turned sideways must fit the other way round.
+  const st = g.querySelector('.ffg-stage');
+  const side = rot % 180 !== 0 && img.naturalWidth ? Math.min(1, Math.min(st.clientWidth / img.clientHeight, st.clientHeight / img.clientWidth)) : 1;
+  img.style.transform = `translate(${G.x}px, ${G.y}px) scale(${G.z * side}) rotate(${rot}deg)`;
+}
+function ffRotatePage(deg) {
+  const G = ffGallery, d = G && ffD.docs[G.doc], pg = d && d.pages[G.i];
+  if (!pg) return;
+  const prev = pg.rot || 0, rot = ((prev + deg) % 360 + 360) % 360;
+  ffRecord('doc.rotate', { doc: d.id, h: pg.h, rot, prev }, null, 'docs');
+  ffGalleryXf();
+}
+function ffGalleryGestures(stage) {
+  const pts = new Map();
+  let base = null;
+  const snap = () => { const a = [...pts.values()]; return a.length >= 2
+    ? { d: Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y), cx: (a[0].x + a[1].x) / 2, cy: (a[0].y + a[1].y) / 2 }
+    : { d: 0, cx: a[0].x, cy: a[0].y }; };
+  stage.addEventListener('pointerdown', e => { stage.setPointerCapture(e.pointerId); pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const s = snap(); base = { ...s, z: ffGallery.z, x: ffGallery.x, y: ffGallery.y, n: pts.size, t: Date.now(), sx: e.clientX }; });
+  stage.addEventListener('pointermove', e => {
+    if (!pts.has(e.pointerId) || !ffGallery) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const s = snap(), G = ffGallery;
+    if (pts.size >= 2 && base.d > 0) { G.z = Math.max(1, Math.min(10, base.z * s.d / base.d)); }
+    G.x = base.x + (s.cx - base.cx); G.y = base.y + (s.cy - base.cy);
+    if (G.z === 1 && pts.size === 1) G.y = 0;
+    ffGalleryXf();
+  });
+  const end = e => {
+    if (!pts.has(e.pointerId)) return;
+    pts.delete(e.pointerId);
+    const G = ffGallery;
+    if (G && base && base.n === 1 && !pts.size && G.z === 1) {
+      const dx = e.clientX - base.sx;
+      if (Math.abs(dx) > 60 && Date.now() - base.t < 600) { ffGalleryShow(G.i + (dx < 0 ? 1 : -1)); return; }
+      G.x = 0; ffGalleryXf();
+    }
+    if (pts.size) { const s = snap(); base = { ...s, z: G.z, x: G.x, y: G.y, n: pts.size, t: Date.now(), sx: s.cx }; }
+  };
+  stage.addEventListener('pointerup', end); stage.addEventListener('pointercancel', end);
+  stage.addEventListener('wheel', e => { e.preventDefault(); const G = ffGallery; if (!G) return;
+    G.z = Math.max(1, Math.min(10, G.z * (e.deltaY < 0 ? 1.15 : 1 / 1.15))); if (G.z === 1) { G.x = 0; G.y = 0; } ffGalleryXf(); }, { passive: false });
+  stage.querySelector('.ffg-img').addEventListener('load', ffGalleryXf);
+}
+async function ffDocMenu(docId) {
+  const d = ffD.docs[docId];
+  if (!d) return;
+  const r = await ffChoose(d.title || 'Document', `${d.pages.length} page(s) · added by ${(d.created && d.created.who) || '?'}, ${ffWhen(d.created && d.created.t)}`, [
+    { label: '✏️ Title, kind, date', value: 'edit' }, { label: '＋ Add pages', value: 'add' },
+    ...(d.pages.length ? [{ label: '🗑 Remove this page', value: 'drop' }] : []),
+    { label: '📝 Notes on this document', value: 'note' }, { label: '🗑 Delete the document', value: 'del' }]);
+  if (!r) return;
+  await ffEnsureAuthor();
+  if (r === 'add') ffAddPages(null, docId);
+  if (r === 'note') ffEditNote(FL.T.doc(docId), (FL.notesOn(ffP, FL.T.doc(docId))[0] || {}).id);
+  if (r === 'drop') {
+    const pg = d.pages[ffGallery.i];
+    ffRecord('doc.droppage', { doc: docId, h: pg.h, page: pg, at: ffGallery.i }, null, 'docs');
+    ffGalleryShow(ffGallery.i);
+  }
+  if (r === 'del') {
+    const ok = await ffDialog({ title: `Delete “${d.title}”?`, text: 'It stays in the history and can be restored from the change log.',
+      buttons: [{ label: 'Cancel', value: null }, { label: 'Delete', value: 'rm', danger: true }] });
+    if (ok) { ffRecord('doc.del', { doc: docId }, null, 'docs'); ffGalleryClose(); }
+  }
+  if (r === 'edit') {
+    const form = el('div', 'ff-leadform');
+    const mk = (label, k, ph, list) => { const row = el('div', 'ff-lf'); row.appendChild(el('div', 'ff-lf-l', label));
+      const i = el('input', 'ff-input'); i.placeholder = ph || ''; i.value = d[k] || ''; i.dataset.k = k; row.appendChild(i);
+      if (list) { const dl = el('datalist'); dl.id = 'ff-dl-' + k; list.forEach(v => { const o = document.createElement('option'); o.value = v; dl.appendChild(o); }); row.appendChild(dl); i.setAttribute('list', dl.id); }
+      form.appendChild(row); };
+    mk('Title', 'title'); mk('Kind', 'kind', 'sketch-plan, shot-table, trip-report, photo…', FL.DOC_KINDS);
+    mk('Date (can be approximate)', 'date', '1994-07-16, 1994, 1970s…'); mk('Description', 'desc');
+    const r2 = await ffDialog({ title: 'Document', body: form, wide: true, buttons: [{ label: 'Cancel', value: null }, { label: 'Save', value: 'ok', primary: true }] });
+    if (!r2) return;
+    const fields = {}, prev = {};
+    form.querySelectorAll('input[data-k]').forEach(i => { const k = i.dataset.k, v = i.value.trim(); if (v !== (d[k] || '')) { fields[k] = v; prev[k] = d[k] || ''; } });
+    if (Object.keys(fields).length) ffRecord('doc.set', { doc: docId, fields, prev }, null, 'docs');
+    ffGalleryShow(ffGallery ? ffGallery.i : 0);
+  }
+}
+// Tags: the project's caves, the map's surveys and stations, leads.
+function ffTagChoices() {
+  const out = [];
+  Object.entries(ffLinks.byName).forEach(([name, cid]) => {
+    const cn = (ffP.caves[cid] && ffP.caves[cid].name) || name;
+    out.push({ label: `Cave · ${cn}`, target: FL.T.cave(cid) });
+    const svs = new Map();
+    ((CAVES_DATA && CAVES_DATA.surveys) || []).filter(s => (s.cave || '') === name).forEach(s => { const c = FL.surveyCode(s.name); if (c && !svs.has(c)) svs.set(c, s.name); });
+    svs.forEach((full, code) => out.push({ label: `Survey ${full} · ${cn}`, target: FL.T.survey(cid, code) }));
+  });
+  stationMap.forEach(st => { const t = ffStTarget(st); if (t) out.push({ label: `Station ${st.name} · ${(ffP.caves[ffStCave(st)] || {}).name || st.cave}`, target: t, st: true }); });
+  return out;
+}
+async function ffEditTags(docId) {
+  await ffEnsureAuthor();
+  const d = ffD.docs[docId];
+  if (!d) return;
+  const body = el('div', 'ff-tagbox');
+  const cur = el('div', 'ff-chips');
+  const draw = () => {
+    const dd = ffD.docs[docId];
+    cur.textContent = '';
+    dd.tagList.forEach(t => {
+      const b = el('button', 'fp-btn ff-chip active', (t === FL.T.project(ffPid) ? 'Project · ' : '') + ffTargetLabel(t) + ' ✕');
+      b.addEventListener('click', () => { ffRecord('doc.untag', { doc: docId, target: t }, null, 'docs'); draw(); });
+      cur.appendChild(b);
+    });
+    if (!dd.tagList.length) cur.appendChild(el('div', 'fp-note', 'No tags: the document is in no project.'));
+  };
+  draw();
+  body.appendChild(cur);
+  const sel = _selMesh && _selMesh._station, selT = sel && ffStTarget(sel);
+  const quick = el('div', 'fp-row');
+  if (selT) { const b = el('button', 'fp-btn', '＋ ' + sel.name + ' (selected)'); b.addEventListener('click', () => { if (!ffD.docs[docId].tags[selT]) ffRecord('doc.tag', { doc: docId, target: selT }, null, 'docs'); draw(); }); quick.appendChild(b); }
+  if (selT) { const code = ffStCodes(sel)[0]; if (code) { const st2 = FL.T.survey(ffStCave(sel), code);
+    const b = el('button', 'fp-btn', '＋ survey ' + code); b.addEventListener('click', () => { if (!ffD.docs[docId].tags[st2]) ffRecord('doc.tag', { doc: docId, target: st2 }, null, 'docs'); draw(); }); quick.appendChild(b); } }
+  if (!d.tags[FL.T.project(ffPid)]) { const b = el('button', 'fp-btn', '＋ this project'); b.addEventListener('click', () => { ffRecord('doc.tag', { doc: docId, target: FL.T.project(ffPid) }, null, 'docs'); draw(); }); quick.appendChild(b); }
+  body.appendChild(quick);
+  const choices = ffTagChoices();
+  const inp = el('input', 'ff-input'); inp.placeholder = 'Tag a cave, survey or station…';
+  const dl = el('datalist'); dl.id = 'ff-tag-list';
+  choices.slice(0, 6000).forEach(c => { const o = el('option'); o.value = c.label; dl.appendChild(o); });
+  inp.setAttribute('list', 'ff-tag-list');
+  const addB = el('button', 'fp-btn active', 'Add tag');
+  addB.addEventListener('click', () => {
+    const v = inp.value.trim().toLowerCase();
+    const c = choices.find(x => x.label.toLowerCase() === v) || choices.find(x => x.label.toLowerCase().includes(v));
+    if (!v || !c) { showToast('Pick one from the list'); return; }
+    if (!ffD.docs[docId].tags[c.target]) ffRecord('doc.tag', { doc: docId, target: c.target }, null, 'docs');
+    inp.value = ''; draw();
+  });
+  const r = el('div', 'fp-row ff-tagadd'); r.appendChild(inp); r.appendChild(addB);
+  body.appendChild(dl); body.appendChild(r);
+  await ffDialog({ title: 'Tags · ' + (d.title || 'document'), text: 'A document shows on the stations, surveys and caves it is tagged to. Tagged to the project only, it waits in the Inbox.', body, wide: true,
+    buttons: [{ label: 'Done', value: 'ok', primary: true }] });
+  if (ffGallery && ffGallery.doc === docId) ffGalleryShow(ffGallery.i);
+}
+
+// ── Station card additions ────────────────────────────────────────────────────
+function ffStationCard(st) {
+  const rows = document.getElementById('info-rows');
+  if (!rows || !st) return;
+  const box = el('div', 'ff-card');
+  const target = ffStTarget(st);
+  if (target) {
+    FL.notesOn(ffP, target).forEach(n => box.appendChild(ffNoteEl(n)));
+    ffLeadsAt(st).forEach(it => {
+      const d = el('div', 'ff-lead' + (it.active ? '' : ' closed') + (it.rec && it.rec.conflicts ? ' conflict' : ''));
+      d.appendChild(el('div', 'ff-note-t', '❓ ' + (it.fields.desc || 'Lead')));
+      d.appendChild(el('div', 'ff-note-m', ffLeadSummary(it.fields) + (it.rec ? ` · ${it.rec.updated.who}, ${ffWhen(it.rec.updated.t)}` : ' · from the export')));
+      d.addEventListener('click', () => ffEditLead(st, it));
+      box.appendChild(d);
+    });
+  } else if (st.name && ffPid) {
+    box.appendChild(el('div', 'fp-note', 'This cave isn’t linked to the project: ⋯ More → Project & sync.'));
+  }
+  const row = el('div', 'fp-row');
+  const nb = el('button', 'fp-btn', '✏️ Note');
+  nb.addEventListener('click', () => target ? ffEditNote(target) : showToast('No project / cave link for this station'));
+  row.appendChild(nb);
+  const lb = el('button', 'fp-btn', '❓ Lead');
+  lb.addEventListener('click', () => ffEditLead(st, null));
+  row.appendChild(lb);
+  const fb = el('button', 'fp-btn', '📄 Documents');
+  fb.addEventListener('click', () => ffOpenDocs(st, 'station'));
+  row.appendChild(fb);
+  if (target) {
+    const fs = FL.docsForStation(ffD, ffP, ffStCave(st), st.name, ffStCodes(st));
+    const n = fs.station.length + fs.survey.length + fs.cave.length;
+    if (n) fb.textContent = `📄 Documents · ${n}`;
+  }
+  const fsv = st._ff && ffState.surveys[st._ff];
+  const sb = el('button', 'fp-btn', fsv ? '📐 ' + fsv.name : '📐 Survey from here');
+  sb.addEventListener('click', () => fsv ? ffOpenPanel(fsv.id) : ffNewSurvey(st));
+  row.appendChild(sb);
+  box.appendChild(row);
+  rows.insertBefore(box, rows.children[2] || null);
+}
+
+// ── Project & sync ────────────────────────────────────────────────────────────
+// Sync files: this device's changes (and what it got from others) for one
+// project, to import on another phone or in FLEX — "since my last sync file"
+// by default, or everything.
+async function ffOpenProject() {
+  closeSheet();
+  if (!ffPid) {
+    ffPid = await ffPickProject();
+    if (!ffPid) return;
+    await ffLoadAll();
+    if (ffPendingProjectName) { ffRecord('project.set', { name: ffPendingProjectName }); ffPendingProjectName = null; }
+    await ffLinkCaves();
+    ffAfterLink();
+  }
+  const sentRaw = await ffHost.kvGet('sync-sent|' + ffPid);
+  const sent = sentRaw ? JSON.parse(sentRaw) : null;
+  const last = await ffHost.kvGet('sync-last|' + ffPid);
+  const sel = FL.selectForSync(ffEntries.proj, ffEntries.docs, ffP, ffD, sent, 'since');
+  const caves = Object.entries(ffLinks.byName).map(([n, c]) => `${escHtml((ffP.caves[c] && ffP.caves[c].name) || n)}${n && n !== (ffP.caves[c] || {}).name ? ' <span style="opacity:.55">(' + escHtml(n) + ')</span>' : ''}`);
+  const html = `<b>${escHtml(ffP.name || 'Project')}</b><br>Caves on this map: ${caves.join(', ') || '—'}<br>` +
+    `${FL.liveCaves(ffP).length} cave(s) · ${FL.docsOf(ffD, ffP).length} document(s) · ${Object.values(ffP.notes).filter(n => !n.deleted).length} note(s) · ` +
+    `${Object.values(ffP.leads).filter(l => FL.leadActive(l)).length} active lead(s)<br><br>` +
+    `Sync files carry what was added here (and what came from others) to another phone or to FLEX.<br>` +
+    (last ? `Last sync file: ${escHtml(ffWhen(last))}. ` : 'No sync file made yet. ') + `${sel.count} change(s) since.`;
+  const r = await ffDialog({ title: '⇄ Project & sync', html, wide: true, buttons: [
+    { label: 'Close', value: null }, { label: 'Re-link caves', value: 'relink' }, { label: 'Import a sync file', value: 'import' },
+    { label: 'Make sync file: everything', value: 'all' }, { label: 'Make sync file: changes', value: 'since', primary: true }] });
+  if (!r) return;
+  if (r.button === 'import') { ffHost.syncImport(); return; }
+  if (r.button === 'relink') { await ffRelinkCaves(); return; }
+  await ffMakeSyncFile(r.button);
+}
+async function ffMakeSyncFile(mode) {
+  const sentRaw = await ffHost.kvGet('sync-sent|' + ffPid);
+  const sent = sentRaw ? JSON.parse(sentRaw) : null;
+  const sel = FL.selectForSync(ffEntries.proj, ffEntries.docs, ffP, ffD, sent, mode);
+  if (!sel.count) { showToast('Nothing new since the last sync file'); return; }
+  const man = FL.syncManifest(ffP, ffDev, ffWho(), sel);
+  const slug = (ffP.name || 'project').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'project';
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  const name = `FLEX-sync-${slug}-${(ffWho() || ffDev).replace(/[^A-Za-z0-9]+/g, '')}-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.zip`;
+  const ok = await ffHost.syncWrite(name, man, sel.entries, sel.blobs);
+  if (!ok) { showToast('Could not write the sync file'); return; }
+  await ffHost.kvSet('sync-sent|' + ffPid, JSON.stringify(sel.sent));
+  await ffHost.kvSet('sync-last|' + ffPid, ffNowIso());
+  showToast(`Sync file: ${sel.count} change(s), ${sel.blobs.length} page(s)`);
+}
+window.ffSyncImported = async function (json) {
+  let r = {};
+  try { r = JSON.parse(json || '{}'); } catch (_) {}
+  if (!r.ok) { if (r.error) ffDialog({ title: 'Sync file not imported', text: r.error }); return; }
+  if (!ffPid && r.project && r.project.id) {          // a map with no project yet: take the file's
+    ffPid = r.project.id;
+    await ffHost.setMapProject(ffPid);
+  }
+  const other = r.project && r.project.id && r.project.id !== ffPid;
+  await ffLoadAll();
+  if (ffPid) { await ffLinkCaves(); ffAfterLink(); }
+  ffDialog({ title: 'Sync file imported', text: `${r.entries} new change(s) and ${r.pages} new page(s)` +
+    (r.from && r.from.who ? ` from ${r.from.who}` : '') + (r.project ? ` for project “${r.project.name || r.project.id}”` : '') + '.' +
+    (other ? ' That project isn’t this map’s; it is on this phone now.' : '') });
+};
+async function ffRelinkCaves() {
+  const names = Object.keys(ffLinks.byName);
+  if (!names.length) { showToast('No cave on this map'); return; }
+  const name = names.length === 1 ? names[0] : await ffChoose('Re-link which cave?', null, names.map(n => ({ label: n || '(unnamed)', value: n })));
+  if (name == null) return;
+  const caves = FL.liveCaves(ffP);
+  const pick = await ffChoose(`“${name || META.name}” is…`, null, caves.map(c => ({ label: c.name, value: c.id }))
+    .concat([{ label: '＋ A new cave', value: '__new' }]));
+  if (!pick) return;
+  await ffEnsureAuthor();
+  let cid = pick;
+  if (pick === '__new') {
+    const r = await ffDialog({ title: 'New cave', input: { value: String(name || META.name || '').replace(/\.(plt|PLT)$/, '') }, buttons: [{ label: 'Cancel', value: null }, { label: 'Create', value: 'ok', primary: true }] });
+    if (!r || !r.value.trim()) return;
+    cid = FL.uid(10);
+    ffRecord('cave.set', { cave: cid, name: r.value.trim() });
+  }
+  ffRecord('cave.alias', { cave: cid, alias: name });
+  await ffLinkCaves();
+  ffAfterLink();
+}
+// After the cave links change: everything keyed by cave id moves.
+function ffAfterLink() {
+  ffReplay();
+  ffCompute(); ffRebuildCave();
+  if (Object.keys(ffState.caveUpdates || {}).length) ffApplyWallHiding();
+  ffDecorateLeads();
+  ffRefreshCard();
+}
+
+// ── Field survey: numbers ─────────────────────────────────────────────────────
+// A cell as typed → { v, raw, flag }. LRUD cells: "3/5" is a ledge, take the
+// larger value; a hyphen, comma or space between numbers is flagged, never
+// guessed (a hyphen could be a range or a minus sign).
+// The numbers live in FlexLib (shared with desktop FLEX): LRUD "3/5" is a
+// ledge and the larger value is used; hyphen / comma / space pairs are flagged.
+const ffParseNum = FL.parseNum, ffShotFlags = FL.shotFlags, ffShotReading = FL.shotReading;
+function ffYear(dateStr) {
+  const d = dateStr ? new Date(dateStr) : new Date();
+  if (isNaN(d)) return new Date().getFullYear() + 0.5;
+  const y = d.getUTCFullYear(), y0 = Date.UTC(y, 0, 1), y1 = Date.UTC(y + 1, 0, 1);
+  return y + (d.getTime() - y0) / (y1 - y0);
+}
+// Declination (WMM at the tie-in, survey date) unless the survey overrides it.
+function ffDeclination(sv, at) {
+  const o = sv.decl != null && sv.decl !== '' ? Number(sv.decl) : null;
+  if (o != null && isFinite(o)) return { v: o, src: 'entered' };
+  const ll = at ? sceneToLatLon(at.x ?? at[0], at.y ?? at[1]) : { lat: META.center_lat, lon: META.center_lon };
+  if (!ll || ll.lat == null || !isFinite(ll.lat)) return { v: 0, src: 'unknown — enter it' };
+  return { v: wmmDeclination(ll.lat, ll.lon, 0, ffYear(sv.date)), src: 'WMM ' + Math.floor(ffYear(sv.date)) };
+}
+// Grid convergence at a point (grid bearing = true bearing − γ).
+function ffConvergence(at) {
+  if (!at || !META.utm_zone) return gridConvergenceDeg();
+  const ll = sceneToLatLon(at.x ?? at[0], at.y ?? at[1]);
+  if (!ll || !isFinite(ll.lat)) return gridConvergenceDeg();
+  const dl = (ll.lon - (META.utm_zone * 6 - 183)) * Math.PI / 180;
+  return Math.atan(Math.tan(dl) * Math.sin(ll.lat * Math.PI / 180)) * 180 / Math.PI;
+}
+
+// Positions of the exported stations, per cave: name → [x, y, z].
+let _ffBase = null;
+function ffBaseStations() {
+  if (_ffBase) return _ffBase;
+  _ffBase = new Map();
+  ((CAVES_DATA && CAVES_DATA.surveys) || []).forEach(sv => {
+    const pfx = sv.cave ? sv.cave + '|' : '';
+    (sv.shots || []).forEach(s => {
+      if (s.from_name && s.from_xyz && !_ffBase.has(pfx + s.from_name)) _ffBase.set(pfx + s.from_name, s.from_xyz);
+      if (s.to_name && s.to_xyz && !_ffBase.has(pfx + s.to_name)) _ffBase.set(pfx + s.to_name, s.to_xyz);
+    });
+    (sv.stations || []).forEach(s => { if (s.name && s.xyz) _ffBase.set(pfx + s.name, s.xyz); });
+  });
+  return _ffBase;
+}
+const ffKey = (cave, name) => (cave ? cave + '|' : '') + String(name || '').trim();
+
+// Shots → positions. Starts from every station whose position is known (the
+// export's, and earlier field surveys'), works outward in both directions,
+// and reports closures (both ends already known) and shots not tied in.
+function ffComputeSurvey(sv, known) {
+  const r = FL.computeSurvey(sv, known, { prefix: sv.cave ? sv.cave + '|' : '', decl: ffDeclination, conv: ffConvergence });
+  const V = a => new THREE.Vector3(a[0], a[1], a[2]);
+  const pos = new Map();
+  r.pos.forEach((p, k) => pos.set(k, V(p)));
+  return { ...r, pos, legs: r.legs.map(L => ({ ...L, a: V(L.a), b: V(L.b) })) };
+}
+
+// LRUD per station from the shots (at From by default, or at To), in metres.
+const ffStationLruds = FL.stationLruds;
+
+function ffCompute() {
+  const up = ffState.caveUpdates || {}, upCaves = Object.keys(up);
+  const known = new Map([...ffBaseStations()].filter(([k]) => !upCaves.some(c => c ? k.startsWith(c + '|') : !k.includes('|'))));
+  ffBuilt = []; ffBuiltInfo = {};
+  // Caves updated from a file on the phone: their fitted lines replace the export's.
+  upCaves.forEach(cave => ffPltSurveys(cave, up[cave]).forEach(sv => {
+    ffBuilt.push(sv);
+    const pfx = cave ? cave + '|' : '';
+    sv.stations.forEach(s => known.set(pfx + s.name, s.xyz));
+    sv.shots.forEach(s => { if (s.from_name && !known.has(pfx + s.from_name)) known.set(pfx + s.from_name, s.from_xyz);
+                            if (s.to_name && !known.has(pfx + s.to_name)) known.set(pfx + s.to_name, s.to_xyz); });
+  }));
+  ffState.order.forEach(id => {
+    const sv = ffState.surveys[id];
+    if (!sv) return;
+    const res = ffComputeSurvey(sv, known);
+    const lr = ffStationLruds(sv), cave = sv.cave || '';
+    const out = { name: sv.name, cave: sv.cave || undefined, color: FF_COLOR, lines: [], shots: [], stations: [], _ff: id };
+    res.legs.forEach(L => {
+      const a = [L.a.x, L.a.y, L.a.z], b = [L.b.x, L.b.y, L.b.z], sh = sv.shots[L.i], r = ffShotReading(sh);
+      out.lines.push([a, b]);
+      out.shots.push({ from_name: String(L.from).trim(), to_name: String(L.to).trim(), from_xyz: a, to_xyz: b,
+                       length: r.len, azimuth: r.az, inclination: r.inc });
+    });
+    res.pos.forEach((p, k) => {
+      const name = k.slice(cave ? cave.length + 1 : 0);
+      const st = { name, xyz: [p.x, p.y, p.z] };
+      if (lr.has(name)) st.lrud = lr.get(name);
+      out.stations.push(st);
+      known.set(k, st.xyz);
+    });
+    // LRUD measured in this survey at an exported station (the tie-in) too.
+    lr.forEach((v, name) => { if (!res.pos.has(ffKey(cave, name)) && known.has(ffKey(cave, name)))
+      out.stations.push({ name, xyz: known.get(ffKey(cave, name)), lrud: v, _tie: true }); });
+    ffBuilt.push(out);
+    ffBuiltInfo[id] = { ...res, lruds: lr };
+  });
+  ffBuildWalls();
+}
+
+// ── Field survey: walls (blocky: one box per shot, FLEX's Blocky mode) ────────
+function ffBuildWalls() {
+  ffWallGroup.children.slice().forEach(m => { ffWallGroup.remove(m); if (m.geometry) m.geometry.dispose(); if (m.material) m.material.dispose(); });
+  const pos = [], col = [];
+  const D = FF_FT;                                   // FLEX's default half-size where nothing was measured
+  const half = (lr, q) => { if (!lr || lr.every(v => v === 0)) return D; const v = lr[q]; return typeof v === 'number' && v > 0.05 ? v : (v === 0 ? 0.05 : D); };
+  let C = new THREE.Color(FF_COLOR);
+  const quad = (a, b, c, d) => { pos.push(...a, ...b, ...c, ...a, ...c, ...d); for (let k = 0; k < 6; k++) col.push(C.r, C.g, C.b); };
+  ffBuilt.forEach(sv => {
+    C = new THREE.Color(String(sv.color || FF_COLOR).slice(0, 7));
+    const lrs = new Map(sv.stations.filter(s => s.lrud).map(s => [s.name, s.lrud]));
+    sv.shots.forEach(sh => {
+      const A = new THREE.Vector3(...sh.from_xyz), B = new THREE.Vector3(...sh.to_xyz);
+      const la = lrs.get(sh.from_name) || lrs.get(sh.to_name), lb = lrs.get(sh.to_name) || lrs.get(sh.from_name);
+      const dx = B.x - A.x, dy = B.y - A.y, hz = Math.hypot(dx, dy);
+      if (hz < 0.1) {
+        // Vertical: a shaft, L+R wide, half as deep, lower floor to upper ceiling.
+        const lo = A.z < B.z ? A : B, hi = A.z < B.z ? B : A, llo = A.z < B.z ? la : lb, lhi = A.z < B.z ? lb : la;
+        const W = Math.min(half(la, 0) + half(la, 1), half(lb, 0) + half(lb, 1)) / 2, Dp = W / 2;
+        const z0 = lo.z - half(llo, 3), z1 = hi.z + half(lhi, 2), cx = (A.x + B.x) / 2, cy = (A.y + B.y) / 2;
+        const c = (sx, sy, z) => [cx + sx * W, cy + sy * Dp, z];
+        quad(c(-1, -1, z0), c(1, -1, z0), c(1, -1, z1), c(-1, -1, z1)); quad(c(1, -1, z0), c(1, 1, z0), c(1, 1, z1), c(1, -1, z1));
+        quad(c(1, 1, z0), c(-1, 1, z0), c(-1, 1, z1), c(1, 1, z1));    quad(c(-1, 1, z0), c(-1, -1, z0), c(-1, -1, z1), c(-1, 1, z1));
+        quad(c(-1, 1, z1), c(-1, -1, z1), c(1, -1, z1), c(1, 1, z1));   quad(c(-1, -1, z0), c(-1, 1, z0), c(1, 1, z0), c(1, -1, z0));
+        return;
+      }
+      const Lx = -dy / hz, Ly = dx / hz;                // left of the shot, level
+      const sec = (P, lr) => {
+        const l = half(lr, 0), r = half(lr, 1), u = half(lr, 2), d = half(lr, 3);
+        return [[P.x + Lx * l, P.y + Ly * l, P.z + u], [P.x - Lx * r, P.y - Ly * r, P.z + u],
+                [P.x - Lx * r, P.y - Ly * r, P.z - d], [P.x + Lx * l, P.y + Ly * l, P.z - d]];
+      };
+      const a = sec(A, la), b = sec(B, lb);
+      for (let k = 0; k < 4; k++) { const k2 = (k + 1) % 4; quad(a[k], b[k], b[k2], a[k2]); }
+      quad(a[3], a[2], a[1], a[0]); quad(b[0], b[1], b[2], b[3]);
+    });
+  });
+  if (!pos.length) { if (typeof requestRender === 'function') { requestRender(); wakeRender(); } return; }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(col), 3));
+  geo.computeVertexNormals();
+  const mk = side => new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, opacity: 0.55, side, depthWrite: true });
+  const back = new THREE.Mesh(geo, mk(THREE.BackSide)), front = new THREE.Mesh(geo, mk(THREE.FrontSide));
+  back.renderOrder = 0.55; front.renderOrder = 0.65;
+  // Like the exported walls: drawn into a cleared depth buffer so they show
+  // through the ground; mask on first (see buildPassageMesh).
+  back.onBeforeRender = r => { r.state.buffers.depth.setMask(true); r.clearDepth(); };
+  ffWallGroup.add(back, front);
+  ffApplyWallMode();
+}
+function ffApplyWallMode() {
+  ffWallGroup.visible = wallMode !== 2;
+  ffWallGroup.children.forEach(m => {
+    m.material.opacity = wallMode === 1 ? 0.2 : 0.55;
+    m.material.depthWrite = wallMode !== 1;
+    m.material.needsUpdate = true;
+  });
+  if (typeof requestRender === 'function') { requestRender(); wakeRender(); }
+}
+
+// Rebuild the survey lines and stations with the field surveys included.
+function ffRebuildCave() {
+  clearStationHighlight();
+  infoPanel.classList.remove('open');
+  if (reach) reach = null;
+  if (routes.length || routePick) routeClear();
+  if (stationCaver) stationCaver.visible = false;
+  if (caveLines) { caveGroup.remove(caveLines); caveLines.geometry.dispose(); caveLines.material.dispose(); caveLines = null; }
+  stationMap.forEach(st => {
+    if (st._mesh) { stationGroup.remove(st._mesh); st._mesh.material.dispose(); }
+    if (st._sprite) { stationGroup.remove(st._sprite); if (st._sprite.material.map) st._sprite.material.map.dispose(); st._sprite.material.dispose(); }
+    if (st._leadSprite) { leadGroup.remove(st._leadSprite); const i = leadSprites.indexOf(st._leadSprite); if (i >= 0) leadSprites.splice(i, 1); }
+  });
+  document.querySelectorAll('#legend .leg-row').forEach(n => n.remove());
+  const wm = passageMesh && passageMesh.userData.meshes && passageMesh.userData.meshes[0];
+  if (wm) wm.userData = {};                          // wall → shot map is per line set
+  buildCaveLines();
+  // Mark field stations so the card can offer their survey.
+  ffBuilt.forEach(sv => {
+    if (!sv._ff) return;
+    const pfx = sv.cave ? sv.cave + '|' : '';
+    sv.stations.forEach(s => { if (s._tie) return; const st = stationMap.get(pfx + s.name); if (st) st._ff = sv._ff; });
+  });
+  if (typeof ffDecorateLeads === 'function' && ffReady) ffDecorateLeads();
+  if (typeof applyReach === 'function' && reach) applyReach();
+  requestRender(); wakeRender();
+}
+
+// ── Field survey: panel ───────────────────────────────────────────────────────
+let ffPanelOpen = false, ffPanelSurvey = null, ffEditShot = null, ffShowBack = false;
+function ffPanel() {
+  let p = document.getElementById('ff-panel');
+  if (!p) {
+    p = el('div'); p.id = 'ff-panel';
+    document.body.appendChild(p);
+  }
+  return p;
+}
+function ffOpenPanel(sid) {
+  closeSheet(); closeFind();
+  ffPanelOpen = true; ffDocsOpen = false; ffPanelSurvey = sid || null; ffEditShot = null;
+  ffPanel().classList.add('open');
+  ffRenderPanel();
+}
+function ffClosePanel() { ffPanelOpen = false; ffDocsOpen = false; const p = document.getElementById('ff-panel'); if (p) p.classList.remove('open'); }
+function ffNextName(name) {
+  const m = /^(.*?)(\d+)$/.exec(String(name || '').trim());
+  if (!m) return (name || 'A') + '1';
+  const n = String(Number(m[2]) + 1);
+  return m[1] + (m[2].length > n.length ? n.padStart(m[2].length, '0') : n);
+}
+async function ffNewSurvey(tieSt) {
+  const st = tieSt || (_selMesh && _selMesh._station);
+  if (!st) { showToast('Tap the station to tie into, then 📐 Survey from here'); return; }
+  if (!st.name) { showToast('That station has no name to tie to'); return; }
+  await ffEnsureAuthor();
+  const n = ffState.order.length + 1;
+  const r = await ffDialog({
+    title: 'New field survey',
+    text: `Tied to ${st.name}${st.cave ? ' (' + st.cave + ')' : ''}. Shots start from there.`,
+    input: { value: `Field ${n} ${new Date().toLocaleDateString()}`, placeholder: 'Survey name' },
+    buttons: [{ label: 'Cancel', value: null }, { label: 'Start', value: 'ok', primary: true }],
+  });
+  if (!r || !r.value.trim()) return;
+  const id = ffUid(), d = new Date();
+  const survey = { id, name: r.value.trim().slice(0, 60), cave: st.cave || '', tie: st.name, lenUnit: 'ft', lrudAt: 'from',
+    decl: null, date: d.toISOString().slice(0, 10), created: d.toISOString(), shots: [] };
+  ffRecord('survey.add', { survey });
+  ffOpenPanel(id);
+}
+
+function ffRenderPanel() {
+  const p = ffPanel();
+  if (!ffPanelOpen) return;
+  p.textContent = '';
+  const head = el('div', 'fp-head');
+  const title = el('div', 'ff-ptitle', ffPanelSurvey && ffState.surveys[ffPanelSurvey] ? '📐 ' + ffState.surveys[ffPanelSurvey].name : '📐 Field survey');
+  head.appendChild(title);
+  head.appendChild(ffAuthorChip());
+  const x = el('button', null, '✕'); x.className = 'ff-x'; x.addEventListener('click', ffClosePanel);
+  head.appendChild(x);
+  p.appendChild(head);
+  const body = el('div', 'fp-body');
+  p.appendChild(body);
+  const sv = ffPanelSurvey && ffState.surveys[ffPanelSurvey];
+  if (!sv) ffRenderSurveyList(body); else ffRenderSurvey(body, sv);
+}
+function ffSurveyLength(sv) {
+  const unit = (sv.lenUnit || 'ft') === 'ft' ? FF_FT : 1;
+  return sv.shots.reduce((a, s) => { const v = ffParseNum(s.len).v; return a + (v > 0 ? v * unit : 0); }, 0);
+}
+function ffRenderSurveyList(body) {
+  const ids = ffState.order.filter(id => ffState.surveys[id]);
+  if (!ids.length) body.appendChild(el('div', 'fp-note', 'No field surveys on this map yet. Select a station, then “Survey from here”.'));
+  ids.forEach(id => {
+    const sv = ffState.surveys[id], info = ffBuiltInfo[id] || {};
+    const flags = sv.shots.reduce((a, s) => a + (ffShotFlags(s, sv).length ? 1 : 0), 0);
+    const sub = `${sv.shots.length} shots · ${U.len(ffSurveyLength(sv))} · from ${sv.tie}${sv.cave ? ' · ' + sv.cave : ''}` +
+      (flags ? ` · ⚠ ${flags}` : '') + (info.loose && info.loose.length ? ` · ${info.loose.length} not tied in` : '');
+    body.appendChild(fpRow('📐', sv.name, sub, () => { ffPanelSurvey = id; ffEditShot = null; ffRenderPanel(); }));
+  });
+  const row = el('div', 'fp-row');
+  const nb = el('button', 'fp-btn active', '＋ New survey');
+  nb.addEventListener('click', () => ffNewSurvey());
+  row.appendChild(nb);
+  const lb = el('button', 'fp-btn', '📝 Change log');
+  lb.addEventListener('click', ffOpenLog);
+  row.appendChild(lb);
+  const xb = el('button', 'fp-btn', '⇪ Export field data');
+  xb.addEventListener('click', ffExportData);
+  row.appendChild(xb);
+  body.appendChild(row);
+}
+function ffRenderSurvey(body, sv) {
+  const info = ffBuiltInfo[sv.id] || {};
+  const back = el('button', 'fp-btn', '‹ All surveys');
+  back.addEventListener('click', () => { ffPanelSurvey = null; ffEditShot = null; ffRenderPanel(); });
+  const top = el('div', 'fp-row'); top.appendChild(back);
+  const ren = el('button', 'fp-btn', 'Rename');
+  ren.addEventListener('click', async () => {
+    const r = await ffDialog({ title: 'Rename survey', input: { value: sv.name }, buttons: [{ label: 'Cancel', value: null }, { label: 'Save', value: 'ok', primary: true }] });
+    if (r && r.value.trim() && r.value.trim() !== sv.name) ffRecord('survey.set', { id: sv.id, patch: { name: r.value.trim().slice(0, 60) }, prev: { name: sv.name } });
+  });
+  top.appendChild(ren);
+  const del = el('button', 'fp-btn ff-danger', 'Delete');
+  del.addEventListener('click', async () => {
+    const r = await ffDialog({ title: `Delete “${sv.name}”?`, text: `${sv.shots.length} shots. It stays in the change log and can be undone there.`,
+      buttons: [{ label: 'Cancel', value: null }, { label: 'Delete', value: 'rm', danger: true }] });
+    if (r) { ffRecord('survey.delete', { id: sv.id, prev: ffClone(sv) }); ffPanelSurvey = null; ffRenderPanel(); }
+  });
+  top.appendChild(del);
+  body.appendChild(top);
+
+  // Settings: units, where LRUDs belong, declination, date.
+  const set = el('div', 'ff-settings');
+  const seg = (label, opts, cur, key) => {
+    const r = el('div', 'ff-set'); r.appendChild(el('span', 'ff-set-l', label));
+    opts.forEach(([v, t]) => {
+      const b = el('button', 'fp-btn' + (cur === v ? ' active' : ''), t);
+      b.addEventListener('click', () => { if (cur !== v) ffRecord('survey.set', { id: sv.id, patch: { [key]: v }, prev: { [key]: cur } }); });
+      r.appendChild(b);
+    });
+    set.appendChild(r);
+  };
+  seg('Lengths', [['ft', 'feet'], ['m', 'metres']], sv.lenUnit || 'ft', 'lenUnit');
+  seg('LRUD at', [['from', 'From stn'], ['to', 'To stn']], sv.lrudAt || 'from', 'lrudAt');
+  const dr = el('div', 'ff-set'); dr.appendChild(el('span', 'ff-set-l', 'Declination'));
+  const decl = info.decl || { v: 0, src: '' };
+  const di = el('input', 'ff-input ff-small'); di.type = 'number'; di.step = '0.1';
+  di.placeholder = decl.v.toFixed(1); di.value = sv.decl != null && sv.decl !== '' ? sv.decl : '';
+  di.addEventListener('change', () => {
+    const v = di.value.trim() === '' ? null : Number(di.value);
+    if (v !== null && !isFinite(v)) return;
+    ffRecord('survey.set', { id: sv.id, patch: { decl: v }, prev: { decl: sv.decl ?? null } });
+  });
+  dr.appendChild(di);
+  dr.appendChild(el('span', 'fp-note', sv.decl != null && sv.decl !== '' ? '° entered' : `° (${decl.src}; type to override)`));
+  set.appendChild(dr);
+  const dd = el('div', 'ff-set'); dd.appendChild(el('span', 'ff-set-l', 'Date'));
+  const din = el('input', 'ff-input ff-small'); din.type = 'date'; din.value = sv.date || '';
+  din.addEventListener('change', () => { if (din.value !== sv.date) ffRecord('survey.set', { id: sv.id, patch: { date: din.value }, prev: { date: sv.date } }); });
+  dd.appendChild(din);
+  set.appendChild(dd);
+  body.appendChild(set);
+  body.appendChild(el('div', 'fp-note', `Tied to ${sv.tie}${sv.cave ? ' · ' + sv.cave : ''} · ${sv.shots.length} shots · ${U.len(ffSurveyLength(sv))} · grid = az + ${(decl.v).toFixed(2)}° decl − ${(info.conv || 0).toFixed(2)}° conv`));
+
+  // Shot form
+  ffRenderShotForm(body, sv);
+
+  // Closures and loose shots
+  (info.closures || []).forEach(c => {
+    const pct = c.along > 0 ? 100 * c.err / c.along : 0;
+    body.appendChild(el('div', 'ff-closure' + (pct > 2 ? ' bad' : ''),
+      `Closes onto ${c.at}: off by ${U.dim(c.err)} (${pct.toFixed(1)}% of ${U.len(c.along)})`));
+  });
+  if (info.loose && info.loose.length)
+    body.appendChild(el('div', 'ff-closure bad', `${info.loose.length} shot${info.loose.length > 1 ? 's' : ''} not tied in: no station of ${sv.cave || 'this cave'} or this survey at either end.`));
+
+  // Shot list
+  body.appendChild(el('div', 'fp-h', 'Shots'));
+  const list = el('div', 'fp-list');
+  const loose = new Set(info.loose || []);
+  sv.shots.slice().reverse().forEach(sh => {
+    const fl = ffShotFlags(sh, sv), r = ffShotReading(sh);
+    const t1 = `${sh.from} → ${sh.to}`;
+    const t2 = `${sh.len || '?'} ${sv.lenUnit || 'ft'} · ${r.az == null ? '—' : r.az.toFixed(1) + '°'} · ${r.inc >= 0 ? '+' : ''}${(r.inc || 0).toFixed(1)}°` +
+      ([sh.l, sh.r, sh.u, sh.d].some(v => String(v || '').trim()) ? ` · ${[sh.l, sh.r, sh.u, sh.d].map(v => String(v || '–').trim() || '–').join('/')}` : '');
+    const row = fpRow(fl.length || loose.has(sv.shots.indexOf(sh)) ? '⚠' : '·', t1, fl.length ? t2 + ' · ' + fl.join('; ') : t2, () => { ffEditShot = sh.id; ffRenderPanel(); });
+    if (ffEditShot === sh.id) row.classList.add('sel');
+    list.appendChild(row);
+  });
+  body.appendChild(list);
+}
+function ffRenderShotForm(body, sv) {
+  const editing = ffEditShot && sv.shots.find(s => s.id === ffEditShot);
+  const last = sv.shots[sv.shots.length - 1];
+  const base = editing || { from: last ? last.to : sv.tie, to: last ? ffNextName(last.to) : ffNextName(sv.tie) };
+  const f = el('div', 'ff-form');
+  f.appendChild(el('div', 'fp-h', editing ? `Edit shot ${editing.from} → ${editing.to}` : 'New shot'));
+  const inputs = {};
+  const cell = (key, label, type, w) => {
+    const c = el('label', 'ff-cell' + (w ? ' ' + w : ''));
+    c.appendChild(el('span', '', label));
+    const i = el('input', 'ff-input');
+    i.inputMode = type === 'text' ? 'text' : 'decimal';
+    i.autocomplete = 'off'; i.spellcheck = false;
+    i.value = base[key] != null ? base[key] : '';
+    i.addEventListener('input', () => ffFormCheck(f, inputs, sv));
+    c.appendChild(i);
+    inputs[key] = i;
+    return c;
+  };
+  const r1 = el('div', 'ff-frow'); r1.appendChild(cell('from', 'From', 'text', 'w2')); r1.appendChild(cell('to', 'To', 'text', 'w2')); f.appendChild(r1);
+  const r2 = el('div', 'ff-frow');
+  r2.appendChild(cell('len', 'Length ' + (sv.lenUnit || 'ft'))); r2.appendChild(cell('az', 'Azimuth °')); r2.appendChild(cell('inc', 'Incl. °'));
+  f.appendChild(r2);
+  const showBack = ffShowBack || (editing && (String(editing.baz || '').trim() || String(editing.binc || '').trim()));
+  const r3 = el('div', 'ff-frow'); r3.appendChild(cell('baz', 'Back az °')); r3.appendChild(cell('binc', 'Back incl °'));
+  r3.style.display = showBack ? '' : 'none';
+  f.appendChild(r3);
+  const r4 = el('div', 'ff-frow');
+  ['l', 'r', 'u', 'd'].forEach(k => r4.appendChild(cell(k, k.toUpperCase() + ' ' + (sv.lenUnit || 'ft'))));
+  f.appendChild(r4);
+  f.appendChild(el('div', 'ff-flags'));
+  const br = el('div', 'fp-row');
+  const save = el('button', 'fp-btn active', editing ? 'Save changes' : 'Add shot');
+  save.addEventListener('click', async () => {
+    await ffEnsureAuthor();
+    const shot = { id: editing ? editing.id : ffUid() };
+    Object.keys(inputs).forEach(k => { shot[k] = inputs[k].value.trim(); });
+    if (!shot.from || !shot.to) { showToast('Give both station names'); return; }
+    if (ffParseNum(shot.len).v == null) { showToast('Length is needed'); return; }
+    if (editing) {
+      const same = Object.keys(inputs).every(k => String(editing[k] || '') === shot[k]);
+      if (!same) ffRecord('shot.set', { sid: sv.id, shot, prev: ffClone(editing) });
+      ffEditShot = null;
+    } else ffRecord('shot.add', { sid: sv.id, shot });
+    ffRenderPanel();
+  });
+  br.appendChild(save);
+  const bs = el('button', 'fp-btn' + (showBack ? ' active' : ''), 'Backsights');
+  bs.addEventListener('click', () => { ffShowBack = !showBack; r3.style.display = ffShowBack ? '' : 'none'; bs.classList.toggle('active', ffShowBack); });
+  br.appendChild(bs);
+  if (editing) {
+    const cancel = el('button', 'fp-btn', 'Cancel');
+    cancel.addEventListener('click', () => { ffEditShot = null; ffRenderPanel(); });
+    br.appendChild(cancel);
+    const del = el('button', 'fp-btn ff-danger', 'Delete shot');
+    del.addEventListener('click', () => {
+      ffRecord('shot.delete', { sid: sv.id, shotId: editing.id, prev: ffClone(editing), index: sv.shots.indexOf(editing) });
+      ffEditShot = null; ffRenderPanel();
+    });
+    br.appendChild(del);
+  }
+  f.appendChild(br);
+  body.appendChild(f);
+  ffFormCheck(f, inputs, sv);
+}
+function ffFormCheck(f, inputs, sv) {
+  const sh = {}; Object.keys(inputs).forEach(k => { sh[k] = inputs[k].value; });
+  // A fresh form isn't wrong yet: hold "missing" until something is typed.
+  const blank = ['len', 'az', 'inc', 'baz', 'binc'].every(k => !String(sh[k] || '').trim());
+  const flags = ffShotFlags(sh, sv).filter(t => !(blank && /missing/.test(t)));
+  const notes = ['l', 'r', 'u', 'd'].map(k => { const p = ffParseNum(sh[k], 'lrud'); return p.note ? `${k.toUpperCase()} ${p.raw} → ${p.v} (${p.note})` : null; }).filter(Boolean);
+  const box = f.querySelector('.ff-flags');
+  box.textContent = '';
+  flags.forEach(t => box.appendChild(el('div', 'ff-flag', '⚠ ' + t)));
+  notes.forEach(t => box.appendChild(el('div', 'ff-flag info', 'ℹ ' + t)));
+  Object.entries(inputs).forEach(([k, i]) => {
+    const kind = 'lrud'.includes(k) && k.length === 1 ? 'lrud' : 'num';
+    const p = (k === 'from' || k === 'to') ? {} : ffParseNum(i.value, kind);
+    i.classList.toggle('bad', !!p.flag);
+  });
+}
+
+// ── Change log panel ──────────────────────────────────────────────────────────
+function ffOpenLog() {
+  ffOpenPanel();
+  const p = ffPanel(), body = p.querySelector('.fp-body');
+  p.querySelector('.ff-ptitle').textContent = '📝 Change log' + (ffP.name ? ' · ' + ffP.name : '');
+  body.textContent = '';
+  const top = el('div', 'fp-row');
+  const back = el('button', 'fp-btn', '‹ Field survey'); back.addEventListener('click', () => ffOpenPanel());
+  top.appendChild(back);
+  const xb = el('button', 'fp-btn', '⇪ Export'); xb.addEventListener('click', ffExportData);
+  top.appendChild(xb);
+  body.appendChild(top);
+  body.appendChild(el('div', 'fp-note', 'Everything added to this project, by anyone (merged from sync files), newest first.'));
+  if (!ffLog.length) body.appendChild(el('div', 'fp-note', 'Nothing changed yet.'));
+  const undone = new Set(ffLog.filter(e => e.undoOf).map(e => e.undoOf));
+  ffLog.slice().reverse().slice(0, 500).forEach(e => {
+    const row = el('div', 'fp-item ff-logrow' + (undone.has(e.id) ? ' undone' : ''));
+    const tx = el('div', 'fp-tx');
+    tx.appendChild(el('div', 'fp-t1', (e.undoOf ? '↶ ' : '') + ffDescribe(e)));
+    tx.appendChild(el('div', 'fp-t2', `${e.who || '?'} · ${ffWhen(e.t)}${e.dev && e.dev !== ffDev ? ' · other device' : ''}${undone.has(e.id) ? ' · undone' : ''}`));
+    row.appendChild(tx);
+    if (!undone.has(e.id) && e.dev === ffDev && ffInverse(e)) {
+      const u = el('button', 'fp-btn', 'Undo');
+      u.addEventListener('click', async ev => { ev.stopPropagation(); await ffEnsureAuthor(); ffUndo(e); ffOpenLog(); });
+      row.appendChild(u);
+    }
+    body.appendChild(row);
+  });
+}
+
+// Everything in the project, for a backup or another program: notes, leads,
+// documents (no page images), field surveys with computed positions, the log.
+function ffExportData() {
+  const live = o => Object.values(o).filter(x => !x.deleted);
+  const out = {
+    format: 'flex-project-data', version: 1, exported: ffNowIso(), by: ffWho(), device: ffDev,
+    project: { id: ffPid, name: ffP.name, caves: FL.liveCaves(ffP).map(c => ({ id: c.id, name: c.name, on_this_map_as: ffCaveName(c.id) })) },
+    map: { name: META.name || '', utm_zone: META.utm_zone, utm_center_e: META.utm_center_e, utm_center_n: META.utm_center_n },
+    notes: live(ffP.notes).map(n => ({ id: n.id, on: n.target, on_label: ffTargetLabel(n.target), text: n.text, who: n.who, t: n.t })),
+    leads: live(ffP.leads).map(L => ({ id: L.id, at: L.target, at_label: ffTargetLabel(L.target), active: FL.leadActive(L), ...L.fields, updated: L.updated })),
+    documents: FL.docsOf(ffD, ffP).map(d => ({ id: d.id, title: d.title, kind: d.kind, date: d.date, pages: d.pages.length, tags: d.tagList.map(ffTargetLabel) })),
+    surveys: ffState.order.filter(id => ffState.surveys[id]).map(id => {
+      const sv = ffState.surveys[id], b = ffBuilt.find(x => x._ff === id), info = ffBuiltInfo[id] || {};
+      return { ...ffClone(sv), declination_used: info.decl ? info.decl.v : null, convergence: info.conv,
+        stations: b ? b.stations.filter(s => !s._tie).map(s => ({ name: s.name, xyz: s.xyz.map(v => +v.toFixed(3)), lrud: s.lrud })) : [] };
+    }),
+    log: ffLog,
+  };
+  fieldSaveFile(fieldFileName('json').replace('-field-', '-project-'), 'application/json', JSON.stringify(out, null, 1));
+}
+
+// ── Update a cave from a PLT on the phone (approximate) ──────────────────────
+// The exact way to update a map is a new export from FLEX. This is the field
+// fallback: read a Compass PLT, place it by fitting it to the stations it
+// shares with the cave already on the map (rotation about the vertical plus a
+// shift, no scale, least squares), and draw it in place of that cave. The
+// whole PLT goes in the change log, so it can be undone and comes back on load.
+
+// Compass PLT → { segments: [{ survey, points: [{n, e, v, name, lrud}] }], leads }
+// Coordinates and LRUDs in metres; LRUD as [L, R, U, D] with '–' for not measured.
+function ffParsePLT(text) {
+  const out = { segments: [], leads: [], surveys: [] };
+  let seg = null, survey = '', last = null;
+  const ft = v => parseFloat(v) * FF_FT;
+  const dim = v => { const x = parseFloat(v); return isFinite(x) && x >= 0 && x * FF_FT < 300 ? x * FF_FT : '–'; };
+  for (const raw of String(text).split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.startsWith(';LEAD\t')) {
+      const p = line.split('\t');
+      try { out.leads.push({ station: p[1], ...JSON.parse(p.slice(2).join('\t')) }); } catch (_) {}
+      continue;
+    }
+    const cmd = line[0], rest = line.slice(1).trim();
+    if (cmd === 'N') { survey = rest.split(/\s+/)[0] || rest; out.surveys.push(survey); seg = null; last = null; continue; }
+    if (cmd === 'M' || cmd === 'D' || cmd === 'd') {
+      const cm = rest.match(/"([^"]*)"$/);
+      const parts = (cm ? rest.slice(0, cm.index) : rest).trim().split(/\s+/);
+      if (parts.length < 3) continue;
+      const pt = { n: ft(parts[0]), e: ft(parts[1]), v: ft(parts[2]) };
+      if (![pt.n, pt.e, pt.v].every(isFinite)) continue;
+      for (let i = 3; i < parts.length; i++) {
+        const t = parts[i];
+        if (t.length > 1 && t[0] === 'S') pt.name = t.slice(1);
+        else if (t === 'P' && i + 4 < parts.length) { const [l, u, d, r] = parts.slice(i + 1, i + 5).map(dim); pt.lrud = [l, r, u, d]; i += 4; }
+        else if (t === 'I' && i + 1 < parts.length) i += 1;
+      }
+      if (cmd === 'M') { seg = { survey, points: [pt] }; out.segments.push(seg); }
+      else if (seg) seg.points.push(pt);
+      last = pt;
+      continue;
+    }
+    if (cmd === 'S' && last && !last.name && rest && !/^[A-Z]\s/.test(rest)) last.name = rest;
+  }
+  return out;
+}
+
+// The export's own stations of one cave: name → [x, y, z].
+function ffCaveStations(cave) {
+  const m = new Map(), pfx = cave ? cave + '|' : '';
+  ffBaseStations().forEach((xyz, k) => { if (cave ? k.startsWith(pfx) : !k.includes('|')) m.set(k.slice(pfx.length), xyz); });
+  return m;
+}
+// Fit PLT stations to the cave's: rotation about Z + shift, least squares.
+// One round of outlier rejection: stations far off the first fit (a moved or
+// renumbered station) are left out of the second, and reported.
+function ffFitPairs(pairs) {
+  const n = pairs.length;
+  const c = (k, i) => pairs.reduce((a, o) => a + o[k][i], 0) / n;
+  const cp = [c('p', 0), c('p', 1)], cq = [c('q', 0), c('q', 1)];
+  let sxx = 0, sxy = 0, spread = 0;
+  pairs.forEach(o => {
+    const px = o.p[0] - cp[0], py = o.p[1] - cp[1], qx = o.q[0] - cq[0], qy = o.q[1] - cq[1];
+    sxx += px * qx + py * qy; sxy += px * qy - py * qx; spread = Math.max(spread, Math.hypot(px, py));
+  });
+  const rotOk = n >= 2 && spread > 5;               // too few or too close: shift only
+  const th = rotOk ? Math.atan2(sxy, sxx) : 0, co = Math.cos(th), si = Math.sin(th);
+  const fit = { th, tx: cq[0] - (co * cp[0] - si * cp[1]), ty: cq[1] - (si * cp[0] + co * cp[1]),
+                tz: pairs.reduce((a, o) => a + (o.q[2] - o.p[2]), 0) / n };
+  return { fit, rotOk };
+}
+function ffFitPlt(parsed, cave) {
+  const target = ffCaveStations(cave), pairs = [], seen = new Set();
+  parsed.segments.forEach(s => s.points.forEach(p => {
+    if (!p.name || seen.has(p.name) || !target.has(p.name)) return;
+    seen.add(p.name);
+    pairs.push({ name: p.name, p: [p.e, p.n, p.v], q: target.get(p.name) });
+  }));
+  if (!pairs.length) return { ok: false, why: 'No station in this file has the same name as a station of ' + (cave || 'this cave') + '.' };
+  const resid = f => pairs.map(o => { const r = ffApplyFit(f, o.p); return { name: o.name, d: Math.hypot(r[0] - o.q[0], r[1] - o.q[1], r[2] - o.q[2]) }; });
+  let F = ffFitPairs(pairs), dropped = [];
+  if (pairs.length >= 4) {
+    const r0 = resid(F.fit), med = r0.map(r => r.d).sort((a, b) => a - b)[Math.floor(r0.length / 2)];
+    const cut = Math.max(0.5, 3 * med), keep = pairs.filter((o, i) => r0[i].d <= cut);
+    if (keep.length >= 2 && keep.length < pairs.length) {
+      dropped = r0.filter(r => r.d > cut).map(r => r.name);
+      F = ffFitPairs(keep);
+    }
+  }
+  const res = resid(F.fit).sort((a, b) => b.d - a.d);
+  const used = res.filter(r => !dropped.includes(r.name));
+  const rms = Math.sqrt(used.reduce((a, r) => a + r.d * r.d, 0) / Math.max(1, used.length));
+  return { ok: true, fit: F.fit, n: pairs.length, used: used.length, dropped, rotOk: F.rotOk, rms, worst: res[0], residuals: res };
+}
+function ffApplyFit(f, p) {
+  const co = Math.cos(f.th), si = Math.sin(f.th);
+  return [co * p[0] - si * p[1] + f.tx, si * p[0] + co * p[1] + f.ty, p[2] + f.tz];
+}
+// A fitted PLT as viewer surveys (one per PLT survey), in the cave's colours.
+const _ffPltCache = {};
+function ffPltSurveys(cave, upd) {
+  const key = upd.id || '';
+  const parsed = _ffPltCache[key] || (_ffPltCache[key] = ffParsePLT(upd.plt));
+  const base = ((CAVES_DATA && CAVES_DATA.surveys) || []).filter(s => (s.cave || '') === cave);
+  const colours = base.map(s => s.color).filter(Boolean);
+  const bySurvey = new Map();
+  parsed.segments.forEach(seg => {
+    if (!bySurvey.has(seg.survey)) bySurvey.set(seg.survey, { name: seg.survey || cave || 'Survey', cave: cave || undefined,
+      color: colours[bySurvey.size % Math.max(1, colours.length)] || '#00e5ff', lines: [], shots: [], stations: [], _pltOf: cave });
+    const sv = bySurvey.get(seg.survey), stSeen = new Set(sv.stations.map(s => s.name));
+    const P = seg.points.map(p => ({ ...p, xyz: ffApplyFit(upd.fit, [p.e, p.n, p.v]) }));
+    for (let k = 0; k + 1 < P.length; k++) {
+      sv.lines.push([P[k].xyz, P[k + 1].xyz]);
+      sv.shots.push({ from_name: P[k].name || '', to_name: P[k + 1].name || '', from_xyz: P[k].xyz, to_xyz: P[k + 1].xyz });
+    }
+    P.forEach(p => { if (p.name && !stSeen.has(p.name)) { stSeen.add(p.name); const s = { name: p.name, xyz: p.xyz }; if (p.lrud) s.lrud = p.lrud; sv.stations.push(s); } });
+  });
+  const out = [...bySurvey.values()];
+  // Leads written by FLEX's Breakout import ride along as ';LEAD' lines.
+  parsed.leads.forEach(ld => {
+    for (const sv of out) {
+      const st = sv.stations.find(s => s.name === ld.station);
+      if (st) { (sv.leads || (sv.leads = [])).push({ station: ld.station, xyz: st.xyz, description: ld.d || ld.description, width: ld.w, height: ld.h, date: ld.t }); break; }
+    }
+  });
+  return out;
+}
+function ffBaseSurveys() {
+  const up = ffState.caveUpdates || {};
+  return ((CAVES_DATA && CAVES_DATA.surveys) || []).filter(s => !up[s.cave || '']);
+}
+
+// Exported walls of a replaced cave: hidden by dropping their triangles. Walls
+// arrive grouped by survey colour, so a cave's walls can be told apart only
+// where its colours aren't shared with another cave.
+function ffWallColoursOf(cave) {
+  const norm = c => String(c || '').toLowerCase().slice(0, 7);
+  const mine = new Set(), others = new Set();
+  ((CAVES_DATA && CAVES_DATA.surveys) || []).forEach(s => ((s.cave || '') === cave ? mine : others).add(norm(s.color)));
+  const own = [...mine].filter(c => !others.has(c));
+  return { own, shared: [...mine].filter(c => others.has(c)) };
+}
+function ffApplyWallHiding() {
+  if (!passageMesh || !passageMesh.userData.groupRanges) return;
+  const hide = new Set();
+  Object.keys(ffState.caveUpdates || {}).forEach(cave => ffWallColoursOf(cave).own.forEach(c => hide.add(c)));
+  const geo = passageMesh.userData.meshes[0].geometry, full = passageMesh.userData.fullIndex;
+  const keep = passageMesh.userData.groupRanges.filter(g => !hide.has(String(g.color || '').toLowerCase().slice(0, 7)));
+  const n = keep.reduce((a, g) => a + g.ni, 0);
+  const idx = new full.constructor(n);
+  let o = 0;
+  keep.forEach(g => { idx.set(full.subarray(g.i0, g.i0 + g.ni), o); o += g.ni; });
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  passageMesh.userData.meshes[0].userData = {};        // wall → shot map again
+  requestRender(); wakeRender();
+}
+
+async function ffUpdateCaveStart() {
+  const caves = [...new Set(((CAVES_DATA && CAVES_DATA.surveys) || []).map(s => s.cave || ''))];
+  if (!caves.length) { showToast('No cave on this map to update'); return; }
+  let cave = caves[0];
+  if (caves.length > 1) {
+    const r = await ffDialog({ title: 'Update which cave?', buttons: [{ label: 'Cancel', value: null }, ...caves.map(c => ({ label: c || '(unnamed)', value: c }))] });
+    if (!r) return;
+    cave = r.button;
+  }
+  const r0 = await ffDialog({ title: 'Update ' + (cave || 'the cave') + ' from a file',
+    html: 'Pick a Compass <b>.plt</b> of this cave. It is placed by fitting it to the stations it shares with the cave on the map, which is <b>approximate</b>: a new export from FLEX is the accurate way to update a map.',
+    buttons: [{ label: 'Cancel', value: null }, { label: 'Pick a .plt', value: 'go', primary: true }] });
+  if (!r0) return;
+  let inp = document.getElementById('ff-plt-input');
+  if (!inp) {
+    inp = el('input'); inp.type = 'file'; inp.id = 'ff-plt-input'; inp.accept = '.plt,.PLT'; inp.style.display = 'none';
+    document.body.appendChild(inp);
+    inp.addEventListener('change', async () => {
+      const f = inp.files && inp.files[0]; inp.value = '';
+      if (f) ffUpdateCaveFrom(inp._cave, f.name, await f.text());
+    });
+  }
+  inp._cave = cave;
+  inp.click();
+}
+async function ffUpdateCaveFrom(cave, fileName, text) {
+  const parsed = ffParsePLT(text);
+  const nPts = parsed.segments.reduce((a, s) => a + s.points.length, 0);
+  if (!nPts) { ffDialog({ title: 'Nothing to draw', text: fileName + ' has no survey lines a PLT reader understands.' }); return; }
+  const fit = ffFitPlt(parsed, cave);
+  if (!fit.ok) { ffDialog({ title: 'Can’t place this file', text: fit.why + ' Update from a FLEX export instead.' }); return; }
+  const target = ffCaveStations(cave), inFile = new Set();
+  parsed.segments.forEach(s => s.points.forEach(p => { if (p.name) inFile.add(p.name); }));
+  const added = [...inFile].filter(n => !target.has(n)).length, gone = [...target.keys()].filter(n => !inFile.has(n)).length;
+  const walls = ffWallColoursOf(cave);
+  const deg = fit.fit.th * 180 / Math.PI;
+  const html = `<b>Approximate.</b> FLEX applies the cave's georeference and control points exactly; this only fits the file to the map.<br><br>` +
+    `Matched <b>${fit.n}</b> station${fit.n > 1 ? 's' : ''}: ${fit.rotOk ? `turned ${deg >= 0 ? '+' : ''}${deg.toFixed(2)}°, ` : 'shift only (too few to fit a turn), '}` +
+    `moved ${U.len(Math.hypot(fit.fit.tx, fit.fit.ty))} and ${U.dim(fit.fit.tz)} vertically.<br>` +
+    `Fit: RMS ${U.dim(fit.rms)} over ${fit.used} stations, worst ${U.dim(fit.worst.d)} at ${escHtml(fit.worst.name)}` +
+    (fit.worst.d > 1 ? ' <span style="color:#ffb36b">— check it: the file and the map disagree there</span>' : '') + `.<br>` +
+    (fit.dropped.length ? `Left out of the fit (too far off): ${fit.dropped.map(escHtml).join(', ')}.<br>` : '') +
+    `${added} new station${added === 1 ? '' : 's'}; ${gone} station${gone === 1 ? '' : 's'} of the map not in the file.` +
+    (passageMesh && walls.shared.length ? `<br><span style="color:#ffb36b">Some exported walls share colours with another cave and stay as they were.</span>` : '') +
+    (ffBuilt.some(s => !s._pltOf && (s.cave || '') === cave) ? '<br>Field surveys in this cave are re-placed on the new lines.' : '');
+  const r = await ffDialog({ title: 'Update ' + (cave || 'the cave') + ' from ' + fileName + '?', html,
+    buttons: [{ label: 'Cancel', value: null }, { label: 'Update (approximate)', value: 'ok', primary: true }] });
+  if (!r) return;
+  await ffEnsureAuthor();
+  const prev = (ffState.caveUpdates || {})[cave] || null;
+  ffRecord('cave.update', { cave, file: fileName, plt: text, fit: fit.fit,
+    stats: { n: fit.n, used: fit.used, dropped: fit.dropped, rms: +fit.rms.toFixed(3), worst: fit.worst.name, worstD: +fit.worst.d.toFixed(3), added, gone },
+    prev: prev ? { file: prev.file, plt: prev.plt, fit: prev.fit, id: prev.id } : null });
+  showToast(`${cave || 'Cave'} updated from ${fileName}`);
+}
+
+async function ffInit() {
+  try { ffDev = await ffHost.dev(); } catch (e) { console.warn('device id', e); ffDev = 'x' + FL.uid(8); }
+  try { ffPid = await ffPickProject(); } catch (e) { console.warn('project', e); ffPid = null; }
+  try { await ffLoadAll(); } catch (e) { console.warn('library read', e); }
+  if (ffPid) {
+    if (ffPendingProjectName) { ffRecord('project.set', { name: ffPendingProjectName }); ffPendingProjectName = null; }
+    if (META.project && META.project.id === ffPid && !ffP.name) ffRecord('project.set', { name: META.project.name || META.name || '' });
+    await ffLinkCaves();
+    ffReplay();
+  }
+  ffReady = true;
+  const upd = Object.keys(ffState.caveUpdates || {}).length;
+  if (upd || ffState.order.some(id => ffState.surveys[id])) { ffCompute(); ffRebuildCave(); }
+  if (upd) ffApplyWallHiding();
+  ffDecorateLeads();
+  if (document.getElementById('fp-lead-list')) leadsRender();
+}
+
 uiStash();          // the GPS sheet's body and the terrain sliders wait off-screen
 
 function buildCaveLines() {
   buildCavePassages();
   if (!buildCaveLines._field) { buildCaveLines._field = true; fieldRebuild(); fieldRenderList(); }
   if (!buildCaveLines._labels) { buildCaveLines._labels = true; buildAreaLabels(); }
-  const surveys = (CAVES_DATA && CAVES_DATA.surveys) || [];
+  // The export's surveys, then the ones surveyed on this phone (FLEX Field).
+  const surveys = (typeof ffBaseSurveys === 'function' ? ffBaseSurveys() : ((CAVES_DATA && CAVES_DATA.surveys) || []))
+    .concat(typeof ffBuilt !== 'undefined' ? ffBuilt : []);
   const legendEl = document.getElementById('legend');
+  if (!buildCaveLines._ff) { buildCaveLines._ff = true; setTimeout(ffInit, 0); }   // notes, log, field surveys
   if (!surveys.length) return;
 
   // Fixed physical sizes (metres) — independent of map extent.
@@ -4256,6 +6438,7 @@ function buildCaveLines() {
   findIndexBuild();
   leadsRender();                 // fills the Leads tab count
   if (colourMode) applyColourMode();
+  updateOrbitZRange();
 }
 
 // ── KML / KMZ import ──────────────────────────────────────────────────────────
@@ -4567,6 +6750,7 @@ function selectStation(st) {
   titleEl2.style.color  = st.hexColor || '#00e5ff';
   document.getElementById('info-subtitle').textContent = '';
   document.getElementById('info-rows').innerHTML       = html;
+  ffStationCard(st);             // note, survey note pages, field survey
   infoPanel.scrollTop = 0;
   infoPanel.classList.add('open');
   if (typeof gpsSheetRefresh === 'function') gpsSheetRefresh();   // calibration follows the selection
@@ -5106,7 +7290,9 @@ function exitFlyMode() {
   _craneRightAfterLeft = false;
   const dir = new THREE.Vector3();
   camera.getWorldDirection(dir);
-  controls.target.copy(camera.position).addScaledVector(dir, terrainScale * 0.1);
+  // Fly and crane go anywhere; only the orbit centre they hand back is held
+  // inside the band, and the camera stays exactly where it was flown to.
+  controls.target.copy(orbitAimInRange(camera.position, dir, terrainScale * 0.1));
   controls.update();
 }
 
@@ -5357,6 +7543,84 @@ function userIsDrivingCamera() {
 }
 window.addEventListener('resize', () => { requestRender(); wakeRender(); });
 
+// ── Orbit clamp ───────────────────────────────────────────────────────────────
+// The orbit centre (controls.target) is held between the lowest and highest
+// thing in the export -- terrain and cave stations -- plus ORBIT_Z_PAD, so a
+// pan cannot carry it hundreds of metres into the sky or deep underground.
+// One range per export, computed once at load.
+//
+// Only the target's Z is clamped, and the camera is shifted by the same amount,
+// so the view keeps its distance, tilt and bearing and a pan that runs into
+// the limit slides along it instead of sticking. Near-level views slide less:
+// screen-up is then mostly world-up, which is exactly the part being refused.
+// The camera itself (dolly, orbit) is never restricted. Fly and crane are
+// separate modes and are not clamped.
+//
+// Applied once per drawn frame, right after controls.update(). That is the only
+// place the scene is rendered, so every frame shows a clamped target, and a
+// static scene costs nothing. No handler re-entry: nothing here calls update().
+const ORBIT_Z_PAD = 10;            // metres, fixed
+let _orbitTerrainZ = null;          // [min, max] of the terrain mesh, set at load
+let _orbitXY = null;                // [minX, minY, maxX, maxY]: terrain, widened by the caves
+let _orbitZMin = -Infinity, _orbitZMax = Infinity;
+
+function updateOrbitZRange() {
+  let lo = Infinity, hi = -Infinity;
+  if (_orbitTerrainZ && isFinite(_orbitTerrainZ[0]) && isFinite(_orbitTerrainZ[1])) {
+    lo = _orbitTerrainZ[0]; hi = _orbitTerrainZ[1];
+  }
+  stationMap.forEach(st => {
+    const z = st.pos && st.pos.z;
+    if (isFinite(z)) { if (z < lo) lo = z; if (z > hi) hi = z; }
+    if (st.pos && isFinite(st.pos.x) && isFinite(st.pos.y)) {
+      if (!_orbitXY) _orbitXY = [st.pos.x, st.pos.y, st.pos.x, st.pos.y];
+      else { _orbitXY[0] = Math.min(_orbitXY[0], st.pos.x); _orbitXY[1] = Math.min(_orbitXY[1], st.pos.y);
+             _orbitXY[2] = Math.max(_orbitXY[2], st.pos.x); _orbitXY[3] = Math.max(_orbitXY[3], st.pos.y); }
+    }
+  });
+  if (lo <= hi) { _orbitZMin = lo - ORBIT_Z_PAD; _orbitZMax = hi + ORBIT_Z_PAD; }
+  else          { _orbitZMin = -Infinity;        _orbitZMax = Infinity; }
+}
+
+// Pull the orbit centre back into the band. moveCamera keeps the view rigid
+// (camera follows the target); without it only the target moves (re-aims).
+function clampOrbitTarget(moveCamera) {
+  const z = controls.target.z;
+  const c = z < _orbitZMin ? _orbitZMin : z > _orbitZMax ? _orbitZMax : z;
+  if (c === z) return false;
+  controls.target.z = c;
+  if (moveCamera) camera.position.z += c - z;
+  return true;
+}
+
+// A point `dist` along a view ray, moved into the band. Where the ray itself
+// crosses the band within reach, the point slides along the ray so the aim is
+// unchanged; otherwise it drops straight onto the band.
+function orbitAimInRange(origin, dir, dist) {
+  return orbitOverMap(orbitAimInBand(origin, dir, dist));
+}
+function orbitAimInBand(origin, dir, dist) {
+  const p = origin.clone().addScaledVector(dir, dist);
+  if (p.z >= _orbitZMin && p.z <= _orbitZMax) return p;
+  const zt = p.z > _orbitZMax ? _orbitZMax : _orbitZMin;
+  if (Math.abs(dir.z) > 1e-6) {
+    const t = (zt - origin.z) / dir.z;
+    if (t >= controls.minDistance && t <= Math.max(dist, terrainScale || 0))
+      return origin.clone().addScaledVector(dir, t);
+  }
+  p.z = zt;
+  return p;
+}
+// …and over the map: an orbit centre past the edge of the terrain and caves
+// (flying out over nothing, then leaving fly) is pulled back to the nearest
+// point of the map, so orbiting turns around something.
+function orbitOverMap(p) {
+  if (!_orbitXY) return p;
+  p.x = Math.min(_orbitXY[2], Math.max(_orbitXY[0], p.x));
+  p.y = Math.min(_orbitXY[3], Math.max(_orbitXY[1], p.y));
+  return p;
+}
+
 // ── Render loop ───────────────────────────────────────────────────────────────
 const _fwd   = new THREE.Vector3();
 const _right = new THREE.Vector3();
@@ -5494,6 +7758,7 @@ let _t = 0;
       }
     }
     controls.update();
+    clampOrbitTarget(true);
   }
 
   renderer.render(scene, camera);

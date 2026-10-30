@@ -1,81 +1,91 @@
-# FLEX Viewer — Android
+# FLEX Field — Android
 
-A WebView host for a FLEX portable cave export.
+One app that opens FLEX map exports and takes them underground: terrain,
+imagery and cave surveys, offline, with GPS and compass — plus notes, survey
+note pages and new survey added on the phone, all in a change log.
 
-## Why this app exists
+## What it does
 
-Chrome will not grant geolocation or device-orientation to a page whose origin
-is `file://`, `content://`, or a bare LAN IP — none of those are "potentially
-trustworthy" origins, so the request is refused outright and no permission
-prompt is ever shown. That is why the exported viewer rendered fine on a phone
-but could never get a GPS fix.
+- **Map list.** Import a FLEX export (the zip from Export → portable viewer)
+  with **Import map**, or open the zip with FLEX Field from Files, Drive or the
+  share sheet. Each map keeps its own notes, note pages, field surveys, tracks
+  and change log.
+- **Updating a map.** Import a newer export of the same map: when its Map Name
+  matches a map already on the phone, the app asks whether to update that map
+  or import it separately. Updating replaces the terrain, imagery and caves and
+  keeps everything added on the phone. ⋯ → *Update from a newer export…* does
+  the same for a map whose name changed.
+- **On a station's card:** ✏️ a note · 📄 that survey's note pages (photos or a
+  PDF of the notes, opened full screen, pinch to zoom) · 📐 survey new passage
+  from here.
+- **🔧 Tools → 📐 Field survey:** typed shots (from, to, length, azimuth,
+  inclination, optional backsights, LRUD in decimal feet; `3/5` = ledge, the
+  larger value is used), tied to existing stations, drawn as lines, stations
+  and walls. Declination comes from the World Magnetic Model for the survey
+  date (or type one in); misclosure is shown when a shot closes onto a station.
+- **🔧 Tools → 📝 Change log:** who changed what and when, with undo. Everything
+  is logged under the name shown on ✍ (switchable, last used by default).
+- **⋯ → Export field data** writes the notes, field surveys (with computed
+  positions) and the full log as JSON. ⋯ on the map list → *Share notes, pages
+  & log* zips a map's notes, note pages, log and tracks.
 
-This app serves the identical files through `WebViewAssetLoader` at
-`https://appassets.androidplatform.net/`, which *is* a trustworthy origin, and
-grants the geolocation request itself from `WebChromeClient`. No socket is
-opened and the app declares no `INTERNET` permission, so it is provably offline.
+## Why an app at all
+
+Chrome refuses geolocation and device orientation to `file://`, `content://`
+and bare LAN-IP pages. The app serves everything through `WebViewAssetLoader`
+at `https://appassets.androidplatform.net/`, a trustworthy origin, and grants
+location itself. It declares no `INTERNET` permission, so it is offline by
+construction.
 
 ## Layout
 
 ```
-app/src/main/assets/flex/
-├── viewer.html      shell with the survey data inlined; other assets referenced
-├── terrain.glb      terrain geometry
-├── tex_sat.jpg      satellite texture
-├── tex_hs.jpg       hillshade texture (when the export has one)
-├── walls.bin        passage walls (when the export has them)
-└── libs/            three.js, OrbitControls, GLTFLoader, jszip
+app/src/main/java/.../MainActivity.kt    WebView, file pickers, JS bridge (AndroidHost), /map/ routing
+app/src/main/java/.../MapStore.kt        storage, zip import, legacy exports, note pages, log
+app/src/main/flexfield-assets/flexfield/index.html   the map list
+../viewer_build/                         the viewer, used as an asset folder as-is
 ```
 
-The single-file export inlines all of that as base64 into one ~180 MB HTML
-document. That works in a desktop browser but risks an out-of-memory kill in a
-WebView and wastes ~45 MB to base64 overhead, so the assets are split back out.
+On the phone (app-private storage):
+
+```
+files/maps/<id>/map.json             name, dates
+files/maps/<id>/export/              terrain.glb, tex_sat.jpg, tex_hs.jpg, walls.bin, caves.json
+files/maps/<id>/user/log.jsonl       the change log (notes and field surveys are rebuilt from it)
+files/maps/<id>/user/notes/<survey>/ note pages
+```
+
+Only the export's data files are unpacked; the zip's big single-file
+`viewer.html` is skipped. Exports made before the sidecar files existed are
+unpacked from that `viewer.html` instead (slower, once).
+
+The viewer is bundled in the app, not taken from each export, so a viewer fix
+reaches every map with one rebuild; it reads every older export layout.
 
 ## Build
 
-Requires Android Studio (or the SDK command-line tools) with a JDK 17.
+Android Studio or the SDK command-line tools, JDK 17.
 
 ```powershell
-cd C:\Users\feroz\FLEX\android
-.\gradlew.bat assembleRelease
+cd android                            # from the FLEX checkout
+.\gradlew.bat installRelease          # or assembleRelease → app\build\outputs\apk\release\
 ```
 
-Output: `app\build\outputs\apk\release\app-release.apk`
+`release` is signed with the debug key so it sideloads with no keystore. Do not
+publish it.
 
-`release` is signed with the debug key on purpose, so the APK installs by
-sideloading without any keystore setup. Do not publish it.
+The package is `com.feroz.flexfield`, so it installs next to the old per-cave
+apps (`com.feroz.flexviewer.*`) instead of replacing them; uninstall those by
+hand. Tracks and pins recorded in an old app stay in that app (export them
+there as GPX/KML first if you want them).
 
-Install over USB with debugging enabled:
-
-```powershell
-.\gradlew.bat installRelease
-```
-
-## Building for a different cave
-
-```powershell
-python tools\assemble_assets.py <export_dir> .. app\src\main\assets\flex
-.\gradlew.bat installRelease
-```
-
-That rewrites `cave.properties`, which `app/build.gradle.kts` reads to set the
-launcher label and the `applicationId` suffix. Each cave therefore installs as
-its own app instead of replacing the last one -- useful for carrying several
-systems on one phone, but it does mean the first build after this change lands
-alongside the old `com.feroz.flexviewer` install rather than upgrading it.
-Uninstall that one by hand.
-
-Pass `--name "Cave Ridge"` to override the label if the export folder name is ugly.
-
-Exports made before the exporter wrote sidecar textures still work: the script
-falls back to decoding them out of the 170 MB `viewer.html`, which is slow but
-correct. Newer exports carry `tex_sat.jpg` and `tex_hs.jpg` directly and skip
-that entirely.
-
-The HTML shell is always rebuilt from `viewer_build/viewer.html`, so an old
-export picks up viewer fixes without being re-exported.
+A made-up test map: `python tools\make_synthetic_export.py out\test` writes
+`out\FLEX-Cave-Ridge.zip` (needs the exporter's conda environment).
 
 ## Debugging on device
 
-Build `assembleDebug`, connect USB, then open `chrome://inspect` on the desktop
-to attach devtools to the WebView.
+Build `assembleDebug`, connect USB, open `chrome://inspect` on the desktop and
+attach to the WebView.
+
+`tools/assemble_assets.py` is the old per-cave build (one APK per export); the
+app no longer uses it.

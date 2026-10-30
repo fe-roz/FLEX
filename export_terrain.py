@@ -436,6 +436,153 @@ def border_nodata_mask(valid, resolution, block_m=4.0, min_blocks=8, progress=pr
     return mask
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Polygon export area
+# ──────────────────────────────────────────────────────────────────────────────
+# The area can be a polygon instead of the whole box: a hard cut, nothing
+# outside it is exported. The export frame stays the upright UTM rectangle
+# around it, so nothing downstream changes; the polygon is a mask inside that
+# frame -- on the points read (fewer to grid and shade), on the mesh (cut
+# exactly at the line, see build_mesh, with the triangle budget spent inside)
+# and on the textures (blanked outside, which only shrinks the JPEGs: the
+# texture is still one rectangle).
+#
+# Polygons are open rings of (x, y) vertices; inside is by the even-odd rule.
+
+def load_polygon(path):
+    """[[lon, lat], ...] from a JSON file -> float array (n, 2), open ring.
+    A repeated closing vertex and repeated neighbours are dropped."""
+    pts = np.asarray(json.loads(Path(path).read_text()), dtype=np.float64)
+    if pts.ndim != 2 or pts.shape[1] < 2:
+        sys.exit("ERROR: --polygon must hold [[lon, lat], ...]")
+    pts = pts[:, :2]
+    keep = np.ones(len(pts), dtype=bool)
+    keep[1:] = np.any(pts[1:] != pts[:-1], axis=1)
+    pts = pts[keep]
+    if len(pts) > 1 and np.all(pts[0] == pts[-1]):
+        pts = pts[:-1]
+    if len(pts) < 3 or not np.isfinite(pts).all():
+        sys.exit("ERROR: the export polygon needs at least 3 distinct points")
+    if not ((-180 <= pts[:, 0]) & (pts[:, 0] <= 180) & (-90 <= pts[:, 1]) & (pts[:, 1] <= 90)).all():
+        sys.exit("ERROR: the export polygon is not in lon/lat degrees")
+    return pts
+
+
+def polygon_to_utm(poly_ll, zone):
+    """Vertices to UTM in the export's zone. Edges stay straight in UTM; over
+    an export's few kilometres that is within millimetres of the lon/lat line."""
+    return np.array([latlon_to_utm(float(la), float(lo), zone)[:2] for lo, la in poly_ll])
+
+
+def polygon_area(poly):
+    x, y = poly[:, 0], poly[:, 1]
+    return 0.5 * abs(float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))))
+
+
+def polygon_inside_grid(poly, xs, ys):
+    """Whether each (xs[i], ys[j]) is inside: bool [len(xs), len(ys)].
+    One scanline per x, so it is exact at every grid point and cheap however
+    many vertices the polygon has."""
+    P = np.asarray(poly, dtype=np.float64)
+    Q = np.roll(P, -1, axis=0)
+    x1, y1, x2, y2 = P[:, 0], P[:, 1], Q[:, 0], Q[:, 1]
+    ys = np.asarray(ys, dtype=np.float64)
+    out = np.zeros((len(xs), len(ys)), dtype=bool)
+    for i, x in enumerate(np.asarray(xs, dtype=np.float64)):
+        m = (x1 <= x) != (x2 <= x)                     # edges this vertical line crosses
+        if not m.any():
+            continue
+        yc = np.sort(y1[m] + (x - x1[m]) * (y2[m] - y1[m]) / (x2[m] - x1[m]))
+        out[i] = (np.searchsorted(yc, ys, side='right') % 2) == 1
+    return out
+
+
+def points_in_polygon(px, py, poly):
+    """Even-odd test for scattered points (same rule as polygon_inside_grid)."""
+    px = np.asarray(px, dtype=np.float64); py = np.asarray(py, dtype=np.float64)
+    inside = np.zeros(px.shape, dtype=bool)
+    P = np.asarray(poly, dtype=np.float64)
+    Q = np.roll(P, -1, axis=0)
+    for (x1, y1), (x2, y2) in zip(P, Q):
+        if x1 == x2:
+            continue
+        m = (x1 <= px) != (x2 <= px)
+        yc = y1 + (px[m] - x1) * (y2 - y1) / (x2 - x1)
+        inside[m] ^= py[m] >= yc
+    return inside
+
+
+def polygon_edge_distance(px, py, poly):
+    """Distance from each point to the nearest edge of the polygon."""
+    px = np.asarray(px, dtype=np.float64); py = np.asarray(py, dtype=np.float64)
+    d = np.full(px.shape, np.inf)
+    P = np.asarray(poly, dtype=np.float64)
+    Q = np.roll(P, -1, axis=0)
+    for (x1, y1), (x2, y2) in zip(P, Q):
+        ex, ey = x2 - x1, y2 - y1
+        L2 = ex * ex + ey * ey
+        t = np.clip(((px - x1) * ex + (py - y1) * ey) / L2, 0.0, 1.0) if L2 > 0 else 0.0
+        d = np.minimum(d, np.hypot(px - (x1 + t * ex), py - (y1 + t * ey)))
+    return d
+
+
+def densify_ring(poly, step):
+    """The ring with extra points on every edge, no more than `step` apart;
+    the original vertices are kept, so the outline is exactly the polygon's."""
+    out = []
+    P = np.asarray(poly, dtype=np.float64)
+    for a, b in zip(P, np.roll(P, -1, axis=0)):
+        n = max(1, int(math.ceil(math.hypot(*(b - a)) / step)))
+        t = np.arange(n)[:, None] / n
+        out.append(a + t * (b - a))
+    return np.vstack(out)
+
+
+def self_intersecting(poly):
+    """True if two non-adjacent edges cross (checked up to 4000 edges)."""
+    P = np.asarray(poly, dtype=np.float64)
+    n = len(P)
+    if n < 4 or n > 4000:
+        return False
+    A, B = P, np.roll(P, -1, axis=0)
+    def orient(p, q, r):
+        return np.sign((q[..., 0] - p[..., 0]) * (r[..., 1] - p[..., 1])
+                       - (q[..., 1] - p[..., 1]) * (r[..., 0] - p[..., 0]))
+    for i in range(n):
+        j = np.arange(i + 2, n)
+        if i == 0:
+            j = j[j != n - 1]
+        if not len(j):
+            continue
+        a, b, c, d = A[i], B[i], A[j], B[j]
+        if np.any((orient(a, b, c) * orient(a, b, d) < 0) & (orient(c, d, a) * orient(c, d, b) < 0)):
+            return True
+    return False
+
+
+def blank_outside(img, grid, poly, margin_px=2):
+    """Paint the texture outside the polygon (UTM) one flat colour, in place:
+    the average of what is inside, so mipmaps along the edge stay true. The
+    mesh ends at the line, so nothing out there is ever shown; flat pixels
+    just compress to almost nothing. A couple of pixels past the line are
+    kept for texture filtering."""
+    from PIL import ImageDraw
+    W, H = img.size
+    sx, sy = W / grid.width, H / grid.height
+    pix = [(float((e - grid.e0) * sx), float((grid.n1 - n) * sy)) for e, n in poly]
+    outside = Image.new('L', (W, H), 255)
+    d = ImageDraw.Draw(outside)
+    d.polygon(pix, fill=0)
+    d.line(pix + pix[:1], fill=0, width=2 * margin_px + 1)
+    small_w, small_h = max(1, W // 16), max(1, H // 16)
+    arr = np.asarray(img.convert('RGB').resize((small_w, small_h)), dtype=np.float64).reshape(-1, 3)
+    sel = np.asarray(outside.resize((small_w, small_h)), dtype=np.uint8).ravel() == 0
+    rgb = arr[sel].mean(axis=0) if sel.any() else np.array([128.0, 128.0, 128.0])
+    fill = int(round(rgb.mean())) if img.mode == 'L' else tuple(int(round(v)) for v in rgb)
+    img.paste(fill, mask=outside)
+    return img
+
+
 def filter_spikes(dem, resolution, radius_m=10.0, threshold_m=1.5, progress=print):
     """
     One-sided spike filter: removes upward outliers (trees, buildings) while
@@ -464,7 +611,7 @@ def filter_spikes(dem, resolution, radius_m=10.0, threshold_m=1.5, progress=prin
 # ──────────────────────────────────────────────────────────────────────────────
 
 def build_mesh(dem, x_bins, y_bins, x_origin, y_origin, max_triangles=2_000_000, progress=print,
-               drop=None):
+               drop=None, clip=None):
     """
     Build a curvature-adaptive TIN mesh from a DEM grid.
 
@@ -486,14 +633,34 @@ def build_mesh(dem, x_bins, y_bins, x_origin, y_origin, max_triangles=2_000_000,
     `drop` marks cells with no data behind them (see border_nodata_mask); they
     get no vertices and no triangles, and the cells along their edge are all
     kept so the cut is clean rather than stepped at the coarse grid spacing.
+
+    `clip` is the export polygon, in the mesh's own (grid-centred) metres: the
+    mesh is cut exactly at its line. Vertices outside it, or closer to the
+    line than about half a cell, are left out and the line itself is put in
+    as vertices (heights from the DEM) no more than 0.8 cell apart, close
+    enough that the triangulation keeps its edges; then triangles whose
+    centre is outside go. The vertex budget is spent inside the polygon.
     """
-    from scipy.ndimage import laplace, uniform_filter
+    from scipy.ndimage import laplace, uniform_filter, binary_dilation, binary_erosion
     from scipy.spatial import Delaunay
 
     rows, cols = dem.shape
     dx = float(x_bins[1] - x_bins[0])
     dy = float(y_bins[1] - y_bins[0])
     n_cells = rows * cols
+    cx = np.arange(rows) * dx - (rows - 1) * dx / 2.0     # cell centres, as the vertices below
+    cy = np.arange(cols) * dy - (cols - 1) * dy / 2.0
+    region = None
+    if clip is not None:
+        clip = np.asarray(clip, dtype=np.float64)
+        inside_c = polygon_inside_grid(clip, cx, cy)
+        if not inside_c.any():
+            sys.exit("ERROR: the export polygon holds no terrain cell")
+        region = binary_dilation(inside_c, iterations=2)
+        edge_c = binary_dilation(inside_c) != binary_erosion(inside_c, border_value=1)
+        band = binary_dilation(edge_c, iterations=2)
+        n_cells = int(region.sum())
+        progress(f"  Polygon: {inside_c.mean() * 100:.1f}% of the rectangle; the mesh is cut at its line")
 
     # ── 1. Curvature map ──────────────────────────────────────────────────────
     # Smooth the DEM slightly to kill per-point noise before computing Laplacian
@@ -520,22 +687,34 @@ def build_mesh(dem, x_bins, y_bins, x_origin, y_origin, max_triangles=2_000_000,
     n_border  = 2 * rows + 2 * (cols - 2)   # rough border count
     n_curv_budget = max(0, max_triangles // 2 - n_subgrid - n_border)
 
-    if n_curv_budget > 0 and n_curv_budget < n_cells:
+    if region is not None:
+        n_subgrid = int((subgrid_mask & region.ravel()).sum())
+        n_border = int(sum(math.hypot(*(b - a)) for a, b in zip(clip, np.roll(clip, -1, axis=0))) / (0.8 * min(dx, dy)))
+        n_curv_budget = max(0, max_triangles // 2 - n_subgrid - n_border)
+    cand = curv_norm if region is None else curv_norm[region.ravel()]
+    if n_curv_budget > 0 and n_curv_budget < len(cand):
         # Select top-N cells by curvature score
-        threshold = float(np.partition(curv_norm, n_cells - n_curv_budget)
-                          [n_cells - n_curv_budget])
+        threshold = float(np.partition(cand, len(cand) - n_curv_budget)
+                          [len(cand) - n_curv_budget])
         curv_mask = curv_norm >= threshold
     else:
-        curv_mask = np.zeros(n_cells, dtype=bool)
+        curv_mask = np.zeros(rows * cols, dtype=bool)
+    del cand
 
     # ── 4. Union + border ─────────────────────────────────────────────────────
     keep = (subgrid_mask | curv_mask).reshape(rows, cols)
     keep[0, :] = keep[-1, :] = keep[:, 0] = keep[:, -1] = True   # always keep border
     if drop is not None and drop.any():
-        from scipy.ndimage import binary_dilation
         rim = binary_dilation(drop) & ~drop
         keep |= rim
         keep &= ~drop
+    if region is not None:
+        # Only inside, and not hard against the line (the line gets its own).
+        keep &= inside_c
+        near = keep & band
+        ri, ci = np.where(near)
+        too_close = polygon_edge_distance(cx[ri], cy[ci], clip) < 0.45 * min(dx, dy)
+        keep[ri[too_close], ci[too_close]] = False
 
     r_idx, c_idx = np.where(keep)
     n_verts = len(r_idx)
@@ -549,6 +728,21 @@ def build_mesh(dem, x_bins, y_bins, x_origin, y_origin, max_triangles=2_000_000,
     vx = (r_idx * dx - (rows - 1) * dx / 2.0).astype(np.float32)   # row  → easting
     vy = (c_idx * dy - (cols - 1) * dy / 2.0).astype(np.float32)   # col  → northing
     vz = dem[r_idx, c_idx].astype(np.float32)
+    if region is not None:
+        # The polygon's line as vertices, heights bilinear from the DEM.
+        ring = densify_ring(clip, 0.8 * min(dx, dy))
+        fi = np.clip((ring[:, 0] + (rows - 1) * dx / 2.0) / dx, 0, rows - 1)
+        fj = np.clip((ring[:, 1] + (cols - 1) * dy / 2.0) / dy, 0, cols - 1)
+        i0 = np.minimum(np.floor(fi).astype(np.int64), max(0, rows - 2)); j0 = np.minimum(np.floor(fj).astype(np.int64), max(0, cols - 2))
+        i1 = np.minimum(i0 + 1, rows - 1); j1 = np.minimum(j0 + 1, cols - 1)
+        u = fi - i0; v = fj - j0
+        rz = (dem[i0, j0] * (1 - u) * (1 - v) + dem[i1, j0] * u * (1 - v)
+              + dem[i0, j1] * (1 - u) * v + dem[i1, j1] * u * v)
+        n_ring = len(ring)
+        vx = np.concatenate([vx, ring[:, 0].astype(np.float32)])
+        vy = np.concatenate([vy, ring[:, 1].astype(np.float32)])
+        vz = np.concatenate([vz, rz.astype(np.float32)])
+        progress(f"  Polygon line: {n_ring:,} vertices")
     vertices = np.column_stack([vx, vy, vz])
 
     # ── 6. 2-D Delaunay triangulation ─────────────────────────────────────────
@@ -556,6 +750,18 @@ def build_mesh(dem, x_bins, y_bins, x_origin, y_origin, max_triangles=2_000_000,
     tri = Delaunay(np.column_stack([vx.astype(np.float64),
                                      vy.astype(np.float64)]))
     faces = tri.simplices.astype(np.uint32)
+    if region is not None:
+        # Delaunay fills the convex hull: drop the triangles whose centre is
+        # outside the polygon. Far from the line a cell look-up decides; near
+        # it, the exact test.
+        P = vertices[:, :2].astype(np.float64)
+        cen = (P[faces[:, 0]] + P[faces[:, 1]] + P[faces[:, 2]]) / 3.0
+        ci = np.clip(np.rint((cen[:, 0] + (rows - 1) * dx / 2.0) / dx).astype(np.int64), 0, rows - 1)
+        cj = np.clip(np.rint((cen[:, 1] + (cols - 1) * dy / 2.0) / dy).astype(np.int64), 0, cols - 1)
+        ins = inside_c[ci, cj]
+        nb = band[ci, cj]
+        ins[nb] = points_in_polygon(cen[nb, 0], cen[nb, 1], clip)
+        faces = faces[ins]
     if drop is not None and drop.any():
         # Delaunay fills the convex hull, so it bridges straight across any
         # dropped region. Test each triangle's centroid and edge midpoints
@@ -570,6 +776,7 @@ def build_mesh(dem, x_bins, y_bins, x_origin, y_origin, max_triangles=2_000_000,
         for m in ((a + b_) / 2.0, (b_ + c) / 2.0, (c + a) / 2.0):
             bad |= _cell(*m.T)
         faces = faces[~bad]
+    if (drop is not None and drop.any()) or region is not None:
         used = np.zeros(len(vertices), dtype=bool)
         used[faces.ravel()] = True
         remap = np.cumsum(used) - 1
@@ -1186,6 +1393,11 @@ def get_viewer_libs(progress=print):
         else:
             progress(f"  {fname}: cached ({local.stat().st_size//1024} KB)")
         result[zip_path] = local
+    # Libraries that live only in the repo (flexlib.js, utif.js): no download.
+    for local in sorted(libs_dir.glob('*.js')):
+        key = 'libs/' + local.name
+        if key not in result:
+            result[key] = local
     return result
 
 
@@ -1271,6 +1483,9 @@ def convert_caves(caves_path, utm_center_e, utm_center_n, progress=print, zone=N
         # so two caves' station "1" stay two stations.
         if survey.get("cave"):
             survey_out["cave"] = survey["cave"]
+        # The survey's code on its own (the name is "code — description").
+        if survey.get("code") is not None:
+            survey_out["code"] = str(survey["code"])
         # Open leads: station name, position and the note/size/date, if any.
         leads_out = []
         for ld in survey.get("leads", []):
@@ -1294,6 +1509,15 @@ def convert_caves(caves_path, utm_center_e, utm_center_n, progress=print, zone=N
                            "xyz": [le - utm_center_e, ln - utm_center_n, lb.get("elev", 0)]})
     if labels_out:
         out["labels"] = labels_out
+    # The FLEX project these caves belong to, and each cave's id (doc 11): the
+    # phone links them without asking. Ids are random, names as the user typed.
+    proj = raw.get("project")
+    if isinstance(proj, dict) and proj.get("id"):
+        out["_project"] = {"id": str(proj["id"])[:40], "name": str(proj.get("name") or "")[:60]}
+    cave_ids = [{"id": str(c["id"])[:40], "name": str(c.get("name") or "")}
+                for c in (raw.get("cave_ids") or []) if isinstance(c, dict) and c.get("id")]
+    if cave_ids:
+        out["_caves"] = cave_ids
     progress(f"  Converted {sum(len(s['lines']) for s in out['surveys']):,} shots across "
              f"{len(out['surveys'])} surveys")
 
@@ -1346,6 +1570,10 @@ def main():
     ap.add_argument('--bbox',        required=True, nargs=4, type=float,
                     metavar=('minLon','minLat','maxLon','maxLat'))
     ap.add_argument('--caves',       default=None,  help='Path to caves.json (PLT lines)')
+    ap.add_argument('--polygon',     default=None,
+                    help='Export only inside this polygon: JSON [[lon, lat], ...]. A hard cut '
+                         '(terrain ends exactly at the line); the frame is the box around it, '
+                         'and --bbox is replaced by the polygon\'s bounds.')
     ap.add_argument('--out',         default='export.zip')
     ap.add_argument('--name',        default='',
                     help='Map name, shown in the viewer title bar and used for the app label')
@@ -1386,6 +1614,11 @@ def main():
         print(f"[export] Terrain from the map, {args.resolution:g} m cells (no point cloud read)")
     map_name = (args.name or '').strip()
 
+    poly_ll = None
+    if args.polygon:
+        poly_ll = load_polygon(args.polygon)
+        args.bbox = [float(poly_ll[:, 0].min()), float(poly_ll[:, 1].min()),
+                     float(poly_ll[:, 0].max()), float(poly_ll[:, 1].max())]
     minLon, minLat, maxLon, maxLat = args.bbox
     print(f"[export] BBox: ({minLat:.5f},{minLon:.5f}) -> ({maxLat:.5f},{maxLon:.5f})")
     if map_name:
@@ -1401,6 +1634,18 @@ def main():
     # are requested for a little more than that so every cell has real data
     # behind it, whatever CRS the dataset is stored in.
     rect = utm_rect_covering(args.bbox, zone, args.resolution)
+    poly_utm = None
+    if poly_ll is not None:
+        poly_utm = polygon_to_utm(poly_ll, zone)
+        # One more cell all round: mesh vertices sit at cell centres, half a
+        # cell in from the rectangle, and the line has to be inside them.
+        c = args.resolution
+        rect = (rect[0] - c, rect[1] - c, rect[2] + c, rect[3] + c)
+        rect_area = (rect[2] - rect[0]) * (rect[3] - rect[1])
+        print(f"[export] Polygon: {len(poly_utm)} points, {polygon_area(poly_utm) / 1e6:.3f} km^2 "
+              f"({polygon_area(poly_utm) / rect_area * 100:.0f}% of its box); nothing outside it is exported")
+        if self_intersecting(poly_utm):
+            print("[export] WARNING: the polygon's edges cross; inside is taken by the even-odd rule")
     pad = max(5.0, 4 * args.resolution)
     q_rect = (rect[0] - pad, rect[1] - pad, rect[2] + pad, rect[3] + pad)
     q_ll = latlon_box_covering(q_rect, zone, south)
@@ -1436,6 +1681,23 @@ def main():
                 zone=zone, south=south, with_mode=True,
             )
             del r, g, b
+            if poly_utm is not None:
+                # Only points within reach of the polygon (a margin so the cells
+                # along the line are backed by real returns).
+                n0 = len(x)
+                reach = pad + 2 * args.resolution
+                cc = max(4 * args.resolution, reach / 3)
+                gx = np.arange(rect[0] - reach, rect[2] + reach + cc, cc)
+                gy = np.arange(rect[1] - reach, rect[3] + reach + cc, cc)
+                from scipy.ndimage import binary_dilation as _bd
+                near = _bd(polygon_inside_grid(poly_utm, gx + cc / 2, gy + cc / 2),
+                           iterations=int(math.ceil(reach / cc)) + 1)
+                ix = np.clip(((x - gx[0]) // cc).astype(np.int64), 0, len(gx) - 1)
+                iy = np.clip(((y - gy[0]) // cc).astype(np.int64), 0, len(gy) - 1)
+                k = near[ix, iy]
+                x, y, z = x[k], y[k], z[k]
+                print(f"[1/7] Polygon: kept {len(x):,} of {n0:,} points")
+                del ix, iy, k, near
 
             # 2. Build DEM on the rectangle, and find where the dataset runs out
             dem, x_bins, y_bins, x0, y0, valid = build_dem(
@@ -1469,6 +1731,14 @@ def main():
         # Terrain centre in UTM (for cave coordinate conversion)
         utm_center_e = (x_bins[0] + x_bins[-1]) / 2
         utm_center_n = (y_bins[0] + y_bins[-1]) / 2
+        clip = None
+        if poly_utm is not None:
+            clip = poly_utm - np.array([utm_center_e, utm_center_n])
+            # The hillshade's resolution follows the area that is really kept.
+            cells_in = polygon_inside_grid(poly_utm, x_bins[:-1] + args.resolution / 2,
+                                           y_bins[:-1] + args.resolution / 2)
+            covered_m2 = float((~drop & cells_in).sum()) * args.resolution ** 2
+            del cells_in
         # The frame every texture is resampled into -- exactly the span
         # compute_uvs() maps the mesh onto.
         grid = UtmGrid(x_bins[0], y_bins[0], x_bins[-1], y_bins[-1], zone, south)
@@ -1477,7 +1747,7 @@ def main():
         vertices, faces = build_mesh(
             dem, x_bins, y_bins, x0, y0, args.max_triangles,
             progress=lambda m: print(f"[3/7] {m}"),
-            drop=drop,
+            drop=drop, clip=clip,
         )
 
         # 4. Satellite texture, warped onto the UTM grid
@@ -1486,6 +1756,8 @@ def main():
             grid, tex_size=args.tex_size, source=args.satellite_source,
             progress=lambda m: print(f"[4/7] {m}")
         )
+        if poly_utm is not None:
+            blank_outside(texture, grid, poly_utm)
 
         # 4b. Hillshade: from the LiDAR itself, or from a tile URL
         import io as _hs_io
@@ -1498,6 +1770,8 @@ def main():
                     x, y, z, grid, covered_m2, mode=ground_mode,
                     max_px=args.hillshade_max_px,
                     progress=lambda m: print(f"[4b/7] {m}"))
+                if poly_utm is not None:
+                    blank_outside(hs_img, grid, poly_utm)
                 hs_buf = _hs_io.BytesIO()
                 hs_img.save(hs_buf, format='JPEG', quality=90)
                 hs_bytes = hs_buf.getvalue()
@@ -1510,6 +1784,8 @@ def main():
                 hs_img, hs_cell = dem_hillshade(dem, args.resolution, grid,
                                                 max_px=args.hillshade_max_px,
                                                 progress=lambda m: print(f"[4b/7] {m}"))
+                if poly_utm is not None:
+                    blank_outside(hs_img, grid, poly_utm)
                 hs_buf = _hs_io.BytesIO()
                 hs_img.save(hs_buf, format='JPEG', quality=90)
                 hs_bytes = hs_buf.getvalue()
@@ -1522,6 +1798,8 @@ def main():
                 hs_img = fetch_imagery(grid, args.tex_size, source='xyz',
                                        url_template=args.hillshade_url,
                                        progress=lambda m: print(f"[4b/7] {m}"))
+                if poly_utm is not None:
+                    blank_outside(hs_img, grid, poly_utm)
                 hs_buf = _hs_io.BytesIO()
                 hs_img.save(hs_buf, format='JPEG', quality=85)
                 hs_bytes = hs_buf.getvalue()
@@ -1589,6 +1867,10 @@ def main():
             # Embed coordinate meta so the viewer can convert GPS lat/lon -> scene XYZ.
             # `name` titles the viewer and names the Android app.
             caves_out["meta"] = {
+                # Bumped when the export's layout changes, so FLEX Field (which
+                # brings its own viewer) knows what it is reading. 1 = before
+                # this field existed; every version stays readable.
+                "format_version": 2,
                 "name":         map_name,
                 "utm_center_e": float(utm_center_e),
                 "utm_center_n": float(utm_center_n),
@@ -1602,6 +1884,16 @@ def main():
                 "terrain":      ('map' if map_terrain else 'lidar'),
                 "terrain_cell_m": float(args.resolution),
             }
+            if caves_out.get("_project"):
+                caves_out["meta"]["project"] = caves_out.pop("_project")
+            if caves_out.get("_caves"):
+                caves_out["meta"]["caves"] = caves_out.pop("_caves")
+            caves_out.pop("_project", None)
+            caves_out.pop("_caves", None)
+            if poly_utm is not None:
+                # The export area, in the viewer's frame (metres from the centre).
+                caves_out["meta"]["area_polygon"] = [[round(float(e - utm_center_e), 2), round(float(n - utm_center_n), 2)]
+                                                     for e, n in poly_utm]
             # Passage walls travel as a binary sidecar (cave_walls.py), not as
             # JSON: a third of the size, and the viewer loads it with no parse.
             walls_bytes = None

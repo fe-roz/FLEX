@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="app_name">FLEX Field</string>
     <string name="loc_rationale">Location is used to show your position on the cave map. Nothing leaves the device.</string>
 </resources>

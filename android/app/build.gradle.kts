@@ -1,48 +1,36 @@
-import java.util.Properties
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
-
-// Cave identity comes from cave.properties, which tools/assemble_assets.py
-// rewrites whenever it packs a new export. Giving each cave its own
-// applicationId means several of them install side by side rather than
-// replacing one another, and the launcher label says which is which.
-val caveProps = Properties().apply {
-    val f = rootProject.file("cave.properties")
-    if (f.exists()) f.inputStream().use { load(it) }
-}
-val caveName: String = caveProps.getProperty("cave.name", "Viewer")
-val caveId:   String = caveProps.getProperty("cave.id", "cave")
 
 android {
     namespace = "com.feroz.flexviewer"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.feroz.flexviewer.$caveId"
+        // One app for every map (FLEX Field). Maps are zips opened inside it,
+        // not baked into the APK, so there is no per-cave identity any more.
+        applicationId = "com.feroz.flexfield"
         minSdk        = 26
         targetSdk     = 34
-        versionCode   = 1
-        versionName   = "1.0"
-
-        // Defined here rather than in strings.xml so it tracks cave.properties;
-        // declaring it in both places would be a duplicate-resource error.
-        resValue("string", "app_name", "FLEX $caveName")
+        versionCode   = 2
+        versionName   = "2.0"
     }
 
-    // The cave payload is already-compressed imagery and geometry. Re-deflating
-    // it in the APK costs build time and a lot of RAM for essentially no size
-    // win, and forces a slow inflate on every read at runtime. Store it raw.
-    androidResources {
-        noCompress += listOf("glb", "webp", "jpg", "jpeg", "png", "bin")
+    // The viewer is not copied into the app: viewer_build/ itself is an asset
+    // folder, so viewer.html and libs/ ship exactly as they are in the repo and
+    // a viewer fix needs nothing but a rebuild. The map list lives in
+    // src/main/flexfield-assets. (src/main/assets is left out on purpose: it
+    // holds the old per-cave payloads, which must not end up in this APK.)
+    sourceSets {
+        getByName("main") {
+            assets.setSrcDirs(listOf("src/main/flexfield-assets", "../../viewer_build"))
+        }
     }
 
     buildTypes {
         release {
-            // No shrinking: there is almost no code here, and R8 on a 180 MB
-            // asset tree buys nothing but build time.
+            // No shrinking: there is little code here and nothing to gain.
             isMinifyEnabled  = false
             isShrinkResources = false
             // Sideload builds are signed with the debug key so `assembleRelease`
@@ -54,9 +42,7 @@ android {
         }
     }
 
-    // lintVital runs automatically on release builds. There are ~200 lines of
-    // Kotlin here and 133 MB of assets it has no opinion about, so it costs
-    // build time and contributes nothing to a sideloaded APK.
+    // lintVital on release builds costs time and adds nothing to a sideloaded APK.
     lint {
         checkReleaseBuilds = false
         abortOnError = false

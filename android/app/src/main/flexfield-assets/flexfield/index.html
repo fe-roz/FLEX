@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FLEX Field</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #0a0a0f; color: #e8e8ee; font: 14px system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-tap-highlight-color: transparent; }
+  body { padding: max(16px, env(safe-area-inset-top)) 14px 90px; max-width: 640px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: 10px; margin: 6px 0 14px; }
+  h1 { font-size: 22px; margin: 0; flex: 1; letter-spacing: .2px; }
+  h1 span { color: #c6ff00; }
+  .btn { padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.06);
+    color: #eee; font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
+  .btn.primary { background: rgba(33,150,243,.35); border-color: #2196F3; }
+  .btn.danger { border-color: rgba(255,107,107,.6); color: #ffb0b0; }
+  .btn:active { filter: brightness(1.3); }
+  #maps { display: flex; flex-direction: column; gap: 10px; }
+  .map { display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: 12px; background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.09); cursor: pointer; }
+  .map:active { background: rgba(0,229,255,.08); }
+  .map .ic { font-size: 26px; width: 36px; text-align: center; }
+  .map .tx { flex: 1; min-width: 0; }
+  .map .t1 { font-weight: 700; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .map .t2 { font-size: 12px; opacity: .55; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .map .more { background: none; border: none; color: #ccc; font-size: 22px; padding: 4px 10px; cursor: pointer; }
+  .empty { opacity: .6; line-height: 1.5; padding: 20px 6px; }
+  #import { position: fixed; left: 50%; transform: translateX(-50%); bottom: max(18px, env(safe-area-inset-bottom));
+    padding: 13px 22px; font-size: 15px; border-radius: 26px; box-shadow: 0 4px 20px rgba(0,0,0,.5); }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 10; }
+  .box { width: min(400px, 100%); background: #14141f; border: 1px solid rgba(255,255,255,.16); border-radius: 14px; padding: 16px;
+    display: flex; flex-direction: column; gap: 12px; }
+  .box h2 { font-size: 16px; margin: 0; }
+  .box p { margin: 0; opacity: .75; line-height: 1.45; }
+  .box .row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .box .col { display: flex; flex-direction: column; gap: 8px; }
+  .box .col .btn { text-align: left; padding: 11px 12px; }
+  .box input { width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,.2); background: rgba(0,0,0,.4);
+    color: #eee; font: inherit; font-size: 15px; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .bar { height: 4px; border-radius: 2px; background: rgba(255,255,255,.1); overflow: hidden; }
+  .bar div { height: 100%; width: 30%; background: #2196F3; animation: slide 1.2s linear infinite; }
+  @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+  #toast { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); background: rgba(20,20,30,.95); padding: 9px 14px;
+    border-radius: 18px; font-size: 13px; opacity: 0; transition: opacity .25s; pointer-events: none; border: 1px solid rgba(255,255,255,.12); }
+  #toast.show { opacity: 1; }
+  .ver { text-align: center; font-size: 11px; opacity: .3; margin-top: 26px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>FLEX <span>Field</span></h1>
+  <button class="btn" id="author">✍ Set name</button>
+</header>
+<div id="maps"></div>
+<div class="ver" id="ver"></div>
+<button class="btn primary" id="import">＋ Import map (zip)</button>
+<div id="toast"></div>
+
+<script>
+'use strict';
+// The map list for FLEX Field. Maps are FLEX exports (zips); the app keeps
+// each in a project whose notes, documents, leads and field survey live in the
+// library (see MapStore.kt, LibStore.kt).
+const H = window.AndroidHost;
+const $ = s => document.querySelector(s);
+const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const human = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : n < 1073741824 ? (n / 1048576).toFixed(1) + ' MB' : (n / 1073741824).toFixed(2) + ' GB';
+const when = ms => ms ? new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 2200); }
+
+// ── Author: shared with the viewer (same storage), last used by default ─────
+function author() { try { return localStorage.getItem('flexfield_author') || ''; } catch (_) { return ''; } }
+function authors() { try { return JSON.parse(localStorage.getItem('flexfield_authors') || '[]'); } catch (_) { return []; } }
+function setAuthor(n) {
+  n = String(n || '').trim().slice(0, 40); if (!n) return;
+  try { localStorage.setItem('flexfield_author', n); localStorage.setItem('flexfield_authors', JSON.stringify([n, ...authors().filter(a => a !== n)].slice(0, 8))); } catch (_) {}
+  showAuthor();
+}
+function showAuthor() { $('#author').textContent = '✍ ' + (author() || 'Set name'); }
+async function changeAuthor() {
+  const r = await dialog({ title: 'Who is entering data?', text: 'Imports, notes and survey shots are logged under this name until you change it.',
+    input: { value: author(), placeholder: 'Your name', list: authors() },
+    buttons: [['Cancel', null], ['Use this name', 'ok', 'primary']] });
+  if (r && r.button === 'ok' && r.value.trim()) setAuthor(r.value);
+  return author();
+}
+async function ensureAuthor() { return author() || (await changeAuthor()); }
+$('#author').addEventListener('click', changeAuthor);
+
+// ── Dialogs ──────────────────────────────────────────────────────────────────
+// buttons: [[label, value, cls]]; layout 'col' stacks them (choices).
+function dialog({ title, text, html, input, buttons, layout }) {
+  return new Promise(res => {
+    const m = document.createElement('div'); m.className = 'modal';
+    const b = document.createElement('div'); b.className = 'box'; m.appendChild(b);
+    if (title) { const h = document.createElement('h2'); h.textContent = title; b.appendChild(h); }
+    if (text) { const p = document.createElement('p'); p.textContent = text; b.appendChild(p); }
+    if (html) { const p = document.createElement('p'); p.innerHTML = html; b.appendChild(p); }
+    let inp = null;
+    if (input) {
+      inp = document.createElement('input'); inp.value = input.value || ''; inp.placeholder = input.placeholder || '';
+      b.appendChild(inp);
+      if (input.list && input.list.length) {
+        const c = document.createElement('div'); c.className = 'chips';
+        input.list.forEach(v => { const x = document.createElement('button'); x.className = 'btn'; x.textContent = v; x.onclick = () => { inp.value = v; }; c.appendChild(x); });
+        b.appendChild(c);
+      }
+    }
+    const row = document.createElement('div'); row.className = layout === 'col' ? 'col' : 'row';
+    (buttons || [['OK', 'ok', 'primary']]).forEach(([label, value, cls]) => {
+      const x = document.createElement('button'); x.className = 'btn' + (cls ? ' ' + cls : ''); x.textContent = label;
+      x.onclick = () => { m.remove(); res(value === null ? null : { button: value, value: inp ? inp.value : '' }); };
+      row.appendChild(x);
+    });
+    b.appendChild(row);
+    m.addEventListener('pointerdown', e => { if (e.target === m) { m.remove(); res(null); } });
+    document.body.appendChild(m);
+    if (inp) setTimeout(() => inp.focus(), 60);
+  });
+}
+let busy = null;
+function showBusy(msg) {
+  if (!busy) {
+    busy = document.createElement('div'); busy.className = 'modal';
+    busy.innerHTML = '<div class="box"><h2>Importing</h2><p id="busy-msg"></p><div class="bar"><div></div></div></div>';
+    document.body.appendChild(busy);
+  }
+  busy.querySelector('#busy-msg').textContent = msg || '';
+}
+function hideBusy() { if (busy) { busy.remove(); busy = null; } }
+
+// ── Map list ─────────────────────────────────────────────────────────────────
+let maps = [];
+function load() {
+  if (!H) {
+    $('#maps').innerHTML = '<div class="empty">This page is the map list of the FLEX Field Android app. Open a FLEX export’s <b>viewer.html</b> in a browser instead.</div>';
+    $('#import').style.display = 'none';
+    return;
+  }
+  try { maps = JSON.parse(H.listMaps() || '[]'); } catch (_) { maps = []; }
+  render();
+}
+function render() {
+  const list = $('#maps');
+  list.textContent = '';
+  if (!maps.length) {
+    list.innerHTML = '<div class="empty"><b>No maps yet.</b><br>In FLEX, export an area (Export → portable viewer); copy the zip to this phone, then tap <b>Import map</b> — or open the zip with FLEX Field from Files or Drive.<br><br>Notes, documents, leads and field survey belong to the map’s <b>project</b> (an area), so every map of that area shows them, and they stay when a map is updated or deleted. Share them with sync files (in a map: ⋯ → Project & sync).</div>';
+    return;
+  }
+  maps.forEach(m => {
+    const row = document.createElement('div'); row.className = 'map';
+    const sub = [m.projectName ? '📁 ' + m.projectName : null, m.exportName && m.exportName !== m.name ? m.exportName : null,
+                 m.updatedAt && m.updatedAt !== m.importedAt ? 'updated ' + when(m.updatedAt) : 'imported ' + when(m.importedAt),
+                 human(m.size || 0)].filter(Boolean).join(' · ');
+    row.innerHTML = `<div class="ic">🗺</div><div class="tx"><div class="t1">${esc(m.name || 'Map')}</div><div class="t2">${esc(sub)}</div></div><button class="more" aria-label="More">⋯</button>`;
+    row.addEventListener('click', () => H.openMap(m.id));
+    row.querySelector('.more').addEventListener('click', e => { e.stopPropagation(); mapMenu(m); });
+    list.appendChild(row);
+  });
+}
+async function mapMenu(m) {
+  const r = await dialog({ title: m.name, layout: 'col', buttons: [
+    ['🗺 Open', 'open'], ['⟳ Update from a newer export…', 'update'], ['✎ Rename', 'rename'],
+    ['⇪ Share tracks, pins & map log', 'share'], ['🗑 Delete', 'delete', 'danger'], ['Cancel', null]] });
+  if (!r) return;
+  if (r.button === 'open') H.openMap(m.id);
+  if (r.button === 'update') {
+    const ok = await dialog({ title: 'Update ' + m.name + '?', text: 'Pick a newer export (zip) of this map. Its terrain, imagery and caves replace the current ones; tracks and pins stay, and the project’s notes, documents, leads and field survey are untouched.',
+      buttons: [['Cancel', null], ['Pick zip', 'go', 'primary']] });
+    if (ok) H.importZip(m.id, await ensureAuthor() || '');
+  }
+  if (r.button === 'rename') {
+    const n = await dialog({ title: 'Rename', input: { value: m.name }, buttons: [['Cancel', null], ['Save', 'ok', 'primary']] });
+    if (n && n.value.trim()) { H.renameMap(m.id, n.value.trim()); load(); }
+  }
+  if (r.button === 'share') share(m);
+  if (r.button === 'delete') {
+    const d = await dialog({ title: 'Delete ' + m.name + '?',
+      text: `The map (terrain, imagery, caves) and its tracks and pins are deleted. ` +
+            (m.projectName ? `Notes, documents, leads and field survey belong to the project “${m.projectName}” and stay on this phone.` : 'This map has no project, so nothing else was added to it.') + ' This can’t be undone.',
+      layout: 'col', buttons: [['⇪ Share tracks & pins first', 'share'], ['🗑 Delete', 'delete', 'danger'], ['Cancel', null]] });
+    if (!d) return;
+    if (d.button === 'share') { share(m); return; }
+    if (H.deleteMap(m.id)) {
+      try { ['flex_field_v1|map:', 'flex_compass_offset_map:', 'flexfield_log|map:'].forEach(k => localStorage.removeItem(k + m.id)); } catch (_) {}
+      toast('Deleted ' + m.name);
+    }
+    load();
+  }
+}
+function share(m) {
+  const extras = {};
+  try { const t = localStorage.getItem('flex_field_v1|map:' + m.id); if (t) extras['tracks_and_pins.json'] = t; } catch (_) {}
+  H.shareMapData(m.id, JSON.stringify(extras));
+}
+
+// ── Import (called back by the app) ─────────────────────────────────────────
+$('#import').addEventListener('click', async () => { H.importZip('', (await ensureAuthor()) || ''); });
+window.ffIncomingZip = async () => { H.importIncoming((await ensureAuthor()) || ''); };
+window.ffImportProgress = msg => showBusy(msg);
+window.ffImportCancelled = () => hideBusy();
+window.ffImportFailed = async msg => { hideBusy(); await dialog({ title: 'Import failed', text: msg }); load(); };
+window.ffImportDone = json => {
+  hideBusy();
+  let m = {}; try { m = JSON.parse(json); } catch (_) {}
+  toast((m.updated ? 'Updated ' : 'Imported ') + (m.name || 'map'));
+  load();
+};
+window.ffImportAsk = async json => {
+  hideBusy();
+  let a = {}; try { a = JSON.parse(json); } catch (_) {}
+  const who = (await ensureAuthor()) || '';
+  const btns = (a.matches || []).map(m => [`⟳ Update “${m.name}” (keeps its tracks; the project’s data is untouched)`, 'u:' + m.id, 'primary']);
+  const r = await dialog({ title: `“${a.name}” is already on this phone`,
+    text: 'Is this a newer export of the same map?', layout: 'col',
+    buttons: [...btns, ['＋ Import as a separate map', 'new'], ['Cancel', 'cancel']] });
+  const b = r ? r.button : 'cancel';
+  if (b.startsWith('u:')) { showBusy('Updating…'); H.resolveImport(a.token, 'update', b.slice(2), who); }
+  else if (b === 'new') { showBusy('Importing…'); H.resolveImport(a.token, 'new', '', who); }
+  else H.resolveImport(a.token, 'cancel', '', who);
+};
+
+showAuthor();
+load();
+if (H) { try { $('#ver').textContent = 'FLEX Field ' + (H.appVersion() || ''); } catch (_) {} H.homeReady(); }
+document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
+</script>
+</body>
+</html>
