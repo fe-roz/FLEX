@@ -149,7 +149,7 @@
     if (!(await ensureAuthor())) return null;
     const scope = where === 'docs' ? FL.DOCS : FL.projScope(pj.pid);
     let e;
-    try { e = await post('append?scope=' + scope, Object.assign({ t: new Date().toISOString(), who: who(), op }, data)); }
+    try { e = await post('append?scope=' + scope + (where === 'docs' && pj.pid ? '&project=' + encodeURIComponent(pj.pid) : ''), Object.assign({ t: new Date().toISOString(), who: who(), op }, data)); }
     catch (err) { toast('Could not save: ' + err.message); return null; }
     (where === 'docs' ? pj.docs : pj.proj).push(e);
     if (quiet) return e;
@@ -500,7 +500,7 @@
     const g = cv.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height);
     return cv;
   }
-  async function storeBytes(buf, ext) { return api('blob?ext=' + ext, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: buf }); }
+  async function storeBytes(buf, ext) { return api('blob?ext=' + ext + (pj.pid ? '&project=' + encodeURIComponent(pj.pid) : ''), { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: buf }); }
   async function storeCanvas(cv, name) {
     const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.85));
     const o = await storeBytes(await blob.arrayBuffer(), 'jpg');
@@ -626,8 +626,10 @@
     const n = d.pages.length;
     G.i = n ? Math.max(0, Math.min(n - 1, i)) : 0;
     const p = d.pages[G.i];
-    g.querySelector('.pjg-title').innerHTML = `<b>${esc(d.title || 'Untitled')}</b> <span>${n ? (G.i + 1) + ' / ' + n : 'no pages'}${p && p.name ? ' · ' + esc(p.name) : ''}${p && p.kind ? ' · ' + esc(FL.DOC_KIND_LABELS[p.kind] || p.kind) : ''}</span>`;
+    g.querySelector('.pjg-title').innerHTML = `<b>${esc(d.title || 'Untitled')}</b> <span>${n ? (G.i + 1) + ' / ' + n : 'no pages'}${p && p.name ? ' · ' + esc(p.name) : ''}${p && p.kind ? ' · ' + esc(FL.DOC_KIND_LABELS[p.kind] || p.kind) : ''}</span>` +
+      (p && p.ext !== 'pdf' && d.file ? ` <span class="pjg-render" title="FLEX shows page images made from the original for quick viewing; the original file is unchanged in the project folder: ${esc(d.file.path)}">page image for viewing</span>` : '');
     const bb = g.querySelector('.pjg-btns'); bb.textContent = '';
+    if (d.file) { const a = el('a', 'pj-btn'); a.textContent = '📄 Original'; a.href = API + 'blob/' + d.file.h + '.' + d.file.ext; a.target = '_blank'; a.rel = 'noopener'; a.title = d.file.path + (d.file.ext === 'tif' ? ' (TIFF: opens in your image viewer)' : ''); bb.appendChild(a); }
     if (p && p.ext !== 'pdf') {
       bb.appendChild(btn('⟲', () => record('doc.rotate', { doc: d.id, h: p.h, rot: ((p.rot || 0) + 270) % 360, prev: p.rot || 0 }, 'docs')));
       bb.appendChild(btn('⟳', () => record('doc.rotate', { doc: d.id, h: p.h, rot: ((p.rot || 0) + 90) % 360, prev: p.rot || 0 }, 'docs')));
@@ -954,18 +956,21 @@
         if (!m || !/^(docs|p-[A-Za-z0-9_-]{1,40})$/.test(m[1])) continue;
         (scopes[m[1]] || (scopes[m[1]] = [])).push(...parseLines(await z.file(n).async('string')));
       }
-      // Pages first, so no entry points at a page that isn't here.
+      // The project first (a new one gets its folder), then its pages, so no entry points at a
+      // page that isn't here, then the entries — all into that project's folder.
+      const mpid = man.project && /^[A-Za-z0-9_-]{1,40}$/.test(man.project.id || '') ? man.project.id : '';
+      const into = mpid ? '&project=' + encodeURIComponent(mpid) : '';
+      if (mpid) await post('projects', { id: mpid, name: man.project.name || '' });
       const names = Object.keys(z.files).map(n => /^blobs\/([0-9a-f]{64}\.[a-z]{2,4})$/.exec(n)).filter(Boolean).map(m => m[1]);
-      const { missing } = names.length ? await post('blobs-missing', { names }) : { missing: [] };
+      const { missing } = names.length ? await post('blobs-missing?x=1' + into, { names }) : { missing: [] };
       let pages = 0;
       for (const n of missing) {
         const [h, ext] = n.split('.');
-        await api(`blob?ext=${ext}&h=${h}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: await z.file('blobs/' + n).async('arraybuffer') });
+        await api(`blob?ext=${ext}&h=${h}${into}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: await z.file('blobs/' + n).async('arraybuffer') });
         pages++;
       }
       let added = 0;
-      for (const [sc, list] of Object.entries(scopes)) added += (await post('merge?scope=' + sc, list)).added;
-      if (man.project && man.project.id) await post('projects', { id: man.project.id, name: man.project.name || '' });
+      for (const [sc, list] of Object.entries(scopes)) added += (await post('merge?scope=' + sc + into, list)).added;
       const other = man.project && man.project.id && man.project.id !== pj.pid;
       if (!pj.pid && man.project && man.project.id) await setProject(man.project.id); else await loadAll();
       render(); refreshCard(); drawField(); drawLeads();
@@ -1436,6 +1441,7 @@
   #pj-gallery.open { display: flex; }
   .pjg-bar { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; gap: 8px; flex-wrap: wrap; }
   .pjg-title span { color: rgba(255,255,255,.55); margin-left: 6px; }
+  .pjg-title .pjg-render { font-size: 10.5px; padding: 1px 7px; border: 1px solid rgba(255,255,255,.25); border-radius: 99px; color: rgba(255,255,255,.7); white-space: nowrap; }
   .pjg-stage { flex: 1; display: flex; align-items: center; min-height: 0; }
   .pjg-view { flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
   .pjg-img { max-width: calc(100vw - 120px); max-height: calc(100vh - 140px); background: #fff; transition: transform .15s; }

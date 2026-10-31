@@ -57,7 +57,7 @@
         const h = await sha(c.text);
         const cur = S.cavefiles[c.name];
         if (!cur || cur.removed || cur.h !== h) {
-          await fetch('/api/lib/blob?ext=plt&h=' + h, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: bytes(c.text) });
+          await fetch('/api/lib/blob?ext=plt&h=' + h + '&project=' + encodeURIComponent(pj.pid), { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: bytes(c.text) });
           await record('cavefile.set', { file: c.name, h, ext: 'plt', place: c.georef || null, removed: false });
         } else if (placeKey(cur.place) !== placeKey(c.georef)) {
           await record('cavefile.set', { file: c.name, place: c.georef || null });

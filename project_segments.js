@@ -662,7 +662,9 @@
     nav.appendChild(btn('›', () => { seg.view.i = Math.min(n - 1, i + 1); B.scrollTop = 0; renderDock(); }, 'small'));
     nav.appendChild(btn(seg.view.zoom ? 'Fit' : 'Zoom', () => { seg.view.zoom = !seg.view.zoom; renderDock(); }, 'small'));
     nav.appendChild(btn('⤢ Full screen', () => A.docOpen(d.id, i), 'small'));
+    if (d.file) { const o = el('a', 'pj-btn small'); o.textContent = '📄 Original'; o.href = '/api/lib/blob/' + d.file.h + '.' + d.file.ext; o.target = '_blank'; o.rel = 'noopener'; o.title = d.file.path; nav.appendChild(o); }
     T.appendChild(nav);
+    if (d.file && p && p.ext !== 'pdf') T.appendChild(el('div', 'pj-sub', 'Page image for viewing, made from the original (' + d.file.name + ').'));
     const box = el('div', 'pjs-page' + (seg.view.zoom ? ' zoom' : ''));
     if (p.ext === 'pdf') { const f = el('iframe'); f.src = '/api/lib/blob/' + p.h + '.pdf'; box.appendChild(f); }
     else { const im = el('img'); im.src = '/api/lib/blob/' + p.h + '.' + (p.ext || 'jpg'); if (p.rot) im.style.transform = `rotate(${p.rot}deg)`; im.addEventListener('click', () => { seg.view.zoom = !seg.view.zoom; renderDock(); }); box.appendChild(im); }

@@ -494,7 +494,7 @@
     Object.values(recs).forEach(r => {
       // A document starts with its doc.add, wherever the clocks put it.
       r.entries = r.entries.filter(e => e.op === 'doc.add').concat(r.entries.filter(e => e.op !== 'doc.add'));
-      const d = { id: r.id, title: '', kind: '', date: '', desc: '', pages: [], tags: {}, deleted: false,
+      const d = { id: r.id, title: '', kind: '', date: '', desc: '', pages: [], tags: {}, deleted: false, file: null,
                   history: r.entries.map(e => e.id) };
       r.entries.forEach(e => {
         switch (e.op) {
@@ -523,6 +523,8 @@
           case 'doc.untag': delete d.tags[e.target]; break;
           case 'doc.del': d.deleted = true; break;
           case 'doc.restore': d.deleted = false; break;
+          // The original file the page images were made from (they are renderings for viewing).
+          case 'doc.file': if (e.file && /^[0-9a-f]{64}$/.test(e.file.h || '')) d.file = { h: e.file.h, ext: String(e.file.ext || ''), name: String(e.file.name || ''), path: String(e.file.path || ''), size: Number(e.file.size) || 0 }; break;
           default: break;
         }
         d.updated = { who: e.who, t: e.t };
