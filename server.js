@@ -6,6 +6,9 @@ const url = require('url');
 const { exec } = require('child_process');
 const os = require('os');
 
+// Proxied requests (map tiles and the like) give up after this long.
+const PROXY_TIMEOUT_MS = 20000;
+
 const settings = require('./settings');
 const library = require('./library');
 const caltopoApi = require('./caltopo_api');   // private CalTopo maps (signed requests; key in user_files)
@@ -273,10 +276,21 @@ function handleProxyRequest(req, res, targetUrl) {
         }
     });
 
+    // An upstream that never answers would leave the browser's request open
+    // for good. For a map tile that is worse than a failure: while every shown
+    // layer is still waiting on its first tile, Cesium draws no globe at all.
+    // So give up after a while and answer 504; Cesium then treats the tile as
+    // failed and carries on.
+    proxyReq.setTimeout(PROXY_TIMEOUT_MS, () => {
+        proxyReq.destroy(Object.assign(new Error(`no answer in ${PROXY_TIMEOUT_MS / 1000} s`), { code: 'ETIMEDOUT' }));
+    });
+
     proxyReq.on('error', (error) => {
-        console.error('Proxy error:', error);
-        res.writeHead(500, { 'Content-Type': 'text/plain' });
-        res.end('Internal Server Error');
+        const timedOut = error && error.code === 'ETIMEDOUT';
+        console.error(timedOut ? '[proxy timeout]' : 'Proxy error:', timedOut ? parsedTargetUrl.hostname + ' ' + parsedTargetUrl.path.slice(0, 80) : error);
+        if (res.headersSent) { res.destroy(); return; }
+        res.writeHead(timedOut ? 504 : 500, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' });
+        res.end(timedOut ? 'Upstream timeout' : 'Internal Server Error');
     });
 
     req.pipe(proxyReq);

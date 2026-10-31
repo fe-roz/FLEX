@@ -3367,9 +3367,18 @@ function initMiniMapWindow() {
   window.addEventListener('resize', () => applyGeometry({ ...geo }));
 }
 
+// globe.getHeight on a coarse tile (just after a jump, or before the detail
+// has loaded) can hit the tile's skirt and come back tens of kilometres below
+// the ellipsoid. No ground is that low, so treat it as "not known yet".
+const GROUND_MIN_PLAUSIBLE_M = -1000;
+function _globeGroundNow(carto) {
+  const g = scene.globe.getHeight(carto);
+  return (g === undefined || Number.isNaN(g) || g < GROUND_MIN_PLAUSIBLE_M) ? undefined : g;
+}
+
 function sampleHeightAboveGround(positionCartographic) {
-  const groundHeight = scene.globe.getHeight(positionCartographic);
-  if (groundHeight === undefined || Number.isNaN(groundHeight)) {
+  const groundHeight = _globeGroundNow(positionCartographic);
+  if (groundHeight === undefined) {
     return Math.max(positionCartographic.height, 0);
   }
   return positionCartographic.height - groundHeight;
@@ -8237,18 +8246,40 @@ handler.setInputAction(function (click) {
 //   }
 //   }, Cesium.ScreenSpaceEventType.PINCH_MOVE);
 
-// Allow for speed adjustment when flying
+// Allow for speed adjustment when flying: the wheel over the 3D view (not
+// over panels and lists, which scroll as usual).
+const FLY_MULT_MIN = 0.002, FLY_MULT_MAX = 64;
+const _clampFlyMult = m => (Number.isFinite(m) ? Math.min(FLY_MULT_MAX, Math.max(FLY_MULT_MIN, m)) : 1);
+let _flyLastTick = null;
 window.addEventListener('wheel', function(event)
 {
+if (!flags.Fly) return;
+const t = event.target;
+if (!(t instanceof HTMLCanvasElement) || (t.closest && t.closest('#mini_map_container'))) return;
 if (event.deltaY < 0)
 {
-moverRateMultiplyer*=1.15;
+moverRateMultiplyer = _clampFlyMult(moverRateMultiplyer*1.15);
 }
 else if (event.deltaY > 0)
 {
-moverRateMultiplyer/=1.15;
+moverRateMultiplyer = _clampFlyMult(moverRateMultiplyer/1.15);
 }
-});
+}, { passive: true });
+
+// Height above (or below) the ground for fly speed. With the globe hidden or
+// its tiles not in yet, the last ground height seen nearby stands in.
+let _flyGround = null;   // { lon, lat, h }
+function _flyHeightAboveGround(carto) {
+  const g = scene.globe.show ? _globeGroundNow(carto) : undefined;
+  if (g !== undefined) {
+    _flyGround = { lon: carto.longitude, lat: carto.latitude, h: g };
+    return carto.height - g;
+  }
+  if (_flyGround && Math.abs(_flyGround.lon - carto.longitude) < 0.001 && Math.abs(_flyGround.lat - carto.latitude) < 0.001) {   // ~5 km (radians)
+    return carto.height - _flyGround.h;
+  }
+  return Math.max(carto.height, 0);
+}
 
 
 // const entity = cesiumViewer.entities.add({
@@ -8781,35 +8812,19 @@ if ((flags.looking) && (flags.TouchFly)) {
 // }
 
 
+const _flyNow = performance.now();
+const _flyDt = _flyLastTick === null ? 0 : Math.min(0.1, Math.max(0, (_flyNow - _flyLastTick) / 1000));
+_flyLastTick = _flyNow;
 if (flags.Fly) {
-  // Change movement speed based on the distance of the camera to the surface of the ellipsoid.
-  const cameraHeight = ellipsoid.cartesianToCartographic(
-    camera.position
-  ).height;
-  // console.log(cameraHeight);
-  // sampleTerrain(viewer.terrainProvider, 5, [camera.positionCartographic])
-  // .then(function(samples) {
-  //   moveRate = ((cameraHeight-samples[0].height)/200.0);
-    moveRate = ((cameraHeight+1000)/200.0);
-    if (moveRate <0){
-      moveRate = -moveRate;
-    }
-    if (moveRate <0.1){ // make sure we can go underground, slowly
-      moveRate = 0.1;
-    }
-
-    if (moveRate > 6000){ // setting some limits
-        moveRate = 6000;
-    }
-
-    if (moverRateMultiplyer > 16){
-      moverRateMultiplyer = 16;
-    }
-    if (moverRateMultiplyer < 0.01){
-      moverRateMultiplyer = 0.01;
-    }
-
-    moveRate = moveRate*moverRateMultiplyer;
+    // Speed follows the distance to the ground (above or below it, so it is
+    // slow in a cave too), in metres per second so it doesn't depend on the
+    // frame rate; the scroll wheel scales it (FLY_MULT_MIN..FLY_MULT_MAX).
+    // It used to follow height above sea level, which made even the slowest
+    // setting fast over high ground.
+    const hag = Math.abs(_flyHeightAboveGround(camera.positionCartographic));
+    const mps = Math.min(20000, Math.max(2, 0.5 * (hag + 20)));
+    moverRateMultiplyer = _clampFlyMult(moverRateMultiplyer);
+    moveRate = mps * moverRateMultiplyer * _flyDt;
 
   _setCameraButtons(false);
   scene.screenSpaceCameraController.enableZoom = false;
@@ -9626,7 +9641,8 @@ function loop(timestamp){
   let cCamHeight = cCamPosCart.height;
   let coords = cCamLat.toFixed(5) + ", " + cCamLong.toFixed(5);
   document.getElementById("coord_display").innerText = coords;
-  document.getElementById("elev_display").innerText = "Height: " + cCamHeight.toFixed(0) + "m";
+  document.getElementById("elev_display").innerText = "Height: " + cCamHeight.toFixed(0) + "m" +
+    (flags.Fly ? "  ·  fly ×" + +moverRateMultiplyer.toPrecision(2) : "");
   syncMiniMapFrame(timestamp, cCamPosCart);
 
   if(window.toScene !== undefined){
