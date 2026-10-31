@@ -797,8 +797,8 @@
             title="No project open: FLEX as usual. Open or create a project here."
             style="font-size:11px; padding:2px 8px; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">📁 No project</button>
           <button id="session_save_btn" class="btn btn-sm btn-secondary" type="button"
-            onclick="window._sessionSave && window._sessionSave()"
-            title="Save session (camera, layers, point clouds) — and, with a project open, what it loads"
+            onclick="window._saveAll ? window._saveAll() : (window._sessionSave && window._sessionSave())"
+            title="Save your view — and, with a project open, the changes waiting for it"
             style="font-size:11px; padding:2px 8px;">💾 Save</button>
           <span id="session_save_indicator"
             style="font-size:10px; color:#aaffaa; display:none;"></span>

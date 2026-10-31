@@ -172,7 +172,7 @@
   // screen now instead.
   async function setProject(pid, { keep = false } = {}) {
     const prev = pj.pid, change = (pid || null) !== prev;
-    if (change && window._pjWs && !keep) await window._pjWs.leave(prev);
+    if (change && window._pjWs && !keep && (await window._pjWs.leave(prev)) === false) { render(); return false; }   // stayed (unsaved changes, Cancel)
     pj.pid = pid || null;
     try { pid ? localStorage.setItem('flex.project', pid) : localStorage.removeItem('flex.project'); } catch (_) {}
     await loadAll();
@@ -1325,7 +1325,7 @@
     if (loaded && window._pjWs) {
       const c = await choose(`New project “${name}”`, `${loaded} thing(s) are loaded now (caves, point clouds, CalTopo, files).`, [
         { label: 'Start it with what is loaded now', sub: 'they become the project’s', value: 'keep', primary: true },
-        { label: 'Start it empty', sub: 'what is loaded now is put away and comes back under “No project”', value: 'empty' }]);
+        { label: 'Start it empty', sub: 'what is loaded now stays loaded; add things to it later (📁 → What this project loads)', value: 'empty' }]);
       if (!c) return;
       keep = c === 'keep';
     }
@@ -1364,7 +1364,7 @@
   // ── For project_segments.js (segments and the review queue) ───────────────
   window._pjApi = { pj, FL, el, btn, esc, when, toast, dialog, choose, record, render, refreshCard, openCard, flyTo,
     caveFor, caveName, partsOf, stationPos, stationsOf, docEl, docOpen, docByPage, describe, headsFor, targetLabel,
-    editNote, noteEl, declAt, yearOf, imps, who, newProject, refresh, editLead };
+    editNote, noteEl, declAt, yearOf, imps, who, ensureAuthor, newProject, refresh, editLead };
 
   // ── What the export takes from the project (index.html _collectCavesInBbox) ─
   window._pjExport = () => pj.pid ? {

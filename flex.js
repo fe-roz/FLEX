@@ -5058,7 +5058,7 @@ window._ws = {
   },
   clearCaltopo: () => clearCaltopo(),
   dataFiles: () => loadedDataFiles.filter(f => f.url).map(f => ({ url: f.url, label: f.label })),
-  addDataFile: (url, label) => addDataFile(url, label),
+  addDataFile: (url, label, opts) => addDataFile(url, label, opts),
   removeDataFile(url) { const f = loadedDataFiles.find(x => x.url === url); if (f) removeDataFile(f.id); },
   // Map overlays with their folders (CalTopo map, KML / GeoJSON data files).
   vectorSources: () => [].concat(caltopoState.dataSource ? [{ kind: 'caltopo', name: 'CalTopo map', url: caltopoState.url, ds: caltopoState.dataSource }] : [],

@@ -128,8 +128,8 @@ export function saveSession() {
     };
     localStorage.setItem(_key(_pidNow()), JSON.stringify(snapshot));
     _flashIndicator(true);
-    // A project open: what it loads (caves and their placement, point clouds,
-    // CalTopo, data files) is saved into the project too — only what changed.
+    // A project open: autosave never writes into it (💾 Save does); this only
+    // updates the count of changes waiting on the Save button.
     if (window._pjWs && _pidNow()) window._pjWs.autosave();
   } catch (e) {
     console.warn('[session] save failed:', e);
