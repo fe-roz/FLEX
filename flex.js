@@ -8248,7 +8248,7 @@ handler.setInputAction(function (click) {
 
 // Allow for speed adjustment when flying: the wheel over the 3D view (not
 // over panels and lists, which scroll as usual).
-const FLY_MULT_MIN = 0.002, FLY_MULT_MAX = 64;
+const FLY_MULT_MIN = 0.02, FLY_MULT_MAX = 64;
 const _clampFlyMult = m => (Number.isFinite(m) ? Math.min(FLY_MULT_MAX, Math.max(FLY_MULT_MIN, m)) : 1);
 let _flyLastTick = null;
 window.addEventListener('wheel', function(event)
