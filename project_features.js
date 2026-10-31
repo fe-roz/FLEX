@@ -259,6 +259,7 @@
     for (const e of es) {
       const nm = e.label && e.label.text ? (e.label.text.getValue ? e.label.text.getValue(now) : e.label.text) : (e.name || 'Point');
       await record('feature.set', { feature: FL.uid(12), kind: 'point', coords: [lonlat(e.position.getValue(now))], name: String(nm).slice(0, 120), group: '' }, null, { quiet: true });
+      if (window._myData) await window._myData.forgetPoint(e, 'moved');      // moved out of My data
       v.entities.remove(e);
     }
     A.refresh('feature.set');

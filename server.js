@@ -11,7 +11,8 @@ const PROXY_TIMEOUT_MS = 20000;
 
 const settings = require('./settings');
 const library = require('./library');
-const caltopoApi = require('./caltopo_api');   // private CalTopo maps (signed requests; key in user_files)
+const caltopoApi = require('./caltopo_api');
+const mine = require('./mine');                 // My data: the Recent list and survey cache once moved in   // private CalTopo maps (signed requests; key in user_files)
 
 // ── CalTopo session cookie (stored in memory + persisted to file) ─────────────
 const COOKIE_FILE = path.join(__dirname, '.caltopo_session');
@@ -72,14 +73,11 @@ const server = http.createServer((req, res) => {
     } else if (sanitizedPath === '/api/updates/apply' && req.method === 'POST') {
         handleUpdatesApply(req, res);
     // ── Recents (EPT + PLT) ───────────────────────────────────────────────────
-    } else if (sanitizedPath === '/api/recents' && req.method === 'GET') {
-        handleRecentsGet(req, res);
-    } else if (sanitizedPath === '/api/recents' && req.method === 'POST') {
-        handleRecentsPost(req, res);
-    } else if (sanitizedPath === '/api/plt-cache' && req.method === 'GET') {
-        handlePltCacheGet(req, res);
-    } else if (sanitizedPath === '/api/plt-cache' && req.method === 'POST') {
-        handlePltCachePost(req, res);
+    // (served from My data once it exists — mine.js; the old files until then)
+    } else if (sanitizedPath === '/api/recents' && (req.method === 'GET' || req.method === 'POST')) {
+        mine.handleRecents(req, res).then(done => { if (!done) (req.method === 'GET' ? handleRecentsGet : handleRecentsPost)(req, res); });
+    } else if (sanitizedPath === '/api/plt-cache' && (req.method === 'GET' || req.method === 'POST')) {
+        mine.handlePltCache(req, res, parsedUrl.query).then(done => { if (!done) (req.method === 'GET' ? handlePltCacheGet : handlePltCachePost)(req, res); });
     } else if (sanitizedPath === '/api/declination' && req.method === 'GET') {
         handleDeclinationLocal(req, res);
     } else if (sanitizedPath === '/api/entwine/config' && req.method === 'GET') {
@@ -110,6 +108,8 @@ const server = http.createServer((req, res) => {
     // ── Project library (notes, leads, documents; library.js) ────────────────
     } else if (sanitizedPath.startsWith('/api/caltopo/')) {
         caltopoApi.handle(req, res, sanitizedPath.slice('/api/caltopo/'.length), parsedUrl.query);
+    } else if (sanitizedPath.startsWith('/api/mine/')) {
+        mine.handle(req, res, sanitizedPath.slice('/api/mine/'.length), parsedUrl.query);
     } else if (sanitizedPath.startsWith('/api/lib/')) {
         library.handle(req, res, sanitizedPath.slice('/api/lib/'.length), parsedUrl.query);
     // ── CORS preflight ────────────────────────────────────────────────────────

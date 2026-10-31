@@ -3567,12 +3567,22 @@ setTimeout(() => {
     loadCaltopoKml(_savedSession.caltopoUrl, _savedSession.caltopoInterval ?? 30);
   }
 
-  // Auto-restore URL-sourced data files silently
-  if (_savedSession?.dataFiles?.length && !_projectAtStart) {
+  // Data files: My data's (it takes in URL files the old saved view still lists)
+  if (!_projectAtStart && window._myData) {
+    window._myData.filesToRestore(_savedSession?.dataFiles || []).then(list => list.forEach(f =>
+      addDataFile(f.url, f.label, { myId: f.id }).catch(e => console.warn('[my data] data file restore failed:', e))))
+      .catch(e => console.warn('[my data] data files:', e));
+  } else if (_savedSession?.dataFiles?.length && !_projectAtStart) {
     for (const f of _savedSession.dataFiles) {
       addDataFile(f.url, f.label).catch(e => console.warn('[session] data file restore failed:', e));
     }
   }
+  // Points of interest kept in My data
+  if (window._myData) window._myData.points().then(ps => {
+    ps.forEach(p => cesiumViewer.entities.add({ label: { scale: p.scale, text: p.name }, position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.h),
+      properties: { isUserLabel: true, myFeature: p.id }, point: {} }));
+    if (ps.length) renderPoiList();
+  }).catch(e => console.warn('[my data] points:', e));
 
   // Restore cave visibility
   if (_savedSession?.caveVisible) {
@@ -4167,7 +4177,7 @@ function renderDataFileList() {
   });
 }
 
-async function addDataFile(fileOrUrl, label) {
+async function addDataFile(fileOrUrl, label, opts = {}) {
   let ds, type, entryLabel;
   try {
     if (typeof fileOrUrl === 'string') {
@@ -4210,8 +4220,11 @@ async function addDataFile(fileOrUrl, label) {
       url: typeof fileOrUrl === 'string' ? fileOrUrl : null,
       dataSource: ds,
       show: true,
+      myId: opts.myId || null,
     };
     loadedDataFiles.push(entry);
+    // Outside a project, a data file is kept in My data (local files too), so it comes back.
+    if (!entry.myId && window._myData && !(window._pj && window._pj.pid) && !opts.noKeep) entry.myId = await window._myData.keepFile(fileOrUrl, entryLabel);
     renderDataFileList();
     if (window._onVectorSourcesChanged) window._onVectorSourcesChanged();
     notifyDataFilesChanged(loadedDataFiles);
@@ -4226,6 +4239,7 @@ function removeDataFile(id) {
   if (idx === -1) return;
   const entry = loadedDataFiles[idx];
   if (entry.url && window._pjWs && !window._ws.switching) window._pjWs.removed('file', entry.url);
+  if (entry.myId && window._myData && !window._ws.switching) window._myData.forgetFile(entry.myId);
   if (entry.dataSource) cesiumViewer.dataSources.remove(entry.dataSource, true);
   loadedDataFiles.splice(idx, 1);
   renderDataFileList();
@@ -4277,6 +4291,7 @@ function renderPoiList() {
       `<span class="lp-row-name" style="font-size:10px;" title="${name}">${name}</span>` +
       `<button class="lp-remove-btn" title="Delete">✕</button>`;
     row.querySelector('.lp-remove-btn').addEventListener('click', () => {
+      if (window._myData) window._myData.forgetPoint(entity);
       cesiumViewer.entities.remove(entity);
       renderPoiList();
     });
@@ -4356,7 +4371,7 @@ let _cwizParsed  = null;     // Holds last-parsed PLT data while wizard is open
 // PLT file contents are stored as individual files via /api/plt-cache so that
 // large PLT files (600KB+) don't bloat the JSON payload and cause silent failures.
 let _recents = { ept: [], plt: [], pltSets: [] };   // pltSets: saved selections of caves
-const RECENTS_MAX = 12;
+const RECENTS_MAX = Infinity;          // My data keeps every cave (× forgets one)
 
 async function _loadRecents() {
   try {
@@ -8574,36 +8589,39 @@ function (e) {
       let preview = "Point of Small interest ".concat(pointCounter.toString());
       let labelName = preview;
       console.log("Added point of Small interest: S".concat(pointCounter.toString()));
-      cesiumViewer.entities.add({
+      const _poi = cesiumViewer.entities.add({
         label: { scale: 0.75, text: "S: ".concat(labelName) },
-        position: cesiumViewer.camera.position,
+        position: cesiumViewer.camera.position.clone(),
         properties: { isUserLabel: true },
         point: {},
       });
+      if (window._myData) window._myData.keepPoint(_poi, 'S');    // kept in My data (this sitting's "Points …" group)
       renderPoiList();
     }else if (flagName == "pointM"){ // add entity point where camera is currently located
       pointCounter +=1;
       let preview = "Point of Medium interest ".concat(pointCounter.toString());
       let labelName = prompt("Name", preview);
       console.log("Added point of Medium interest: M".concat(pointCounter.toString()));
-      cesiumViewer.entities.add({
+      const _poi = cesiumViewer.entities.add({
         label: { scale: 1, text: "M: ".concat(labelName) },
-        position: cesiumViewer.camera.position,
+        position: cesiumViewer.camera.position.clone(),
         properties: { isUserLabel: true },
         point: {},
       });
+      if (window._myData) window._myData.keepPoint(_poi, 'M');    // kept in My data (this sitting's "Points …" group)
       renderPoiList();
     }else if (flagName == "pointL"){ // add entity point where camera is currently located
       pointCounter +=1;
       let preview = "Point of Large interest ".concat(pointCounter.toString());
       let labelName = prompt("Name", preview);
       console.log("Added point of Large interest: L".concat(pointCounter.toString()));
-      cesiumViewer.entities.add({
+      const _poi = cesiumViewer.entities.add({
         label: { scale: 1.5, text: "L: ".concat(labelName) },
-        position: cesiumViewer.camera.position,
+        position: cesiumViewer.camera.position.clone(),
         properties: { isUserLabel: true },
         point: {},
       });
+      if (window._myData) window._myData.keepPoint(_poi, 'L');    // kept in My data (this sitting's "Points …" group)
       renderPoiList();
     }else if (flagName == "route"){ // startor stop recording route. If starting, add route point where camera is currently located.
       if (creatingRoute == ""){

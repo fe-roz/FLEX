@@ -1201,6 +1201,11 @@
       row.appendChild(btn('＋ New', newProject, 'small'));
       if (pj.pid) row.appendChild(btn('✏️', renameProject, 'small'));
       b.appendChild(row);
+      if (pj.pid) {
+        const dr = el('div', 'pj-row pj-sub');
+        dr.append(pj.P.desc ? pj.P.desc + ' ' : '', btn(pj.P.desc ? 'edit' : '＋ description', editDescription, 'link'));
+        b.appendChild(dr);
+      }
       const r2 = el('div', 'pj-row pj-sub');
       r2.append(`Entering as: ${who() || '(not set)'} `, btn('change', async () => { try { localStorage.removeItem('flex.author'); } catch (_) {} await ensureAuthor(); render(); }, 'link'));
       b.appendChild(r2);
@@ -1312,6 +1317,9 @@
       buttons: [{ label: 'Cancel', value: null }, { label: 'Create', value: 'ok', primary: true }] });
     if (!r || !r.value.trim()) return;
     const id = FL.uid(10), name = r.value.trim().slice(0, 60);
+    const dr = await dialog({ title: `“${name}”: description`, text: 'Optional: what the project is about, who works on it.', input: { value: '', placeholder: 'Description (optional)' },
+      buttons: [{ label: 'Skip', value: 'skip' }, { label: 'Save', value: 'ok', primary: true }] });
+    const descText = dr && dr.button === 'ok' ? String(dr.value || '').trim().slice(0, 500) : '';
     const w = window._ws, loaded = w ? w.caves().length + w.pointClouds().length + (w.caltopo() ? 1 : 0) + w.dataFiles().length : 0;
     let keep = false;
     if (loaded && window._pjWs) {
@@ -1324,8 +1332,15 @@
     await post('projects', { id, name });
     pj.projects = await api('projects');
     await setProject(id, { keep });
-    await record('project.set', { name });
+    await record('project.set', descText ? { name, desc: descText } : { name });
     if (window._pjWs) window._pjWs.label();
+  }
+  async function editDescription() {
+    const r = await dialog({ title: 'Project description', text: 'What the project is about, who works on it. Empty removes it.', input: { value: pj.P.desc || '', placeholder: 'Description' },
+      buttons: [{ label: 'Cancel', value: null }, { label: 'Save', value: 'ok', primary: true }] });
+    if (!r) return;
+    const v = String(r.value || '').trim().slice(0, 500);
+    if (v !== (pj.P.desc || '')) { await record('project.set', { desc: v }); render(); }
   }
   async function renameProject() {
     const r = await dialog({ title: 'Project name', input: { value: pj.P.name || '' }, buttons: [{ label: 'Cancel', value: null }, { label: 'Save', value: 'ok', primary: true }] });

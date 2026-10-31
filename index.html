@@ -888,7 +888,7 @@
                 </label>
                 <div id="lp-poi-group" style="display:none;">
                   <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:3px;">
-                    <span style="font-size:10px; opacity:0.55; text-transform:uppercase; letter-spacing:0.05em;">Unsaved points</span>
+                    <span style="font-size:10px; opacity:0.55; text-transform:uppercase; letter-spacing:0.05em;" title="Kept in My data; each sitting's points form a group “Points <date time>”">Points (in My data)</span>
                     <div style="display:flex; gap:4px;">
                       <button class="btn btn-sm btn-secondary" style="font-size:9px; padding:1px 5px;"
                         onclick="window._exportPoi('kmz')">KMZ</button>
@@ -2021,6 +2021,7 @@
 <script type="module" src="flex.js"></script>
 <!-- Projects: notes, leads, documents, sync files (the same library as FLEX Field) -->
 <script src="viewer_build/libs/flexlib.js"></script>
+<script src="my_data.js"></script>
 <script src="viewer_build/libs/utif.js"></script>
 <script src="viewer_build/libs/jszip.min.js"></script>
 <script src="project.js"></script>

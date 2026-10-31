@@ -42,9 +42,10 @@ const SCOPE_RE = /^(docs|p-[A-Za-z0-9_-]{1,40})$/;
 const DEV_RE = /^[A-Za-z0-9_-]{1,40}$/;
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
 const HASH_RE = /^[0-9a-f]{64}$/;
-const EXTS = new Set(['jpg', 'png', 'webp', 'pdf', 'plt', 'tif']);       // plt: survey files (text); tif: original scans
+const EXTS = new Set(['jpg', 'png', 'webp', 'pdf', 'plt', 'tif', 'kml', 'kmz', 'json']);   // plt: survey files (text); tif: original scans; kml/kmz/json: data files
 const IMAGE = new Set(['jpg', 'png', 'webp']);                          // page images → .flex/renders
-const MIME = { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp', pdf: 'application/pdf', plt: 'text/plain; charset=utf-8', tif: 'image/tiff' };
+const MIME = { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp', pdf: 'application/pdf', plt: 'text/plain; charset=utf-8', tif: 'image/tiff',
+  kml: 'application/vnd.google-earth.kml+xml', kmz: 'application/vnd.google-earth.kmz', json: 'application/json' };
 const MAX_BLOB = 40 << 20;
 const MAX_BODY = 64 << 20;
 
@@ -71,7 +72,7 @@ const absDir = d => (d ? (path.isAbsolute(d) ? d : path.join(USER_FILES, d)) : n
 const relDir = d => { const r = path.relative(USER_FILES, d); return r && !r.startsWith('..') && !path.isAbsolute(r) ? r.split(path.sep).join('/') : d; };
 /** The project's folder, or null for a project still in the old library. */
 function projDir(pid) { const p = projects().find(x => x.id === pid); return p && p.dir ? absDir(p.dir) : null; }
-const folderProjects = () => projects().filter(p => p.dir).map(p => ({ id: p.id, dir: absDir(p.dir) }));
+const folderProjects = () => projects().filter(p => p.dir).map(p => ({ id: p.id, dir: absDir(p.dir) }));   // (incl. My data)
 /** A folder name Windows, macOS and Linux all accept. */
 function safeName(name) {
   const s = String(name || '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[. ]+$/, '').replace(/^[. ]+/, '').trim().slice(0, 80);
@@ -113,6 +114,24 @@ function setProject(id, name, dir) {
   return list;
 }
 function isProjectFolder(d, id) { try { return JSON.parse(fs.readFileSync(path.join(d, '.flex', 'project.json'), 'utf8')).id === id; } catch (_) { return false; } }
+/** A private project (My data): has a folder, never listed as a project. */
+function registerPrivate(id, name, dir) {
+  if (!ID_RE.test(id || '') || !isProjectFolder(dir, id)) throw new Error('not this project’s folder');
+  const list = projects();
+  if (!list.find(x => x.id === id)) { list.push({ id, name, dir: relDir(path.resolve(dir)), private: true }); saveProjects(list); }
+  _seq.clear(); _blobIndex = null;
+}
+/** Record a readable file by fingerprint in the project's files.json. */
+function indexFile(pid, name, rel) {
+  const pd = projDir(pid);
+  if (!pd || !nameRe.test(name)) return;
+  const fi = path.join(pd, '.flex', 'files.json');
+  let o = {}; try { o = JSON.parse(fs.readFileSync(fi, 'utf8')) || {}; } catch (_) {}
+  if (o[name] === rel) return;
+  o[name] = rel;
+  fs.writeFileSync(fi + '.part', JSON.stringify(o, null, 1)); fs.renameSync(fi + '.part', fi);
+  if (_blobIndex) _blobIndex.set(name, path.join(pd, rel));
+}
 /** Point a project at its (migrated) folder. */
 function adoptFolder(id, dir) {
   if (!ID_RE.test(id || '') || !isProjectFolder(dir, id)) throw new Error('not this project’s folder');
@@ -133,7 +152,7 @@ function scopeDirs(scope) {
     // The old shared docs log counts while some project is still in the old library; once all
     // have folders it is only the backup. (Entries copied to a folder and still here are the
     // same entries, same ids: the replay counts them once.)
-    if (!dirs.length || projects().some(p => !p.dir)) dirs.push(path.join(root(), 'docs'));
+    if (!projects().some(p => p.dir && !p.private) || projects().some(p => !p.dir)) dirs.push(path.join(root(), 'docs'));
     dirs.push(path.join(root(), 'docs-unassigned'));
     return dirs;
   }
@@ -277,7 +296,7 @@ function body(req, max = MAX_BODY) {
 const json = (res, data, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
 const pidOf = q => (q && ID_RE.test(String(q.project || '')) ? String(q.project) : null);
 /** What the page gets: id, name and where the folder is (for showing; no folder → still in the old library). */
-const projectsOut = () => projects().map(p => ({ id: p.id, name: p.name, folder: p.dir ? absDir(p.dir) : null }));
+const projectsOut = () => projects().filter(p => !p.private).map(p => ({ id: p.id, name: p.name, folder: p.dir ? absDir(p.dir) : null }));
 
 /** /api/lib/<rest> */
 async function handle(req, res, rest, query) {
@@ -314,4 +333,4 @@ async function handle(req, res, rest, query) {
   }
 }
 
-module.exports = { handle, device, read, append, merge, putBlob, blobPath, projects, setProject, adoptFolder, makeFolder, safeName, projDir, kv, kvSet, ROOT, PROJECTS_DIR };
+module.exports = { handle, device, read, append, merge, putBlob, blobPath, projects, setProject, adoptFolder, registerPrivate, indexFile, makeFolder, safeName, projDir, kv, kvSet, ROOT, PROJECTS_DIR };

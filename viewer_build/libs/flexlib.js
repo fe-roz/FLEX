@@ -387,6 +387,9 @@
           ['h', 'ext'].forEach(k => { if (e[k] != null) f[k] = String(e[k]); });
           if (e.place !== undefined) { f.place = clone(e.place); f.placed = { t: e.t, who: e.who }; }
           if (e.removed != null) f.removed = !!e.removed; else if (e.h) f.removed = false;
+          if (e.display !== undefined) f.display = clone(e.display);           // My data: the cave's style
+          if (e.lastUsed != null) f.lastUsed = String(e.lastUsed);
+          if (e.group != null) f.group = String(e.group);
           f.updated = { t: e.t, who: e.who };
           break;
         }
@@ -403,7 +406,8 @@
         }
         case 'group.set': {
           const g = S.groups[e.group] || (S.groups[e.group] = { id: e.group, name: '', parent: '' });
-          ['name', 'parent', 'color'].forEach(k => { if (e[k] != null) g[k] = String(e[k]); });
+          ['name', 'parent', 'color', 'kind', 'savedAt'].forEach(k => { if (e[k] != null) g[k] = String(e[k]); });
+          if (e.caves !== undefined) g.caves = clone(e.caves);                 // My data: a saved cave set
           if (e.removed != null) g.removed = !!e.removed;
           g.updated = { t: e.t, who: e.who };
           break;
@@ -412,6 +416,8 @@
           const l = S.layers[e.layer] || (S.layers[e.layer] = { id: e.layer, t: e.t, who: e.who });
           ['kind', 'url', 'name', 'group'].forEach(k => { if (e[k] != null) l[k] = String(e[k]); });
           if (e.interval != null) l.interval = Number(e.interval);
+          if (e.lastUsed != null) l.lastUsed = String(e.lastUsed);
+          if (e.blob != null) l.blob = String(e.blob);                         // a data file stored by fingerprint ("<sha>.<ext>")
           if (e.order != null) l.order = Number(e.order);
           if (e.removed != null) l.removed = !!e.removed;
           l.updated = { t: e.t, who: e.who };
