@@ -36,30 +36,71 @@
   const colorOf = f => (f.style && f.style.color) || (f.group && pj.P.groups[f.group] && groupColor(f.group)) || ROOT_COLOR;
   function groupColor(id) { for (const g of FL.groupPath(pj.P, id).reverse()) if (g.color) return g.color; return ROOT_COLOR; }
   function groupHidden(id) { const h = hidden(); if (h['root']) return true; return FL.groupPath(pj.P, id).some(g => h['g:' + g.id]); }
+  // Lines and areas are drawn simplified: a GPS track of 10 000 points draped
+  // on the terrain slows everything down, and points closer than SIMPLIFY_M to
+  // the drawn line change nothing you can see. The project keeps every point.
+  const SIMPLIFY_M = 2, MAX_DRAWN = 2000;
+  function simplify(coords) {
+    if (coords.length <= 3) return coords;
+    const lat0 = coords[0][1] * Math.PI / 180, mx = 111320 * Math.cos(lat0), my = 110540;
+    const xy = coords.map(c => [c[0] * mx, c[1] * my]);
+    const run = tol => {
+      const keep = new Uint8Array(xy.length); keep[0] = keep[xy.length - 1] = 1;
+      const stack = [[0, xy.length - 1]], t2 = tol * tol;
+      while (stack.length) {
+        const [a, b] = stack.pop();
+        const [ax, ay] = xy[a], dx = xy[b][0] - ax, dy = xy[b][1] - ay, L2 = dx * dx + dy * dy;
+        let best = -1, bd = t2;
+        for (let i = a + 1; i < b; i++) {
+          const px = xy[i][0] - ax, py = xy[i][1] - ay;
+          let d2;
+          if (!L2) d2 = px * px + py * py;
+          else { const t = Math.max(0, Math.min(1, (px * dx + py * dy) / L2)); const qx = px - t * dx, qy = py - t * dy; d2 = qx * qx + qy * qy; }
+          if (d2 > bd) { bd = d2; best = i; }
+        }
+        if (best > 0) { keep[best] = 1; stack.push([a, best], [best, b]); }
+      }
+      return coords.filter((_, i) => keep[i]);
+    };
+    let tol = SIMPLIFY_M, out = run(tol);
+    while (out.length > MAX_DRAWN && tol < 200) { tol *= 2; out = run(tol); }
+    return out;
+  }
+  F.simplify = simplify;                               // tests
+  // Drawn entities per feature, rebuilt only when the feature (or its colour) changed.
+  const drawn = new Map();                             // feature id → { sig, ents }
+  const sigOf = (f, color) => { const c = f.coords || [], m = c[c.length >> 1]; return [f.kind, f.name, f.desc, color, c.length, c[0], m, c[c.length - 1], window._pjfLabelSig || ''].map(x => JSON.stringify(x)).join('|'); };
   function draw() {
     const v = V();
     if (!v || !window.Cesium) return;
     if (!F.src) { F.src = new Cesium.CustomDataSource('pj-features'); v.dataSources.add(F.src); }
-    F.src.entities.removeAll();
     HL.divs.forEach(d => d.remove()); HL.divs.clear(); HL.mode = null;
-    if (!pj.pid) return;
-    FL.liveFeatures(pj.P).forEach(f => {
-      if (groupHidden(f.group)) return;
-      const c = Cesium.Color.fromCssColorString(colorOf(f));
+    const want = new Set();
+    if (pj.pid) FL.liveFeatures(pj.P).forEach(f => {
+      if (groupHidden(f.group) || !f.coords || !f.coords.length) return;
+      want.add(f.id);
+      const col = colorOf(f), sig = sigOf(f, col), had = drawn.get(f.id);
+      if (had && had.sig === sig) return;
+      if (had) had.ents.forEach(e => F.src.entities.remove(e));
+      const c = Cesium.Color.fromCssColorString(col);
       const props = { isProjectFeature: true, featureId: f.id };
-      const pos = f.coords.map(p => Cesium.Cartesian3.fromDegrees(p[0], p[1], p[2] || 0));
+      const pts = f.kind === 'point' ? f.coords : simplify(f.coords);
+      const pos = pts.map(p => Cesium.Cartesian3.fromDegrees(p[0], p[1], p[2] || 0));
       const base = { name: f.name || ({ point: 'Point', line: 'Line', area: 'Area' }[f.kind]), description: esc(f.desc || '').replace(/\n/g, '<br>'), properties: props };
+      const ents = [];
       if (f.kind === 'point') {
-        F.src.entities.add(Object.assign(base, { position: pos[0],
+        ents.push(F.src.entities.add(Object.assign(base, { position: pos[0],
           point: { pixelSize: 9, color: c, outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: 5000 },
-          label: window._pjfLabel(f.name || '') }));
+          label: window._pjfLabel(f.name || '') })));
       } else if (f.kind === 'line') {
-        F.src.entities.add(Object.assign(base, { polyline: { positions: pos, width: 3, material: c, clampToGround: true } }));
+        ents.push(F.src.entities.add(Object.assign(base, { polyline: { positions: pos, width: 3, material: c, clampToGround: true } })));
       } else {
-        F.src.entities.add(Object.assign(base, { polygon: { hierarchy: pos, material: c.withAlpha(0.25), heightReference: Cesium.HeightReference.CLAMP_TO_GROUND } }));
-        F.src.entities.add({ polyline: { positions: pos.concat([pos[0]]), width: 2, material: c, clampToGround: true }, properties: props });
+        ents.push(F.src.entities.add(Object.assign(base, { polygon: { hierarchy: pos, material: c.withAlpha(0.25), heightReference: Cesium.HeightReference.CLAMP_TO_GROUND } })));
+        ents.push(F.src.entities.add({ polyline: { positions: pos.concat([pos[0]]), width: 2, material: c, clampToGround: true }, properties: props }));
       }
+      drawn.set(f.id, { sig, ents });
     });
+    for (const [id, d] of drawn) if (!want.has(id)) { d.ents.forEach(e => F.src.entities.remove(e)); drawn.delete(id); }
     v.scene.requestRender && v.scene.requestRender();
   }
 
