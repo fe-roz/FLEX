@@ -213,6 +213,20 @@
     const col = el('input'); col.type = 'color'; col.value = g.color || (g.parent ? groupColor(g.parent) : ROOT_COLOR);
     const lab = (t, x) => { const r = el('div', 'pj-f'); r.appendChild(el('div', 'pj-f-l', t)); r.appendChild(x); return r; };
     body.append(lab('Name', name), lab('Inside', par), lab('Colour (for its features)', col));
+    // Lines, points or subfolders inside with a colour of their own keep it
+    // over the folder's; changing the colour offers to give them this one.
+    const inside = id ? FL.liveFeatures(pj.P).filter(f => f.style && f.style.color && FL.groupPath(pj.P, f.group).some(x => x.id === id)) : [];
+    const subs = id ? FL.liveGroups(pj.P).filter(x => x.id !== id && x.color && FL.groupPath(pj.P, x.id).some(y => y.id === id)) : [];
+    let all = null;
+    if (inside.length || subs.length) {
+      const row = el('label', 'pj-row pj-sub'); row.style.display = 'none';
+      all = el('input'); all.type = 'checkbox'; all.checked = true;
+      const what = [inside.length ? `${inside.length} ${inside.length === 1 ? 'item' : 'items'} with a colour of their own` : '', subs.length ? `${subs.length} subfolder${subs.length === 1 ? '' : 's'} with its own colour` : ''].filter(Boolean).join(' and ');
+      row.append(all, ' Also recolour the ' + what);
+      body.appendChild(row);
+      const was = col.value;
+      col.addEventListener('input', () => { row.style.display = col.value !== was ? '' : 'none'; });
+    }
     setTimeout(() => name.focus(), 50);
     const r = await dialog({ title: id ? `Folder “${g.name}”` : 'New folder', body,
       buttons: [{ label: 'Cancel', value: null }, ...(id ? [{ label: 'Delete folder', value: 'rm', danger: true }] : []), { label: 'Save', value: 'ok', primary: true }] });
@@ -224,7 +238,15 @@
       return;
     }
     if (!name.value.trim()) return;
-    await record('group.set', { group: id || FL.uid(10), name: name.value.trim().slice(0, 80), parent: par.value, color: col.value });
+    const recolour = id && all && all.checked && col.value.toLowerCase() !== String(g.color || (g.parent ? groupColor(g.parent) : ROOT_COLOR)).toLowerCase();
+    await record('group.set', { group: id || FL.uid(10), name: name.value.trim().slice(0, 80), parent: par.value, color: col.value }, null, recolour ? { quiet: true } : undefined);
+    if (recolour) {
+      // All at once: one by one, a folder of many tracks took seconds to answer Save.
+      await Promise.all(inside.map(f => record('feature.set', { feature: f.id, style: {} }, null, { quiet: true }))
+        .concat(subs.map(x => record('group.set', { group: x.id, color: '' }, null, { quiet: true }))));
+      A.refresh('feature.set');
+      toast(`“${name.value.trim()}” and everything in it now ${col.value}`);
+    }
   }
 
   // ── Import and download ──────────────────────────────────────────────────
@@ -487,9 +509,17 @@
     heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 8000),
     disableDepthTestDistance: 5000,
   });
-  const lidarShown = () => (HL.force != null ? HL.force : false) || ((window.potreeViewer && window.potreeViewer.scene && window.potreeViewer.scene.pointclouds) || []).some(pc => pc.visible !== false);
+  // Point cloud drawn over the map: a visible cloud with at least one class of
+  // points shown ("5" hides every class but leaves the cloud "visible").
+  const lidarShown = () => {
+    if (HL.force != null) return HL.force;
+    const pv = window.potreeViewer, pcs = (pv && pv.scene && pv.scene.pointclouds) || [];
+    if (!pcs.some(pc => pc.visible !== false)) return false;
+    const cls = pv.classifications || (pv.scene && pv.scene.classifications);
+    return !cls || !Object.keys(cls).length || Object.values(cls).some(c => !c || c.visible !== false);
+  };
   const HL = { divs: new Map(), heights: new Map(), mode: null, box: null };
-  window._pjfHtml = HL;                          // tests
+  window._pjfHtml = HL; HL.lidarShown = () => lidarShown();   // tests
   function labelled() {
     const out = [];
     if (F.src) F.src.entities.values.forEach(e => { if (e.label && e.position) out.push(e); });
@@ -534,8 +564,18 @@
       if (!sp || sp.x < -60 || sp.y < -60 || sp.x > window.innerWidth + 60 || sp.y > window.innerHeight + 60 ||
           Cesium.Cartesian3.distance(v.camera.positionWC, world) > 8000) { if (d) d.style.display = 'none'; continue; }
       if (!d) {
-        d = document.createElement('div'); d.className = 'html-label pjf-html';
-        d.textContent = (e.label.text && e.label.text.getValue ? e.label.text.getValue(now) : e.name) || e.name || '';
+        // The name, and the point's own icon in its colour: the cloud covers
+        // Cesium's, and a hidden Cesium point can't be clicked, so the icon
+        // here takes the click (selects it, as a map click would).
+        d = document.createElement('div'); d.className = 'pjf-html-wrap';
+        const lab = document.createElement('div'); lab.className = 'html-label pjf-html';
+        lab.textContent = (e.label.text && e.label.text.getValue ? e.label.text.getValue(now) : e.name) || e.name || '';
+        const dot = document.createElement('div'); dot.className = 'pjf-dot';
+        const col = e.point && e.point.color && e.point.color.getValue ? e.point.color.getValue(now) : null;
+        if (col) dot.style.background = col.toCssColorString();
+        dot.title = e.name || '';
+        dot.addEventListener('click', ev => { ev.stopPropagation(); const vv = V(); if (vv) vv.selectedEntity = e; });
+        d.append(lab, dot);
         HL.box.appendChild(d); HL.divs.set(e.id, d);
       }
       d.style.display = 'block'; d.style.left = Math.round(sp.x) + 'px'; d.style.top = Math.round(sp.y) + 'px';
@@ -551,22 +591,25 @@
     t = setTimeout(() => { draw(); render(); }, 120);
   }
   window._onVectorSourcesChanged = () => { applyOverlayHidden(); clearTimeout(t); t = setTimeout(() => render(), 150); };
-  // A click on a project feature opens it.
+  // A click on a project feature shows it in the details panel (info_panel.js);
+  // editing is a second step there (✏️ Edit), not the click itself.
   const hook = setInterval(() => {
     const v = V();
     if (!v || !v.selectedEntityChanged) return;
     clearInterval(hook);
     v.scene.postRender.addEventListener(updateHtml);
-    v.selectedEntityChanged.addEventListener(ent => {
-      const p = ent && ent.properties;
-      if (p && p.isProjectFeature && !F.draw) { const id = p.featureId.getValue(); setTimeout(() => editFeature(id), 0); }
-    });
     changed(null);
   }, 300);
   ['#featuresCollapsible', '#caveCollapsible'].forEach(t => document.querySelector(`[data-target="${t}"]`)?.addEventListener('click', () => setTimeout(render, 0)));
 
   const st = document.createElement('style');
   st.textContent = `
+  .pjf-html-wrap { position: absolute; width: 0; height: 0; pointer-events: none; }
+  .pjf-html-wrap .pjf-html { left: 0; top: 0; }
+  .pjf-html-wrap .pjf-html::after { display: none; }
+  .pjf-dot { position: absolute; left: -6px; top: -6px; width: 12px; height: 12px; border-radius: 50%; background: #ffb020; border: 2px solid #000; box-shadow: 0 0 5px rgba(0,0,0,.6);
+    pointer-events: auto; cursor: pointer; box-sizing: border-box; }
+  .pjf-dot:hover { transform: scale(1.3); }
   .pjf-banner { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 99999; background: rgba(20,20,30,.92); color: #fff; font: 13px system-ui, sans-serif;
     padding: 8px 14px; border-radius: 6px; border: 1px solid #ffb020; }
   .pjf-folder, .pjf-item { display: flex; align-items: center; gap: 4px; font-size: 12px; padding: 2px 4px; border-radius: 4px; }

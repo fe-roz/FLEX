@@ -13,7 +13,14 @@
 // Drawn above the built-in layers, in the order listed.
 //
 // Library entries: layer.set { layer, kind: 'imagery', blob: '<sha>.webp',
-// bounds: [west, south, east, north], name } or { kind: 'tiles', url, name }.
+// bounds: [west, south, east, north], name } or { kind: 'tiles', url, name }
+// (+ bounds, minZoom, maxZoom for the tiles a project made), or { kind: 'terrain',
+// blob: '<sha>.bin', bounds, name } (a terrain patch, terrain_patch.js).
+//
+// ⛰ Generate terrain + hillshade: the project's own DEM and hillshade made once
+// from the LiDAR by the server (terrain_generate.js, the FLEX Field export's
+// pipeline) for the area in the Export panel (by default the project's
+// footprint plus a margin), kept as a terrain patch and a tiles layer.
 (function () {
   'use strict';
   const PJ = () => window._pj || {}, A = () => window._pjApi, MD = () => window._myData, FL = () => window.FlexLib, V = () => window.cesiumViewer;
@@ -45,7 +52,8 @@
   const sigOf = l => [l.kind, srcUrl(l), (l.bounds || []).join(',')].join('|');
 
   // ── On the globe ─────────────────────────────────────────────────────────
-  const drawn = new Map();                       // id → { layer, sig }
+  const drawn = new Map();                       // 'p:<id>' / 'm:<id>' → { layer, sig, id } (the same file can be in the project and in My data)
+  const keyOf = l => l.owner + ':' + l.id;
   let chain = Promise.resolve();
   // Terrain patches (layer kind 'terrain'): put over the globe's terrain in list order, shown ones only.
   let terrainSig = '';
@@ -64,17 +72,18 @@
   async function doSync(force) {
     const v = V(); if (!v || !window.Cesium) return;
     {
-      const want = await entries(force), ids = new Set(want.map(l => l.id));
+      const want = await entries(force), ids = new Set(want.map(keyOf));
       await syncTerrain(want);
       let listChanged = false;
-      for (const [id, d] of drawn) if (!ids.has(id) || d.sig !== sigOf(want.find(l => l.id === id))) { v.imageryLayers.remove(d.layer, true); drawn.delete(id); listChanged = true; }
+      for (const [k, d] of drawn) if (!ids.has(k) || d.sig !== sigOf(want.find(l => keyOf(l) === k))) { v.imageryLayers.remove(d.layer, true); drawn.delete(k); listChanged = true; }
       for (const l of want) {
         if (l.kind === 'terrain') continue;
-        if (!drawn.has(l.id)) {
+        if (!drawn.has(keyOf(l))) {
           let prov = null;
           try {
             if (l.kind === 'imagery' && l.blob && l.bounds) prov = await Cesium.SingleTileImageryProvider.fromUrl(srcUrl(l), { rectangle: Cesium.Rectangle.fromDegrees(...l.bounds) });
-            else if (l.kind === 'tiles' && l.url) prov = new Cesium.UrlTemplateImageryProvider({ url: l.url, maximumLevel: 20 });
+            else if (l.kind === 'tiles' && l.url) prov = new Cesium.UrlTemplateImageryProvider({ url: l.url, maximumLevel: l.maxZoom != null ? l.maxZoom : 20, minimumLevel: l.minZoom || 0,
+              rectangle: l.bounds ? Cesium.Rectangle.fromDegrees(...l.bounds) : undefined });     // a project's own tiles: only where and at the levels they exist
           } catch (e) { console.warn('[layers] could not show', l.name, e); }
           if (!prov) continue;
           const z0 = views()[l.id] && views()[l.id].z, vw0 = viewOf(l.id);
@@ -85,10 +94,10 @@
           const kid = l.id;
           Cesium.knockout.getObservable(layer, 'show').subscribe(s => setView(kid, { show: !!s }));
           Cesium.knockout.getObservable(layer, 'alpha').subscribe(a => setView(kid, { alpha: +a }));
-          drawn.set(l.id, { layer, sig: sigOf(l) });
+          drawn.set(keyOf(l), { layer, sig: sigOf(l), id: l.id });
           listChanged = true;
         }
-        const d = drawn.get(l.id), vw = viewOf(l.id);
+        const d = drawn.get(keyOf(l)), vw = viewOf(l.id);
         d.layer.show = !!vw.show; d.layer.alpha = Math.max(0, Math.min(1, +vw.alpha));
       }
       if (listChanged && window._updateLayerList) { window._updateLayerList(); if (window._renderLayerList) window._renderLayerList(); }
@@ -137,10 +146,10 @@
     let rgba, dem = false, vals = null;
     if (spp === 1 && (fmt === 3 || bps > 8)) {
       // One band of numbers (a DEM): a hillshade from it.
-      const raw = new Uint8Array(ifd.data).buffer;                  // a copy, aligned
-      vals = fmt === 3 && bps === 32 ? new Float32Array(raw, 0, w * h) : fmt === 3 && bps === 64 ? new Float64Array(raw, 0, w * h)
-        : bps === 16 ? (fmt === 2 ? new Int16Array(raw, 0, w * h) : new Uint16Array(raw, 0, w * h))
-        : bps === 32 ? (fmt === 2 ? new Int32Array(raw, 0, w * h) : new Uint32Array(raw, 0, w * h)) : null;
+      const bytes = new Uint8Array(ifd.data).buffer;                // a copy, aligned (not "raw": that is the argument)
+      vals = fmt === 3 && bps === 32 ? new Float32Array(bytes, 0, w * h) : fmt === 3 && bps === 64 ? new Float64Array(bytes, 0, w * h)
+        : bps === 16 ? (fmt === 2 ? new Int16Array(bytes, 0, w * h) : new Uint16Array(bytes, 0, w * h))
+        : bps === 32 ? (fmt === 2 ? new Int32Array(bytes, 0, w * h) : new Uint32Array(bytes, 0, w * h)) : null;
       if (!vals) throw new Error('this DEM’s number type isn’t read yet');
       const p0 = toXY(0, 0), p1 = toXY(1, 1);
       let cx = Math.abs(p1[0] - p0[0]), cy = Math.abs(p1[1] - p0[1]);
@@ -299,13 +308,13 @@
     try { await fetch('/api/lib/putfile?project=' + encodeURIComponent(pid) + '&path=' + encodeURIComponent('FLEX maps/' + file), { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: bytes }); }
     catch (e) { console.warn('[layers] keepCopy', file, e); }
   }
-  async function record(entry) {
+  async function record(entry, view) {
     const pid = PJ().pid;
     const id = entry.layer;
     if (pid && A()) { await A().record('layer.set', Object.assign({ order: FL().liveLayers(PJ().P).length, removed: false }, entry)); }
     else if (MD() && MD().record) await MD().record('layer.set', Object.assign({ removed: false }, entry));
     else throw new Error('nowhere to keep it');
-    setView(id, { show: true, alpha: entry.kind === 'imagery' ? 0.75 : 1 });
+    setView(id, Object.assign({ show: true, alpha: entry.kind === 'imagery' ? 0.75 : 1 }, view || {}));
     await sync(true); render(true);
     return id;
   }
@@ -365,7 +374,7 @@
     const body = document.getElementById('lp-layers-body'); if (!body) return null;
     const sec = body.closest('.lp-section');
     host = document.createElement('div'); host.id = 'cl-panel'; host.className = 'lp-section';
-    host.innerHTML = '<div class="lp-section-header" onclick="window._lpToggle(this)"><span class="lp-section-arrow">▸</span> Terrain</div><div class="lp-section-body open" id="cl-terrain-body"></div>';
+    host.innerHTML = '<div class="lp-section-header" onclick="window._lpToggle(this)"><span class="lp-section-arrow">▸</span> Terrain</div><div class="lp-section-body open"><div id="cl-terrain-body"></div></div>';
     sec.parentNode.insertBefore(host, sec.nextSibling);
     host.addEventListener('click', onClick);
     return host;
@@ -376,11 +385,12 @@
     cache = (await entries(force)).filter(l => l.kind === 'terrain');
     const pj = PJ(), pjName = (window._pjWs && window._pjWs.projName && window._pjWs.projName()) || (pj.P && pj.P.name) || 'the project';
     const rows = cache.map(l => `<div class="cl-row" data-id="${esc(l.id)}">
-        <button type="button" class="cl-eye${viewOf(l.id).show ? ' on' : ''}" data-act="eye" title="${viewOf(l.id).show ? 'Hide' : 'Show'}"></button>
+        <button type="button" class="cl-eye ui-eye${viewOf(l.id).show ? ' on' : ''}" data-act="eye" title="${viewOf(l.id).show ? 'Hide' : 'Show'}"></button>
         <span class="cl-nm" title="${esc(l.name)}">${l.owner === 'p' ? '📁 ' : '👤 '}${esc(l.name || 'Terrain')}</span>
         <span class="cl-tools"><button type="button" data-act="fly" title="Fly there">⌖</button><button type="button" data-act="rm" title="${l.owner === 'p' ? 'Remove from the project' : 'Forget (out of My data)'}">✕</button></span></div>`).join('');
     const html = `<div class="cl-row cl-base"><span></span><span class="cl-nm">🌍 World terrain <small>everywhere</small></span><span></span></div>${rows}
-      <div class="cl-bar"><button type="button" data-act="terrain" title="A DEM GeoTIFF baked into precise terrain for its area; kept ${pj.pid ? 'in 📁 ' + esc(pjName) : 'in 👤 My data'}">＋ Terrain patch…</button></div>`;
+      <div class="cl-bar"><button type="button" data-act="terrain" title="A DEM GeoTIFF baked into precise terrain for its area; kept ${pj.pid ? 'in 📁 ' + esc(pjName) : 'in 👤 My data'}">＋ Terrain patch…</button>
+      <button type="button" data-act="gen"${pj.pid ? '' : ' disabled'} title="${pj.pid ? 'Terrain and a hillshade made from the LiDAR for the project’s area, once, and kept in 📁 ' + esc(pjName) : 'Open a project first'}">⛰ Generate terrain + hillshade…</button></div>`;
     if (html === last) return;
     last = html; document.getElementById('cl-terrain-body').innerHTML = html;
   }
@@ -392,11 +402,171 @@
     const b = e.target.closest('[data-act]'); if (!b) return;
     const act = b.dataset.act;
     if (act === 'terrain') return pickFile(true);
+    if (act === 'gen') return Gen.toggle();
     const row = b.closest('.cl-row'), l = row && cache.find(x => x.id === row.dataset.id); if (!l) return;
     if (act === 'eye') { setView(l.id, { show: !viewOf(l.id).show }); await sync(); render(true); }
     else if (act === 'fly') flyTo(l);
     else if (act === 'rm') removeById(l.id);
   }
+
+  // ── ⛰ Generate terrain + hillshade (the project's own, from the LiDAR) ────
+  // The area is the Export panel's (box or polygon), so it is seen and changed
+  // there with the same tools; by default the project's footprint plus a
+  // margin. The server runs the export's pipeline (terrain_generate.js); when
+  // it is done the terrain patch and the hillshade tiles become two layers.
+  const Gen = (() => {
+    const JK = 'flex.cl.genjob';                   // a job still running (survives a reload)
+    let box = null, open = false, poll = null, busy = false;
+    const $ = id => document.getElementById(id);
+    const pjName = () => (window._pjWs && window._pjWs.projName && window._pjWs.projName()) || (PJ().P && PJ().P.name) || 'the project';
+    function ensure() {
+      const h = ensureHost(); if (!h) return null;
+      if (box && box.isConnected) return box;
+      box = document.createElement('div'); box.id = 'cl-gen'; box.hidden = !open;
+      box.innerHTML = `<div class="clg-t">⛰ Terrain + hillshade from the LiDAR</div>
+        <div class="clg-r">Area: the project’s footprint + <input type="number" id="clg-margin" value="200" min="0" max="5000" step="50"> m <button type="button" data-g="area" title="Put this area in the Export panel again">↺ Reset</button></div>
+        <div class="clg-note" id="clg-area"></div>
+        <div class="clg-r">LiDAR <select id="clg-ept"></select></div>
+        <div class="clg-r">Cell <select id="clg-cell"><option value="0.5" selected>0.5 m</option><option value="1">1 m</option><option value="2">2 m</option></select>
+          Name <input type="text" id="clg-name" maxlength="60" placeholder="LiDAR terrain"></div>
+        <div class="clg-r"><button type="button" class="clg-go" data-g="run">Generate</button><button type="button" data-g="close">Close</button></div>
+        <div class="clg-bar" hidden><div></div></div><div class="clg-note" id="clg-msg"></div>`;
+      (h.querySelector('.lp-section-body') || h).appendChild(box);   // under the list, not in it (the list is redrawn)
+      box.addEventListener('click', e => { const b = e.target.closest('[data-g]'); if (!b) return; e.preventDefault(); const g = b.dataset.g;
+        if (g === 'area') setArea(true); else if (g === 'run') run(); else if (g === 'close') toggle(false); else if (g === 'export' && window._rail) window._rail.open('#exportCollapsible'); });
+      box.querySelector('#clg-margin').addEventListener('change', () => setArea(true));
+      return box;
+    }
+    /** The LiDAR there is: point clouds loaded now, and the project's own point cloud layers. */
+    function datasets() {
+      const out = [], seen = new Set(), add = (url, name) => { if (!url) return; if (!/ept\.json$/i.test(url)) url = url.replace(/\/$/, '') + '/ept.json'; if (!seen.has(url)) { seen.add(url); out.push({ url, name: name || url }); } };
+      try { if (window._refreshEptDatasets) window._refreshEptDatasets(); } catch (_) {}
+      const sel = $('export_ept_select');
+      if (sel) [...sel.options].forEach(o => o.value && add(o.value, o.textContent));
+      const pj = PJ();
+      if (pj.P && FL()) FL().liveLayers(pj.P).filter(l => l.kind === 'pointcloud' && l.url).forEach(l => add(l.url, '📁 ' + (l.name || l.url)));
+      return out;
+    }
+    function fillDatasets() {
+      const sel = $('clg-ept'); if (!sel) return [];
+      const ds = datasets(), was = sel.value;
+      sel.innerHTML = ds.length ? ds.map(d => `<option value="${esc(d.url)}">${esc(d.name)}</option>`).join('') + (ds.length > 1 ? `<option value="*">All ${ds.length} together</option>` : '')
+        : '<option value="">— load a point cloud first —</option>';
+      if (was && [...sel.options].some(o => o.value === was)) sel.value = was;
+      return ds;
+    }
+    /** A footprint ([[lon, lat]…], a hull) grown by m metres: the hull of circles round its corners. */
+    function grow(fp, m) {
+      if (!fp.length) return [];
+      const lat0 = fp.reduce((a, p) => a + p[1], 0) / fp.length, mx = 111320 * Math.cos(lat0 * Math.PI / 180), my = 110540, pts = [];
+      fp.forEach(([lo, la]) => { for (let k = 0; k < 16; k++) { const a = k * Math.PI / 8; pts.push([lo + m * Math.cos(a) / mx, la + m * Math.sin(a) / my]); } });
+      const H = window._pjx && window._pjx.hull ? window._pjx.hull : (q => q);
+      return (m > 0 ? H(pts) : H(fp.slice())).map(p => [+p[0].toFixed(8), +p[1].toFixed(8)]);
+    }
+    let ours = null;                               // the ring this panel last put in the Export panel
+    async function setArea(force) {
+      const note = $('clg-area'), pj = PJ(); if (!note || !pj.pid) return;
+      const cur = window._exportArea && window._exportArea();
+      // Someone's own area in the Export panel stays (it is shown and changed there).
+      if (!force && cur && !(ours && JSON.stringify(cur.polygon) === JSON.stringify(ours))) return showArea();
+      const margin = Math.max(0, Math.min(5000, +$('clg-margin').value || 0));
+      let fp = [];
+      try { if (window._pjx && window._pjx.info) fp = (await window._pjx.info({ id: pj.pid, name: pjName() })).footprint || []; } catch (e) { console.warn('[layers] footprint', e); }
+      const ring = grow(fp, margin);
+      if (ring.length < 3 || !window._exportSetPolygon) {
+        note.innerHTML = 'The project has no footprint yet (no caves or points): draw the area in the <a href="#" data-g="export">Export panel</a>.';
+        return;
+      }
+      if (window._exportClearBbox) window._exportClearBbox();
+      window._exportSetPolygon(ring, `project area + ${margin} m`);
+      ours = window._exportGetPolygon ? window._exportGetPolygon() : ring;
+      const v = V(), lons = ring.map(p => p[0]), lats = ring.map(p => p[1]);
+      if (v) v.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)), duration: 1.2 });
+      showArea();
+    }
+    function showArea() {
+      const note = $('clg-area'), a = window._exportArea && window._exportArea(); if (!note) return;
+      if (!a) { note.innerHTML = 'No area: draw one in the <a href="#" data-g="export">Export panel</a>, or ↺ Reset.'; return; }
+      const lat0 = (a.bbox[1] + a.bbox[3]) / 2, mx = 111320 * Math.cos(lat0 * Math.PI / 180), my = 110540;
+      const pts = a.polygon || [[a.bbox[0], a.bbox[1]], [a.bbox[2], a.bbox[1]], [a.bbox[2], a.bbox[3]], [a.bbox[0], a.bbox[3]]];
+      let s = 0; pts.forEach((p, i) => { const q = pts[(i + 1) % pts.length]; s += p[0] * mx * q[1] * my - q[0] * mx * p[1] * my; });
+      note.innerHTML = `${a.polygon ? '⬠ ' + (a.label ? esc(a.label) : 'polygon') : '▭ box'}, ${(Math.abs(s) / 2e6).toFixed(2)} km², on the map: drag its dots to change it, or draw another in the <a href="#" data-g="export">Export panel</a>.`
+        + (a.crossing ? ' <b class="clg-bad">Its edges cross.</b>' : '');
+    }
+    function say(msg, pct, bad) {
+      const m = $('clg-msg'), bar = box && box.querySelector('.clg-bar');
+      if (m) { m.textContent = msg || ''; m.classList.toggle('clg-bad', !!bad); }
+      if (bar) { bar.hidden = pct == null; bar.firstElementChild.style.width = (pct || 0) + '%'; }
+    }
+    function toggle(on) {
+      open = on == null ? !open : !!on;
+      const b = ensure(); if (!b) return;
+      b.hidden = !open;
+      if (open) { fillDatasets(); setArea(false); refresh(); }
+    }
+    function refresh() {
+      const go = box && box.querySelector('.clg-go'); if (!go) return;
+      const ok = !!PJ().pid && !!$('clg-ept').value && !busy;
+      go.disabled = !ok;
+      if (open && !busy) showArea();
+    }
+    async function run() {
+      const pj = PJ(); if (!pj.pid || busy) return;
+      const a = window._exportArea && window._exportArea();
+      if (!a) return say('Draw the area first (↺ Reset, or the Export panel).', null, true);
+      if (a.crossing) return say('The area’s edges cross: drag its points so they don’t.', null, true);
+      const pick = $('clg-ept').value, ds = datasets();
+      const ept = pick === '*' ? ds.map(d => d.url) : pick ? [pick] : [];
+      if (!ept.length) return say('Load a point cloud first (🛰 LiDAR).', null, true);
+      const lat = (a.bbox[1] + a.bbox[3]) / 2, lon = (a.bbox[0] + a.bbox[2]) / 2;
+      const dz = typeof window._pcDatumDz === 'function' ? window._pcDatumDz(lat, lon) : null;
+      const name = ($('clg-name').value || '').trim() || 'LiDAR terrain';
+      busy = true; refresh(); say('Starting…', 2);
+      try {
+        const r = await fetch('/api/terrain/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project: pj.pid, bbox: a.bbox, polygon: a.polygon, ept, resolution: +$('clg-cell').value || 0.5, z_offset: dz, name }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !j.jobId) throw new Error(j.error || 'the server did not take the job');
+        try { localStorage.setItem(JK, JSON.stringify({ jobId: j.jobId, pid: pj.pid, name })); } catch (_) {}
+        watch(j.jobId, pj.pid, name);
+      } catch (e) { busy = false; refresh(); say('❌ ' + e.message, null, true); }
+    }
+    function watch(jobId, pid, name) {
+      busy = true; clearTimeout(poll);
+      const tick = async () => {
+        let j;
+        try { const r = await fetch('/api/terrain/status/' + jobId); j = await r.json(); if (r.status === 404) j = { status: 'error', error: 'the job is gone (was FLEX restarted?)' }; }
+        catch (_) { poll = setTimeout(tick, 2500); return; }
+        if (j.status === 'running') { say(String(j.message || 'Working…').replace(/^\[\d\/4\]\s*/, ''), j.progress || 5); poll = setTimeout(tick, 1500); return; }
+        try { localStorage.removeItem(JK); } catch (_) {}
+        busy = false;
+        if (j.status === 'done' && j.result) {
+          try { await keep(j.result, pid, name); say(`✅ Done: “${name}” terrain and hillshade are in the project.`, 100); }
+          catch (e) { say('❌ ' + e.message, null, true); }
+        } else say('❌ ' + (j.error || 'it did not work'), null, true);
+        refresh();
+      };
+      tick();
+    }
+    /** The finished job → the project's two layers: the terrain patch and the hillshade tiles. */
+    async function keep(R, pid, name) {
+      if (PJ().pid !== pid) throw new Error('the project was closed: the files are in its folder, but the layers were not added');
+      const T = R.terrain, H = R.tiles, nm = R.name || name;
+      await record({ layer: 'ter-' + T.blob.slice(0, 12), kind: 'terrain', blob: T.blob, bounds: T.bounds.map(n => +(+n).toFixed(8)), name: nm });
+      await record({ layer: 'hs-' + T.blob.slice(0, 12), kind: 'tiles', url: H.url, bounds: H.bounds.map(n => +(+n).toFixed(8)), minZoom: H.minzoom, maxZoom: H.maxzoom, name: nm + ' hillshade' }, { alpha: 0.75 });
+      toast(`⛰ “${nm}”: terrain ${T.nx}×${T.ny} posts of ${T.cell_m} m, hillshade ${H.count} tiles (${R.folder})`);
+      const v = V(); if (v && T.bounds) v.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(...T.bounds), duration: 1.5 });
+    }
+    // A job that was running when the page went away: pick it up again.
+    setTimeout(function resume() {
+      let j = null; try { j = JSON.parse(localStorage.getItem(JK) || 'null'); } catch (_) {}
+      if (!j || !j.jobId) return;
+      if (PJ().pid !== j.pid) { if (!PJ().ready) setTimeout(resume, 2000); return; }
+      toggle(true); watch(j.jobId, j.pid, j.name);
+    }, 3000);
+    setInterval(() => { if (open) { if (!busy) fillDatasets(); refresh(); } }, 3000);
+    return { toggle, setArea, grow, datasets, run, isOpen: () => open, busy: () => busy };
+  })();
 
   // ── Wiring: project switches, project and My data changes ────────────────
   let lastKey = '';
@@ -404,7 +574,7 @@
     const pj = PJ(), key = (pj.pid || '') + '|' + ((pj.P && FL()) ? FL().liveLayers(pj.P).filter(l => KINDS.has(l.kind)).map(sigOf).join(';') : '');
     if (key !== lastKey) { lastKey = key; await sync(true); render(true); }
     // the order the person gave them in the list is kept (this computer)
-    const v = V(); if (v) drawn.forEach((d, id) => { const z = v.imageryLayers.indexOf(d.layer); if (z >= 0 && views()[id] && views()[id].z !== z) setView(id, { z }); });
+    const v = V(); if (v) drawn.forEach(d => { const id = d.id, z = v.imageryLayers.indexOf(d.layer); if (z >= 0 && views()[id] && views()[id].z !== z) setView(id, { z }); });
   }, 1500);
   document.querySelector('[data-target="#mapLayersCollapsible"]')?.addEventListener('click', () => setTimeout(() => render(true), 0));
   const st = document.createElement('style');
@@ -413,16 +583,26 @@
   #cl-panel .cl-row { display: grid; grid-template-columns: 14px 1fr auto; gap: 5px; align-items: center; padding: 2px 3px; border-radius: 5px; font-size: 11px; }
   #cl-panel .cl-row:hover { background: rgba(255,255,255,.07); }
   #cl-panel .cl-base small { color: rgba(255,255,255,.4); margin-left: 4px; }
-  #cl-panel .cl-eye { width: 13px; height: 13px; border: 1.5px solid rgba(255,255,255,.45); border-radius: 3px; background: none; padding: 0; cursor: pointer; }
-  #cl-panel .cl-eye.on { background: #e8ece9; border-color: #e8ece9; box-shadow: inset 0 0 0 2px #1d232e; }
   #cl-panel .cl-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(255,255,255,.88); }
   #cl-panel .cl-tools { display: inline-flex; gap: 1px; opacity: .45; } #cl-panel .cl-row:hover .cl-tools { opacity: 1; }
   #cl-panel .cl-tools button { background: none; border: none; color: rgba(255,255,255,.75); padding: 0 3px; cursor: pointer; font-size: 12px; }
   #cl-panel .cl-empty { color: rgba(255,255,255,.45); font-style: italic; font-size: 10.5px; padding: 2px 4px; }
   #cl-panel .cl-bar { display: flex; gap: 4px; margin-top: 4px; }
   #cl-panel .cl-bar button { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.15); color: #e8ece9; border-radius: 5px; padding: 2px 8px; font-size: 10.5px; cursor: pointer; }
-  #cl-panel .cl-bar button:hover { background: rgba(255,255,255,.12); }`;
+  #cl-panel .cl-bar button:hover { background: rgba(255,255,255,.12); }
+  #cl-panel .cl-bar { flex-wrap: wrap; } #cl-panel .cl-bar button:disabled { opacity: .45; cursor: default; }
+  #cl-gen { margin: 6px 0 2px; padding: 6px 7px; border: 1px solid rgba(255,255,255,.14); border-radius: 6px; background: rgba(255,255,255,.04); display: flex; flex-direction: column; gap: 4px; }
+  #cl-gen[hidden] { display: none; }
+  #cl-gen .clg-t { font-weight: 600; color: #e8ece9; }
+  #cl-gen .clg-r { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; color: rgba(255,255,255,.8); }
+  #cl-gen input, #cl-gen select { background: #222; color: #eee; border: 1px solid #444; border-radius: 3px; padding: 1px 4px; font-size: 11px; min-width: 0; }
+  #cl-gen #clg-margin { width: 60px; } #cl-gen #clg-ept { flex: 1; } #cl-gen #clg-name { flex: 1; }
+  #cl-gen button { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.15); color: #e8ece9; border-radius: 5px; padding: 2px 8px; font-size: 10.5px; cursor: pointer; }
+  #cl-gen button.clg-go { background: #2d6a4f; border-color: #3f8f6b; font-weight: 600; } #cl-gen button:disabled { opacity: .45; cursor: default; }
+  #cl-gen .clg-note { color: rgba(255,255,255,.55); font-size: 10.5px; line-height: 1.35; } #cl-gen .clg-note a { color: #8ab4ec; }
+  #cl-gen .clg-bad { color: #ff7a7a; }
+  #cl-gen .clg-bar { height: 4px; background: rgba(255,255,255,.1); border-radius: 2px; overflow: hidden; } #cl-gen .clg-bar > div { height: 100%; width: 0; background: #00e5ff; transition: width .4s; }`;
   document.head.appendChild(st);
 
-  window._customLayers = { sync, render, pickFile, askTiles, removeById, addTerrain, bakeTerrain, addTiff, addTiles, remove, entries, readTiff, toLonLat, hillshade, drawn };
+  window._customLayers = { keyOf, gen: Gen, sync, render, pickFile, askTiles, removeById, addTerrain, bakeTerrain, addTiff, addTiles, remove, entries, readTiff, toLonLat, hillshade, drawn };
 })();

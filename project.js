@@ -166,6 +166,7 @@
     if (/^lead\.|^accept$|^reject$|^feature\./.test(e.op) || /^cave\./.test(e.op)) drawLeads();
     if (window._pjSeg) window._pjSeg.changed(e);
     if (window._pjf) window._pjf.changed(e);
+    if (window._info) window._info.changed(e);
   }
   // Switching project: what was on screen is saved and unloaded, the project's
   // things load (project_workspace.js). keep: a new project takes what is on
@@ -482,7 +483,10 @@
   const docByPage = h => h && Object.values(pj.D.docs).find(d => !d.deleted && d.pages.some(p => p.h === h));
   function docSub(d) {
     const tags = d.tagList.filter(t => t !== FL.T.project(pj.pid)).map(targetLabel);
-    return `${d.pages.length} page${d.pages.length === 1 ? '' : 's'}${d.kind ? ' · ' + (FL.DOC_KIND_LABELS[d.kind] || d.kind) : ''}${d.date ? ' · ' + d.date : ''} · ` +
+    const m = FL.docMedia(d);
+    const what = m === 'video' ? '🎞 Video' : m === 'photo' ? `🖼 ${d.pages.length > 1 ? d.pages.length + ' photos' : 'Photo'}`
+      : `${d.pages.length} page${d.pages.length === 1 ? '' : 's'}${d.kind ? ' · ' + (FL.DOC_KIND_LABELS[d.kind] || d.kind) : ''}`;
+    return `${what}${d.date ? ' · ' + d.date : ''} · ` +
       (tags.length ? tags.slice(0, 3).join(', ') + (tags.length > 3 ? ` +${tags.length - 3}` : '') : 'inbox') +
       (d.has_coordinates ? ' · 📌 shows coordinates' : '') + (d.conflicts ? ' · ⚠ edited on two devices' : '');
   }
@@ -490,8 +494,10 @@
     const r = el('div', 'pj-item pj-doc');
     const at = target ? FL.pageFor(d, target) : 0;
     const p = d.pages[at];
+    const vid = FL.docMedia(d) === 'video';
     if (p && p.ext !== 'pdf') { const im = el('img', 'pj-thumb'); im.loading = 'lazy'; im.src = blobUrl(p); if (p.rot) im.style.transform = `rotate(${p.rot}deg)`; r.appendChild(im); }
-    else r.appendChild(el('div', 'pj-thumb pj-thumb-x', p ? 'PDF' : '—'));
+    else r.appendChild(el('div', 'pj-thumb pj-thumb-x', vid ? '🎞' : p ? 'PDF' : '—'));
+    if (vid) r.classList.add('pj-doc-video');
     const t = el('div'); t.appendChild(el('div', 'pj-item-t', d.title || 'Untitled')); t.appendChild(el('div', 'pj-sub', docSub(d)));
     r.appendChild(t);
     r.addEventListener('click', () => docOpen(d.id, at));
@@ -602,8 +608,27 @@
   }
 
   // Gallery
+  // A video stops for good when it goes out of sight: paused, its source
+  // dropped and reloaded (no more decoding or downloading), then removed. A
+  // video only hidden or taken out of the page plays on, unseen.
+  function stopVideos(root) {
+    (root ? [...root.querySelectorAll('video')].concat(root.tagName === 'VIDEO' ? [root] : []) : []).forEach(v => {
+      try { v.pause(); v.removeAttribute('src'); v.querySelectorAll('source').forEach(x => x.remove()); v.load(); } catch (_) {}
+      v.remove();
+    });
+  }
   function docOpen(id, i) {
+    if (window._info) window._info.stopMedia();             // one video at a time: the details panel's stops
     pj.gallery = { doc: id, i: i || 0 };
+    galleryFrame();
+  }
+  /** A file of the project folder that is no document (📄 Docs): a photo or a video, shown in the gallery. */
+  function fileOpen(path) {
+    if (window._info) window._info.stopMedia();
+    pj.gallery = { file: path, i: 0 };
+    galleryFrame();
+  }
+  function galleryFrame() {
     let g = $('pj-gallery');
     if (!g) {
       g = el('div'); g.id = 'pj-gallery';
@@ -621,10 +646,12 @@
     g.classList.add('open');
     galleryShow(pj.gallery.i);
   }
-  function galleryClose() { pj.gallery = null; const g = $('pj-gallery'); if (g) g.classList.remove('open'); }
+  function galleryClose() { pj.gallery = null; const g = $('pj-gallery'); if (g) { stopVideos(g); g.classList.remove('open'); } }
+  const isVideoName = n => /\.(mp4|m4v|mov|webm|mkv|avi)$/i.test(n || '');
   function galleryShow(i) {
     const g = $('pj-gallery'), G = pj.gallery;
     if (!g || !G) return;
+    if (G.file) { galleryFile(g, G.file); return; }
     const d = pj.D.docs[G.doc];
     if (!d || d.deleted) { galleryClose(); return; }
     const n = d.pages.length;
@@ -634,7 +661,14 @@
       (p && p.ext !== 'pdf' && d.file ? ` <span class="pjg-render" title="FLEX shows page images made from the original for quick viewing; the original file is unchanged in the project folder: ${esc(d.file.path)}">page image for viewing</span>` : '');
     const bb = g.querySelector('.pjg-btns'); bb.textContent = '';
     const isVid = !!(d.file && /^(mp4|m4v|mov|webm|mkv)$/i.test(d.file.ext)), fileUrl = d.file && d.file.path ? API + 'file?project=' + encodeURIComponent(pj.pid) + '&path=' + encodeURIComponent(d.file.path) : null;
-    if (d.file) { const a = el('a', 'pj-btn'); a.textContent = isVid ? '🎞 Original' : '📄 Original'; a.href = isVid && fileUrl ? fileUrl : API + 'blob/' + d.file.h + '.' + d.file.ext; a.target = '_blank'; a.rel = 'noopener'; a.title = d.file.path + (d.file.ext === 'tif' ? ' (TIFF: opens in your image viewer)' : ''); bb.appendChild(a); }
+    if (d.file) {
+      const a = el('a', 'pj-btn'); a.textContent = isVid ? '⇩ Original' : '📄 Original';
+      a.href = isVid && fileUrl ? fileUrl : API + 'blob/' + d.file.h + '.' + d.file.ext;
+      // A video is saved, to open in your own player, not played in a tab of its own (where it goes on unseen).
+      if (isVid) { a.download = d.file.name || 'video.' + d.file.ext; a.title = 'Save the video to open it in your own player: ' + d.file.path; }
+      else { a.target = '_blank'; a.rel = 'noopener'; a.title = d.file.path + (d.file.ext === 'tif' ? ' (TIFF: opens in your image viewer)' : ''); }
+      bb.appendChild(a);
+    }
     if (p && p.ext !== 'pdf') {
       bb.appendChild(btn('⟲', () => record('doc.rotate', { doc: d.id, h: p.h, rot: ((p.rot || 0) + 270) % 360, prev: p.rot || 0 }, 'docs')));
       bb.appendChild(btn('⟳', () => record('doc.rotate', { doc: d.id, h: p.h, rot: ((p.rot || 0) + 90) % 360, prev: p.rot || 0 }, 'docs')));
@@ -645,13 +679,13 @@
     bb.appendChild(btn('📝 Note', () => editNote(FL.T.doc(d.id), (FL.notesOn(pj.P, FL.T.doc(d.id))[0] || {}).id)));
     bb.appendChild(btn('⋯', () => docMenu(d.id)));
     bb.appendChild(btn('✕', galleryClose));
-    const v = g.querySelector('.pjg-view'); v.textContent = '';
+    const v = g.querySelector('.pjg-view');
+    const playing = v.querySelector('video');
+    if (playing && isVid && playing.dataset.src === fileUrl) { /* the same video: it plays on */ }
+    else { stopVideos(v); v.textContent = ''; }
+    v.scrollTop = 0;
     if (isVid && fileUrl) {                       // a video in the project folder: played from there, with seeking (Range)
-      const vd = el('video', 'pjg-img'); vd.controls = true; vd.preload = 'metadata'; vd.playsInline = true; vd.src = fileUrl; if (p) vd.poster = blobUrl(p);
-      vd.style.maxWidth = 'calc(100vw - 120px)'; vd.style.maxHeight = 'calc(100vh - 160px)'; vd.style.background = '#000';
-      const note = el('div'); note.style.cssText = 'font-size:11px;opacity:.7;margin-top:4px;display:none'; note.textContent = 'This browser cannot play this video (probably HEVC). Use 🎞 Original to open it in your own player.';
-      vd.addEventListener('error', () => { note.style.display = 'block'; });
-      v.appendChild(vd); v.appendChild(note);
+      if (!v.querySelector('video')) v.appendChild(videoEl(fileUrl, p ? blobUrl(p) : null));
     }
     else if (p && p.ext === 'pdf') { const f = el('iframe', 'pjg-pdf'); f.src = blobUrl(p); v.appendChild(f); }
     else if (p) {
@@ -666,6 +700,29 @@
     tg.textContent = docSub(d) + (d.desc ? ' — ' + d.desc : '') + (notes.length ? ` · 📝 ${notes[0].text}` : '');
     g.querySelector('.pjg-prev').disabled = G.i <= 0;
     g.querySelector('.pjg-next').disabled = G.i >= n - 1;
+  }
+  /** A video player: seeking by ranges, a note when this browser cannot play it. */
+  function videoEl(url, poster, cls) {
+    const box = el('div', 'pj-video ' + (cls || ''));
+    const vd = el('video', 'pjg-img'); vd.controls = true; vd.preload = 'metadata'; vd.playsInline = true; vd.src = url; vd.dataset.src = url; if (poster) vd.poster = poster;
+    const note = el('div', 'pj-video-note', 'This browser cannot play this video (probably HEVC). Use ⇩ Original to save it and open it in your own player.');
+    vd.addEventListener('error', () => { note.style.display = 'block'; });
+    // HEVC in a browser without it: sometimes no error, only sound and no picture.
+    vd.addEventListener('loadedmetadata', () => { if (!vd.videoWidth) note.style.display = 'block'; });
+    box.append(vd, note);
+    return box;
+  }
+  function galleryFile(g, path) {
+    const url = API + 'file?project=' + encodeURIComponent(pj.pid) + '&path=' + encodeURIComponent(path), name = path.split('/').pop(), vid = isVideoName(name);
+    g.querySelector('.pjg-title').innerHTML = `<b>${esc(name)}</b> <span>${esc(path)}</span>`;
+    const bb = g.querySelector('.pjg-btns'); bb.textContent = '';
+    const a = el('a', 'pj-btn'); a.textContent = '⇩ Original'; a.href = url; a.download = name; bb.appendChild(a);
+    bb.appendChild(btn('✕', galleryClose));
+    const v = g.querySelector('.pjg-view');
+    const playing = v.querySelector('video');
+    if (!(playing && playing.dataset.src === url)) { stopVideos(v); v.textContent = ''; v.appendChild(vid ? videoEl(url, null) : Object.assign(el('img', 'pjg-img'), { src: url })); }
+    g.querySelector('.pjg-tags').textContent = 'A file of the project folder (not a document yet).';
+    g.querySelector('.pjg-prev').disabled = g.querySelector('.pjg-next').disabled = true;
   }
   async function docMenu(docId) {
     const d = pj.D.docs[docId];
@@ -731,6 +788,7 @@
       svs.forEach((desc, code) => out.push({ label: `Survey ${code}${desc ? ' — ' + desc : ''} · ${c.name}`, target: FL.T.survey(c.id, code) }));
       [...sts].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).forEach(n => out.push({ label: `Station ${n} · ${c.name}`, target: FL.T.station(c.id, n) }));
     });
+    FL.liveFeatures(pj.P).forEach(f => out.push({ label: `${{ point: 'Point', line: 'Line', area: 'Area' }[f.kind] || 'Feature'} · ${f.name || '(no name)'} (surface)`, target: FL.T.feature(f.id) }));
     Object.values(pj.P.leads).forEach(L => { if (!L.deleted) out.push({ label: 'Lead · ' + targetLabel(L.target) + (L.fields.desc ? ' — ' + L.fields.desc.slice(0, 40) : ''), target: FL.T.lead(L.id) }); });
     return out;
   }
@@ -746,7 +804,7 @@
       [...want].forEach(t => { const b = btn(targetLabel(t) + ' ✕', () => { want.delete(t); paintChips(); }, 'chip on'); chips.appendChild(b); });
       if (!want.size) chips.appendChild(el('div', 'pj-note', 'No tags: the document is in no project.'));
     };
-    const q = el('input', 'pj-input'); q.placeholder = 'Find a cave, survey, station or lead…';
+    const q = el('input', 'pj-input'); q.placeholder = 'Find a cave, survey, station, surface point or lead…';
     const list = el('div', 'pj-list pj-taglist');
     const paintList = () => {
       list.textContent = '';
@@ -1119,7 +1177,7 @@
     const get = k => (pr && pr[k] ? pr[k].getValue() : null);
     if (!pr) { closeCard(); if (window._sel) window._sel.clear(); return; }
     if (get('isCaveSurvey') && window._sel && window._sel.active()) return;     // selection.js chose what to show
-    if (get('isFeatureLead')) { const L = pj.P.leads[get('leadId')]; if (L) editLead(null, targetLabel(L.target), { id: L.id, rec: L, fields: L.fields, active: FL.leadActive(L) }); return; }
+    if (get('isFeatureLead')) { closeCard(); return; }        // the details panel shows it (info_panel.js); ✏️ there edits it
     if (get('isFieldStation')) { openCard({ cid: get('cave'), name: get('stationName'), field: true }); return; }
     if (!get('isCaveSurvey')) { closeCard(); return; }
     const imp = imps().find(i => i.name === get('surveyName'));
@@ -1418,8 +1476,11 @@
     section(docsRoot, 'Documents', true, b => {
       const all = FL.docsOf(pj.D, pj.P);
       const inbox = all.filter(d => FL.docInbox(d, pj.P));
+      // Photos and videos apart from the papers (both are media).
+      const photos = all.filter(d => FL.docMedia(d) === 'photo'), videos = all.filter(d => FL.docMedia(d) === 'video');
       const tabs = el('div', 'pj-tabs');
-      [['inbox', `Inbox (${inbox.length})`], ['all', `All (${all.length})`]].forEach(([k, l]) => tabs.appendChild(btn(l, () => { pj.docTab = k; render(); }, pj.docTab === k ? 'on' : '')));
+      [['inbox', `Inbox (${inbox.length})`], ['all', `All (${all.length})`], ['photos', `🖼 Photos (${photos.length})`], ['videos', `🎞 Videos (${videos.length})`]]
+        .forEach(([k, l]) => tabs.appendChild(btn(l, () => { pj.docTab = k; render(); }, pj.docTab === k ? 'on' : '')));
       b.appendChild(tabs);
       const add = btn('＋ Add files (photos, scans, TIFF, PDF)…', () => addPages({}), 'primary');
       b.appendChild(add);
@@ -1428,8 +1489,10 @@
       drop.addEventListener('dragleave', () => drop.classList.remove('on'));
       drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('on'); addPages({ files: Array.from(e.dataTransfer.files || []) }); });
       b.appendChild(drop);
-      const list = pj.docTab === 'inbox' ? inbox : all.slice().sort((x, y) => (FL.dateKey(y.date) || '').localeCompare(FL.dateKey(x.date) || ''));
-      if (!list.length) b.appendChild(el('div', 'pj-note', pj.docTab === 'inbox' ? 'Inbox empty: every document is tagged to a cave, survey, station or lead.' : 'No documents yet.'));
+      const byDate = l => l.slice().sort((x, y) => (FL.dateKey(y.date) || '').localeCompare(FL.dateKey(x.date) || ''));
+      const list = pj.docTab === 'inbox' ? inbox : pj.docTab === 'photos' ? byDate(photos) : pj.docTab === 'videos' ? byDate(videos) : byDate(all);
+      if (!list.length) b.appendChild(el('div', 'pj-note', pj.docTab === 'inbox' ? 'Inbox empty: every document is tagged to a cave, survey, station, surface point or lead.'
+        : pj.docTab === 'photos' ? 'No photos yet.' : pj.docTab === 'videos' ? 'No videos yet.' : 'No documents yet.'));
       list.slice(0, 300).forEach(d => b.appendChild(docEl(d)));
     });
     section(root, 'Field survey', false, b => {
@@ -1509,7 +1572,8 @@
   // ── For project_segments.js (segments and the review queue) ───────────────
   window._pjApi = { pj, FL, el, btn, esc, when, toast, dialog, choose, record, render, refreshCard, openCard, flyTo,
     caveFor, caveName, partsOf, stationPos, stationsOf, docEl, docOpen, docByPage, describe, headsFor, targetLabel,
-    editNote, noteEl, declAt, yearOf, imps, who, ensureAuthor, newProject, refresh, editLead, renameProject, editDescription, setProject, importSync, acceptAbove, closeCard };
+    editNote, noteEl, declAt, yearOf, imps, who, ensureAuthor, newProject, refresh, editLead, renameProject, editDescription, setProject, importSync, acceptAbove, closeCard,
+    stopVideos, videoEl, fileOpen, galleryClose, addPages, editTags, leadEl, leadsAt, leadSummary, blobUrl, docSub };
 
   // ── What the export takes from the project (index.html _collectCavesInBbox) ─
   window._pjExport = () => pj.pid ? {
@@ -1573,6 +1637,7 @@
   .pj-tabs { display: flex; gap: 2px; margin: 2px 0 4px; }
   .pj-doc { display: flex; gap: 8px; align-items: center; }
   .pj-thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 4px; background: #fff; flex: none; }
+  .pj-doc-video .pj-thumb { box-shadow: inset 0 0 0 2px #8ab4ec; outline: 2px solid #8ab4ec; outline-offset: -2px; }
   .pj-thumb-x { display: flex; align-items: center; justify-content: center; color: #333; font-size: 10px; }
   .pj-drop { border: 1px dashed rgba(255,255,255,.25); border-radius: 6px; padding: 6px; text-align: center; color: rgba(255,255,255,.4); font-size: 11px; margin: 4px 0; }
   .pj-drop.on { border-color: #2196F3; color: #8ec5ff; }
@@ -1603,7 +1668,10 @@
   .pjg-title span { color: rgba(255,255,255,.55); margin-left: 6px; }
   .pjg-title .pjg-render { font-size: 10.5px; padding: 1px 7px; border: 1px solid rgba(255,255,255,.25); border-radius: 99px; color: rgba(255,255,255,.7); white-space: nowrap; }
   .pjg-stage { flex: 1; display: flex; align-items: center; min-height: 0; }
-  .pjg-view { flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .pjg-view { flex: 1; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: safe center; overflow: auto; overscroll-behavior: contain; }
+  .pj-video { display: flex; flex-direction: column; align-items: center; max-width: 100%; }
+  .pj-video video { background: #000; max-width: calc(100vw - 120px); max-height: calc(100vh - 160px); }
+  .pj-video-note { font-size: 11px; opacity: .75; margin-top: 4px; display: none; }
   .pjg-img { max-width: calc(100vw - 120px); max-height: calc(100vh - 140px); background: #fff; transition: transform .15s; }
   .pjg-pdf { width: calc(100vw - 120px); height: calc(100vh - 140px); border: 0; background: #fff; }
   .pjg-prev, .pjg-next { font-size: 40px; width: 50px; background: none; border: none; color: #fff; cursor: pointer; }

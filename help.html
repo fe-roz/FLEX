@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>FLEX Guide</title>
 <!-- The FLEX guide: setting up, how FLEX is organised, and the diagrams.
-     Opened from ⓘ Help (in a frame over the map) or on its own at /help.html.
+     Opened from ⓘ Help (in a frame over the map; the contents row below the
+     title replaces the old Help pane's section buttons) or on its own at /help.html.
      Self-contained and offline: no fonts or scripts from the network.
      Example names only — no real places, caves or people. -->
 <style>
@@ -54,6 +55,18 @@ li { margin: 2px 0; }
 table { border-collapse: collapse; margin: 8px 0 14px; font-size: 13px; }
 td, th { border-bottom: 1px solid var(--rule); padding: 5px 12px 5px 0; text-align: left; vertical-align: top; }
 th { color: var(--muted); font-weight: 600; font-size: 12px; }
+.toc { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 4px; max-width: 80ch; }
+.toc a { padding: 3px 10px; border: 1px solid var(--rule); border-radius: 99px; background: var(--panel); color: var(--ink); text-decoration: none; font-size: 12.5px; }
+.toc a:hover { border-color: var(--blue); color: var(--blue); }
+/* the two small controls, drawn as in the panels (ui_kit.css) */
+.uisw { display: inline-block; position: relative; width: 28px; height: 15px; border-radius: 8px; background: rgba(255,255,255,.2); vertical-align: -3px; margin: 0 3px; }
+.uisw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: #fff; }
+.uisw.on { background: #3fae6e; } .uisw.on::after { left: 15px; }
+.uibox { display: inline-block; width: 13px; height: 13px; border: 1.5px solid var(--muted); border-radius: 3px; vertical-align: -2px; margin: 0 3px; }
+.uibox.tick { background: var(--blue); border-color: var(--blue); }
+.uieye { display: inline-block; width: 13px; height: 13px; border: 1.5px solid rgba(255,255,255,.45); border-radius: 3px; vertical-align: -2px; margin: 0 3px; }
+.uieye.on { background: #e8ece9; border-color: #e8ece9; box-shadow: inset 0 0 0 2px var(--panel); }
+.uieye.half { border-color: #e8ece9; }
 
 /* ── The screen (layout diagram) ── */
 .screen { position: relative; min-width: 620px; height: 330px; border: 1.5px solid var(--line); border-radius: 8px; background: linear-gradient(160deg, #1d2a2a, #121a20 60%, #0e1316); overflow: hidden; font-size: 11.5px; }
@@ -174,6 +187,9 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
 
 <h1>FLEX guide</h1>
 <p class="lede">FLEX shows everything about a piece of ground at once: the globe and terrain, map layers, LiDAR point clouds, surface points and tracks, and 3D cave surveys. Work is kept in <b>projects</b> (one per area), and any area can be baked into an offline viewer that runs on a phone underground.</p>
+<div class="toc" aria-label="Contents">
+  <a href="#setup">Setting up</a><a href="#first">First area</a><a href="#screen">The screen</a><a href="#tree">Projects</a><a href="#saving">Saving</a><a href="#caves">Caves</a><a href="#surface">Surface</a><a href="#caltopo">CalTopo</a><a href="#lidar">LiDAR</a><a href="#export">Phone app</a><a href="#keys">Keyboard</a><a href="#trouble">Problems</a>
+</div>
 
 <!-- ═════════════════════════════════════════════════════════════════════ -->
 <h2 id="setup">Setting up</h2>
@@ -183,7 +199,7 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
   <li><b>Install Node.js</b>
     Version 18 or newer, from <a href="https://nodejs.org" target="_blank" rel="noopener">nodejs.org</a> (the LTS installer is fine).</li>
   <li><b>Get FLEX and its parts</b>
-    Download or clone FLEX from GitHub, open a terminal in its folder, and run:
+    Download or clone FLEX from GitHub (<a href="https://github.com/ferozfeerasta/FLEX" target="_blank" rel="noopener">github.com/ferozfeerasta/FLEX</a>), open a terminal in its folder, and run:
     <pre>npm install</pre></li>
   <li><b>Add your map keys</b>
     Copy <code>Tokens.js.example</code> to <code>Tokens.js</code> and paste in a <b>Cesium ion</b> access token (a free account at <a href="https://ion.cesium.com" target="_blank" rel="noopener">ion.cesium.com</a> → Access Tokens). That token gives the 3D terrain and Bing imagery. A Google Maps key is optional, for Google's photorealistic 3D tiles. <code>Tokens.js</code> stays on your computer: it is never committed or shared.</li>
@@ -232,7 +248,7 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
     <span class="callout" style="right:150px;top:290px">5</span>
   </div>
   <div class="keylist">
-    <div><span class="n">1</span><span><b>Icon strip.</b> One panel per kind of data. 📁 Project · 🗺 Layers · ☁ LiDAR · 📍 Surface · 🕳 Caves, then the project-only ones (📄 Docs, ❓ Leads, ✓ Review; grey with no project), 📦 Export, 🌿 Analyze, ⚙ Settings, ⓘ Help.</span></div>
+    <div><span class="n">1</span><span><b>Icon strip.</b> One panel per kind of data. 📁 Project · 🗺 Layers · ☁ LiDAR · 📍 Surface · 🕳 Caves, then the project-only ones (📄 Docs, ❓ Leads, ✓ Review; grey with no project), 📦 Export, 🌿 Analyze, ⚙ Settings, ⓘ Help (this guide; ⓘ again or <kbd>Esc</kbd> closes it).</span></div>
     <div><span class="n">2</span><span><b>Panel.</b> Caves and Surface have two columns: the open project on the left, 👤 My data on the right. ← / → moves an item between them. A plain click on the map closes the panel (Export and Analyze stay open).</span></div>
     <div><span class="n">3</span><span><b>Top bar.</b> 💾 Save (with how many project changes wait) and 🔄 Updates.</span></div>
     <div><span class="n">4</span><span><b>The map.</b> Click a cave to select it; click again to go deeper. Right-click for a menu.</span></div>
@@ -240,6 +256,12 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
   </div>
   <div class="cap">With a project open, clicking 📁 again switches project.</div>
 </div>
+<h3>Switches, ticks and eyes</h3>
+<ul>
+  <li><span class="uisw on"></span> <b>Switch</b> — on (green) or off <span class="uisw"></span>. It takes effect at once: Leads, Area names, Show LiDAR Datasets, the Ground and height filters, Show features and Labels in 📍 Surface. Click it or its words; with the keyboard, <kbd>Tab</kbd> to it and press <kbd>Space</kbd> or <kbd>Enter</kbd>.</li>
+  <li><span class="uibox tick"></span> <b>Tick box</b> — only in lists where you pick several things and then press a button, like 🕳 Caves → <b>Recent PLT</b> (tick some, then Load), and in forms saved with their own button.</li>
+  <li><span class="uieye on"></span><span class="uieye half"></span><span class="uieye"></span> <b>Row box</b> in 🕳 Caves and 📍 Surface: filled = shown, outline = loaded but hidden, faint = not loaded yet (click to load).</li>
+</ul>
 
 <!-- ═════════════════════════════════════════════════════════════════════ -->
 <h2 id="tree">Projects and My data</h2>
@@ -327,6 +349,13 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
   <li>Right-click a cave for a <b>Select</b> menu with every level, to jump straight to one.</li>
   <li>Double-click a cave's name in 🕳 Caves to fly there.</li>
 </ul>
+<h3>Points, lines and areas: info first, editing second</h3>
+<ul>
+  <li>A click shows brief info in the details panel on the right: what it is, a few lines of its description, and how many photos, videos, documents, notes and leads go with it. A click never edits: use <b>✏️ Edit</b> for that.</li>
+  <li><b>More:</b> rest the pointer on the details panel for a moment (or press <b>⤢ More</b>) to open a larger panel beside it with everything: position and height, the whole description, notes, leads, photos, videos and documents. It goes away when the pointer leaves, unless you drag it by its header, pin it with 📌 or click inside it. × or <kbd>Esc</kbd> closes it.</li>
+  <li><b>Photos and videos</b> are listed apart from other documents (📄 Docs → 🖼 Photos and 🎞 Videos). A video plays in the larger panel or in the document viewer and stops as soon as you close it. If your browser can't play one (often HEVC from phones), <b>⇩ Original</b> saves it for your own player.</li>
+  <li>Documents can be tagged to a surface point, line or area too (🏷 Tags → find it by name).</li>
+</ul>
 
 <!-- ═════════════════════════════════════════════════════════════════════ -->
 <h2 id="places">Phone, computer, CalTopo</h2>
@@ -381,7 +410,9 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
   <li><b>＋ GeoTIFF…</b> — a hillshade, an orthophoto or a georeferenced scan, in lon/lat (EPSG:4326), UTM (WGS84 or NAD83) or Web Mercator. A <b>DEM</b> (one band of heights) is turned into a hillshade. FLEX keeps one picture of it (at most 4096 pixels a side) with where it goes. Other projections: save the file as lon/lat or UTM first (e.g. QGIS → Export → Save As, or <code>gdalwarp -t_srs EPSG:4326</code>).</li>
   <li><b>＋ Tile link…</b> — any map served as tiles, with <code>{z}</code>, <code>{x}</code> and <code>{y}</code> in the link. A key in the link travels with the layer, so don't add private keys to a shared project.</li>
 </ul>
-<p>With a project open, a new layer goes into the project (📁) and travels with it; with none, into 👤 My data. The box and the slider (how see-through) are yours alone. They're drawn above the built-in layers.</p>
+<p>With a project open, a new layer goes into the project (📁) and travels with it; with none, into 👤 My data. They're listed in the one Layers list (📁 or 👤 in front), added from its <b>＋ Add layer</b> menu; the switch and the slider (how see-through) are yours alone.</p>
+<h3>Terrain and hillshade from the LiDAR</h3>
+<p>With a project open and a point cloud loaded, 🗺 Layers → Terrain → <b>⛰ Generate terrain + hillshade…</b> makes the project's own terrain and hillshade from the LiDAR, once, with the same code as the FLEX Field export. The area starts as the project's footprint plus 200 m (change the margin, or drag the dots on the map: it is the Export panel's area, so you can also draw a box or polygon there). Pick the LiDAR, the cell size and a name, then <b>Generate</b>; it takes a few minutes. Then the terrain replaces the world terrain inside the area, and "&lt;name&gt; hillshade" appears in the Layers list. Both are kept in the project: the terrain in its library (it travels in sync files), the hillshade as map tiles in the project folder (<code>FLEX maps/&lt;name&gt;/</code>, which doesn't). <b>＋ Terrain patch…</b> does the same from a DEM GeoTIFF you already have.</p>
 
 <h2 id="caltopo">CalTopo</h2>
 <p>Paste a CalTopo map link in 📍 Surface → <b>CalTopo map: link and key</b>. Public maps work as they are. <b>Private maps need a key</b>, kept only on this computer (never in a project, sync file or git):</p>
@@ -389,7 +420,7 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
   <li><b>Team account:</b> Team Admin → Details → add a <b>service account</b> with READ. Enter its credential ID, secret, and the team ID.</li>
   <li><b>Personal account:</b> the credential from <code>caltopo.com/api/v1/activate</code> (unofficial; it may stop working if CalTopo changes it).</li>
 </ul>
-<p>With an account or team ID, <b>Pick a map…</b> lists your maps. FLEX re-reads the map every so often, so the group's changes appear. To link a cave to its entrance marker, put a line like <code>flex: cave=Ridge Cave; station=E1</code> in the marker's description.</p>
+<p>With an account or team ID, <b>Pick a map…</b> lists your maps. FLEX re-reads the map every so often, so the group's changes appear; only what changed is redrawn, and long tracks are drawn simplified (within about 2 m). A map the open project doesn't have shows in 📍 Surface under 👤 My data, with its folders; ← makes it the project's map. To link a cave to its entrance marker, put a line like <code>flex: cave=Ridge Cave; station=E1</code> in the marker's description.</p>
 
 <h2 id="lidar">LiDAR</h2>
 <ul>
@@ -427,7 +458,7 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
   <tr><td><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></td><td>Fly forward / left / back / right</td><td><kbd>L</kbd></td><td>LiDAR datasets on/off</td></tr>
   <tr><td><kbd>Q</kbd> <kbd>E</kbd></td><td>Fly down / up</td><td><kbd>O</kbd></td><td>OpenTopo datasets on/off</td></tr>
   <tr><td>Scroll (flying)</td><td>Flight speed</td><td><kbd>N</kbd></td><td>Compass style</td></tr>
-  <tr><td><kbd>Z</kbd> <kbd>X</kbd> <kbd>C</kbd></td><td>Small / medium / large point</td><td><kbd>M</kbd></td><td>Mini-map</td></tr>
+  <tr><td><kbd>Z</kbd> <kbd>X</kbd> <kbd>C</kbd></td><td>Small point (no name) / medium / large point (both ask for a name)</td><td><kbd>M</kbd></td><td>Mini-map</td></tr>
   <tr><td><kbd>R</kbd> / <kbd>B</kbd></td><td>Start-end route / add waypoint</td><td><kbd>V</kbd></td><td>Depth measurement</td></tr>
   <tr><td><kbd>K</kbd></td><td>Download KMZ</td><td><kbd>1</kbd>–<kbd>5</kbd></td><td>Point classes on/off</td></tr>
   <tr><td><kbd>Esc</kbd></td><td>Clear the selection</td><td><kbd>0</kbd></td><td>Remove all point clouds</td></tr>

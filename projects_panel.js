@@ -237,10 +237,9 @@
         });
         b.append(none, cards);
         filter();
-        const tog = el('label', 'pj-row pj-sub pjx-tog');
-        const cb = el('input'); cb.type = 'checkbox'; cb.checked = showFootprints();
-        cb.addEventListener('change', () => { try { localStorage.setItem(prefKey, cb.checked ? '1' : '0'); } catch (_) {} drawFootprints(); });
-        tog.append(cb, ' Show project footprints on the map');
+        // A switch (ui_kit.js): it takes effect at once.
+        const tog = window.uiSwitch(showFootprints(), on => { try { localStorage.setItem(prefKey, on ? '1' : '0'); } catch (_) {} drawFootprints(); },
+          'Show project footprints on the map', { className: 'pj-sub pjx-tog' });
         b.appendChild(tog);
         author(b);
       });

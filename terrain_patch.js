@@ -176,7 +176,8 @@
     const wh = new Float32Array(nxd * nyd), pos = [];
     for (let j = 0; j < nyd; j++) for (let i = 0; i < nxd; i++) pos.push(C.Cartographic.fromDegrees(m.west + i * dxd, m.north - j * dyd));
     for (let k = 0; k < pos.length; k += 2000) {
-      const part = await C.sampleTerrainMostDetailed(base, pos.slice(k, k + 2000));
+      // (a provider without availability, e.g. the plain ellipsoid, can't say its most detailed level: ask one)
+      const part = base.availability ? await C.sampleTerrainMostDetailed(base, pos.slice(k, k + 2000)) : await C.sampleTerrain(base, MIN_LEVEL, pos.slice(k, k + 2000));
       part.forEach((c, q) => { wh[k + q] = c.height; });
     }
     // cells with no data (outside the DEM's own edge) take the world terrain's height

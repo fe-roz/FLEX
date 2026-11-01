@@ -55,7 +55,7 @@
       ? `<button type="button" class="cc-mv" data-mv="out" title="${x.dir === 'in' ? 'Back to My data (cancel the move)' : 'Move to My data'}">→</button>`
       : `<button type="button" class="cc-mv" data-mv="in" title="${x.dir === 'out' ? 'Back into the project (cancel the move)' : 'Move into the project'}">←</button>`;
     return `<div class="cc-it${x.dir ? ' cc-moving' : ''}" data-name="${esc(x.name)}" draggable="${open ? 'true' : 'false'}">
-      <button type="button" class="cc-eye${vis ? ' on' : x.loaded ? ' half' : ''}" data-eye title="${!x.loaded ? 'Load' : vis ? 'Hide' : 'Show'}" aria-label="${!x.loaded ? 'Load' : vis ? 'Hide' : 'Show'} ${esc(x.name)}"></button>
+      <button type="button" class="cc-eye ui-eye${vis ? ' on' : x.loaded ? ' half' : ''}" data-eye title="${!x.loaded ? 'Load' : vis ? 'Hide' : 'Show'}" aria-label="${!x.loaded ? 'Load' : vis ? 'Hide' : 'Show'} ${esc(x.name)}"></button>
       <span class="cc-nm" title="${esc(x.name)} — double-click to fly there">${esc(x.name.replace(/\.(plt|json)$/i, ''))}${what ? '<b class="cc-dot" title="' + esc(what) + ' — 💾 Save puts it in">•</b>' : ''}<small>${esc(what || (x.loaded ? '' : placeText(x.place)))}</small></span>
       <span class="cc-tools"><button type="button" data-more title="More">⋯</button>${arrow}</span>
     </div>`;
@@ -215,9 +215,7 @@
   #cave-cols .cc-it:hover { background: rgba(255,255,255,.07); }
   #cave-cols .cc-it[draggable="true"] { cursor: grab; }
   #cave-cols .cc-moving { background: rgba(242,194,78,.08); }
-  #cave-cols .cc-eye { width: 13px; height: 13px; border: 1.5px solid rgba(255,255,255,.45); border-radius: 3px; background: none; padding: 0; cursor: pointer; }
-  #cave-cols .cc-eye.on { background: #e8ece9; border-color: #e8ece9; box-shadow: inset 0 0 0 2px #1d232e; }
-  #cave-cols .cc-eye.half { border-color: #e8ece9; }
+  /* the row eye (.cc-eye) looks like every other: .ui-eye in ui_kit.css */
   #cave-cols .cc-nm { cursor: default; user-select: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(255,255,255,.88); }
   #cave-cols .cc-nm small { display: block; font-size: 9px; color: rgba(255,255,255,.4); overflow: hidden; text-overflow: ellipsis; }
   #cave-cols .cc-moving .cc-nm small { color: #f2c24e; }

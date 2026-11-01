@@ -81,6 +81,9 @@
   const pointEntities = ids => (V() ? V().entities.values.filter(e => e.properties && e.properties.myFeature && ids.has(e.properties.myFeature.getValue())) : []);
   const srcOf = url => (ws() ? ws().vectorSources().find(s => (s.url || s.name) === url) : null);
 
+  // A CalTopo map's id (…/m/<id>), so two spellings of the same link match.
+  const mapId = u => (String(u || '').match(/\/m\/([A-Za-z0-9]+)/) || [])[1] || null;
+  const sameMap = (a, b) => { const x = mapId(a), y = mapId(b); return x && y ? x === y : String(a || '') === String(b || ''); };
   async function model() {
     const w = ws(), pj = PJ(), pw = PW();
     if (!w) return null;
@@ -112,8 +115,11 @@
       const FL = window.FlexLib;
       const ct = (FL.liveLayers(pj.P) || []).filter(l => l.kind === 'caltopo');
       const now = w.caltopo(), src = w.vectorSources().find(s => s.kind === 'caltopo');
-      ct.forEach(l => L.unshift({ kind: 'caltopo', id: l.id, name: 'CalTopo map', url: l.url, interval: l.interval, loaded: !!(now && now.url === l.url),
-        shown: !!(src && own(src.ds) && now && now.url === l.url), items: src ? src.ds.entities.values.length : 0, src: src && now && now.url === l.url ? src : null }));
+      const isNow = l => !!(now && sameMap(now.url, l.url));        // the same map, however its link is written
+      ct.forEach(l => L.unshift({ kind: 'caltopo', id: l.id, name: 'CalTopo map', url: l.url, interval: l.interval, loaded: isNow(l),
+        shown: !!(src && own(src.ds) && isNow(l)), items: src ? src.ds.entities.values.length : 0, src: src && isNow(l) ? src : null }));
+      // A CalTopo map loaded that the project doesn't have: yours (My data), ← puts it in the project.
+      if (src && now && !ct.some(isNow)) R.unshift({ kind: 'caltopo', id: 'ct', name: 'CalTopo map', url: now.url, interval: now.interval, loaded: true, shown: own(src.ds), items: src.ds.entities.values.length, src, mine: true });
       const h = PF() ? PF().hidden() : {};
       const feats = FL.liveFeatures(pj.P), groups = FL.liveGroups(pj.P);
       groups.filter(g => !g.parent).sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true })).forEach(g => {
@@ -153,7 +159,7 @@
       : x.kind === 'file' ? (x.loaded ? (x.items ? x.items + ' items' : 'loaded') : 'not loaded')
       : x.kind === 'caltopo' ? (x.loaded ? x.items + ' items' : 'not loaded')
       : (x.n != null ? x.n + (x.kind === 'pgroup' ? ' point' + (x.n === 1 ? '' : 's') : '') : '');
-    const canMove = isOpen && (x.kind === 'pgroup' || x.kind === 'file');
+    const canMove = isOpen && (x.kind === 'pgroup' || x.kind === 'file' || (x.kind === 'caltopo' && x.mine));
     const arrow = !canMove ? '' : side === 'p'
       ? (x.kind === 'pgroup' && x.dir !== 'in' ? '' : `<button type="button" class="cc-mv" data-mv="out" title="${x.dir === 'in' ? 'Back to My data (cancel the move)' : 'Move to My data'}">→</button>`)
       : `<button type="button" class="cc-mv" data-mv="in" title="${x.dir === 'out' ? 'Back into the project (cancel the move)' : 'Move into the project'}">←</button>`;
@@ -163,7 +169,7 @@
     const forget = side === 'm' && !x.dir && (x.kind === 'file') ? '<button type="button" data-forget title="Forget: out of My data (unloads it)">✕</button>' : '';
     const ftools = x.kind === 'folder' ? `<button type="button" data-gadd="${esc(x.id)}" title="Add to this folder">＋</button><button type="button" data-gdl="${esc(x.id)}" title="Download for CalTopo">⇩</button><button type="button" data-gedit="${esc(x.id)}" title="Rename, colour, move">✏️</button>` : '';
     let html = `<div class="cc-it${x.dir ? ' cc-moving' : ''}" data-kind="${x.kind}" data-id="${esc(x.id)}" draggable="${canMove ? 'true' : 'false'}">
-      <button type="button" class="cc-eye${eyeOn ? ' on' : eyeHalf ? ' half' : ''}" data-eye title="${(x.kind === 'file' || x.kind === 'caltopo') && !x.loaded ? 'Load' : eyeOn ? 'Hide' : 'Show'}"></button>
+      <button type="button" class="cc-eye ui-eye${eyeOn ? ' on' : eyeHalf ? ' half' : ''}" data-eye title="${(x.kind === 'file' || x.kind === 'caltopo') && !x.loaded ? 'Load' : eyeOn ? 'Hide' : 'Show'}"></button>
       <span class="cc-nm" title="${esc(x.name)}"${k ? ` data-expand="${esc(k)}"` : ''}>${k ? arrowOf(k, exp) : '<span class="sc-arrow"></span>'}${icon[x.kind] || ''} ${esc(x.name)}${x.dir ? '<b class="cc-dot">•</b>' : ''}<small>${esc(sub)}</small></span>
       <span class="cc-tools">${ftools}${forget}${arrow}</span></div>`;
     if (exp) html += `<div class="sc-kids">${kids(x, isOpen)}</div>`;
@@ -183,7 +189,7 @@
     if (gid) FL.liveGroups(pj.P).filter(g => (g.parent || '') === gid).sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true })).forEach(g => {
       const k = 'g:' + g.id, exp = !!fOpen()[k];
       const n = FL.liveFeatures(pj.P).filter(f => FL.groupPath(pj.P, f.group).some(y => y.id === g.id)).length;
-      out += `<div class="sc-sub sc-fold" ${pad(depth)}><button type="button" class="cc-eye${h[k] ? '' : ' on'}" data-geye="${esc(g.id)}" title="${h[k] ? 'Show' : 'Hide'}"></button>
+      out += `<div class="sc-sub sc-fold" ${pad(depth)}><button type="button" class="cc-eye ui-eye ui-eye-sm${h[k] ? '' : ' on'}" data-geye="${esc(g.id)}" title="${h[k] ? 'Show' : 'Hide'}"></button>
         <span class="sc-nm" data-expand="${esc(k)}">${arrowOf(k, exp)}<span class="pjs-sw" style="background:${esc(P.groupColor(g.id))}"></span>📁 ${esc(g.name)} <small>${n}</small></span>
         <span class="cc-tools"><button type="button" data-gadd="${esc(g.id)}" title="Add to this folder">＋</button><button type="button" data-gdl="${esc(g.id)}" title="Download for CalTopo">⇩</button><button type="button" data-gedit="${esc(g.id)}" title="Rename, colour, move">✏️</button></span></div>`;
       if (exp) out += projectTree(g.id, depth + 1);
@@ -207,14 +213,14 @@
       folders.forEach(e => {
         const p = path + '/' + (e.name || e.id), key = base + '|' + p, hk = P.srcKey(src, p), exp = open.has(key);
         ov.set(hk, e);
-        out += `<div class="sc-sub sc-fold" style="padding-left:${4 + depth * 12}px"><button type="button" class="cc-eye${h[hk] ? '' : ' on'}" data-oeye="${esc(hk)}" title="${h[hk] ? 'Show' : 'Hide'}"></button>
+        out += `<div class="sc-sub sc-fold" style="padding-left:${4 + depth * 12}px"><button type="button" class="cc-eye ui-eye ui-eye-sm${h[hk] ? '' : ' on'}" data-oeye="${esc(hk)}" title="${h[hk] ? 'Show' : 'Hide'}"></button>
           <span class="sc-nm" data-expand="${esc(key)}">${arrowOf(key, exp)}📁 ${esc(e.name || '(folder)')} <small>${(tree.get(e) || []).length}</small></span></div>`;
         if (exp) visit(e, p, depth + 1);
       });
       leaves.slice(0, 200).forEach(e => {
         const p = path + '/' + (e.name || e.id), hk = P.srcKey(src, p);
         ov.set(hk, e);
-        out += `<div class="sc-sub sc-feat" data-ov="${esc(hk)}" style="padding-left:${4 + depth * 12}px" title="Click: highlight · double-click: fly there"><button type="button" class="cc-eye${h[hk] ? '' : ' on'}" data-oeye="${esc(hk)}" title="${h[hk] ? 'Show' : 'Hide'}"></button>
+        out += `<div class="sc-sub sc-feat" data-ov="${esc(hk)}" style="padding-left:${4 + depth * 12}px" title="Click: highlight · double-click: fly there"><button type="button" class="cc-eye ui-eye ui-eye-sm${h[hk] ? '' : ' on'}" data-oeye="${esc(hk)}" title="${h[hk] ? 'Show' : 'Hide'}"></button>
           <span class="sc-nm">${esc(e.name || '(no name)')}</span></div>`;
       });
       if (leaves.length > 200) out += `<div class="sc-sub sc-none" style="padding-left:${4 + depth * 12}px">… and ${leaves.length - 200} more</div>`;
@@ -229,7 +235,7 @@
       ? `<button type="button" data-draw="point" title="Draw a point in the project">＋ Point</button><button type="button" data-draw="line" title="Draw a line">＋ Line</button><button type="button" data-draw="area" title="Draw an area">＋ Area</button><button type="button" data-tool="folder" title="A new folder">＋ Folder</button><button type="button" data-tool="import" title="GPX / KML / KMZ / GeoJSON into the project's features">⇪ Import</button><button type="button" data-tool="download" title="All the project's features, for CalTopo">⇩ Download</button><button type="button" data-tool="file" title="Show a KMZ / GeoJSON / GPX file as it is (a data file)">📄 Add file</button>`
       : `<button type="button" data-tool="file" title="Show a KMZ / GeoJSON / GPX file">📄 Add KMZ / GeoJSON / GPX</button>`;
     const lab = labelsOn();
-    return `<div class="sc-bar"><button type="button" class="sc-master${on ? ' on' : ''}" data-master title="${on ? 'Hide every feature on the surface (each keeps its own setting)' : 'Show the features again, as each was set'}"><span class="sc-sw"></span>Show features</button><button type="button" class="sc-master sc-lab${lab ? ' on' : ''}" data-labels title="${lab ? 'Hide the names on the map' : 'Show the names on the map'}"><span class="sc-sw"></span>Labels</button><span class="sc-tools">${tools}</span></div>`;
+    return `<div class="sc-bar"><button type="button" class="sc-master${on ? ' on' : ''}" data-master role="switch" aria-checked="${!!on}" title="${on ? 'Hide every feature on the surface (each keeps its own setting)' : 'Show the features again, as each was set'}"><span class="ui-sw ui-sw-sm"></span>Show features</button><button type="button" class="sc-master sc-lab${lab ? ' on' : ''}" data-labels role="switch" aria-checked="${!!lab}" title="${lab ? 'Hide the names on the map' : 'Show the names on the map'}"><span class="ui-sw ui-sw-sm"></span>Labels</button><span class="sc-tools">${tools}</span></div>`;
   }
 
   async function render() {
@@ -279,6 +285,12 @@
     const pw = PW(), x = await find(kind, id);
     if (!pw || !x || !PJ().pid) return;
     if (kind === 'pgroup' && dir === 'out' && x.dir !== 'in') return;   // project features don't go back to My data (yet)
+    if (kind === 'caltopo') {                                           // the loaded CalTopo map becomes the project's
+      if (dir !== 'in' || !window._pjApi) return;
+      await window._pjApi.record('layer.set', { layer: pw.layerId('caltopo', x.url), kind: 'caltopo', url: x.url, interval: x.interval ?? 30, order: (window.FlexLib.liveLayers(PJ().P) || []).length, removed: false });
+      if (pw.badge) await pw.badge();
+      soon(); return;
+    }
     await pw.moveItem({ kind, id, name: x.name, dir: x.dir ? x.dir : dir, url: x.url });
     soon();
   }
@@ -376,10 +388,7 @@
   #surf-cols .sc-bar button { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.15); color: #e8ece9; border-radius: 5px; padding: 2px 7px; font-size: 10.5px; cursor: pointer; }
   #surf-cols .sc-bar button:hover { background: rgba(255,255,255,.12); }
   #surf-cols .sc-master { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; margin-right: 4px; }
-  #surf-cols .sc-master .sc-sw { width: 24px; height: 13px; border-radius: 7px; background: rgba(255,255,255,.2); position: relative; flex: none; transition: background .15s; }
-  #surf-cols .sc-master .sc-sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 9px; height: 9px; border-radius: 50%; background: #fff; transition: left .15s; }
-  #surf-cols .sc-master.on .sc-sw { background: #3fae6e; }
-  #surf-cols .sc-master.on .sc-sw::after { left: 13px; }
+  /* the switch in Show features / Labels: span.ui-sw (ui_kit.css) */
   #surf-cols .sc-master:not(.on) { border-color: #f2c24e; color: #f2c24e; }
   #surf-cols .sc-lab:not(.on) { border-color: rgba(255,255,255,.15); color: rgba(255,255,255,.6); }
   #surf-cols .sc-tools { display: contents; }
@@ -399,7 +408,6 @@
   #surf-cols .sc-ic { text-align: center; }
   #surf-cols .pjs-sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 3px; vertical-align: 0; }
   #surf-cols .sc-pt:hover .cc-tools, #surf-cols .sc-sub:hover .cc-tools { opacity: 1; }
-  #surf-cols .sc-sub .cc-eye { width: 11px; height: 11px; }
   /* rows share the look of 🕳 Caves (cave_columns.js) */
   #surf-cols .cc-head { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 2px 0 4px; font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
   #surf-cols .cc-hp { color: #6fd39a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; } #surf-cols .cc-hm { color: #8ab4ec; padding: 0 4px; }
@@ -414,9 +422,7 @@
   #surf-cols .cc-it:hover { background: rgba(255,255,255,.07); }
   #surf-cols .cc-it[draggable="true"] { cursor: grab; }
   #surf-cols .cc-moving { background: rgba(242,194,78,.08); }
-  #surf-cols .cc-eye { width: 13px; height: 13px; border: 1.5px solid rgba(255,255,255,.45); border-radius: 3px; background: none; padding: 0; cursor: pointer; }
-  #surf-cols .cc-eye.on { background: #e8ece9; border-color: #e8ece9; box-shadow: inset 0 0 0 2px #1d232e; }
-  #surf-cols .cc-eye.half { border-color: #e8ece9; }
+  /* row eyes: .ui-eye (ui_kit.css) */
   #surf-cols .cc-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(255,255,255,.88); }
   #surf-cols .cc-nm small { display: block; font-size: 9px; color: rgba(255,255,255,.4); overflow: hidden; text-overflow: ellipsis; padding-left: 12px; }
   #surf-cols .cc-moving .cc-nm small { color: #f2c24e; }

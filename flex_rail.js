@@ -8,7 +8,8 @@
 //   - the project-only icons (data-pj-only: Docs, Leads, Trips, Review)
 //     greyed with no project open, and their panels closed when it closes;
 //     Trips (data-rail-later) stays greyed until it is built,
-//   - a dot on Review when suggestions are waiting.
+//   - a dot on Review when suggestions are waiting,
+//   - ⓘ Help: the guide over the map (no panel).
 (function () {
   'use strict';
   const rail = document.getElementById('flex-rail');
@@ -88,26 +89,37 @@
     });
   }, true);
 
-  // ⓘ Help → the guide (help.html) in a frame over the map; × / Esc / outside closes.
+  // ⓘ Help → the guide (help.html) in a frame over the map, straight away (no
+  // panel of its own: the guide's contents list replaces the old section
+  // buttons). ⓘ stays lit while it is open; ⓘ again, ×, Esc or a click outside
+  // closes it.
+  const helpBtn = $('rail-help');
+  function guideClose() {
+    const ov = $('flex-guide'); if (ov) ov.classList.remove('on');
+    if (helpBtn) { helpBtn.classList.remove('on'); helpBtn.setAttribute('aria-pressed', 'false'); }
+  }
   function guide(section) {
     let ov = $('flex-guide');
     if (!ov) {
       ov = document.createElement('div'); ov.id = 'flex-guide';
-      ov.innerHTML = '<div class="fg-box"><div class="fg-bar"><b>📘 FLEX guide</b><span><a href="help.html" target="_blank" rel="noopener">open in a tab ↗</a><button type="button" class="fg-x" title="Close (Esc)">×</button></span></div><iframe title="FLEX guide"></iframe></div>';
+      ov.innerHTML = '<div class="fg-box" role="dialog" aria-label="FLEX guide"><div class="fg-bar"><b>📘 FLEX guide</b><span><a href="help.html" target="_blank" rel="noopener">open in a tab ↗</a><button type="button" class="fg-x" title="Close (Esc)">×</button></span></div><iframe title="FLEX guide"></iframe></div>';
       document.body.appendChild(ov);
-      const close = () => ov.classList.remove('on');
-      ov.querySelector('.fg-x').addEventListener('click', close);
-      ov.addEventListener('mousedown', e => { if (e.target === ov) close(); });
+      ov.querySelector('.fg-x').addEventListener('click', guideClose);
+      ov.addEventListener('mousedown', e => { if (e.target === ov) guideClose(); });
       const fr = ov.querySelector('iframe');
-      fr.addEventListener('load', () => { try { fr.contentWindow.addEventListener('keydown', e => { if (e.key === 'Escape') close(); }); } catch (_) {} });
-      document.addEventListener('keydown', e => { if (e.key === 'Escape' && ov.classList.contains('on')) { e.stopPropagation(); close(); } }, true);
+      fr.addEventListener('load', () => { try { fr.contentWindow.addEventListener('keydown', e => { if (e.key === 'Escape') guideClose(); }); } catch (_) {} });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape' && ov.classList.contains('on')) { e.stopPropagation(); guideClose(); } }, true);
     }
     const fr = ov.querySelector('iframe'), url = 'help.html' + (section ? '#' + section : '');
     if (!fr.getAttribute('src')) fr.setAttribute('src', url);
     else { try { const w = fr.contentWindow; if (section) { const t = w.document.getElementById(section); if (t) t.scrollIntoView({ block: 'start' }); } else w.scrollTo(0, 0); } catch (_) { fr.setAttribute('src', url); } }
     ov.classList.add('on');
+    if (helpBtn) { helpBtn.classList.add('on'); helpBtn.setAttribute('aria-pressed', 'true'); }
   }
-  document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('#help-guide-links [data-guide]'); if (b) guide(b.dataset.guide); });
+  if (helpBtn) helpBtn.addEventListener('click', () => {
+    const ov = $('flex-guide');
+    if (ov && ov.classList.contains('on')) guideClose(); else guide();
+  });
 
   rail.addEventListener('click', e => {
     const b = e.target.closest('button');
@@ -142,5 +154,5 @@
   document.head.appendChild(st);
   setInterval(sync, 3000);                             // suggestions arriving, project data loading
   sync();
-  window._rail = { open: sel => { const b = rail.querySelector(`[data-target="${sel}"]`); const t = document.querySelector(sel); if (b && t && !t.classList.contains('show')) b.click(); } };
+  window._rail = { guide, guideClose, open: sel => { const b = rail.querySelector(`[data-target="${sel}"]`); const t = document.querySelector(sel); if (b && t && !t.classList.contains('show')) b.click(); } };
 })();

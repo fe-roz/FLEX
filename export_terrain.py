@@ -36,7 +36,10 @@ from scipy.interpolate import NearestNDInterpolator
 from scipy.stats import binned_statistic_2d
 import requests
 from PIL import Image
-import pygltflib
+try:
+    import pygltflib            # only the viewer export writes a GLB; --project-terrain does not
+except ImportError:             # pragma: no cover
+    pygltflib = None
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Coordinate helpers
@@ -510,6 +513,21 @@ def points_in_polygon(px, py, poly):
         yc = y1 + (px[m] - x1) * (y2 - y1) / (x2 - x1)
         inside[m] ^= py[m] >= yc
     return inside
+
+
+def points_near_polygon(x, y, poly_utm, rect, reach, resolution):
+    """Mask of the points within about `reach` of the polygon (UTM), so the
+    cells along the line are backed by real returns. Coarse cells, dilated:
+    cheap for tens of millions of points."""
+    from scipy.ndimage import binary_dilation as _bd
+    cc = max(4 * resolution, reach / 3)
+    gx = np.arange(rect[0] - reach, rect[2] + reach + cc, cc)
+    gy = np.arange(rect[1] - reach, rect[3] + reach + cc, cc)
+    near = _bd(polygon_inside_grid(poly_utm, gx + cc / 2, gy + cc / 2),
+               iterations=int(math.ceil(reach / cc)) + 1)
+    ix = np.clip(((x - gx[0]) // cc).astype(np.int64), 0, len(gx) - 1)
+    iy = np.clip(((y - gy[0]) // cc).astype(np.int64), 0, len(gy) - 1)
+    return near[ix, iy]
 
 
 def polygon_edge_distance(px, py, poly):
@@ -1558,6 +1576,306 @@ def convert_caves(caves_path, utm_center_e, utm_center_n, progress=print, zone=N
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Project terrain (--project-terrain OUT_DIR)
+# ──────────────────────────────────────────────────────────────────────────────
+# The same ground, DEM and "From LiDAR" hillshade as the export, kept by a FLEX
+# project instead of packed into a viewer: the DEM as a terrain patch (the .bin
+# terrain_patch.js reads: uint32 LE header length, JSON header padded with
+# spaces to a 4-byte boundary, float32 LE ellipsoid heights on a lon/lat grid,
+# first row = north, NaN = no data) and the hillshade as web-mercator XYZ
+# tiles (PNG, grey + alpha, transparent outside the area and where the data
+# runs out). Nothing here reads a point cloud, so it is tested with synthetic
+# points (tools/test_project_terrain.py).
+
+PATCH_MAX_SIDE = 3000      # grid posts a side, as the browser bake (custom_layers.js): ~36 MB, under the library's 40 MB blob limit
+TILE_PX = 256
+
+
+def latlon_to_utm_np(lat, lon, zone, south=False):
+    """latlon_to_utm() for arrays, in one fixed zone and hemisphere (the frame's)."""
+    lat_r = np.radians(np.asarray(lat, dtype=np.float64))
+    lon_r = np.radians(np.asarray(lon, dtype=np.float64))
+    lon0 = math.radians((zone - 1) * 6 - 180 + 3)
+    a, f = 6378137.0, 1 / 298.257223563
+    e2 = f * (2 - f)
+    ep2 = e2 / (1 - e2)
+    s, c = np.sin(lat_r), np.cos(lat_r)
+    N = a / np.sqrt(1 - e2 * s ** 2)
+    T = np.tan(lat_r) ** 2
+    C = ep2 * c ** 2
+    A = c * (lon_r - lon0)
+    M = a * ((1 - e2/4 - 3*e2**2/64 - 5*e2**3/256) * lat_r
+             - (3*e2/8 + 3*e2**2/32 + 45*e2**3/1024) * np.sin(2*lat_r)
+             + (15*e2**2/256 + 45*e2**3/1024) * np.sin(4*lat_r)
+             - (35*e2**3/3072) * np.sin(6*lat_r))
+    k0 = 0.9996
+    e = k0 * N * (A + (1-T+C)*A**3/6 + (5-18*T+T**2+72*C-58*ep2)*A**5/120) + 500000
+    n = k0 * (M + N*np.tan(lat_r)*(A**2/2 + (5-T+9*C+4*C**2)*A**4/24
+                                   + (61-58*T+T**2+600*C-330*ep2)*A**6/720))
+    if south:
+        n = n + 10_000_000
+    return e, n
+
+
+def box_ring(bbox, step_deg=None):
+    """A lat/lon box as a ring of points along its edges (its edges are not
+    straight in UTM, so they are walked rather than given by four corners)."""
+    w, s, e, n = bbox
+    t = np.linspace(0.0, 1.0, 33)[:-1]
+    return np.vstack([np.c_[w + (e - w) * t, np.full_like(t, s)], np.c_[np.full_like(t, e), s + (n - s) * t],
+                      np.c_[e - (e - w) * t, np.full_like(t, n)], np.c_[np.full_like(t, w), n - (n - s) * t]])
+
+
+def terrain_patch_grid(dem, x_bins, y_bins, resolution, zone, south, ll_box, keep=None,
+                       max_side=PATCH_MAX_SIDE):
+    """The DEM (build_dem's [x, y] layout, values at cell centres, already in
+    the frame's heights) sampled bilinearly on a lon/lat grid over ll_box.
+    Posts about `resolution` apart, at most `max_side` a side. Where `keep`
+    (bool [x, y]) is False, or outside the DEM, the post is NaN: terrain_patch.js
+    fills it from the world terrain.
+    Returns (meta, grid float32 [ny, nx], row 0 = north)."""
+    W, S, E, N = [float(v) for v in ll_box]
+    lat0 = math.radians((S + N) / 2)
+    mLon, mLat = 111320 * math.cos(lat0), 110540
+    nx = int(round((E - W) * mLon / resolution)) + 1
+    ny = int(round((N - S) * mLat / resolution)) + 1
+    k = min(1.0, max_side / max(nx, ny))
+    nx, ny = max(2, int(round(nx * k))), max(2, int(round(ny * k)))
+    lons = W + (E - W) * np.arange(nx) / (nx - 1)
+    nxc, nyc = dem.shape
+    grid = np.full((ny, nx), np.nan, dtype=np.float32)
+    for j0 in range(0, ny, 256):                         # in bands: a 3000 x 3000 grid at once is a GB of temporaries
+        lats = N - (N - S) * np.arange(j0, min(ny, j0 + 256)) / (ny - 1)
+        LON, LAT = np.meshgrid(lons, lats)
+        e, n = latlon_to_utm_np(LAT, LON, zone, south)
+        fx = (e - x_bins[0]) / resolution - 0.5            # cell centre i sits at x_bins[0] + (i + 0.5) * res
+        fy = (n - y_bins[0]) / resolution - 0.5
+        inside = (fx >= -0.5) & (fx <= nxc - 0.5) & (fy >= -0.5) & (fy <= nyc - 0.5)
+        i0 = np.clip(np.floor(fx).astype(np.int64), 0, max(0, nxc - 2))
+        j0c = np.clip(np.floor(fy).astype(np.int64), 0, max(0, nyc - 2))
+        i1, j1 = np.minimum(i0 + 1, nxc - 1), np.minimum(j0c + 1, nyc - 1)
+        u = np.clip(fx - i0, 0, 1); v = np.clip(fy - j0c, 0, 1)
+        h = (dem[i0, j0c] * (1 - u) * (1 - v) + dem[i1, j0c] * u * (1 - v)
+             + dem[i0, j1] * (1 - u) * v + dem[i1, j1] * u * v)
+        if keep is not None:
+            inside &= keep[np.clip(np.rint(fx).astype(np.int64), 0, nxc - 1),
+                           np.clip(np.rint(fy).astype(np.int64), 0, nyc - 1)]
+        grid[j0:j0 + len(lats)] = np.where(inside, h, np.nan)
+    ok = np.isfinite(grid)
+    if not ok.any():
+        sys.exit("ERROR: no terrain inside the area")
+    meta = {'west': W, 'south': S, 'east': E, 'north': N, 'nx': nx, 'ny': ny,
+            'units': 'm', 'heightReference': 'WGS84 ellipsoid',
+            'min': float(grid[ok].min()), 'max': float(grid[ok].max()),
+            'cell_m': round((E - W) * mLon / (nx - 1), 3)}
+    return meta, grid
+
+
+def pack_terrain_patch(meta, grid):
+    """Bytes of a terrain patch file, as terrain_patch.js pack() writes it."""
+    head = json.dumps(dict({'format': 'flex-terrain-patch', 'version': 2}, **meta),
+                      separators=(',', ':')).encode('utf-8')
+    pad = (4 - ((4 + len(head)) % 4)) % 4
+    g = np.ascontiguousarray(grid, dtype='<f4')
+    return struct.pack('<I', len(head) + pad) + head + b' ' * pad + g.tobytes()
+
+
+def read_terrain_patch(data):
+    """(meta, grid [ny, nx]) from terrain patch bytes (for tests and checks)."""
+    n = struct.unpack('<I', data[:4])[0]
+    meta = json.loads(data[4:4 + n].decode('utf-8'))
+    grid = np.frombuffer(data, dtype='<f4', offset=4 + n, count=meta['nx'] * meta['ny'])
+    return meta, grid.reshape(meta['ny'], meta['nx'])
+
+
+def tile_range(ll_box, z):
+    """XYZ tiles (x0, y0, x1, y1 inclusive) covering a lon/lat box at zoom z."""
+    w, s, e, n = ll_box
+    wx0, wy0 = _merc_world_px(w, n, z, TILE_PX)
+    wx1, wy1 = _merc_world_px(e, s, z, TILE_PX)
+    top = 2 ** z - 1
+    return (int(min(top, max(0, wx0 // TILE_PX))), int(min(top, max(0, wy0 // TILE_PX))),
+            int(min(top, max(0, (wx1 - 1e-9) // TILE_PX))), int(min(top, max(0, (wy1 - 1e-9) // TILE_PX))))
+
+
+def tile_bounds(x, y, z):
+    """(west, south, east, north) degrees of an XYZ tile."""
+    n = 2.0 ** z
+    lon = lambda i: i / n * 360.0 - 180.0
+    lat = lambda j: math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * j / n))))
+    return lon(x), lat(y + 1), lon(x + 1), lat(y)
+
+
+def tile_zooms(ll_box, cell, max_zoom=21):
+    """(min, max) zoom: the finest level's pixels are at least as fine as the
+    hillshade's; the coarsest is the finest level where the whole area takes
+    at most four tiles (Cesium asks for every tile of its minimum level at
+    once; zoomed out further the area is a few pixels anyway)."""
+    lat_mid = (ll_box[1] + ll_box[3]) / 2
+    zmax = _choose_zoom(lat_mid, cell, TILE_PX, zmin=1, zmax=max_zoom)
+    zmin = zmax
+    while zmin > 0:
+        x0, y0, x1, y1 = tile_range(ll_box, zmin)
+        if (x1 - x0 + 1) * (y1 - y0 + 1) <= 4:
+            break
+        zmin -= 1
+    return zmin, zmax
+
+
+def write_tile_pyramid(img, grid, ll_box, out_dir, cell, progress=print, max_zoom=21):
+    """XYZ tiles of a grey + alpha picture of the UTM grid (img: PIL 'LA', its
+    edges on the grid's rectangle). The finest level is resampled from the
+    picture (a bilinear QUAD per tile: over one tile the UTM-to-mercator map
+    is affine to far below a pixel); each coarser one is the level below
+    halved, 2 x 2 tiles into one. Fully transparent tiles are not written (the
+    server answers them with an empty tile). Returns (zmin, zmax, count)."""
+    out_dir = Path(out_dir)
+    zmin, zmax = tile_zooms(ll_box, cell, max_zoom)
+    W, H = img.size
+    sx, sy = W / grid.width, H / grid.height
+    x0, y0, x1, y1 = tile_range(ll_box, zmax)
+    progress(f"  Tiles: zoom {zmin}-{zmax}, {(x1 - x0 + 1) * (y1 - y0 + 1)} at zoom {zmax}")
+    have = set()
+    for ty in range(y0, y1 + 1):
+        for tx in range(x0, x1 + 1):
+            w, s, e, n = tile_bounds(tx, ty, zmax)
+            E, N = latlon_to_utm_np(np.array([n, s, s, n]), np.array([w, w, e, e]), grid.zone, grid.south)
+            px = (E - grid.e0) * sx
+            py = (grid.n1 - N) * sy
+            if px.max() < 0 or py.max() < 0 or px.min() > W or py.min() > H:
+                continue
+            quad = tuple(float(v) for pair in zip(px, py) for v in pair)   # UL, LL, LR, UR
+            t = img.transform((TILE_PX, TILE_PX), Image.QUAD, quad, resample=Image.BILINEAR, fillcolor=(0, 0))
+            if t.getchannel('A').getbbox() is None:
+                continue
+            p = out_dir / str(zmax) / str(tx)
+            p.mkdir(parents=True, exist_ok=True)
+            t.save(p / f'{ty}.png', compress_level=6)
+            have.add((tx, ty))
+        if (ty - y0) % 16 == 0:
+            progress(f"  Tiles: zoom {zmax}, row {ty - y0 + 1} of {y1 - y0 + 1}")
+    count = len(have)
+    for z in range(zmax - 1, zmin - 1, -1):
+        parents = {(x // 2, y // 2) for x, y in have}
+        nxt = set()
+        for px_, py_ in parents:
+            big = Image.new('LA', (2 * TILE_PX, 2 * TILE_PX), (0, 0))
+            for dx in (0, 1):
+                for dy in (0, 1):
+                    c = (2 * px_ + dx, 2 * py_ + dy)
+                    if c in have:
+                        with Image.open(out_dir / str(z + 1) / str(c[0]) / f'{c[1]}.png') as ch:
+                            big.paste(ch.convert('LA'), (dx * TILE_PX, dy * TILE_PX))
+            t = big.reduce(2)
+            if t.getchannel('A').getbbox() is None:
+                continue
+            p = out_dir / str(z) / str(px_)
+            p.mkdir(parents=True, exist_ok=True)
+            t.save(p / f'{py_}.png', compress_level=6)
+            nxt.add((px_, py_))
+        have = nxt
+        count += len(have)
+    progress(f"  Tiles: {count} written")
+    return zmin, zmax, count
+
+
+def area_alpha(size, grid, poly_utm, drop=None):
+    """Alpha (PIL 'L', 255 = shown) over the UTM grid picture: inside the
+    polygon, and not where the dataset doesn't reach (`drop`, build_dem layout)."""
+    from PIL import ImageDraw
+    W, H = size
+    sx, sy = W / grid.width, H / grid.height
+    a = Image.new('L', (W, H), 0)
+    ImageDraw.Draw(a).polygon([(float((e - grid.e0) * sx), float((grid.n1 - n) * sy)) for e, n in poly_utm], fill=255)
+    if drop is not None and drop.any():
+        d = Image.fromarray(np.where(drop.T[::-1], 0, 255).astype(np.uint8)).resize((W, H), Image.NEAREST)
+        a = Image.fromarray(np.minimum(np.asarray(a), np.asarray(d)))
+    return a
+
+
+def project_terrain(x, y, z, ground_mode, out_dir, bbox, poly_ll=None, resolution=0.5,
+                    z_offset=-32 * 0.766, spike_threshold=1.5, name='', max_px=16384,
+                    source='', progress=print):
+    """Ground points (UTM, in the zone of the area's centre) -> the project's
+    terrain patch and hillshade tiles in out_dir:
+        terrain.bin      the DEM as a terrain patch (ellipsoid heights = DEM + z_offset)
+        tiles/z/x/y.png  the "From LiDAR" hillshade
+        result.json      what was made (bounds, sizes, zooms)
+    The steps are the export's: build_dem (lowest return per cell, cloth),
+    border_nodata_mask, filter_spikes, z_offset; build_lidar_hillshade."""
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    say = lambda step: (lambda m: progress(f"[{step}/4] {m}"))
+    if poly_ll is None:
+        poly_ll = box_ring(bbox)
+    else:
+        poly_ll = np.asarray(poly_ll, dtype=np.float64)
+        bbox = [float(poly_ll[:, 0].min()), float(poly_ll[:, 1].min()),
+                float(poly_ll[:, 0].max()), float(poly_ll[:, 1].max())]
+    zone = utm_zone_for((bbox[0] + bbox[2]) / 2)
+    south = (bbox[1] + bbox[3]) / 2 < 0
+    rect = utm_rect_covering(bbox, zone, resolution)
+    c = resolution
+    rect = (rect[0] - c, rect[1] - c, rect[2] + c, rect[3] + c)
+    poly_utm = polygon_to_utm(poly_ll, zone)
+
+    # DEM, exactly as the export builds it
+    dem, x_bins, y_bins, x0, y0, valid = build_dem(x, y, z, resolution, progress=say(2),
+                                                   extent=rect, return_valid=True)
+    drop = border_nodata_mask(valid, resolution, progress=say(2))
+    del valid
+    if spike_threshold > 0:
+        dem = filter_spikes(dem, resolution, radius_m=10.0, threshold_m=spike_threshold, progress=say(2))
+    dem = dem + z_offset
+    say(2)(f"Applied FLEX point-cloud Z offset: {z_offset:.3f} m")
+    cells_in = polygon_inside_grid(poly_utm, x_bins[:-1] + resolution / 2, y_bins[:-1] + resolution / 2)
+    covered_m2 = float((cells_in & ~drop).sum()) * resolution ** 2
+    # Posts on the line itself take the cell just outside it too (one cell's grace).
+    from scipy.ndimage import binary_dilation as _bd
+    keep = _bd(cells_in, iterations=1) & ~drop
+
+    # The terrain patch, on a lon/lat grid over the area
+    meta, tgrid = terrain_patch_grid(dem, x_bins, y_bins, resolution, zone, south, bbox, keep=keep)
+    meta.update({'name': name or 'LiDAR terrain', 'source': source or 'LiDAR ground returns',
+                 'datum_shift_m': round(float(z_offset), 3), 'ground': ground_mode,
+                 'dem_cell_m': float(resolution)})
+    (out_dir / 'terrain.bin').write_bytes(pack_terrain_patch(meta, tgrid))
+    say(2)(f"Terrain patch: {meta['nx']}x{meta['ny']} posts of {meta['cell_m']} m, "
+           f"heights {meta['min']:.1f} to {meta['max']:.1f} m (ellipsoid)")
+    del tgrid
+
+    # The "From LiDAR" hillshade, transparent outside the area
+    grid = UtmGrid(x_bins[0], y_bins[0], x_bins[-1], y_bins[-1], zone, south)
+    say(3)("Building hillshade from LiDAR ground returns...")
+    hs, hs_cell = build_lidar_hillshade(x, y, z, grid, covered_m2, mode=ground_mode,
+                                        max_px=max_px, progress=say(3))
+    alpha = area_alpha(hs.size, grid, poly_utm, drop)
+    a = np.asarray(alpha)
+    L = np.asarray(hs).copy()
+    if (a > 0).any():
+        L[a == 0] = int(round(float(L[a > 0].mean())))      # flat outside: no dark fringe when levels are halved
+    img = Image.merge('LA', (Image.fromarray(L), alpha))
+    del hs, L, a, alpha
+    say(4)("Cutting map tiles...")
+    zmin, zmax, count = write_tile_pyramid(img, grid, bbox, out_dir / 'tiles', hs_cell, progress=say(4))
+    tiles = {'format': 'flex-tiles', 'scheme': 'xyz', 'tile_px': TILE_PX, 'ext': 'png',
+             'bounds': [round(float(v), 8) for v in bbox], 'minzoom': zmin, 'maxzoom': zmax,
+             'count': count, 'cell_m': float(hs_cell), 'name': meta['name']}
+    (out_dir / 'tiles' / 'tiles.json').write_text(json.dumps(tiles, indent=1))
+    result = {
+        'terrain': {'file': 'terrain.bin', 'bounds': [meta['west'], meta['south'], meta['east'], meta['north']],
+                    'nx': meta['nx'], 'ny': meta['ny'], 'cell_m': meta['cell_m'],
+                    'min': meta['min'], 'max': meta['max']},
+        'tiles': dict(tiles, dir='tiles'),
+        'z_offset': float(z_offset), 'ground': ground_mode, 'name': meta['name'],
+        'utm_zone': zone, 'area_km2': round(polygon_area(poly_utm) / 1e6, 4),
+    }
+    (out_dir / 'result.json').write_text(json.dumps(result, indent=1))
+    progress(f"[done] Project terrain: {meta['nx']}x{meta['ny']} posts, {count} tiles (zoom {zmin}-{zmax})")
+    return result
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Main
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -1598,6 +1916,11 @@ def main():
     ap.add_argument('--hillshade-max-px', type=int, default=16384,
         help='Longest side of the LiDAR hillshade texture (default 16384, the '
              'largest single texture most GPUs accept).')
+    ap.add_argument('--project-terrain', default=None, metavar='OUT_DIR',
+        help='Instead of a viewer export: the DEM as a terrain patch (terrain.bin) and the '
+             'LiDAR hillshade as XYZ map tiles (tiles/), for a FLEX project. Needs --ept.')
+    ap.add_argument('--also-ept', action='append', default=[], metavar='EPT',
+        help='With --project-terrain: more datasets, their ground returns used together.')
     args = ap.parse_args()
     map_terrain = bool(args.dem_grid)
     if not map_terrain and not args.ept:
@@ -1652,6 +1975,36 @@ def main():
     print(f"[export] UTM zone {zone}: E {rect[0]:.0f}-{rect[2]:.0f}, N {rect[1]:.0f}-{rect[3]:.0f} "
           f"({(rect[2]-rect[0])/1000:.2f} x {(rect[3]-rect[1])/1000:.2f} km)")
 
+    if args.project_terrain:
+        # A project's own terrain: same points, DEM and hillshade, kept as a
+        # terrain patch and map tiles instead of a viewer (project_terrain()).
+        if map_terrain:
+            sys.exit("ERROR: --project-terrain needs the LiDAR (--ept), not --dem-grid")
+        parts, modes = [], []
+        for k, ept in enumerate([args.ept] + list(args.also_ept or [])):
+            x, y, z, r, g, b, mode = fetch_ept_points(
+                ept, q_rect, bbox_latlon=q_ll, progress=lambda m: print(f"[1/4] {m}"),
+                zone=zone, south=south, with_mode=True)
+            del r, g, b
+            if poly_utm is not None:
+                n0 = len(x)
+                keep = points_near_polygon(x, y, poly_utm, rect, pad + 2 * args.resolution, args.resolution)
+                x, y, z = x[keep], y[keep], z[keep]
+                print(f"[1/4] Polygon: kept {len(x):,} of {n0:,} points")
+            parts.append((x, y, z)); modes.append(mode)
+        x = np.concatenate([p[0] for p in parts]); y = np.concatenate([p[1] for p in parts])
+        z = np.concatenate([p[2] for p in parts]); del parts
+        # Ground found the least reliable way decides how the hillshade treats them all.
+        mode = 'all' if 'all' in modes else ('smrf' if 'smrf' in modes else 'classified')
+        z_off = args.z_offset if args.z_offset is not None else -32 * 0.766
+        project_terrain(x, y, z, mode, args.project_terrain, args.bbox, poly_ll=poly_ll,
+                        resolution=args.resolution, z_offset=z_off,
+                        spike_threshold=args.spike_threshold, name=map_name,
+                        max_px=args.hillshade_max_px,
+                        source=', '.join(Path(str(e).rstrip('/')).parent.name or str(e)
+                                         for e in [args.ept] + list(args.also_ept or [])))
+        return
+
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
 
@@ -1685,19 +2038,10 @@ def main():
                 # Only points within reach of the polygon (a margin so the cells
                 # along the line are backed by real returns).
                 n0 = len(x)
-                reach = pad + 2 * args.resolution
-                cc = max(4 * args.resolution, reach / 3)
-                gx = np.arange(rect[0] - reach, rect[2] + reach + cc, cc)
-                gy = np.arange(rect[1] - reach, rect[3] + reach + cc, cc)
-                from scipy.ndimage import binary_dilation as _bd
-                near = _bd(polygon_inside_grid(poly_utm, gx + cc / 2, gy + cc / 2),
-                           iterations=int(math.ceil(reach / cc)) + 1)
-                ix = np.clip(((x - gx[0]) // cc).astype(np.int64), 0, len(gx) - 1)
-                iy = np.clip(((y - gy[0]) // cc).astype(np.int64), 0, len(gy) - 1)
-                k = near[ix, iy]
+                k = points_near_polygon(x, y, poly_utm, rect, pad + 2 * args.resolution, args.resolution)
                 x, y, z = x[k], y[k], z[k]
                 print(f"[1/7] Polygon: kept {len(x):,} of {n0:,} points")
-                del ix, iy, k, near
+                del k
 
             # 2. Build DEM on the rectangle, and find where the dataset runs out
             dem, x_bins, y_bins, x0, y0, valid = build_dem(

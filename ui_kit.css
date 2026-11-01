@@ -1,0 +1,104 @@
+/* ui_kit.css — the shared look of FLEX's small controls (loaded by index.html).
+ *
+ * The rule: a SWITCH takes effect now (show/hide, on/off); a CHECKBOX ticks
+ * items to act on later ("Recent" lists: tick several, then Load). Panel
+ * checkboxes are switches by default; give one the class .keep-box to keep it
+ * a plain checkbox.
+ *
+ * Switches are the real <input type="checkbox"> restyled (appearance: none),
+ * so ids, .checked, change events and Knockout bindings work as before;
+ * ui_kit.js adds role="switch" and window.uiSwitch() for JS-built ones.
+ * The knob is a background gradient rather than ::before, which not every
+ * engine draws on an <input>.
+ *
+ * Scope: #toolbar (every rail panel) and the minimap controls. Not the Potree
+ * sidebar, Cesium widgets or dialogs (.pj-modal: form fields saved with the
+ * dialog's button, so checkboxes by the rule).
+ */
+:root {
+  --ui-on: #3fae6e;                      /* switch on */
+  --ui-on-hover: #4cc07d;
+  --ui-off: rgba(255,255,255,.2);        /* switch off */
+  --ui-off-hover: rgba(255,255,255,.3);
+  --ui-knob: #fff;
+  --ui-focus: #8ab4ec;                   /* keyboard focus ring */
+  --ui-disabled-opacity: .4;
+  --ui-text: rgba(255,255,255,.85);      /* label text on the dark panels */
+  --ui-eye: #e8ece9;                     /* row eye, filled = shown */
+  --ui-eye-off: rgba(255,255,255,.45);
+  --ui-eye-gap: #1d232e;                 /* the ring inside a filled eye */
+}
+
+/* ── Switch: a checkbox in a panel, or .ui-sw on any checkbox ───────────── */
+input.ui-sw[type=checkbox],
+:is(#toolbar, #mini_map_controls) input[type=checkbox]:not(.keep-box) {
+  --sw-w: 28px; --sw-h: 15px; --sw-k: 11px;   /* main panels */
+  -webkit-appearance: none; appearance: none;
+  box-sizing: border-box; flex: none;
+  width: var(--sw-w); height: var(--sw-h); margin: 0 5px 0 0; padding: 0;
+  border: none; border-radius: calc(var(--sw-h) / 2);
+  vertical-align: middle; position: relative; top: -1px;
+  cursor: pointer;
+  background: radial-gradient(circle closest-side, var(--ui-knob) 92%, transparent 100%) no-repeat,
+              var(--ui-off);
+  background-size: var(--sw-k) var(--sw-k);
+  background-position: calc((var(--sw-h) - var(--sw-k)) / 2) 50%;
+  transition: background-position .15s, background-color .15s;
+}
+input.ui-sw[type=checkbox]:checked,
+:is(#toolbar, #mini_map_controls) input[type=checkbox]:not(.keep-box):checked {
+  background-color: var(--ui-on);
+  background-position: calc(100% - (var(--sw-h) - var(--sw-k)) / 2) 50%;
+}
+/* the gradient's base colour is a layer, so hover/checked change it through background-color on top */
+input.ui-sw[type=checkbox]:not(:checked):hover:not(:disabled),
+:is(#toolbar, #mini_map_controls) input[type=checkbox]:not(.keep-box):not(:checked):hover:not(:disabled) {
+  background-color: var(--ui-off-hover);
+}
+input.ui-sw[type=checkbox]:checked:hover:not(:disabled),
+:is(#toolbar, #mini_map_controls) input[type=checkbox]:not(.keep-box):checked:hover:not(:disabled) {
+  background-color: var(--ui-on-hover);
+}
+input.ui-sw[type=checkbox]:focus-visible,
+:is(#toolbar, #mini_map_controls) input[type=checkbox]:not(.keep-box):focus-visible {
+  outline: 2px solid var(--ui-focus); outline-offset: 2px;
+}
+input.ui-sw[type=checkbox]:focus:not(:focus-visible),
+:is(#toolbar, #mini_map_controls) input[type=checkbox]:not(.keep-box):focus:not(:focus-visible) { outline: none; }
+input.ui-sw[type=checkbox]:disabled,
+:is(#toolbar, #mini_map_controls) input[type=checkbox]:not(.keep-box):disabled {
+  opacity: var(--ui-disabled-opacity); cursor: not-allowed;
+}
+/* Compact sizes for dense rows. */
+input.ui-sw-sm[type=checkbox] { --sw-w: 24px; --sw-h: 13px; --sw-k: 9px; }
+input.ui-sw-xs[type=checkbox] { --sw-w: 20px; --sw-h: 11px; --sw-k: 7px; }
+
+/* Label text beside a switch: readable on the dark panels, aligned with it. */
+/* :where() keeps this weaker than any class that sets its own colour. */
+:where(#toolbar) label, :where(#toolbar) .sw-row { color: var(--ui-text); }
+.sw-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; cursor: pointer; font-size: 11px; }
+.sw-row > input[type=checkbox] { margin: 0; top: 0; }
+/* A label around a switch: pointer, and the panels' 11px text (some had none
+   and came out at the page's 16px). Weakest possible, so any set size wins. */
+:where(#toolbar label:has(> input[type=checkbox]:not(.keep-box))) { cursor: pointer; font-size: 11px; }
+
+/* ── Switch drawn as a span (inside a button that is the control) ──────────
+   <button class="on"><span class="ui-sw"></span>Labels</button>; the button
+   carries role="switch" and aria-checked. */
+span.ui-sw { --sw-w: 28px; --sw-h: 15px; --sw-k: 11px; display: inline-block; flex: none; position: relative;
+  width: var(--sw-w); height: var(--sw-h); border-radius: calc(var(--sw-h) / 2); background: var(--ui-off); transition: background .15s; vertical-align: middle; }
+span.ui-sw::after { content: ""; position: absolute; top: calc((var(--sw-h) - var(--sw-k)) / 2); left: calc((var(--sw-h) - var(--sw-k)) / 2);
+  width: var(--sw-k); height: var(--sw-k); border-radius: 50%; background: var(--ui-knob); transition: left .15s; }
+.on > span.ui-sw, span.ui-sw.on { background: var(--ui-on); }
+.on > span.ui-sw::after, span.ui-sw.on::after { left: calc(var(--sw-w) - var(--sw-k) - (var(--sw-h) - var(--sw-k)) / 2); }
+span.ui-sw.ui-sw-sm { --sw-w: 24px; --sw-h: 13px; --sw-k: 9px; }
+span.ui-sw.ui-sw-xs { --sw-w: 20px; --sw-h: 11px; --sw-k: 7px; }
+
+/* ── Row eye (Caves, Surface, map layers): tri-state show/hide/load ─────────
+   .on = shown (filled), .half = loaded but hidden (outline), neither = not
+   loaded (faint outline). .ui-eye-sm in folder/sub rows. */
+.ui-eye { width: 13px; height: 13px; flex: none; box-sizing: border-box; border: 1.5px solid var(--ui-eye-off); border-radius: 3px; background: none; padding: 0; cursor: pointer; }
+.ui-eye.on { background: var(--ui-eye); border-color: var(--ui-eye); box-shadow: inset 0 0 0 2px var(--ui-eye-gap); }
+.ui-eye.half { border-color: var(--ui-eye); }
+.ui-eye.ui-eye-sm { width: 11px; height: 11px; }
+.ui-eye:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 1px; }

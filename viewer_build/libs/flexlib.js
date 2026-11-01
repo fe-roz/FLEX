@@ -178,10 +178,22 @@
 
   // ── Documents: kinds (per document, or per page when a file mixes them) ──
   // Dates may be approximate: "1994-07-16", "1994-07", "1994", "1970s", "c. 1975".
-  const DOC_KINDS = ['sketch-plan', 'sketch-profile', 'cross-sections', 'shot-table', 'trip-report', 'map', 'photo',
+  const DOC_KINDS = ['sketch-plan', 'sketch-profile', 'cross-sections', 'shot-table', 'trip-report', 'map', 'photo', 'video',
                      'letter', 'notes', 'other'];
   const DOC_KIND_LABELS = { 'sketch-plan': 'Sketch (plan)', 'sketch-profile': 'Sketch (profile)', 'cross-sections': 'Cross-sections',
-    'shot-table': 'Shot table', 'trip-report': 'Trip report', map: 'Map', photo: 'Photo', letter: 'Letter', notes: 'Notes', other: 'Other' };
+    'shot-table': 'Shot table', 'trip-report': 'Trip report', map: 'Map', photo: 'Photo', video: 'Video', letter: 'Letter', notes: 'Notes', other: 'Other' };
+  // Media, shown apart from the papers: 'video' (its kind, or the original is a
+  // video file), 'photo' (its kind, or no kind and only photo images), else ''.
+  const VIDEO_EXT = /^(mp4|m4v|mov|webm|mkv|avi)$/i, PHOTO_EXT = /^(jpe?g|png|webp|heic|heif|gif)$/i;
+  function docMedia(d) {
+    if (!d) return '';
+    if (d.kind === 'video' || (d.file && VIDEO_EXT.test(d.file.ext || ''))) return 'video';
+    if (d.kind === 'photo') return 'photo';
+    if (d.kind) return '';
+    if (d.file) return PHOTO_EXT.test(d.file.ext || '') ? 'photo' : '';
+    const ps = d.pages || [];
+    return ps.length && ps.every(p => PHOTO_EXT.test(String(p.name || '').split('.').pop()) && !/\.(tiff?|pdf)\b/i.test(p.name || '')) ? 'photo' : '';
+  }
   // A date to sort by (approximate dates sort at their start): "1970s" → "1970".
   function dateKey(d) {
     const s = String(d || '');
@@ -419,6 +431,7 @@
           if (e.lastUsed != null) l.lastUsed = String(e.lastUsed);
           if (e.blob != null) l.blob = String(e.blob);                         // a data file stored by fingerprint ("<sha>.<ext>")
           if (Array.isArray(e.bounds) && e.bounds.length === 4 && e.bounds.every(Number.isFinite)) l.bounds = e.bounds.map(Number);   // a map image: [west, south, east, north]
+          ['minZoom', 'maxZoom'].forEach(k => { if (Number.isInteger(e[k]) && e[k] >= 0 && e[k] <= 24) l[k] = e[k]; });          // tiles: the levels there are (none asked for outside them)
           if (e.order != null) l.order = Number(e.order);
           if (e.removed != null) l.removed = !!e.removed;
           l.updated = { t: e.t, who: e.who };
@@ -554,6 +567,7 @@
       if (p.kind === 'project') return p.pid === S.id;
       if (p.cave) return !!S.caves[p.cave];
       if (p.kind === 'lead') return !!S.leads[p.lead];
+      if (p.kind === 'feature') return !!(S.features && S.features[p.feature]);
       return false;
     });
   }
@@ -926,7 +940,7 @@
 
   return {
     FORMAT, FT, DOCS, projScope, scopeProject, sha256, uid, clone, nowIso, same, cmp, sortEntries, surveyCode,
-    T, parseTarget, areaHas, DOC_KINDS, DOC_KIND_LABELS, dateKey, resolveProposals, reviewQueue, causalOrder, LEAD, LEAD_FIELDS, leadLists, statusLabel, leadActive, heads,
+    T, parseTarget, areaHas, DOC_KINDS, DOC_KIND_LABELS, docMedia, dateKey, resolveProposals, reviewQueue, causalOrder, LEAD, LEAD_FIELDS, leadLists, statusLabel, leadActive, heads,
     replayProject, replayDocs, caveForName, liveCaves, notesOn, leadsOn,
     docInProject, docInbox, docsOf, docsForStation, docsForTarget, pageFor,
     segmentsOf, segmentIndex, segmentsAt, proposalTarget, segmentStates, liveCavefiles, liveLayers,

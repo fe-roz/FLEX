@@ -98,6 +98,9 @@ const server = http.createServer((req, res) => {
         handleExportStatus(req, res, sanitizedPath.slice('/api/export/status/'.length));
     } else if (sanitizedPath.startsWith('/api/export/download/') && req.method === 'GET') {
         handleExportDownload(req, res, sanitizedPath.slice('/api/export/download/'.length));
+    // ── A project's own terrain + hillshade from the LiDAR (terrain_generate.js) ──
+    } else if (sanitizedPath.startsWith('/api/terrain/')) {
+        terrainGen.handle(req, res, sanitizedPath.slice('/api/terrain/'.length));
     // ── LiDAR derivations (vegetation density, voids) ────────────────────────
     } else if (sanitizedPath === '/api/lidar/derive' && req.method === 'POST') {
         handleLidarDerive(req, res);
@@ -695,6 +698,8 @@ const CONDA_PYTHON = process.env.FLEX_PYTHON || (process.platform === 'win32'
   : path.join(os.homedir(), 'miniconda3', 'envs', 'entwine', 'bin', 'python'));
 const EXPORT_SCRIPT = path.join(__dirname, 'export_terrain.py');
 const EXPORT_OUT_DIR = path.join(__dirname, 'user_files', 'exports');
+// The same pipeline run for a project: its DEM as a terrain patch, its hillshade as map tiles.
+const terrainGen = require('./terrain_generate')({ python: CONDA_PYTHON, script: EXPORT_SCRIPT, library });
 
 function handleExportTerrain(req, res) {
     let body = '';

@@ -3966,43 +3966,78 @@ async function _caltopoHasKey(force) {
 const _caltopoMapId = u => (String(u || '').match(/\/m\/([A-Za-z0-9]+)/) || [])[1] || null;
 const _ctColor = (c, d) => { c = String(c || '').replace(/^#/, ''); return /^[0-9a-f]{6}$/i.test(c) ? Cesium.Color.fromCssColorString('#' + c) : Cesium.Color.fromCssColorString(d); };
 // CalTopo map JSON (result.state.features) → a data source; folders are parent
-// entities, so hiding one hides what is in it.
-function _caltopoJsonToDataSource(result) {
-  const ds = new Cesium.CustomDataSource('CalTopo');
+// entities, so hiding one hides what is in it. Refreshes update the same data
+// source in place: a feature that didn't change keeps its entity, so its line
+// isn't draped on the ground again (that is the expensive part); a map that
+// didn't change at all costs nothing. Long tracks are drawn simplified (as
+// project features are, project_features.js): within ~2 m, at most 2000 points.
+function _ctSimplify(coords) {
+  const S = window._pjfState && window._pjfState.simplify;
+  return S && coords.length > 50 ? S(coords) : coords;
+}
+function _caltopoJsonToDataSource(result, ds) {
+  ds = ds || new Cesium.CustomDataSource('CalTopo');
   const feats = (result && result.state && result.state.features) || [];
-  const folders = new Map();
-  feats.filter(f => f.properties && f.properties.class === 'Folder').forEach(f => {
-    folders.set(f.id, ds.entities.add(new Cesium.Entity({ id: 'ctf-' + f.id, name: f.properties.title || 'Folder' })));
-  });
-  feats.filter(f => f.properties && f.properties.class === 'Folder' && f.properties.folderId && folders.has(f.properties.folderId))
-    .forEach(f => { folders.get(f.id).parent = folders.get(f.properties.folderId); });
-  let n = 0;
-  feats.forEach(f => {
-    const p = f.properties || {}, g = f.geometry;
-    if (!g || p.class === 'Folder' || !g.coordinates) return;
-    const base = { id: 'ct-' + f.id, name: p.title || '', description: p.description || '', parent: folders.get(p.folderId) };
-    const P = c => Cesium.Cartesian3.fromDegrees(c[0], c[1], 0);
-    try {
-      if (g.type === 'Point') {
-        const col = _ctColor(p['marker-color'], '#ff8800');
-        ds.entities.add(Object.assign(base, { position: P(g.coordinates),
-          point: { pixelSize: 9, color: col, outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: 5000 },
-          label: window._pjfLabel ? window._pjfLabel(p.title || '') : { text: p.title || '', font: '15px sans-serif', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
-                   style: Cesium.LabelStyle.FILL_AND_OUTLINE, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -10),
-                   heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 8000), disableDepthTestDistance: 5000 } }));
-      } else if (g.type === 'LineString') {
-        ds.entities.add(Object.assign(base, { polyline: { positions: g.coordinates.map(P), width: Math.max(1, +p['stroke-width'] || 2), material: _ctColor(p.stroke, '#ff0000'), clampToGround: true } }));
-      } else if (g.type === 'Polygon') {
-        const ring = (g.coordinates[0] || []).map(P);
-        const col = _ctColor(p.stroke || p.fill, '#ff0000');
-        ds.entities.add(Object.assign(base, { polygon: { hierarchy: ring, material: _ctColor(p.fill || p.stroke, '#ff0000').withAlpha(+p['fill-opacity'] || 0.15), heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
-          polyline: { positions: ring, width: Math.max(1, +p['stroke-width'] || 2), material: col, clampToGround: true } }));
-      } else return;
-      n++;
-    } catch (e) { console.warn('[caltopo] feature skipped', f.id, e); }
-  });
-  ds._ctCount = n;
+  const E = ds.entities, keep = new Set();
+  ds.entities.suspendEvents();
+  try {
+    feats.filter(f => f.properties && f.properties.class === 'Folder').forEach(f => {
+      const id = 'ctf-' + f.id; keep.add(id);
+      const e = E.getById(id) || E.add(new Cesium.Entity({ id }));
+      e.name = f.properties.title || 'Folder';
+    });
+    feats.filter(f => f.properties && f.properties.class === 'Folder').forEach(f => {
+      const e = E.getById('ctf-' + f.id), par = f.properties.folderId && E.getById('ctf-' + f.properties.folderId);
+      if (e && e.parent !== (par || undefined)) e.parent = par || undefined;
+    });
+    let n = 0;
+    feats.forEach(f => {
+      const p = f.properties || {}, g = f.geometry;
+      if (!g || p.class === 'Folder' || !g.coordinates) return;
+      const id = 'ct-' + f.id;
+      const sig = JSON.stringify([g, p.title, p.description, p.stroke, p['stroke-width'], p['marker-color'], p.fill, p['fill-opacity'], p.folderId]);
+      const had = E.getById(id);
+      if (had && had._ctSig === sig) { keep.add(id); n++; return; }
+      if (had) E.remove(had);
+      const base = { id, name: p.title || '', description: p.description || '', parent: E.getById('ctf-' + p.folderId) || undefined };
+      const P = c => Cesium.Cartesian3.fromDegrees(c[0], c[1], 0);
+      let ent = null;
+      try {
+        if (g.type === 'Point') {
+          const col = _ctColor(p['marker-color'], '#ff8800');
+          ent = E.add(Object.assign(base, { position: P(g.coordinates),
+            point: { pixelSize: 9, color: col, outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: 5000 },
+            label: window._pjfLabel ? window._pjfLabel(p.title || '') : { text: p.title || '', font: '15px sans-serif', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
+                     style: Cesium.LabelStyle.FILL_AND_OUTLINE, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -10),
+                     heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 8000), disableDepthTestDistance: 5000 } }));
+        } else if (g.type === 'LineString') {
+          ent = E.add(Object.assign(base, { polyline: { positions: _ctSimplify(g.coordinates).map(P), width: Math.max(1, +p['stroke-width'] || 2), material: _ctColor(p.stroke, '#ff0000'), clampToGround: true } }));
+        } else if (g.type === 'Polygon') {
+          const ring = _ctSimplify(g.coordinates[0] || []).map(P);
+          const col = _ctColor(p.stroke || p.fill, '#ff0000');
+          ent = E.add(Object.assign(base, { polygon: { hierarchy: ring, material: _ctColor(p.fill || p.stroke, '#ff0000').withAlpha(+p['fill-opacity'] || 0.15), heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
+            polyline: { positions: ring, width: Math.max(1, +p['stroke-width'] || 2), material: col, clampToGround: true } }));
+        }
+      } catch (e) { console.warn('[caltopo] feature skipped', f.id, e); }
+      if (ent) { ent._ctSig = sig; keep.add(id); n++; }
+    });
+    E.values.slice().forEach(e => { if (!keep.has(e.id)) E.remove(e); });      // gone from the map
+    ds._ctCount = n;
+  } finally { ds.entities.resumeEvents(); }
   return ds;
+}
+window._ctApplyJson = _caltopoJsonToDataSource;                // tests
+// Long KML lines (public maps, no key): simplified once after loading.
+function _ctSimplifyKml(ds) {
+  const now = Cesium.JulianDate.now();
+  ds.entities.values.forEach(e => {
+    if (!e.polyline || !e.polyline.positions || !e.polyline.positions.isConstant) return;
+    const ps = e.polyline.positions.getValue(now);
+    if (!ps || ps.length <= 50) return;
+    const ll = ps.map(c => { const k = Cesium.Cartographic.fromCartesian(c); return [Cesium.Math.toDegrees(k.longitude), Cesium.Math.toDegrees(k.latitude), k.height]; });
+    const s = _ctSimplify(ll);
+    if (s.length < ps.length) e.polyline.positions = s.map(c => Cesium.Cartesian3.fromDegrees(c[0], c[1], c[2]));
+  });
 }
 
 async function _fetchCaltopoKml() {
@@ -4012,12 +4047,24 @@ async function _fetchCaltopoKml() {
     try {
       _setCaltopoStatus('updating (private map)…', '#aaa');
       const r = await fetch('/api/caltopo/map?id=' + encodeURIComponent(mapId));
-      const j = await r.json();
+      const txt = await r.text();
+      let j; try { j = JSON.parse(txt); } catch (_) { j = {}; }
       if (!r.ok) throw new Error(j.error || r.statusText);
-      const ds = _caltopoJsonToDataSource(j);
-      if (caltopoState.dataSource) cesiumViewer.dataSources.remove(caltopoState.dataSource, true);
-      cesiumViewer.dataSources.add(ds);
-      caltopoState.dataSource = ds;
+      const ds0 = caltopoState.dataSource;
+      if (ds0 && ds0._ctJson && caltopoState._ctText === txt && caltopoState._ctMapId === mapId) {       // nothing changed: nothing to do
+        _setCaltopoStatus(`✓ private map, ${ds0._ctCount} feature(s), checked ${new Date().toLocaleTimeString()}`, '#8f8');
+        renderCaltopoStatus();
+        return;
+      }
+      const same = ds0 && ds0._ctJson && caltopoState._ctMapId === mapId;
+      const ds = _caltopoJsonToDataSource(j, same ? ds0 : null);
+      ds._ctJson = true;
+      caltopoState._ctText = txt; caltopoState._ctMapId = mapId;
+      if (!same) {
+        if (ds0) cesiumViewer.dataSources.remove(ds0, true);
+        cesiumViewer.dataSources.add(ds);
+        caltopoState.dataSource = ds;
+      }
       try { syncMinimapCaltopoFeatures(ds); } catch (_) {}
       if (window._onVectorSourcesChanged) window._onVectorSourcesChanged();
       _setCaltopoStatus(`✓ private map, ${ds._ctCount} feature(s), ${new Date().toLocaleTimeString()}`, '#8f8');
@@ -4031,11 +4078,21 @@ async function _fetchCaltopoKml() {
   const proxiedUrl = ProxyUrlGenerator.generateProxyUrl(caltopoState.url);
   try {
     _setCaltopoStatus('updating…', '#aaa');
-    const ds = await Cesium.KmlDataSource.load(proxiedUrl, {
+    // The KML as text first: unchanged since last time → keep what is drawn.
+    let kml = null;
+    try { const rr = await fetch(proxiedUrl); if (rr.ok) kml = await rr.text(); } catch (_) {}
+    if (kml && caltopoState.dataSource && caltopoState._ctText === kml) {
+      _setCaltopoStatus(`✓ checked ${new Date().toLocaleTimeString()}`, '#8f8');
+      renderCaltopoStatus();
+      return;
+    }
+    const ds = await Cesium.KmlDataSource.load(kml ? new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' }) : proxiedUrl, {
       camera:        cesiumViewer.scene.camera,
       canvas:        cesiumViewer.scene.canvas,
       clampToGround: true,
     });
+    caltopoState._ctText = kml; caltopoState._ctMapId = null;
+    _ctSimplifyKml(ds);
     if (caltopoState.dataSource) {
       cesiumViewer.dataSources.remove(caltopoState.dataSource, true);
     }
@@ -4086,7 +4143,7 @@ function clearCaltopo() {
   _clearCaltopoTimers();
   if (caltopoState.dataSource) {
     cesiumViewer.dataSources.remove(caltopoState.dataSource, true);
-    caltopoState.dataSource = null;
+    caltopoState.dataSource = null; caltopoState._ctText = null; caltopoState._ctMapId = null;
   }
   if (miniMapCaltopoSource) miniMapCaltopoSource.clear();
   caltopoState.url = null;
@@ -4559,7 +4616,7 @@ function _renderPltRecents() {
     for (const n of [..._recentTicks]) if (!_recents.plt.some(r => r.name === n)) _recentTicks.delete(n);
     html += head('Recent PLT');
     html += _recents.plt.map((r, i) => `<div style="display:flex;align-items:center;gap:4px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
-      <input type="checkbox" ${_recentTicks.has(r.name) ? 'checked' : ''} ${r.georef ? '' : 'disabled'} onchange="window._recentTick(${i}, this.checked)"
+      <input type="checkbox" class="keep-box" ${_recentTicks.has(r.name) ? 'checked' : ''} ${r.georef ? '' : 'disabled'} onchange="window._recentTick(${i}, this.checked)"
         title="${r.georef ? 'Tick to load or save several at once' : 'Load it once to place it first'}" style="margin:0;flex-shrink:0;">
       <div style="flex:1;min-width:0;">
         <div style="font-size:9px;color:rgba(255,255,255,0.75);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.name)}</div>
@@ -5465,7 +5522,7 @@ function _renderCaveList() {
     return `
       <div style="padding:3px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
         <div class="lp-row" style="gap:4px;">
-          <input type="checkbox" ${imp.visible ? 'checked' : ''} onchange="window._toggleCaveImport(${i}, this.checked)" style="margin:0; flex-shrink:0;">
+          <input type="checkbox" class="ui-sw ui-sw-sm" role="switch" ${imp.visible ? 'checked' : ''} onchange="window._toggleCaveImport(${i}, this.checked)" style="margin:0; flex-shrink:0;" aria-label="Show ${imp.name}">
           <span class="lp-row-name" style="font-size:10px; cursor:pointer;" title="${imp.name}" onclick="window._toggleCaveInfo(${i})">${imp.name}</span>
           <button onclick="window._flyToCave(${i})" style="background:none;border:none;color:rgba(255,255,255,0.5);cursor:pointer;font-size:12px;padding:0 2px;flex-shrink:0;" title="Fly to this cave">⌖</button>
           <button onclick="window._toggleCaveInfo(${i})" style="background:none;border:none;color:rgba(255,255,255,0.4);cursor:pointer;font-size:11px;padding:0 2px;flex-shrink:0;" title="Info / Edit">ℹ</button>
@@ -6372,8 +6429,8 @@ function _labelsPanelEl() {
       <button onclick="window._labelsClose()" style="background:none;border:none;color:#888;cursor:pointer;font-size:14px;padding:0 2px;">✕</button>
     </div>
     <div id="labels-cave-name" style="font-size:11px;opacity:0.5;margin-bottom:6px;"></div>
-    <label style="display:flex;align-items:center;gap:6px;font-size:11px;margin-bottom:8px;cursor:pointer;" title="The switch in the cave list hides every cave's area names">
-      <input type="checkbox" id="labels-show-cave" onchange="window._labelsShowCave(this.checked)" style="margin:0;"> Show this cave's area names
+    <label class="sw-row" style="margin-bottom:8px;" title="The switch in the cave list hides every cave's area names">
+      <input type="checkbox" class="ui-sw" role="switch" id="labels-show-cave" onchange="window._labelsShowCave(this.checked)"> Show this cave's area names
     </label>
     <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:8px;">Fly the camera to the spot, type a name and press Add: the label goes where the camera is.</div>
     <div style="display:flex;gap:6px;margin-bottom:6px;">
@@ -7837,12 +7894,9 @@ function renderLayerList() {
     handle.style.userSelect = 'none';
     handle.title = 'Drag to reorder';
 
-    // Visibility checkbox
-    const chk = document.createElement('input');
-    chk.type = 'checkbox';
-    chk.checked = !!layer.show;
-    chk.style.margin = '0';
-    chk.addEventListener('change', () => { layer.show = chk.checked; });
+    // Visibility switch (ui_kit.js)
+    const chk = window.uiSwitch(!!layer.show, on => { layer.show = on; }, null, { small: true });
+    chk.setAttribute('aria-label', 'Show ' + layer.name);
 
     // Name label
     const nameSpan = document.createElement('span');

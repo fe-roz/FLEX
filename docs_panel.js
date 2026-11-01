@@ -2,7 +2,8 @@
 //
 // Every file under the project folder but .flex (/api/lib/tree), as folders
 // with counts. A file FLEX knows as a document (its original, doc.file)
-// opens in the document viewer; any other file opens in a new tab
+// opens in the document viewer; a photo or video file in FLEX's viewer too
+// (closing it stops the video); any other file opens in a new tab
 // (/api/lib/file, read only). "To sort" is flagged when it has files.
 // The documents list (inbox, tags, ＋ Add files) follows below (project.js).
 (function () {
@@ -26,8 +27,10 @@
     finally { S.loading = false; }
     A.render();
   }
-  const icon = n => { const x = (n.split('.').pop() || '').toLowerCase();
-    return /^(mp4|m4v|mov|webm|mkv)$/.test(x) ? '🎞' : /^(jpe?g|png|webp|gif|tiff?)$/.test(x) ? '🖼' : x === 'pdf' ? '📄' : /^(plt|dat|svx|mak|th|tro)$/.test(x) ? '🕳' : /^(kml|kmz|gpx|geojson|json)$/.test(x) ? '🗺' : /^(txt|md|csv|docx?|odt|rtf)$/.test(x) ? '📝' : '•'; };
+  const VIDEO = /^(mp4|m4v|mov|webm|mkv|avi)$/, PHOTO = /^(jpe?g|png|webp|gif|heic)$/;
+  const ext = n => (n.split('.').pop() || '').toLowerCase();
+  const icon = n => { const x = ext(n);
+    return VIDEO.test(x) ? '🎞' : /^(jpe?g|png|webp|gif|tiff?)$/.test(x) ? '🖼' : x === 'pdf' ? '📄' : /^(plt|dat|svx|mak|th|tro)$/.test(x) ? '🕳' : /^(kml|kmz|gpx|geojson|json)$/.test(x) ? '🗺' : /^(txt|md|csv|docx?|odt|rtf)$/.test(x) ? '📝' : '•'; };
   const size = b => (b > 1 << 20 ? (b / (1 << 20)).toFixed(1) + ' MB' : b > 1024 ? Math.round(b / 1024) + ' kB' : b + ' B');
 
   function build(files) {
@@ -52,6 +55,9 @@
   function open(f) {
     const d = docsByPath().get(f.p);
     if (d && A.docOpen) { A.docOpen(d.id); return; }
+    // Photos and videos open in FLEX's viewer, where closing stops a video (in a tab of its own it plays on).
+    const x = ext(f.p);
+    if ((VIDEO.test(x) || PHOTO.test(x)) && A.fileOpen) { A.fileOpen(f.p); return; }
     window.open('/api/lib/file?project=' + encodeURIComponent(pj.pid) + '&path=' + encodeURIComponent(f.p), '_blank', 'noopener');
   }
 
@@ -105,7 +111,8 @@
         dir(T, 0);
       }
       paint();
-      b.appendChild(el('div', 'pj-note', `${S.tree.length} file${S.tree.length === 1 ? '' : 's'}. A file lives in one folder; what it is about shows in the documents below (tags). Files open read only.`));
+      const nPh = S.tree.filter(f => PHOTO.test(ext(f.p))).length, nVi = S.tree.filter(f => VIDEO.test(ext(f.p))).length;
+      b.appendChild(el('div', 'pj-note', `${S.tree.length} file${S.tree.length === 1 ? '' : 's'} (🖼 ${nPh} photo${nPh === 1 ? '' : 's'}, 🎞 ${nVi} video${nVi === 1 ? '' : 's'}). A file lives in one folder; what it is about shows in the documents below (tags). Files open read only.`));
     });
   }
 

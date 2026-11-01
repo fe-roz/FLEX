@@ -15,6 +15,9 @@
     <script src="https://cdn.jsdelivr.net/npm/popper.js@1.12.9/dist/umd/popper.min.js" integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.0.0/dist/js/bootstrap.min.js" integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl" crossorigin="anonymous"></script>
     <script src="settings.js"></script>
+    <!-- UI kit: switches, row eyes, their tokens (switch = takes effect now; .keep-box = tick to act later) -->
+    <link rel="stylesheet" href="ui_kit.css">
+    <script src="ui_kit.js"></script>
     <script src="proxy-url-generator.js"></script>
 
 
@@ -831,7 +834,7 @@
         <button type="button" data-target="#lidarDeriveCollapsible" title="Analyze the point clouds">🌿<small>Analyze</small></button>
         <div class="rail-grow"></div>
         <button type="button" data-target="#settingsCollapsible" title="Settings">⚙<small>Settings</small></button>
-        <button type="button" data-target="#helpCollapsible" title="Help">ⓘ<small>Help</small></button>
+        <button type="button" id="rail-help" aria-pressed="false" title="Help: the FLEX guide">ⓘ<small>Help</small></button>
       </nav>
       <div id="toolbar" style="z-index: 10;">
 
@@ -1695,60 +1698,6 @@
           </div>
         </div>
 
-        <!-- ══════════════ HELP ════════════════════════════════════════════ -->
-        <div class="collapse" id="helpCollapsible">
-          <div class="lp-panel-wrap">
-            <div style="padding:2px 0; font-size:11px; color:rgba(255,255,255,0.8); line-height:1.75;">
-
-              <div id="help-guide-links" style="margin-bottom:12px;">
-                <button type="button" class="btn btn-sm btn-primary" data-guide="" style="font-size:12px; width:100%; margin-bottom:6px;">📘 Open the FLEX guide</button>
-                <div style="display:flex; flex-wrap:wrap; gap:4px;">
-                  <button type="button" class="btn btn-sm btn-secondary" data-guide="setup" style="font-size:10.5px; padding:1px 7px;">Setting up</button>
-                  <button type="button" class="btn btn-sm btn-secondary" data-guide="first" style="font-size:10.5px; padding:1px 7px;">First area</button>
-                  <button type="button" class="btn btn-sm btn-secondary" data-guide="screen" style="font-size:10.5px; padding:1px 7px;">The screen</button>
-                  <button type="button" class="btn btn-sm btn-secondary" data-guide="tree" style="font-size:10.5px; padding:1px 7px;">Projects</button>
-                  <button type="button" class="btn btn-sm btn-secondary" data-guide="saving" style="font-size:10.5px; padding:1px 7px;">Saving</button>
-                  <button type="button" class="btn btn-sm btn-secondary" data-guide="caltopo" style="font-size:10.5px; padding:1px 7px;">CalTopo</button>
-                  <button type="button" class="btn btn-sm btn-secondary" data-guide="export" style="font-size:10.5px; padding:1px 7px;">Phone app</button>
-                  <button type="button" class="btn btn-sm btn-secondary" data-guide="trouble" style="font-size:10.5px; padding:1px 7px;">Problems</button>
-                </div>
-              </div>
-              <div style="margin-bottom:10px;">
-                <a href="https://github.com/ferozfeerasta/FLEX" target="_blank" rel="noopener noreferrer"
-                  style="color:#7bbfff; font-size:11px; text-decoration:none;">
-                  📖 FLEX on GitHub ↗
-                </a>
-              </div>
-
-              <div style="font-size:9px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:rgba(255,255,255,0.4); margin-bottom:3px;">Movement</div>
-              [F] Toggle fly mode<br>
-              [W/A/S/D] Fly forward / left / back / right<br>
-              [Q / E] Fly down / up<br>
-              [Scroll] Flight speed<br>
-
-              <div style="font-size:9px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:rgba(255,255,255,0.4); margin:8px 0 3px;">View</div>
-              [H] Hide/show terrain<br>
-              [L] Toggle LiDAR datasets<br>
-              [O] Toggle OpenTopo datasets<br>
-              [N] Cycle compass style<br>
-              [M] Toggle mini-map<br>
-
-              <div style="font-size:9px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:rgba(255,255,255,0.4); margin:8px 0 3px;">Labeling</div>
-              [Z] Small POI (no name)<br>
-              [X] Medium POI (name prompt)<br>
-              [C] Large POI (name prompt)<br>
-              [R] Start / end route<br>
-              [B] Add waypoint to route<br>
-              [K] Download KMZ<br>
-              [V] Toggle depth measurement<br>
-
-              <div style="font-size:9px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:rgba(255,255,255,0.4); margin:8px 0 3px;">Point Cloud</div>
-              [1–5] Toggle classification layers<br>
-              [0] Remove all point clouds<br>
-            </div>
-          </div>
-        </div>
-
         <!-- Coordinates display -->
         <div style="display:block;" id="coord_container">
           <span>Coordinates: </span>
@@ -1850,7 +1799,6 @@
             '#leadsCollapsible',
             '#reviewCollapsible',
             '#lidarDeriveCollapsible',
-            '#helpCollapsible',
           ];
 
           document.querySelectorAll('#flex-rail [data-target], #pj-top-btn').forEach(button => {
@@ -2065,6 +2013,7 @@
 <script src="project_features.js"></script>
 <!-- One details panel on the right: card, segment panel, map feature info -->
 <script src="inspector.js"></script>
+<script src="info_panel.js"></script>
 <!-- The icon strip down the left -->
 <script src="flex_rail.js"></script>
 <!-- 🕳 Caves: project | My data -->
@@ -2649,6 +2598,8 @@
       return true;
     };
     window._exportGetPolygon = () => (_exportPoly ? _exportPoly.map(p => p.slice()) : null);
+    // The area as it is now (box, polygon or nothing), for others that use it (⛰ project terrain, custom_layers.js).
+    window._exportArea = () => (!_bboxCorner1 || !_bboxCorner2) ? null : { bbox: [Math.min(_bboxCorner1[0], _bboxCorner2[0]), Math.min(_bboxCorner1[1], _bboxCorner2[1]), Math.max(_bboxCorner1[0], _bboxCorner2[0]), Math.max(_bboxCorner1[1], _bboxCorner2[1])], polygon: window._exportGetPolygon(), crossing: !!(_exportPoly && _polySelfCrossing(_exportPoly)), label: _exportPolyLabel };
     function _polySyncBox() {
       if (!_exportPoly) return;
       const lons = _exportPoly.map(p => p[0]), lats = _exportPoly.map(p => p[1]);

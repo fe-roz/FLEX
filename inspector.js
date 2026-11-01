@@ -5,7 +5,9 @@
 //   - the segment panel (#pjs-dock, project_segments.js), which keeps the
 //     card at its own top while it is open,
 //   - Cesium's info box for anything else on the map (points, data files,
-//     CalTopo features), its own title bar replaced by the panel's.
+//     CalTopo features), its own title bar replaced by the panel's,
+//   - the brief info of a clicked map feature, lead or point (info_panel.js,
+//     setBrief); it can hide Cesium's info box when it says the same.
 // Nothing here knows what those show: the elements are moved in as they
 // appear, and the panel shows while any of them is open.
 (function () {
@@ -20,8 +22,9 @@
   const close = mk('button', 'ins-x', '×'); close.type = 'button'; close.title = 'Close (Esc)'; close.setAttribute('aria-label', 'Close');
   head.append(title, close);
   const crumbSlot = mk('nav', 'ins-crumbs'); crumbSlot.setAttribute('aria-label', 'Selected');
-  const cardSlot = mk('div', 'ins-card'), infoSlot = mk('div', 'ins-info'), actSlot = mk('div', 'ins-acts'), mainSlot = mk('div', 'ins-main');
-  box.append(grip, head, crumbSlot, cardSlot, infoSlot, actSlot, mainSlot);
+  const cardSlot = mk('div', 'ins-card'), infoSlot = mk('div', 'ins-info'), briefSlot = mk('div', 'ins-brief'), actSlot = mk('div', 'ins-acts'), mainSlot = mk('div', 'ins-main');
+  box.append(grip, head, crumbSlot, cardSlot, infoSlot, briefSlot, actSlot, mainSlot);
+  let brief = null;                                   // { node, title, hideInfo } (info_panel.js)
   document.body.appendChild(box);
 
   // ── Width ──────────────────────────────────────────────────────────────
@@ -48,7 +51,15 @@
   const infoBox = () => { const v = V(); return v && v.infoBox; };
   // Cesium's own description: not for a whole cave, survey or segment (selection.js) — only the clicked station's.
   const selLevel = () => (window._sel ? window._sel.level() : null);
-  const infoOpen = () => { const ib = infoBox(); const l = selLevel(); return !!(ib && ib.viewModel.showInfo && V().selectedEntity) && !dockOpen() && (!l || l === 'station'); };
+  const infoOpen = () => { const ib = infoBox(); const l = selLevel(); return !!(ib && ib.viewModel.showInfo && V().selectedEntity) && !dockOpen() && (!l || l === 'station') && !(brief && brief.hideInfo); };
+  const briefOpen = () => !!brief && !cardOpen() && !dockOpen();
+  /** The brief info of what was clicked (info_panel.js); null takes it away. */
+  function setBrief(b) {
+    brief = b || null;
+    briefSlot.textContent = '';
+    if (brief && brief.node) briefSlot.appendChild(brief.node);
+    refresh();
+  }
 
   // Elements made elsewhere are put into their slot as they appear.
   function adopt() {
@@ -63,22 +74,25 @@
   }
   function refresh() {
     adopt();
-    const c = cardOpen(), d = dockOpen(), i = infoOpen();
-    const any = c || d || i;
+    const c = cardOpen(), d = dockOpen(), i = infoOpen(), br = briefOpen();
+    const any = c || d || i || br;
     box.classList.toggle('open', any);
     document.body.classList.toggle('ins-open', any);
     box.classList.toggle('with-dock', d);
     box.classList.toggle('no-info', !i);
+    box.classList.toggle('no-brief', !br);
     // The title: the card and the segment panel have their own; Cesium's
     // info box gets the panel's (its own title bar is hidden).
     let t = '';
-    if (!c && !d && i) { const e = V().selectedEntity; t = (e && e.name) || infoBox().viewModel.titleText || ''; }
+    if (!c && !d && br && brief.title) t = brief.title;
+    else if (!c && !d && i) { const e = V().selectedEntity; t = (e && e.name) || infoBox().viewModel.titleText || ''; }
     if (title.textContent !== t) title.textContent = t;
     box.classList.toggle('titled', !!t);
     crumbs(any);
     if (i) fitInfo();
     // Everything closed some other way (a card's or the segment panel's own ✕): nothing is selected.
     if (!any && window._sel && window._sel.active()) setTimeout(() => { if (!cardOpen() && !dockOpen() && !infoOpen()) window._sel.clear(); }, 50);
+    if (!any && window._info) window._info.panelClosed();
   }
   // Cave › Survey › Segment › Station, each part clickable (selection.js).
   let lastCrumbs = '';
@@ -111,6 +125,7 @@
     if (cardOpen() && x) x.click();
     const v = V(); if (v && v.selectedEntity) v.selectedEntity = undefined;
     if (window._sel) window._sel.clear();
+    if (window._info) window._info.clear();
     setTimeout(refresh, 0);
   }
   close.addEventListener('click', closeAll);
@@ -168,6 +183,8 @@
   #flex-inspector .ins-card { flex: none; max-height: 60%; overflow: auto; }
   #flex-inspector.with-dock .ins-card { display: none; }
   #flex-inspector .ins-info { flex: 0 1 auto; min-height: 0; overflow: auto; }
+  #flex-inspector .ins-brief { flex: 0 1 auto; min-height: 0; overflow: auto; }
+  #flex-inspector.no-brief .ins-brief { display: none; }
   #flex-inspector .ins-acts { flex: none; padding: 0 12px; }
   #flex-inspector .ins-acts:has(#floating-action-btn[style*="display: block"]) { padding: 4px 12px 10px; }
   #flex-inspector.with-dock .ins-acts { display: none; }
@@ -193,5 +210,5 @@
   #flex-inspector .cesium-infoBox-iframe { width: 100%; }`;
   document.head.appendChild(style);
 
-  window._inspector = { refresh, close: closeAll, el: box };
+  window._inspector = { refresh, close: closeAll, el: box, setBrief, brief: () => brief };
 })();

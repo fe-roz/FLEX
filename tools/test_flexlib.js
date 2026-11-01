@@ -376,5 +376,17 @@ const pid = 'proj1', cid = 'cave1', cid2 = 'cave2';
   ok('tile link kept as a layer', S.layers.t1.url === 'https://t/{z}/{x}/{y}.png' && L.liveLayers(S).length === 3);
 }
 
+// Tiles a project made (its hillshade): bounds and the zoom levels there are; bad levels ignored.
+{
+  const PL = (op, d) => Object.assign({ id: 'mz' + Math.random().toString(36).slice(2, 8), t: '2026-11-01T00:00:00Z', who: 'T', dev: 'pc', op }, d);
+  const S = L.replayProject([PL('layer.set', { layer: 'hs1', kind: 'tiles', url: '/api/terrain/tiles/p1/Ridge/{z}/{x}/{y}.png', bounds: [-120.1, 38, -120, 38.1], minZoom: 14, maxZoom: 19, name: 'Hillshade' }),
+    PL('layer.set', { layer: 'hs2', kind: 'tiles', url: 'https://t/{z}/{x}/{y}.png', minZoom: -1, maxZoom: 2.5, name: 'Bad zooms' }),
+    PL('layer.set', { layer: 'hs3', kind: 'tiles', url: 'https://t/{z}/{x}/{y}.png', maxZoom: '18', name: 'Text zoom' })], 'p-mz');
+  ok('tiles keep bounds and zoom levels', S.layers.hs1.minZoom === 14 && S.layers.hs1.maxZoom === 19 && JSON.stringify(S.layers.hs1.bounds) === '[-120.1,38,-120,38.1]', S.layers.hs1);
+  ok('bad zoom levels are not kept', !('minZoom' in S.layers.hs2) && !('maxZoom' in S.layers.hs2) && !('maxZoom' in S.layers.hs3));
+  const S2 = L.replayProject([PL('layer.set', { layer: 'hs1', kind: 'tiles', url: 'u', minZoom: 14, maxZoom: 19 }), PL('layer.set', { layer: 'hs1', name: 'Renamed' })], 'p-mz');
+  ok('renaming keeps the zoom levels', S2.layers.hs1.maxZoom === 19 && S2.layers.hs1.name === 'Renamed');
+}
+
 console.log((fail ? 'FAILED ' : 'ok ') + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
