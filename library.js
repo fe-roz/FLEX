@@ -312,6 +312,21 @@ async function handle(req, res, rest, query) {
     if (req.method === 'POST' && rest === 'merge') return json(res, { added: merge(q.scope, JSON.parse((await body(req)).toString('utf8')), pidOf(q)) });
     if (req.method === 'GET' && rest === 'projects') return json(res, projectsOut());
     if (req.method === 'POST' && rest === 'projects') { const o = JSON.parse((await body(req, 1 << 16)).toString('utf8')); setProject(o.id, o.name); return json(res, projectsOut()); }
+    // A project's card numbers and footprint (computed by the page from its
+    // survey files, kept so the Projects list needn't read them every time).
+    if (rest === 'stats' && pidOf(q)) {
+      const pd = projDir(pidOf(q)), f = pd ? path.join(pd, '.flex', 'stats.json') : null;
+      if (req.method === 'GET') {
+        if (f) { try { return json(res, JSON.parse(fs.readFileSync(f, 'utf8'))); } catch (_) { return json(res, null); } }
+        try { return json(res, JSON.parse(kv()['stats:' + pidOf(q)] || 'null')); } catch (_) { return json(res, null); }
+      }
+      if (req.method === 'POST') {
+        const o = JSON.parse((await body(req, 4 << 20)).toString('utf8'));
+        if (f) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f + '.tmp', JSON.stringify(o)); fs.renameSync(f + '.tmp', f); }
+        else kvSet('stats:' + pidOf(q), JSON.stringify(o));
+        return json(res, { ok: true });
+      }
+    }
     if (req.method === 'GET' && rest === 'kv') return json(res, { v: kv()[q.k] ?? null });
     if (req.method === 'POST' && rest === 'kv') { const o = JSON.parse((await body(req, 1 << 20)).toString('utf8')); kvSet(o.k, o.v); return json(res, { ok: true }); }
     if (req.method === 'POST' && rest === 'blob') return json(res, putBlob(await body(req, MAX_BLOB + 1), String(q.ext || ''), q.h ? String(q.h) : null, pidOf(q)));

@@ -5093,7 +5093,47 @@ window._ws = {
   deleteSet: i => window._caveSetDelete(i),
   caveIndex: name => _caveImports.findIndex(x => x && x.name === name),
   caveVisible: name => { const x = _caveImports.find(c => c && c.name === name); return !!(x && x.visible !== false); },
+  caveGeometry: (text, georef) => _caveGeometry(text, georef),
 };
+
+// A cave's size and where it lies, from its survey file and placement,
+// without drawing it (project cards and footprints, projects_panel.js).
+// → { length, depth (m), stations, pts: [[lon, lat], …] (at most ~1500) } or null.
+function _caveGeometry(text, georef) {
+  if (!text || !georef) return null;
+  let parsed;
+  try { parsed = parsePLT(text); } catch (_) { return null; }
+  const imp = { parsed, georef: JSON.parse(JSON.stringify(georef)) };
+  let fn = null;
+  if (georef.mode === 'anchor') {
+    const a = georef.station === '__first__' ? parsed.segments[0]?.points[0]
+      : parsed.stations.find(s => s.name === georef.station) || parsed.segments[0]?.points[0];
+    if (!a) return null;
+    const cart = Cesium.Cartesian3.fromDegrees(georef.lon, georef.lat, georef.elev || 0);
+    let enu = Cesium.Transforms.eastNorthUpToFixedFrame(cart);
+    if (georef.declination) enu = Cesium.Matrix4.multiply(enu, Cesium.Matrix4.fromRotationTranslation(Cesium.Matrix3.fromRotationZ(Cesium.Math.toRadians(georef.declination)), Cesium.Cartesian3.ZERO), new Cesium.Matrix4());
+    fn = (n, e, v) => Cesium.Matrix4.multiplyByPoint(enu, new Cesium.Cartesian3(e - a.e, n - a.n, v - a.v), new Cesium.Cartesian3());
+  } else {
+    try { fn = _caveUtmConvertFn(imp); } catch (_) { fn = null; }
+  }
+  if (!fn) return null;
+  let length = 0, lo = Infinity, hi = -Infinity, all = [];
+  for (const sg of parsed.segments) {
+    let prev = null;
+    for (const q of sg.points) {
+      if (!Number.isFinite(q.n) || !Number.isFinite(q.e) || !Number.isFinite(q.v)) { prev = null; continue; }
+      if (prev && !q.excluded) length += Math.hypot(q.n - prev.n, q.e - prev.e, q.v - prev.v);
+      lo = Math.min(lo, q.v); hi = Math.max(hi, q.v);
+      all.push(q); prev = q;
+    }
+  }
+  const step = Math.max(1, Math.ceil(all.length / 1500)), pts = [];
+  for (let i = 0; i < all.length; i += step) {
+    const c = Cesium.Cartographic.fromCartesian(fn(all[i].n, all[i].e, all[i].v));
+    if (c) pts.push([+Cesium.Math.toDegrees(c.longitude).toFixed(6), +Cesium.Math.toDegrees(c.latitude).toFixed(6)]);
+  }
+  return { length: Math.round(length), depth: Number.isFinite(hi - lo) ? Math.round(hi - lo) : 0, stations: parsed.stations.length, pts };
+}
 
 // ── UTM → WGS84 (Transverse Mercator inverse, WGS84 ellipsoid) ───────────────
 function utmToLatLon(easting, northing, zoneNum, isNorth) {

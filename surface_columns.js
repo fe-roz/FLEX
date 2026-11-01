@@ -16,7 +16,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const V = () => window.cesiumViewer;
   const open = new Set();                      // expanded point groups
-  let my = null, last = '', busy = false;
+  let my = null, last = '', busy = false, again = false;
 
   async function myState(force) {
     if (!MD()) return { features: {}, groups: {}, layers: {} };
@@ -99,7 +99,8 @@
   }
 
   async function render() {
-    if (busy || !host.isConnected) return;
+    if (!host.isConnected) return;
+    if (busy) { again = true; return; }              // asked again while drawing: once more after
     busy = true;
     try {
       const M = await model();
@@ -118,7 +119,7 @@
       host.innerHTML = html;
       host.querySelector('.cc-cols').scrollTop = sc;
     } catch (e) { console.warn('[surface] render', e); }
-    finally { busy = false; }
+    finally { busy = false; if (again) { again = false; setTimeout(render, 0); } }
   }
   const soon = (force) => { if (force) my = null; setTimeout(render, 30); };
 

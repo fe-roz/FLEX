@@ -1191,7 +1191,9 @@
     const root = $('pj-panel');
     if (!root) return;
     root.textContent = '';
-    section(root, 'Project', true, b => {
+    // The Projects list / the open project's overview (projects_panel.js).
+    if (window._pjx) window._pjx.top(root, section);
+    else section(root, 'Project', true, b => {
       const row = el('div', 'pj-row');
       const sel = el('select', 'pj-input');
       sel.appendChild(new Option('— choose a project —', ''));
@@ -1212,7 +1214,7 @@
       if (!pj.pid) b.appendChild(el('div', 'pj-note', 'A project is an area: its caves (survey files and where they are placed), point clouds, CalTopo map, documents, notes, leads and field survey — opened together, saved together, shared with friends and FLEX Field by sync files. Without one, FLEX works as usual.'));
     });
     if (window._pjWs) window._pjWs.section(root, section);
-    if (!pj.pid) { section(root, 'Sync files', true, b => b.appendChild(btn('⇩ Import a sync file…', () => importSync()))); return; }
+    if (!pj.pid) { if (!window._pjx) section(root, 'Sync files', true, b => b.appendChild(btn('⇩ Import a sync file…', () => importSync()))); return; }
     const q = FL.reviewQueue(pj.P, pj.D);
     if (q.length) section(root, `Suggestions (${q.length})`, true, b => {
       b.appendChild(el('div', 'pj-note', `${q.length} suggestion(s) waiting — from ${[...new Set(q.map(p => p.by))].join(', ')}. They change nothing until accepted.`));
@@ -1364,7 +1366,7 @@
   // ── For project_segments.js (segments and the review queue) ───────────────
   window._pjApi = { pj, FL, el, btn, esc, when, toast, dialog, choose, record, render, refreshCard, openCard, flyTo,
     caveFor, caveName, partsOf, stationPos, stationsOf, docEl, docOpen, docByPage, describe, headsFor, targetLabel,
-    editNote, noteEl, declAt, yearOf, imps, who, ensureAuthor, newProject, refresh, editLead };
+    editNote, noteEl, declAt, yearOf, imps, who, ensureAuthor, newProject, refresh, editLead, renameProject, editDescription, setProject, importSync };
 
   // ── What the export takes from the project (index.html _collectCavesInBbox) ─
   window._pjExport = () => pj.pid ? {

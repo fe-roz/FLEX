@@ -79,6 +79,13 @@ const lines = t => t.split('\n').filter(Boolean).map(JSON.parse);
   const ap = await get('append?scope=docs', { method: 'POST', body: JSON.stringify({ op: 'doc.add', doc: 'd1', pages: [{ h: b.h, ext: 'png' }], tags: ['project:proj1'] }) });
   ok('POST append → numbered entry', ap.body.id === dev + '.1' && ap.body.dev === dev, ap.body);
   ok('POST merge', (await get('merge?scope=docs', { method: 'POST', body: JSON.stringify([ph(1, 'doc.tag', { doc: 'd1', target: 'cave:c1' })]) })).body.added === 1);
+  // Project numbers kept for the Projects list: in the project's .flex/ (a folder project), else in the settings.
+  ok('GET stats: none yet', (await get('stats?project=proj2')).body === null);
+  await get('stats?project=proj2', { method: 'POST', body: JSON.stringify({ v: 1, caves: { A: { length: 12 } }, footprint: [[1, 2]] }) });
+  ok('POST stats → the project folder', (await get('stats?project=proj2')).body.caves.A.length === 12 && fs.existsSync(path.join(lib.projDir('proj2'), '.flex', 'stats.json')));
+  await get('stats?project=proj1', { method: 'POST', body: JSON.stringify({ v: 1, caves: {} }) });
+  ok('stats of a project with no folder → settings', (await get('stats?project=proj1')).body.v === 1 && !!lib.kv()['stats:proj1']);
+  ok('stats: bad project id → not found', (await get('stats?project=..%2Fx')).s === 404);
   const bl = await get('blob?ext=jpg', { method: 'POST', body: Buffer.from('not really a jpeg') });
   ok('POST blob', HASH(bl.body.h) && bl.body.ext === 'jpg');
   const rb = await fetch(base + 'blob/' + bl.body.h + '.jpg');
