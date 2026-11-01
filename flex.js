@@ -10246,6 +10246,42 @@ window._styleResetColors = function() {
   window._openStylePanel(_styleIdx);  // refresh panel
 };
 
+// ── One style setting for every loaded cave (cave_columns.js: 🎨 All caves) ─
+// key: showStations, showLabels, stationColor, stationSize, showSurface,
+// passageMode, passageUpAxis, passageLrudAt, passageOpacity, showAreaLabels,
+// visible, resetColours. What each cave has otherwise stays its own.
+const _STYLE_STATIONS = new Set(['showStations', 'showLabels', 'stationColor', 'stationSize']);
+window._styleAll = function(key, value) {
+  _caveImports.forEach((imp, i) => {
+    if (!imp || !imp.parsed) return;
+    const d = imp.displayOptions || (imp.displayOptions = _defaultDisplayOptions(imp.parsed));
+    if (key === 'visible') { window._toggleCaveImport(i, !!value); return; }
+    if (key === 'resetColours') {
+      const keep = d.areaLabels, show = d.showAreaLabels;
+      imp.displayOptions = Object.assign(d, { surveyColors: _defaultDisplayOptions(imp.parsed).surveyColors });
+      if (keep) imp.displayOptions.areaLabels = keep; if (show != null) imp.displayOptions.showAreaLabels = show;
+      _rerenderCave(i);
+    } else if (key === 'showAreaLabels') {
+      d.showAreaLabels = !!value;
+      _setCaveLayersVisible(imp);
+    } else {
+      d[key] = value;
+      if (_STYLE_STATIONS.has(key)) _buildCaveStations(imp);
+      else if (!(key === 'passageOpacity' || key === 'passageUpAxis') || (d.passageMode || 'none') !== 'none') _rerenderCave(i);
+    }
+    _displayUpdateRecent(imp);
+  });
+  if (typeof _styleIdx === 'number' && _caveImports[_styleIdx] && document.getElementById('cave-inline-style')) window._openStylePanel(_styleIdx);
+  if (window._caveCols) window._caveCols.render();
+};
+/** What the loaded caves have for a setting: the value if all agree, else 'mixed'. */
+window._styleAllState = function(key) {
+  const vals = _caveImports.filter(i => i && i.parsed).map(imp => key === 'visible' ? imp.visible !== false : (imp.displayOptions || {})[key]);
+  if (!vals.length) return null;
+  const norm = v => (v === undefined ? null : v);
+  return vals.every(v => JSON.stringify(norm(v)) === JSON.stringify(norm(vals[0]))) ? norm(vals[0]) : 'mixed';
+};
+
 window._styleClose = function() {
   const _sc = document.getElementById('cave-inline-style');
   if (_sc) _sc.style.display = 'none';
