@@ -376,7 +376,7 @@
         btn('＋ Folder', () => editGroup(null, ''), 'small'), btn('⇪ Import…', () => importFile(''), 'small'), btn('⇩ Download', () => downloadMenu(''), 'small'));
       b.appendChild(bar);
       const un = V() ? V().entities.values.filter(e => e.properties && e.properties.isUserLabel).length : 0;
-      if (un) { const r = el('div', 'pj-row'); r.append(el('span', 'pj-sub', `${un} unsaved point(s) on the map`), btn('Keep them in this project', adoptPoints, 'small')); b.appendChild(r); }
+      if (un) b.appendChild(el('div', 'pj-sub', `${un} point(s) of yours are in 👤 My data (above): ← moves a sitting’s points into the project.`));
       const all = FL.liveFeatures(pj.P), groups = FL.liveGroups(pj.P);
       if (!all.length && !groups.length) b.appendChild(el('div', 'pj-note', 'Nothing yet. Draw on the map, or import a GPX / KML / GeoJSON file. Download a folder to upload it to CalTopo.'));
       const h = hidden();
@@ -612,5 +612,5 @@
   .pjf-item { user-select: none; }`;
   document.head.appendChild(st);
 
-  window._pjf = { highlight, clearHighlight, updateHtml, changed, render, draw, startDraw, stopDraw, editFeature, editGroup, importFile, download, scanTags, placeAtTag, copyTag, applyOverlayHidden, walk };
+  window._pjf = { hidden, setHidden, highlight, clearHighlight, updateHtml, changed, render, draw, startDraw, stopDraw, editFeature, editGroup, importFile, download, scanTags, placeAtTag, copyTag, applyOverlayHidden, walk };
 })();

@@ -33,7 +33,7 @@
   // ── Hashing and ids ──────────────────────────────────────────────────────
   const bytes = t => new TextEncoder().encode(t);
   async function sha(t) {
-    const b = bytes(t);
+    const b = typeof t === 'string' ? bytes(t) : t;
     if (window.crypto && crypto.subtle) { const d = await crypto.subtle.digest('SHA-256', b); return [...new Uint8Array(d)].map(x => x.toString(16).padStart(2, '0')).join(''); }
     return FL.sha256(b);
   }
@@ -67,6 +67,19 @@
     if (moving(name, 'in')) return true;
     return inProject.cave(name) && !moving(name, 'out');
   }
+  /**
+   * 📍 Surface (surface_columns.js): a sitting's points ('pgroup'), one point
+   * ('point') or a data file ('file') to the project ('in') or My data ('out').
+   * m = { kind, id, name, dir, url? }. The same again cancels it.
+   */
+  async function moveItem(m) {
+    if (!pj.pid) return;
+    const k = W.moves.findIndex(x => x.kind === m.kind && x.id === m.id);
+    if (k >= 0) W.moves.splice(k, 1); else W.moves.push(m);
+    saveMoves();
+    await badge();
+  }
+  const movingItem = (kind, id) => (W.moves.find(x => x.kind === kind && x.id === id) || {}).dir || null;
   /** ← / →: a cave to the project ('in') or to My data ('out'); the same again cancels it. */
   async function moveCave(name, dir) {
     if (!pj.pid) return;
@@ -83,7 +96,7 @@
     const w = ws(), out = { pending: [], extra: { caves: [], layers: [] } };
     if (!pj.pid || !w) return out;
     const S = pj.P;
-    W.moves.forEach(m => out.pending.push({ kind: 'move', name: m.name, dir: m.dir, what: m.dir === 'in' ? 'into the project' : 'out to My data' }));
+    W.moves.forEach(m => out.pending.push({ kind: 'move', move: m, name: m.name, dir: m.dir, what: m.dir === 'in' ? 'into the project' : 'out to My data' }));
     for (const c of w.caves()) {
       if (!c.text) continue;
       if (moving(c.name)) continue;
@@ -103,6 +116,12 @@
   async function commit(p) {
     if (p.kind === 'move') {
       const w = ws(), c = w.caves().find(x => x.name === p.name);
+      if (p.move && p.move.kind !== 'cave') {
+        await commitSurface(p.move);
+        W.moves = W.moves.filter(m => !(m.kind === p.move.kind && m.id === p.move.id));
+        saveMoves();
+        return;
+      }
       if (p.dir === 'in') {
         // From My data: its text and placement (loaded, or as My data keeps them).
         const r = w.recents().find(x => x.name === p.name);
@@ -162,6 +181,56 @@
     } catch (e) { console.warn('[workspace] save failed', e); toast('Could not save into the project: ' + e.message); }
     finally { W.busy = false; await badge(); }
     return n;
+  }
+  // A surface move, when saved. Points: My data → project features (a
+  // sitting becomes a project folder of the same name). Data files: their
+  // bytes are copied into the destination's folder first, then taken out of
+  // the other side, and the loaded copy is swapped for the new one.
+  async function commitSurface(m) {
+    const w = ws(), MD = window._myData;
+    if (!MD) throw new Error('My data is not available');
+    if (m.kind === 'pgroup' || m.kind === 'point') {
+      if (m.dir !== 'in') return;
+      const S = await MD.state(true);
+      const pts = Object.values(S.features || {}).filter(f => !f.removed && f.kind === 'point' && f.coords && (m.kind === 'point' ? f.id === m.id : f.group === m.id));
+      let group = '';
+      if (m.kind === 'pgroup') { group = FL.uid(10); await record('group.set', { group, name: (S.groups[m.id] || {}).name || m.name || 'Points', parent: '' }, null, { quiet: true }); }
+      for (const f of pts) {
+        await record('feature.set', { feature: FL.uid(12), kind: 'point', coords: f.coords, name: f.name || 'Point', group }, null, { quiet: true });
+        await MD.forgetPoint({ properties: { myFeature: { getValue: () => f.id } } }, 'moved');
+        const V = window.cesiumViewer, e = V && V.entities.values.find(x => x.properties && x.properties.myFeature && x.properties.myFeature.getValue() === f.id);
+        if (e) V.entities.remove(e);
+      }
+      if (window._pjf) window._pjf.draw();
+      return;
+    }
+    if (m.kind === 'file') {
+      const r = await fetch(m.url);
+      if (!r.ok) throw new Error(`“${m.name}” could not be read (${r.status})`);
+      const buf = await r.arrayBuffer();
+      let ext = (m.url.split('?')[0].split('.').pop() || '').toLowerCase(); if (ext === 'geojson') ext = 'json';
+      const wasLoaded = w.dataFiles().find(f => f.url === m.url);
+      let url;
+      if (m.dir === 'in') {
+        const h = await sha(new Uint8Array(buf));
+        const b = await fetch('/api/lib/blob?ext=' + ext + '&h=' + h + '&project=' + encodeURIComponent(pj.pid), { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: buf });
+        if (!b.ok) throw new Error(`“${m.name}” could not be stored in the project`);
+        url = '/api/lib/blob/' + h + '.' + ext;
+        await addLayer({ kind: 'file', url, name: m.name });
+        await MD.forgetFile(m.id);
+      } else {
+        const myId = await MD.keepFile(new File([buf], (m.name || 'file').replace(/\.(kml|kmz|json|geojson)$/i, '') + '.' + ext), m.name);
+        if (!myId) throw new Error(`“${m.name}” could not be kept in My data`);
+        await record('layer.set', { layer: m.id, removed: true }, null, { quiet: true });
+        const S = await MD.state(true); const L = S.layers[myId]; url = L && L.blob ? '/api/lib/blob/' + L.blob : null;
+        m.myId = myId;
+      }
+      if (wasLoaded && url) {
+        w.switching = true;
+        try { w.removeDataFile(m.url); } finally { w.switching = false; }
+        await w.addDataFile(url, m.name, m.dir === 'in' ? { noKeep: true } : { myId: m.myId });
+      }
+    }
   }
   /** Discard: the project's saved version comes back; waiting moves are dropped. */
   async function discard() {
@@ -234,6 +303,7 @@
     b.textContent = n ? `💾 Save · ${n}` : '💾 Save';
     b.classList.toggle('pj-save-waiting', !!n);
     if (window._caveCols) window._caveCols.render();
+    if (window._surfCols) window._surfCols.refresh();
     b.title = n ? `Save your view, and put ${n} change${n > 1 ? 's' : ''} into “${projName()}”: ${W.pending.map(p => p.name + ' (' + p.what + ')').join(', ')}`
                 : (pj.pid ? `Save your view. Nothing waiting for “${projName()}”.` : 'Save your view (camera, layers, what is loaded).');
   }
@@ -398,6 +468,7 @@
       // Loaded, not in the project
       const box = el('div'); b.appendChild(box);
       scan().then(({ extra }) => {
+        extra.layers = extra.layers.filter(l => l.kind !== 'file');      // data files: 📍 Surface, ← into the project
         if (!extra.layers.length) return;
         box.appendChild(el('div', 'lp-group-label', 'Loaded, not in this project'));
         const add = async (fn, x) => { await fn(x); await refreshAfter('cavefile.set'); A.render && A.render(); toast(`Added “${x.name}” to “${projName()}”`); };
@@ -419,5 +490,5 @@
 
   window._saveAll = saveClick;
   window._pjWs = { placeCaltopo, autosave, save, saveClick, discard, badge, scan, removed, leave, enter, adopt, label, section, unloadProject,
-                   owns, moveCave, moving, loadProjectCave, projName };
+                   owns, moveCave, moving, loadProjectCave, projName, moveItem, movingItem, layerId };
 })();

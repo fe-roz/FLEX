@@ -4227,7 +4227,8 @@ async function addDataFile(fileOrUrl, label, opts = {}) {
     };
     loadedDataFiles.push(entry);
     // Outside a project, a data file is kept in My data (local files too), so it comes back.
-    if (!entry.myId && window._myData && !(window._pj && window._pj.pid) && !opts.noKeep) entry.myId = await window._myData.keepFile(fileOrUrl, entryLabel);
+    // Kept in My data (also with a project open: ← in 📍 Surface moves it into the project).
+    if (!entry.myId && window._myData && !opts.noKeep) entry.myId = await window._myData.keepFile(fileOrUrl, entryLabel);
     renderDataFileList();
     if (window._onVectorSourcesChanged) window._onVectorSourcesChanged();
     notifyDataFilesChanged(loadedDataFiles);
@@ -5070,7 +5071,9 @@ window._ws = {
     return loadCaltopoKml(url, interval ?? 30);
   },
   clearCaltopo: () => clearCaltopo(),
-  dataFiles: () => loadedDataFiles.filter(f => f.url).map(f => ({ url: f.url, label: f.label })),
+  dataFiles: () => loadedDataFiles.filter(f => f.url).map(f => ({ url: f.url, label: f.label, myId: f.myId || null, show: f.show !== false,
+    items: f.dataSource ? f.dataSource.entities.values.length : 0 })),
+  setDataFileShown(url, on) { const f = loadedDataFiles.find(x => x.url === url); if (!f) return; f.show = on; if (f.dataSource) f.dataSource.show = on; renderDataFileList(); },
   addDataFile: (url, label, opts) => addDataFile(url, label, opts),
   removeDataFile(url) { const f = loadedDataFiles.find(x => x.url === url); if (f) removeDataFile(f.id); },
   // Map overlays with their folders (CalTopo map, KML / GeoJSON data files).
@@ -9613,6 +9616,11 @@ function updateHtmlLabels() {
     entity.label.show = false;
 
     liveIds.add(entity.id);
+    if (entity.show === false) {                      // hidden (📍 Surface: a sitting's points switched off)
+      const div = htmlLabelState.divs.get(entity.id);
+      if (div) div.style.display = 'none';
+      continue;
+    }
 
     const worldPos = entity.position.getValue(now);
     if (!worldPos) continue;
