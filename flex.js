@@ -6607,7 +6607,7 @@ function _shotDescHtml(imp, A, B, segLabel, surface) {
 // Pick id for one chain of shots: a click opens the shot nearest the click.
 function _caveShotPickId(imp, seg, pts, positions, segLabel, surface) {
   return lazyPick(screenPos => {
-    let k = 0;
+    let k = 0, kt = 0;
     if (screenPos) {
       const toWin = Cesium.SceneTransforms.worldToWindowCoordinates || Cesium.SceneTransforms.wgs84ToWindowCoordinates;
       const scr = positions.map(p => toWin(cesiumViewer.scene, p));
@@ -6619,7 +6619,7 @@ function _caveShotPickId(imp, seg, pts, positions, segLabel, surface) {
         let t = L2 ? ((screenPos.x - a.x) * dx + (screenPos.y - a.y) * dy) / L2 : 0;
         t = Math.max(0, Math.min(1, t));
         const d = Math.hypot(a.x + t * dx - screenPos.x, a.y + t * dy - screenPos.y);
-        if (d < best) { best = d; k = j; }
+        if (d < best) { best = d; k = j; kt = t; }
       }
     }
     const A = pts[k], B = pts[k + 1];
@@ -6627,7 +6627,8 @@ function _caveShotPickId(imp, seg, pts, positions, segLabel, surface) {
       name: (A.name && B.name) ? `${A.name} → ${B.name}` : segLabel,
       position: Cesium.Cartesian3.midpoint(positions[k], positions[k + 1], new Cesium.Cartesian3()),
       description: _shotDescHtml(imp, A, B, segLabel, surface),
-      properties: { isCaveSurvey: true, surveyName: imp.name, surveyCode: seg.survey || '', isSurface: !!surface },
+      properties: { isCaveSurvey: true, surveyName: imp.name, surveyCode: seg.survey || '', isSurface: !!surface,
+                    fromStation: A.name || '', toStation: B.name || '', nearStation: (kt < 0.5 ? A.name : B.name) || A.name || B.name || '' },
     };
   }, true);
 }

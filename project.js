@@ -1105,7 +1105,8 @@
   function onSelect(entity) {
     const pr = entity && entity.properties;
     const get = k => (pr && pr[k] ? pr[k].getValue() : null);
-    if (!pr) { closeCard(); return; }
+    if (!pr) { closeCard(); if (window._sel) window._sel.clear(); return; }
+    if (get('isCaveSurvey') && window._sel && window._sel.active()) return;     // selection.js chose what to show
     if (get('isFeatureLead')) { const L = pj.P.leads[get('leadId')]; if (L) editLead(null, targetLabel(L.target), { id: L.id, rec: L, fields: L.fields, active: FL.leadActive(L) }); return; }
     if (get('isFieldStation')) { openCard({ cid: get('cave'), name: get('stationName'), field: true }); return; }
     if (!get('isCaveSurvey')) { closeCard(); return; }
@@ -1126,7 +1127,7 @@
     box.textContent = '';
     box.classList.add('open');
     const head = el('div', 'pj-card-h');
-    head.appendChild(el('div', 'pj-card-t', c.survey ? `Survey ${c.code || '(none)'}` : `📍 ${c.name}${c.field ? ' (field)' : ''}`));
+    head.appendChild(el('div', 'pj-card-t', c.level === 'cave' ? `🕳 ${c.cid ? caveName(c.cid) : (c.imp ? c.imp.name : 'Cave')}` : c.survey ? `Survey ${c.code || '(none)'}` : `📍 ${c.name}${c.field ? ' (field)' : ''}`));
     head.appendChild(btn('✕', closeCard, 'small'));
     box.appendChild(head);
     if (!pj.pid) {
@@ -1138,6 +1139,7 @@
       if (c.imp) box.appendChild(btn('Link it to a cave…', async () => { await linkFile(c.imp); c.cid = caveFor(c.imp, c.code); renderCard(); }, 'primary'));
       return;
     }
+    if (c.level === 'cave') { caveCard(box, c); return; }
     box.appendChild(el('div', 'pj-sub', caveName(c.cid) + (c.code && !c.survey ? ` · survey ${c.code}` : '')));
     const target = c.survey ? FL.T.survey(c.cid, c.code) : FL.T.station(c.cid, c.name);
     const sec = (title, items) => { if (!items.length) return; box.appendChild(el('div', 'pj-h', title)); items.forEach(i => box.appendChild(i)); };
@@ -1160,6 +1162,32 @@
     const row = el('div', 'pj-row pj-card-btns');
     row.appendChild(btn('✏️ Note', () => editNote(target)));
     if (!c.survey) row.appendChild(btn('❓ Lead', () => editLead(c.cid, c.name, null)));
+    row.appendChild(btn('📄 Add pages', () => addPages({ tags: [target] })));
+    row.appendChild(btn('🏷 From inbox', () => tagFromInbox(target)));
+    box.appendChild(row);
+  }
+  // A whole cave (selection.js, the first click on it): its files, notes, leads, documents.
+  function caveCard(box, c) {
+    const cv = pj.P.caves[c.cid] || {};
+    const parts = partsOf(c.cid);
+    const st = parts.reduce((n, { imp }) => n + ((imp.parsed && imp.parsed.stations) || []).length, 0);
+    const codes = new Set(parts.flatMap(({ codes }) => [...codes]));
+    box.appendChild(el('div', 'pj-sub', [(cv.sources || []).map(s => s.file).join(', ') || 'no files', codes.size ? codes.size + ' survey' + (codes.size === 1 ? '' : 's') : '', st ? st + ' stations' : 'not loaded'].filter(Boolean).join(' · ')));
+    const target = FL.T.cave(c.cid);
+    const sec = (title, items) => { if (!items.length) return; box.appendChild(el('div', 'pj-h', title)); items.forEach(i => box.appendChild(i)); };
+    sec('Notes', FL.notesOn(pj.P, target).map(noteEl));
+    const ls = allLeads().filter(x => x.active && FL.parseTarget(x.target).cave === c.cid)
+      .sort((a, b) => (Number(a.fields.priority) || 9) - (Number(b.fields.priority) || 9));
+    sec(`Open leads (${ls.length})`, ls.slice(0, 30).map(x => {
+      const t = FL.parseTarget(x.target), r = el('div', 'pj-item');
+      r.appendChild(el('div', 'pj-item-t', `❓ ${t.name || '?'}`));
+      r.appendChild(el('div', 'pj-sub', leadSummary(x.fields) + (x.fields.desc ? ' — ' + x.fields.desc : '')));
+      r.addEventListener('click', () => flyTo(c.cid, t.name));
+      return r;
+    }));
+    sec('Documents · the cave', FL.docsForTarget(pj.D, target).map(d => docEl(d)));
+    const row = el('div', 'pj-row pj-card-btns');
+    row.appendChild(btn('✏️ Note', () => editNote(target)));
     row.appendChild(btn('📄 Add pages', () => addPages({ tags: [target] })));
     row.appendChild(btn('🏷 From inbox', () => tagFromInbox(target)));
     box.appendChild(row);
@@ -1388,7 +1416,7 @@
   // ── For project_segments.js (segments and the review queue) ───────────────
   window._pjApi = { pj, FL, el, btn, esc, when, toast, dialog, choose, record, render, refreshCard, openCard, flyTo,
     caveFor, caveName, partsOf, stationPos, stationsOf, docEl, docOpen, docByPage, describe, headsFor, targetLabel,
-    editNote, noteEl, declAt, yearOf, imps, who, ensureAuthor, newProject, refresh, editLead, renameProject, editDescription, setProject, importSync, acceptAbove };
+    editNote, noteEl, declAt, yearOf, imps, who, ensureAuthor, newProject, refresh, editLead, renameProject, editDescription, setProject, importSync, acceptAbove, closeCard };
 
   // ── What the export takes from the project (index.html _collectCavesInBbox) ─
   window._pjExport = () => pj.pid ? {

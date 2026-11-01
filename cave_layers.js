@@ -156,6 +156,7 @@ export function materialize(id, screenPos) {
 // ordinary Entity. Call once.
 export function installLazyPick(viewer) {
   const Cs = C(), h = viewer.screenSpaceEventHandler;
+  window._caveMaterialize = materialize;           // selection.js: the right-click Select section
   for (const type of [Cs.ScreenSpaceEventType.LEFT_CLICK, Cs.ScreenSpaceEventType.LEFT_DOUBLE_CLICK]) {
     const orig = h.getInputAction(type);
     if (!orig) continue;
@@ -164,6 +165,9 @@ export function installLazyPick(viewer) {
       const id = picked && picked.id;
       if (id && id._caveLazy) {
         const ent = materialize(id, e.position);
+        // selection.js decides what a click on a cave selects (cave, survey,
+        // segment, station: one level deeper inside the selection).
+        if (type === Cs.ScreenSpaceEventType.LEFT_CLICK && window._sel && window._sel.click(ent, e.position)) return;
         if (type === Cs.ScreenSpaceEventType.LEFT_CLICK) viewer.selectedEntity = ent;
         else viewer.trackedEntity = undefined;
         return;

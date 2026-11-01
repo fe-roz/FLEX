@@ -167,6 +167,7 @@
       .context-menu-item:hover  { background: rgba(255,255,255,0.08); }
       .context-menu-item:active { background: rgba(255,255,255,0.12); }
       .context-menu-text { flex: 1; }
+      .context-menu-head { font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: rgba(255,255,255,0.45); padding: 5px 12px 2px; }
       .context-menu-external { opacity: 0.4; margin-left: 6px; font-size: 10px; }
       .context-menu-link { color: rgba(255,255,255,0.85); }
       .context-menu-link:hover .context-menu-external { opacity: 0.7; }
@@ -2083,6 +2084,8 @@
 <script src="projects_panel.js"></script>
 <!-- 📄 Docs: the project folder as on disk -->
 <script src="docs_panel.js"></script>
+<!-- What a click on a cave selects (cave › survey › segment › station) -->
+<script src="selection.js"></script>
 <script src="project_features.js"></script>
 <!-- One details panel on the right: card, segment panel, map feature info -->
 <script src="inspector.js"></script>

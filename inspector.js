@@ -19,8 +19,9 @@
   const title = mk('div', 'ins-title');
   const close = mk('button', 'ins-x', '×'); close.type = 'button'; close.title = 'Close (Esc)'; close.setAttribute('aria-label', 'Close');
   head.append(title, close);
+  const crumbSlot = mk('nav', 'ins-crumbs'); crumbSlot.setAttribute('aria-label', 'Selected');
   const cardSlot = mk('div', 'ins-card'), infoSlot = mk('div', 'ins-info'), actSlot = mk('div', 'ins-acts'), mainSlot = mk('div', 'ins-main');
-  box.append(grip, head, cardSlot, infoSlot, actSlot, mainSlot);
+  box.append(grip, head, crumbSlot, cardSlot, infoSlot, actSlot, mainSlot);
   document.body.appendChild(box);
 
   // ── Width ──────────────────────────────────────────────────────────────
@@ -45,7 +46,9 @@
   const cardOpen = () => !!(card() && card().classList.contains('open'));
   const dockOpen = () => !!(dock() && dock().classList.contains('open'));
   const infoBox = () => { const v = V(); return v && v.infoBox; };
-  const infoOpen = () => { const ib = infoBox(); return !!(ib && ib.viewModel.showInfo && V().selectedEntity) && !dockOpen(); };
+  // Cesium's own description: not for a whole cave, survey or segment (selection.js) — only the clicked station's.
+  const selLevel = () => (window._sel ? window._sel.level() : null);
+  const infoOpen = () => { const ib = infoBox(); const l = selLevel(); return !!(ib && ib.viewModel.showInfo && V().selectedEntity) && !dockOpen() && (!l || l === 'station'); };
 
   // Elements made elsewhere are put into their slot as they appear.
   function adopt() {
@@ -65,13 +68,34 @@
     box.classList.toggle('open', any);
     document.body.classList.toggle('ins-open', any);
     box.classList.toggle('with-dock', d);
+    box.classList.toggle('no-info', !i);
     // The title: the card and the segment panel have their own; Cesium's
     // info box gets the panel's (its own title bar is hidden).
     let t = '';
     if (!c && !d && i) { const e = V().selectedEntity; t = (e && e.name) || infoBox().viewModel.titleText || ''; }
     if (title.textContent !== t) title.textContent = t;
     box.classList.toggle('titled', !!t);
+    crumbs(any);
     if (i) fitInfo();
+    // Everything closed some other way (a card's or the segment panel's own ✕): nothing is selected.
+    if (!any && window._sel && window._sel.active()) setTimeout(() => { if (!cardOpen() && !dockOpen() && !infoOpen()) window._sel.clear(); }, 50);
+  }
+  // Cave › Survey › Segment › Station, each part clickable (selection.js).
+  let lastCrumbs = '';
+  function crumbs(any) {
+    const cs = any && window._sel ? window._sel.crumbs() : [];
+    const key = JSON.stringify(cs);
+    if (key === lastCrumbs) return;
+    lastCrumbs = key;
+    crumbSlot.textContent = '';
+    box.classList.toggle('with-crumbs', cs.length > 0);
+    cs.forEach((c, k) => {
+      if (k) crumbSlot.appendChild(mk('span', 'ins-sep', '›'));
+      const b = mk('button', 'ins-crumb' + (k === cs.length - 1 ? ' cur' : ''), c.label);
+      b.type = 'button';
+      b.addEventListener('click', () => window._sel.toLevel(c.level, c.sid));
+      crumbSlot.appendChild(b);
+    });
   }
   // Cesium sizes the description frame when the text changes, which can be
   // while the panel is still hidden (height 0): measure again once shown.
@@ -86,6 +110,7 @@
     const x = card() && card().querySelector('.pj-card-h button');
     if (cardOpen() && x) x.click();
     const v = V(); if (v && v.selectedEntity) v.selectedEntity = undefined;
+    if (window._sel) window._sel.clear();
     setTimeout(refresh, 0);
   }
   close.addEventListener('click', closeAll);
@@ -133,6 +158,13 @@
   #flex-inspector .ins-x:hover { color: #fff; background: rgba(255,255,255,.08); }
   #flex-inspector.titled .ins-x { margin-top: -2px; }
   #flex-inspector:not(.titled) .ins-head { position: absolute; top: 2px; right: 2px; padding: 0; z-index: 3; }
+  #flex-inspector .ins-crumbs { display: none; flex-wrap: wrap; align-items: center; gap: 2px; padding: 7px 34px 5px 10px; border-bottom: 1px solid rgba(255,255,255,.08); flex: none; font-size: 12px; }
+  #flex-inspector.with-crumbs .ins-crumbs { display: flex; }
+  #flex-inspector .ins-crumb { background: none; border: none; color: #98a3a0; padding: 1px 4px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  #flex-inspector .ins-crumb:hover { color: #fff; background: rgba(255,255,255,.08); }
+  #flex-inspector .ins-crumb.cur { color: #f2f4f3; font-weight: 600; }
+  #flex-inspector .ins-sep { color: rgba(255,255,255,.35); }
+  #flex-inspector.with-crumbs.with-dock .ins-head { display: flex; position: absolute; top: 2px; right: 2px; padding: 0; z-index: 3; }
   #flex-inspector .ins-card { flex: none; max-height: 60%; overflow: auto; }
   #flex-inspector.with-dock .ins-card { display: none; }
   #flex-inspector .ins-info { flex: 0 1 auto; min-height: 0; overflow: auto; }
@@ -142,7 +174,7 @@
   #flex-inspector #floating-action-btn { position: static !important; font-size: 12px !important; padding: 5px 12px !important; border-radius: 6px !important; box-shadow: none !important; }
   #flex-inspector .ins-main { display: none; flex: 1; min-height: 0; flex-direction: column; }
   #flex-inspector.with-dock .ins-main { display: flex; }
-  #flex-inspector.with-dock .ins-info { display: none; }
+  #flex-inspector.with-dock .ins-info, #flex-inspector.no-info .ins-info { display: none; }
   /* The card: its own ✕ gives way to the panel's ×. */
   #flex-inspector #pj-card { position: static; width: auto; max-height: none; box-shadow: none; border: none; border-radius: 0; background: transparent; margin: 0; padding: 10px 34px 10px 12px; }
   #flex-inspector #pj-card:not(.open) { display: none; }

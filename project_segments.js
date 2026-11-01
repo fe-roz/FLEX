@@ -683,9 +683,18 @@
     ids = ids.filter(id => pj.P.segments[id] && !pj.P.segments[id].removed);
     if (!ids.length) { if (I.any) box.appendChild(el('div', 'pj-sub', 'In no segment.')); return; }
     const cur = seg.sel && ids.includes(seg.sel.sid) ? seg.sel.sid : ids[0];
+    const toSeg = id => (window._sel ? window._sel.toSegment(c.cid, id) : showSegment(c.cid, id));
+    // Picked as a station or survey (selection.js): its segments as chips; the
+    // segment panel opens only when a segment is what is selected.
+    if (c.level && c.level !== 'segment') {
+      const row = el('div', 'pj-row'); row.appendChild(el('span', 'pj-sub', ids.length > 1 ? 'Segments here: ' : 'Segment: '));
+      ids.forEach(id => row.appendChild(btn(segName(id), () => toSeg(id), 'small chip')));
+      box.appendChild(row);
+      return;
+    }
     if (ids.length > 1) {
       const row = el('div', 'pj-row'); row.appendChild(el('span', 'pj-sub', 'Segments here: '));
-      ids.forEach(id => row.appendChild(btn(segName(id), () => showSegment(c.cid, id), 'small chip' + (id === cur ? ' on' : ''))));
+      ids.forEach(id => row.appendChild(btn(segName(id), () => toSeg(id), 'small chip' + (id === cur ? ' on' : ''))));
       box.appendChild(row);
     }
     if (!dockOpen() || !seg.sel || seg.sel.sid !== cur || seg.list || seg.view) setTimeout(() => showSegment(c.cid, cur), 0);
@@ -879,7 +888,7 @@
   .pjs-docked .cesium-viewer-infoBoxContainer { display: none; }`;
   document.head.appendChild(style);
 
-  window._pjSeg = { on, changed, card, section, review: showList, showList, showSegment, closeDock, step, setLabels, drawVersions, info, effectText };
+  window._pjSeg = { on, changed, card, section, review: showList, showList, showSegment, closeDock, step, setLabels, drawVersions, info, effectText, segName, dockOpen };
   // Draw once the project and the caves are there.
   setTimeout(() => changed(null), 1500);
 })();

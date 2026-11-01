@@ -63,6 +63,7 @@ export function createContextMenuElement({ document: doc = document } = {}) {
   menu.id        = 'mapContextMenu';
   menu.className = 'map-context-menu';
   menu.innerHTML = `
+    <div id="contextMenuSelect"></div>
     <div class="context-menu-coords" id="contextMenuCoords"
          data-action="copyCoords" title="Click to copy coordinates">--</div>
     <div class="context-menu-divider"></div>
@@ -250,6 +251,10 @@ export class ContextMenuController {
     this.currentAltitude = camCarto.height;
     this.currentCoords   = { lat, lng };
 
+    // On a cave object: a "Select" section on top (selection.js).
+    this._selItems = [];
+    try { if (typeof this.window._selMenu === 'function') this._selItems = this.window._selMenu(canvasPos) || []; } catch (e) { console.warn('[context-menu] select', e); }
+
     this._updateMenuContent();
     this._positionMenu(screenX, screenY);
     this.menuElement.classList.add('visible');
@@ -257,6 +262,14 @@ export class ContextMenuController {
 
   _updateMenuContent() {
     const { lat, lng } = this.currentCoords;
+    const selEl = this.menuElement.querySelector('#contextMenuSelect');
+    if (selEl) {
+      const items = this._selItems || [];
+      const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      selEl.innerHTML = items.length ? '<div class="context-menu-head">Select</div>' +
+        items.map((it, i) => `<div class="context-menu-item" data-action="select" data-i="${i}"><span class="context-menu-text">${esc(it.label)}</span></div>`).join('') +
+        '<div class="context-menu-divider"></div>' : '';
+    }
     const zoom = altitudeToZoom(this.currentAltitude, lat);
 
     const coordsEl = this.menuElement.querySelector('#contextMenuCoords');
@@ -309,6 +322,7 @@ export class ContextMenuController {
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
     if (btn.dataset.action === 'copyCoords') this._copyCoordinates();
+    if (btn.dataset.action === 'select') { const it = (this._selItems || [])[Number(btn.dataset.i)]; if (it) it.run(); }
     this.hide();
   }
 
