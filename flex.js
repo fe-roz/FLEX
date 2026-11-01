@@ -4442,7 +4442,10 @@ function _addEptRecent(url, name) {
   _renderEptRecents();
 }
 
-function _addPltRecent(name, rawText, georef, displayOptions) {
+function _addPltRecent(name, rawText, georef, displayOptions, { force = false } = {}) {
+  // A cave of the open project lives there, not in My data: placing or
+  // styling it here doesn't copy it back (project_workspace.js decides).
+  if (!force && window._pjWs && window._pjWs.owns && window._pjWs.owns(name)) return;
   // Save raw text to its own server-side file, not into recents.json
   _savePltCache(name, rawText);
   // Only lightweight metadata goes into recents index
@@ -4512,6 +4515,13 @@ function _recentsNote(text, color = '#8fa', ms = 8000) {
 function _renderPltRecents() {
   const el = document.getElementById('lp-plt-recents');
   if (!el) return;
+  // The two cave columns (cave_columns.js) show My data's caves and sets;
+  // here only the messages.
+  if (window._caveCols) {
+    el.innerHTML = _recentsNoteMsg ? `<div style="font-size:10px;color:${_recentsNoteMsg.color};padding:3px 6px;border:1px solid rgba(255,255,255,0.15);border-radius:3px;margin:4px 0;">${_escapeHtml(_recentsNoteMsg.text)}</div>` : '';
+    window._caveCols.render();
+    return;
+  }
   const sets = _recents.pltSets || [];
   if (!_recents.plt.length && !sets.length && !_setNamePrompt && !_recentsNoteMsg) { el.innerHTML = ''; return; }
   const esc = _escapeHtml;
@@ -5068,6 +5078,18 @@ window._ws = {
     loadedDataFiles.filter(f => f.dataSource).map(f => ({ kind: 'file', name: f.label, url: f.url, ds: f.dataSource }))),
     restoreView(snap) { if (!snap) return; if (snap.camera) restoreCamera(snap, cesiumViewer); if (snap.layers) restoreLayerState(snap, viewModel); },
   recentCave(name) { const i = (_recents.plt || []).findIndex(r => r.name === name); return i >= 0 ? window._loadPltRecent(i) : null; },
+  // My data's caves (the old Recent list) and cave sets, for cave_columns.js.
+  recents: () => (_recents.plt || []).map(r => ({ name: r.name, georef: r.georef || null, displayOptions: r.displayOptions || null, lastUsed: r.lastUsed || null })),
+  sets: () => (_recents.pltSets || []).map(st => ({ name: st.name, savedAt: st.savedAt || null, caves: (st.caves || []).map(c => c.name) })),
+  recentText: name => _fetchPltCache(name),
+  /** Into My data (a cave moved out of a project). */
+  keepRecent(name, text, georef, displayOptions) { _addPltRecent(name, text, georef || null, displayOptions || null, { force: true }); },
+  /** Out of My data (moved into a project, or forgotten). Its file and history stay. */
+  forgetRecent(name) { _removePltRecent(name); },
+  loadSet: i => window._caveSetLoad(i),
+  deleteSet: i => window._caveSetDelete(i),
+  caveIndex: name => _caveImports.findIndex(x => x && x.name === name),
+  caveVisible: name => { const x = _caveImports.find(c => c && c.name === name); return !!(x && x.visible !== false); },
 };
 
 // ── UTM → WGS84 (Transverse Mercator inverse, WGS84 ellipsoid) ───────────────
@@ -5338,6 +5360,7 @@ function setCaveSurveyVisible(visible) {
 
 // ── Render the cave import list in the panel ──────────────────────────────────
 function _renderCaveList() {
+  if (window._caveCols) window._caveCols.render();
   const list = document.getElementById('lp-cave-list');
   if (!list) return;
   if (!_caveImports.length) { list.innerHTML = ''; return; }

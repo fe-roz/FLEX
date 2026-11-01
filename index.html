@@ -1019,10 +1019,13 @@
 
             <div class="lp-section">
               <div class="lp-section-header" onclick="window._lpToggle(this)">
-                <span class="lp-section-arrow">▸</span> Imported Surveys
+                <span class="lp-section-arrow">▸</span> Caves
               </div>
               <div class="lp-section-body open">
-                <div id="lp-cave-list" style="margin-bottom:4px;"></div>
+                <!-- Project | My data, two columns (cave_columns.js). The old
+                     list stays hidden: flex.js still fills it. -->
+                <div id="cave-cols"></div>
+                <div id="lp-cave-list" style="display:none;"></div>
                 <div id="cave-inline-panel" style="display:none;margin:4px 0 8px;"></div>
                 <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:2px;">
                   <button class="btn btn-sm btn-primary lp-add-btn" onclick="window._importCavePLT()" style="font-size:11px;" title="Compass .plt, a Breakout .json, or a Walls shapefile export (select all its files)">+ Import PLT / Breakout / Walls</button>
@@ -1038,7 +1041,7 @@
                     <input type="checkbox" id="lp-cave-areas-toggle" checked style="margin:0;" onchange="window._setCaveAreaLabelsVisible(this.checked)">
                     <span style="font-size:10px; opacity:0.7; margin-left:4px;">Area names</span>
                   </label>
-                  <button onclick="window._caveSetSaveLoaded()" title="Save the caves loaded now (placement and style) as a set, to load together later from Recent" style="font-size:10px;padding:2px 7px;background:rgba(80,220,255,0.10);border:1px solid rgba(80,220,255,0.35);color:#8ee8ff;border-radius:3px;cursor:pointer;">💾 Save as set…</button>
+                  
                 </div>
                 <div style="display:flex; align-items:center; gap:6px; margin-top:5px; font-size:10px;">
                   <span style="opacity:0.7;" title="How every loaded cave's lines, station dots and walls are coloured">Colour</span>
@@ -2065,6 +2068,8 @@
 <script src="inspector.js"></script>
 <!-- The icon strip down the left -->
 <script src="flex_rail.js"></script>
+<!-- 🕳 Caves: project | My data -->
+<script src="cave_columns.js"></script>
 <!-- Brings the globe back if a map layer stalls at startup -->
 <script src="globe_watchdog.js"></script>
 
