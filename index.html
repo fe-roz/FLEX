@@ -906,8 +906,7 @@
                  in two columns with folders opening in place (surface_columns.js) -->
             <div id="surf-cols"></div>
             <div class="sc-extra">
-              <label title="Names next to points on the map"><input type="checkbox" id="html_labels_toggle" checked> Show labels</label>
-              <span class="sc-sep">·</span>
+              <input type="checkbox" id="html_labels_toggle" checked hidden>  <!-- driven by 📍 Surface → Labels -->
               <span title="Your points in 👤 My data, as a file">⇩ My points: <a href="#" onclick="window._exportPoi('kmz');return false;">KMZ</a> <a href="#" onclick="window._exportPoi('geojson');return false;">GeoJSON</a></span>
             </div>
             <!-- Kept for flex.js; the columns show these now. -->

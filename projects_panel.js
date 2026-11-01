@@ -171,6 +171,21 @@
     r.append(`Entering as: ${A.who() || '(not set)'} `, btn('change', async () => { try { localStorage.removeItem('flex.author'); } catch (_) {} await A.ensureAuthor(); A.render(); }, 'link'));
     root.appendChild(r);
   }
+  // ── Order of the list ────────────────────────────────────────────────────
+  // Most recent: opened on this computer or changed (anyone, any device),
+  // whichever is later; projects never opened or counted yet go last, A–Z.
+  const opened = () => { try { return JSON.parse(localStorage.getItem('flex.pjx.opened') || '{}'); } catch (_) { return {}; } };
+  function markOpened(id) { if (!id) return; const o = opened(); o[id] = new Date().toISOString(); try { localStorage.setItem('flex.pjx.opened', JSON.stringify(o)); } catch (_) {} }
+  const sortMode = () => { try { return localStorage.getItem('flex.pjx.sort') === 'name' ? 'name' : 'recent'; } catch (_) { return 'recent'; } };
+  const recency = p => { const a = opened()[p.id] || '', I = X.info[p.id], b = (I && I.last) || ''; return a > b ? a : b; };
+  const byName = (a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id), undefined, { numeric: true, sensitivity: 'base' });
+  function sorted(list) {
+    const l = list.slice();
+    if (sortMode() === 'name') return l.sort(byName);
+    return l.sort((a, b) => { const ra = recency(a), rb = recency(b); return ra === rb ? byName(a, b) : ra > rb ? -1 : 1; });
+  }
+  let openedPid = null;
+  setInterval(() => { if (pj.pid !== openedPid) { openedPid = pj.pid; markOpened(pj.pid); } }, 1000);
   function top(root, section) {
     if (!pj.pid) {
       section(root, 'Projects', true, b => {
@@ -178,12 +193,37 @@
         bar.appendChild(btn('＋ New project', () => A.newProject(), 'small primary'));
         bar.appendChild(btn('⇩ From a sync file…', () => A.importSync(), 'small'));
         b.appendChild(bar);
-        const list = pj.projects || [];
+        const list = sorted(pj.projects || []);
         if (!list.length) b.appendChild(el('div', 'pj-note', 'No projects yet. A project is an area: its caves, surface points, documents, notes and leads, opened and saved together, shared with friends and FLEX Field by sync files.'));
+        // Order (most recent first, or A–Z) and a search over names, descriptions and folders.
+        if (list.length > 1) {
+          const tools = el('div', 'pjx-tools');
+          const q = el('input', 'pj-input pjx-q'); q.type = 'search'; q.placeholder = '🔍 Search projects'; q.value = X.q || '';
+          q.addEventListener('input', () => { X.q = q.value; filter(); });
+          q.addEventListener('focus', () => { X.qFocus = true; });
+          q.addEventListener('blur', () => { setTimeout(() => { if (q.isConnected) X.qFocus = false; }, 0); });   // not when a redraw replaced it
+          q.addEventListener('keydown', e => { if (e.key === 'Escape' && q.value) { e.stopPropagation(); q.value = X.q = ''; filter(); } if (e.key === 'Enter') { const one = [...b.querySelectorAll('.pjx-card')].filter(c => c.style.display !== 'none'); if (one.length === 1) open(one[0].dataset.id); } });
+          const sel = el('select', 'pjx-sort'); sel.title = 'Order';
+          [['recent', 'Most recent'], ['name', 'A–Z']].forEach(([v, t]) => { const o = el('option', '', t); o.value = v; sel.appendChild(o); });
+          sel.value = sortMode();
+          sel.addEventListener('change', () => { try { localStorage.setItem('flex.pjx.sort', sel.value); } catch (_) {} A.render(); });
+          tools.append(q, sel);
+          b.appendChild(tools);
+          if (X.qFocus) setTimeout(() => { q.focus(); const n = q.value.length; try { q.setSelectionRange(n, n); } catch (_) {} }, 0);
+        }
+        const none = el('div', 'pj-note pjx-none', 'No project matches.'); none.style.display = 'none';
         const cards = el('div', 'pjx-cards');
+        const filter = () => {
+          const t = (X.q || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+          let n = 0;
+          cards.querySelectorAll('.pjx-card').forEach(c => { const hit = t.every(w => c.dataset.k.includes(w)); c.style.display = hit ? '' : 'none'; if (hit) n++; });
+          none.style.display = n || !list.length ? 'none' : '';
+        };
         list.forEach(p => {
           const I = X.info[p.id];
           const c = el('div', 'pjx-card' + (X.sel === p.id ? ' on' : ''));
+          c.dataset.id = p.id;
+          c.dataset.k = [p.name, p.id, I && I.desc, p.folder].filter(Boolean).join(' ').toLowerCase();
           const h = el('div', 'pjx-card-h');
           h.appendChild(el('b', '', '📁 ' + (p.name || p.id)));
           h.appendChild(btn('Open', () => open(p.id), 'small primary'));
@@ -191,10 +231,12 @@
           c.appendChild(el('div', 'pj-sub', I ? short(I) : 'counting…'));
           if (I && I.desc) c.appendChild(el('div', 'pjx-desc', I.desc));
           if (p.folder) c.appendChild(el('div', 'pjx-path', p.folder));
+          if (sortMode() === 'recent' && recency(p)) c.appendChild(el('div', 'pjx-when', (opened()[p.id] && opened()[p.id] >= ((I && I.last) || '') ? 'opened ' : 'changed ') + when(recency(p))));
           c.addEventListener('click', e => { if (e.target.closest('button')) return; select(p.id, true); });
           cards.appendChild(c);
         });
-        b.appendChild(cards);
+        b.append(none, cards);
+        filter();
         const tog = el('label', 'pj-row pj-sub pjx-tog');
         const cb = el('input'); cb.type = 'checkbox'; cb.checked = showFootprints();
         cb.addEventListener('change', () => { try { localStorage.setItem(prefKey, cb.checked ? '1' : '0'); } catch (_) {} drawFootprints(); });
@@ -267,6 +309,10 @@
 
   const st = document.createElement('style');
   st.textContent = `
+  .pjx-tools { display: flex; gap: 5px; align-items: center; margin: 6px 0 2px; }
+  .pjx-tools .pjx-q { flex: 1; min-width: 0; margin: 0; }
+  .pjx-sort { background: #1a1a2e; color: #e8ece9; border: 1px solid rgba(255,255,255,.2); border-radius: 4px; font-size: 11px; padding: 2px 4px; }
+  .pjx-when { font-size: 10px; color: rgba(255,255,255,.4); }
   .pjx-cards { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; }
   .pjx-card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.12); border-radius: 7px; padding: 7px 9px; cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
   .pjx-card:hover, .pjx-card.on { border-color: #6fd39a; }

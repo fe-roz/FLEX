@@ -501,6 +501,14 @@
     const v = V(); if (!v) return;
     const on = lidarShown();
     const ents = labelled();
+    // 📍 Surface → Labels off: no names at all (surface_columns.js).
+    if (window._surfLabelsOff) {
+      if (HL.divs.size) { HL.divs.forEach(d => d.remove()); HL.divs.clear(); }
+      ents.forEach(e => { if (e.label && !e._pjfLab) { e.label.show = false; e._pjfLab = true; } });
+      HL.mode = 'off';
+      return;
+    }
+    if (HL.mode === 'off') { ents.forEach(e => { if (e._pjfLab) { e._pjfLab = false; if (!e._pjfHid) e.label.show = true; } }); HL.mode = null; }
     if (!on) {
       if (HL.mode !== false) {
         HL.divs.forEach(d => d.remove()); HL.divs.clear();

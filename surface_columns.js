@@ -52,6 +52,24 @@
     applyMaster(); last = ''; render();
   }
   setInterval(() => { if (MS.off) applyMaster(); }, 1000);
+
+  // ── Labels on/off: names of project features, CalTopo and data-file
+  // features (project_features.js draws those) and your points (flex.js,
+  // through its old "Show labels" box, kept hidden).
+  let LB = true;
+  try { LB = localStorage.getItem('flex.surface.labels') !== '0'; } catch (_) {}
+  const labelsOn = () => LB;
+  function applyLabels() {
+    window._surfLabelsOff = !LB;
+    const cb = document.getElementById('html_labels_toggle');
+    if (cb && cb.checked !== LB) { cb.checked = LB; cb.dispatchEvent(new Event('change')); }
+    const v = V(); if (v && v.scene.requestRender) v.scene.requestRender();
+  }
+  function setLabels(on) {
+    LB = !!on;
+    try { localStorage.setItem('flex.surface.labels', LB ? '1' : '0'); } catch (_) {}
+    applyLabels(); last = ''; render();
+  }
   const masterOnFirst = () => { if (MS.off) setMaster(true); };   // using a row's box turns the surface back on
 
   async function myState(force) {
@@ -210,7 +228,8 @@
     const tools = isOpen
       ? `<button type="button" data-draw="point" title="Draw a point in the project">＋ Point</button><button type="button" data-draw="line" title="Draw a line">＋ Line</button><button type="button" data-draw="area" title="Draw an area">＋ Area</button><button type="button" data-tool="folder" title="A new folder">＋ Folder</button><button type="button" data-tool="import" title="GPX / KML / KMZ / GeoJSON into the project's features">⇪ Import</button><button type="button" data-tool="download" title="All the project's features, for CalTopo">⇩ Download</button><button type="button" data-tool="file" title="Show a KMZ / GeoJSON / GPX file as it is (a data file)">📄 Add file</button>`
       : `<button type="button" data-tool="file" title="Show a KMZ / GeoJSON / GPX file">📄 Add KMZ / GeoJSON / GPX</button>`;
-    return `<div class="sc-bar"><button type="button" class="sc-master${on ? ' on' : ''}" data-master title="${on ? 'Hide everything on the surface (each thing keeps its own setting)' : 'Show the surface again, as each thing was set'}"><span class="sc-sw"></span>${on ? 'Surface shown' : 'Surface hidden'}</button>${tools}</div>`;
+    const lab = labelsOn();
+    return `<div class="sc-bar"><button type="button" class="sc-master${on ? ' on' : ''}" data-master title="${on ? 'Hide every feature on the surface (each keeps its own setting)' : 'Show the features again, as each was set'}"><span class="sc-sw"></span>Show features</button><button type="button" class="sc-master sc-lab${lab ? ' on' : ''}" data-labels title="${lab ? 'Hide the names on the map' : 'Show the names on the map'}"><span class="sc-sw"></span>Labels</button><span class="sc-tools">${tools}</span></div>`;
   }
 
   async function render() {
@@ -283,6 +302,7 @@
   host.addEventListener('click', async e => {
     const P = PF();
     if (e.target.closest('[data-master]')) { setMaster(MS.off); return; }
+    if (e.target.closest('[data-labels]')) { setLabels(!LB); return; }
     if (e.target.closest('[data-openpj]')) { const b = document.getElementById('rail-pj') || document.getElementById('pj-top-btn'); if (b) b.click(); return; }
     const dr = e.target.closest('[data-draw]'); if (dr && P) { masterOnFirst(); P.startDraw(dr.dataset.draw, ''); return; }
     const tl = e.target.closest('[data-tool]');
@@ -344,6 +364,7 @@
     const prev = window._onVectorSourcesChanged;
     window._onVectorSourcesChanged = (...a) => { if (prev) prev(...a); if (MS.off) applyMaster(); soon(); };
     if (MS.off) applyMaster();
+    applyLabels();
     render();
   }, 300);
   setInterval(() => { const p = document.getElementById('featuresCollapsible'); if (p && p.classList.contains('show')) render(); }, 3000);
@@ -360,6 +381,8 @@
   #surf-cols .sc-master.on .sc-sw { background: #3fae6e; }
   #surf-cols .sc-master.on .sc-sw::after { left: 13px; }
   #surf-cols .sc-master:not(.on) { border-color: #f2c24e; color: #f2c24e; }
+  #surf-cols .sc-lab:not(.on) { border-color: rgba(255,255,255,.15); color: rgba(255,255,255,.6); }
+  #surf-cols .sc-tools { display: contents; }
   #surf-cols .sc-dim { opacity: .5; }
   #flex-rail .sc-off { opacity: .5; text-decoration: line-through; }
   #surf-cols .sc-arrow { display: inline-block; width: 10px; color: rgba(255,255,255,.5); cursor: pointer; }
@@ -412,5 +435,5 @@
   #lp-poi-list, #lp-data-list { display: none !important; }`;
   document.head.appendChild(style);
 
-  window._surfCols = { render: async () => { while (busy) await new Promise(r => setTimeout(r, 20)); last = ''; return render(); }, refresh: () => soon(true), master: on => (on === undefined ? !MS.off : setMaster(on)) };
+  window._surfCols = { labels: on => (on === undefined ? LB : setLabels(on)), render: async () => { while (busy) await new Promise(r => setTimeout(r, 20)); last = ''; return render(); }, refresh: () => soon(true), master: on => (on === undefined ? !MS.off : setMaster(on)) };
 })();
