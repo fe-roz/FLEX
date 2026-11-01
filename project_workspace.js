@@ -373,22 +373,28 @@
     const snap = await readSnap(pid);
     loadMoves();
     W.entering = true; w.switching = true;
+    const cavefiles = FL.liveCavefiles(pj.P), layers = FL.liveLayers(pj.P);
+    const L = loading(projName(), cavefiles.length + layers.length + 1);
     try {
       const style = {};
       ((snap && snap.caves) || []).forEach(c => { style[c.name] = c.displayOptions; });
       const missing = [], loaded = new Set(w.caves().map(c => c.name));
-      for (const f of FL.liveCavefiles(pj.P)) {
+      let k = 0;
+      for (const f of cavefiles) {
+        await L.step(`Cave ${++k} of ${cavefiles.length}: ${f.file}`);
         const r = await fetch('/api/lib/blob/' + f.h + '.' + (f.ext || 'plt'));
         if (!r.ok) { missing.push(f.file); continue; }
         if (loaded.has(f.file)) w.removeCave(f.file);                 // the project's version and placement win
         w.loadCave(f.file, await r.text(), f.place || null, style[f.file] || mineStyle(f.file));
       }
-      const layers = FL.liveLayers(pj.P), pcs = new Set(w.pointClouds()), files = new Set(w.dataFiles().map(f => f.url));
-      layers.filter(l => l.kind === 'pointcloud' && !pcs.has(l.url)).forEach(l => w.addPointCloud(l.url));
+      const pcs = new Set(w.pointClouds()), files = new Set(w.dataFiles().map(f => f.url));
+      for (const l of layers.filter(l => l.kind === 'pointcloud')) { await L.step('Point cloud: ' + (l.name || l.url)); if (!pcs.has(l.url)) w.addPointCloud(l.url); }
       const ct = layers.filter(l => l.kind === 'caltopo');
-      if (ct.length && !(w.caltopo() && w.caltopo().url === ct[0].url)) w.setCaltopo(ct[0].url, ct[0].interval ?? 30);
+      for (const l of ct) await L.step('CalTopo map');
+      if (ct.length && !(w.caltopo() && w.caltopo().url === ct[0].url)) await withTimeout(w.setCaltopo(ct[0].url, ct[0].interval ?? 30), 15000);
       if (ct.length > 1) toast(`This project has ${ct.length} CalTopo maps; FLEX shows one at a time (the first)`);
-      for (const l of layers.filter(l => l.kind === 'file' && !files.has(l.url))) await w.addDataFile(l.url, l.name, { noKeep: true });
+      for (const l of layers.filter(l => l.kind === 'file')) { await L.step('Data file: ' + (l.name || '')); if (!files.has(l.url)) await w.addDataFile(l.url, l.name, { noKeep: true }); }
+      for (const l of layers.filter(l => !['pointcloud', 'caltopo', 'file'].includes(l.kind))) await L.step(l.name || 'Layer');
       if (startup) {
         // At start, what else was loaded with this project open comes back too (from My data).
         const inP = new Set(FL.liveCavefiles(pj.P).map(f => f.file));
@@ -401,6 +407,11 @@
         }
       }
       if (missing.length) toast(`Survey file(s) not on this computer yet: ${missing.join(', ')} — import the sync file that has them`);
+      // Let the drawing catch up before moving the camera: a flight while caves
+      // are still being built is jerky.
+      await L.step('Drawing…');
+      await settle();
+      L.done();
       if (snap && snap.camera) w.restoreView(snap, { fly: !startup });          // opening: fly there; at start: just be there
       else if (!startup) setTimeout(() => {                                   // no view kept yet: over the project's area
         if (window._pjx && window._pjx.flyToProject(pid)) return;
@@ -408,7 +419,46 @@
         const i = (window._caveImports || []).findIndex(x => x && files.has(x.name));
         if (i >= 0 && window._flyToCave) window._flyToCave(i);
       }, 300);
-    } finally { w.switching = false; W.entering = false; label(); await badge(); }
+    } finally { L.done(); w.switching = false; W.entering = false; label(); await badge(); }
+  }
+
+  // ── "Loading <project>" with a progress bar, while a project opens ────────
+  const withTimeout = (p, ms) => Promise.race([Promise.resolve(p).catch(() => {}), new Promise(r => setTimeout(r, ms))]);
+  const tick = () => new Promise(r => setTimeout(r, 30));          // lets the bar paint between steps
+  function loading(name, total) {
+    let box = document.getElementById('pj-loading');
+    if (!box) {
+      box = el('div'); box.id = 'pj-loading';
+      box.innerHTML = '<div class="pjl-card"><div class="pjl-k">Loading project</div><div class="pjl-t"></div><div class="pjl-bar"><div></div></div><div class="pjl-s"></div></div>';
+      document.body.appendChild(box);
+    }
+    box.querySelector('.pjl-t').textContent = name;
+    const bar = box.querySelector('.pjl-bar div'), sub = box.querySelector('.pjl-s');
+    let n = 0, shown = false;
+    bar.style.width = '0%'; sub.textContent = '';
+    const t0 = Date.now();
+    return {
+      async step(text) {
+        n++;
+        if (!shown && (total > 1 || Date.now() - t0 > 300)) { shown = true; box.classList.add('on'); }
+        bar.style.width = Math.min(100, Math.round(100 * n / Math.max(1, total))) + '%';
+        sub.textContent = text || '';
+        await tick();
+      },
+      done() { bar.style.width = '100%'; box.classList.remove('on'); },
+    };
+  }
+  /** Until the caves are drawn and the map has caught up (or a few seconds pass). */
+  async function settle(ms = 5000) {
+    const V = window.cesiumViewer, t0 = Date.now();
+    while (Date.now() - t0 < ms) {
+      const prims = (window._caveImports || []).map(i => i && i._linePrim).filter(Boolean);
+      const drawn = prims.every(p => p.ready !== false);
+      const tiles = !V || V.scene.globe.tilesLoaded;
+      if (drawn && tiles) break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    await new Promise(r => setTimeout(r, 200));
   }
   /** A new project that starts with what is loaded now: all of it goes in. */
   async function adopt() {
@@ -499,6 +549,15 @@
   st.textContent = '#pj-top-btn.pj-top-on { background: rgba(33,150,243,.55); border-color: #2196F3; color: #fff; }' +
     '#session_save_btn.pj-save-waiting { background: rgba(242,194,78,.85); border-color: #f2c24e; color: #1b1b1b; font-weight: 600; }' +
     '#pj-save-menu { position: fixed; z-index: 9800; width: 300px; background: rgba(20,22,30,.98); color: #e8e8ee; border: 1px solid #f2c24e; border-radius: 8px; padding: 10px 12px; font: 12px system-ui, sans-serif; box-shadow: 0 10px 30px rgba(0,0,0,.5); }' +
+    '#pj-loading { position: fixed; inset: 0; z-index: 9990; display: flex; align-items: center; justify-content: center; background: rgba(6,8,12,.55); backdrop-filter: blur(2px); opacity: 0; pointer-events: none; transition: opacity .35s ease; }' +
+    '#pj-loading.on { opacity: 1; pointer-events: auto; }' +
+    '#pj-loading .pjl-card { width: 340px; background: rgba(18,22,30,.96); border: 1px solid rgba(255,255,255,.12); border-radius: 10px; padding: 18px 20px; color: #e8ece9; font: 13px system-ui, sans-serif; box-shadow: 0 20px 50px rgba(0,0,0,.5); }' +
+    '#pj-loading .pjl-k { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: #6fd39a; font-weight: 700; }' +
+    '#pj-loading .pjl-t { font-size: 18px; font-weight: 700; margin: 2px 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }' +
+    '#pj-loading .pjl-bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.1); overflow: hidden; }' +
+    '#pj-loading .pjl-bar div { height: 100%; width: 0; border-radius: 3px; background: linear-gradient(90deg, #6fd39a, #9fe3bd); transition: width .25s ease; background-size: 200% 100%; animation: pjl-shine 1.2s linear infinite; }' +
+    '@keyframes pjl-shine { from { background-position: 200% 0; } to { background-position: 0 0; } }' +
+    '#pj-loading .pjl-s { margin-top: 8px; font-size: 11.5px; color: rgba(255,255,255,.6); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 1.2em; }' +
     '#pj-save-menu .pj-save-menu-t { font-weight: 700; margin-bottom: 4px; } #pj-save-menu .pj-save-menu-i { opacity: .85; padding: 1px 0; } #pj-save-menu .pj-row { margin-top: 8px; }';
   document.head.appendChild(st);
   setInterval(() => { if (pj.pid && !W.busy && !W.entering) badge(); }, 5000);

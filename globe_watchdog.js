@@ -18,7 +18,7 @@
   const STUCK_MS = 6000;       // how long a tile may wait before we step in
   const MAX_NUDGES = 5;        // per page load
 
-  let stuckSince = 0, nudges = 0;
+  let stuckSince = 0, nudges = 0, told = false, lastFrame = -1;
 
   // Imagery states (Cesium ImageryState): READY 3, FAILED 4, INVALID 5.
   const settled = im => !im || im.state === 3 || im.state === 4 || im.state === 5;
@@ -42,16 +42,35 @@
     if (!v || v.isDestroyed()) return;
     const globe = v.scene.globe;
     if (!globe || !globe.show) { stuckSince = 0; return; }
+    // Only while frames are being drawn (a background tab draws none: nothing to judge).
+    const frame = v.scene.frameState && v.scene.frameState.frameNumber;
+    if (frame === lastFrame) return;
+    lastFrame = frame;
     const roots = globe._surface && globe._surface._levelZeroTiles;
-    if (!Array.isArray(roots) || !roots.length) return;
-    // Terrain is in (it has a mesh) but the tile still may not be drawn.
-    const waiting = roots.filter(t => t && !t.renderable && t.data && t.data.vertexArray);
-    if (!waiting.length) { stuckSince = 0; return; }
+    const rootsOk = Array.isArray(roots) && roots.length;
+    // No globe at all: no root tile drawable (or none made yet).
+    const notDrawn = rootsOk ? roots.filter(t => t && !t.renderable) : [];
+    if (rootsOk && notDrawn.length < roots.length) { stuckSince = 0; return; }
     const now = Date.now();
     if (!stuckSince) { stuckSince = now; return; }
     if (now - stuckSince < STUCK_MS || nudges >= MAX_NUDGES) return;
-    const layers = stalledLayers(waiting);
-    if (!layers.length) return;
+    // Terrain is in (it has a mesh) but a shown layer has no picture yet.
+    let layers = stalledLayers(notDrawn.filter(t => t.data && t.data.vertexArray));
+    if (!layers.length) {
+      // Something else: say what, once, for the bug report; then the by-hand
+      // fix (a shown layer off and on), which has always brought it back.
+      if (!told) {
+        told = true;
+        const lz = v.imageryLayers, names = [];
+        for (let i = 0; i < lz.length; i++) { const l = lz.get(i); names.push((l.name || 'layer ' + i) + (l.show ? '' : ' (hidden)') + (l.ready === false ? ' (not ready)' : '')); }
+        console.warn('[globe] no globe after ' + Math.round((now - stuckSince) / 1000) + ' s: ' +
+          (!rootsOk ? 'no root tiles yet' : notDrawn.length + ' root tile(s) not drawable, terrain ' + notDrawn.filter(t => t.data && t.data.vertexArray).length + '/' + notDrawn.length + ' in') +
+          '; terrain provider ' + (globe.terrainProvider ? globe.terrainProvider.constructor.name : 'none') + '; layers: ' + names.join(', '));
+      }
+      layers = [];
+      for (let i = 0; i < v.imageryLayers.length; i++) { const l = v.imageryLayers.get(i); if (l.show) layers.push(l); }
+      if (!layers.length) return;
+    }
     nudges++; stuckSince = now;
     console.warn('[globe] no globe yet: waiting on ' + layers.map(l => '"' + (l.name || 'a layer') + '"').join(', ') +
       ' - showing the globe without ' + (layers.length > 1 ? 'them' : 'it') + ' until ' + (layers.length > 1 ? 'they load' : 'it loads'));
