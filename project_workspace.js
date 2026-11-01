@@ -378,6 +378,8 @@
     try {
       const style = {};
       ((snap && snap.caves) || []).forEach(c => { style[c.name] = c.displayOptions; });
+      // Precise terrain first, so what is loaded after it (caves, features) stands on it.
+      if (layers.some(l => l.kind === 'terrain') && window._customLayers) { await L.step('Terrain'); await withTimeout(window._customLayers.sync(true), 60000); }
       const missing = [], loaded = new Set(w.caves().map(c => c.name));
       let k = 0;
       for (const f of cavefiles) {
@@ -395,7 +397,7 @@
       if (ct.length > 1) toast(`This project has ${ct.length} CalTopo maps; FLEX shows one at a time (the first)`);
       for (const l of layers.filter(l => l.kind === 'file')) { await L.step('Data file: ' + (l.name || '')); if (!files.has(l.url)) await w.addDataFile(l.url, l.name, { noKeep: true }); }
       for (const l of layers.filter(l => !['pointcloud', 'caltopo', 'file'].includes(l.kind))) await L.step(l.name || 'Layer');
-      if (layers.some(l => l.kind === 'imagery' || l.kind === 'tiles') && window._customLayers) await withTimeout(window._customLayers.sync(true), 10000);   // map layers: custom_layers.js
+      if (layers.some(l => l.kind === 'imagery' || l.kind === 'tiles' || l.kind === 'terrain') && window._customLayers) await withTimeout(window._customLayers.sync(true), 10000);   // map layers: custom_layers.js
       if (startup) {
         // At start, what else was loaded with this project open comes back too (from My data).
         const inP = new Set(FL.liveCavefiles(pj.P).map(f => f.file));

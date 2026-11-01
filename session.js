@@ -233,7 +233,7 @@ function _collectLayers() {
   if (allLayers.length === 0) return null;
   return {
     layers: allLayers
-      .filter(l => l.name)   // skip any unnamed system layers
+      .filter(l => l.name && !l._custom)   // skip unnamed system layers, and your own map layers (project/My data keep those)
       .map(l => ({ name: l.name, show: !!l.show, alpha: l.alpha ?? 1 })),
     usgsRef: !!_viewModel.usgsRef,
   };

@@ -42,9 +42,9 @@ const SCOPE_RE = /^(docs|p-[A-Za-z0-9_-]{1,40})$/;
 const DEV_RE = /^[A-Za-z0-9_-]{1,40}$/;
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
 const HASH_RE = /^[0-9a-f]{64}$/;
-const EXTS = new Set(['jpg', 'png', 'webp', 'pdf', 'plt', 'tif', 'kml', 'kmz', 'json']);   // plt: survey files (text); tif: original scans; kml/kmz/json: data files
+const EXTS = new Set(['jpg', 'png', 'webp', 'pdf', 'plt', 'tif', 'kml', 'kmz', 'json', 'bin']);   // plt: survey files (text); tif: original scans; kml/kmz/json: data files; bin: terrain patches
 const IMAGE = new Set(['jpg', 'png', 'webp']);                          // page images → .flex/renders
-const MIME = { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp', pdf: 'application/pdf', plt: 'text/plain; charset=utf-8', tif: 'image/tiff',
+const MIME = { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp', pdf: 'application/pdf', plt: 'text/plain; charset=utf-8', tif: 'image/tiff', bin: 'application/octet-stream',
   kml: 'application/vnd.google-earth.kml+xml', kmz: 'application/vnd.google-earth.kmz', json: 'application/json' };
 const MAX_BLOB = 40 << 20;
 const MAX_BODY = 64 << 20;
@@ -374,6 +374,17 @@ async function handle(req, res, rest, query) {
       const type = FILE_MIME[ext] || 'application/octet-stream';
       res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache', 'Content-Disposition': (FILE_MIME[ext] ? 'inline' : 'attachment') + '; filename*=UTF-8\'\'' + encodeURIComponent(path.basename(f)) });
       return fs.createReadStream(f).pipe(res);
+    }
+    // A file written into the project folder (e.g. FLEX maps/…): never .flex, never outside, never over a different file unless overwrite=1.
+    if (req.method === 'POST' && rest === 'putfile' && pidOf(q)) {
+      const pd = projDir(pidOf(q)); if (!pd) return json(res, { error: 'no folder' }, 404);
+      const rel = String(q.path || '').replace(/\\/g, '/').split('/').filter(x => x && x !== '.' && x !== '..').map(safeName).join('/');
+      if (!rel || rel.split('/')[0].toLowerCase() === '.flex') return json(res, { error: 'bad path' }, 400);
+      const dest = path.join(pd, rel);
+      if (fs.existsSync(dest) && String(q.overwrite || '') !== '1') return json(res, { ok: true, path: rel, existed: true });
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.writeFileSync(dest, await body(req, 256 << 20));
+      return json(res, { ok: true, path: rel });
     }
     if (req.method === 'GET' && rest === 'kv') return json(res, { v: kv()[q.k] ?? null });
     if (req.method === 'POST' && rest === 'kv') { const o = JSON.parse((await body(req, 1 << 20)).toString('utf8')); kvSet(o.k, o.v); return json(res, { ok: true }); }

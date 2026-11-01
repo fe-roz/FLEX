@@ -7744,6 +7744,8 @@ function subscribeLayerToSession(layer) {
   Cesium.knockout.getObservable(layer, 'alpha')?.subscribe(() => saveSession());
 }
 
+window._renderLayerList = () => renderLayerList();
+window._updateLayerList = updateLayerList;
 function renderLayerList() {
   const body = document.getElementById('lp-layers-body');
   if (!body) return;
@@ -7844,7 +7846,8 @@ function renderLayerList() {
 
     // Name label
     const nameSpan = document.createElement('span');
-    nameSpan.textContent = layer.name;
+    nameSpan.textContent = (layer._custom ? (layer._custom.owner === 'p' ? '📁 ' : '👤 ') : '') + layer.name;
+    if (layer._custom) nameSpan.title = layer._custom.owner === 'p' ? 'Part of the project' : 'In My data';
     nameSpan.style.cssText = 'flex:1; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
 
     // Opacity slider
@@ -7863,6 +7866,7 @@ function renderLayerList() {
     removeBtn.addEventListener('mouseenter', () => { removeBtn.style.color = 'rgba(255,60,60,1)'; });
     removeBtn.addEventListener('mouseleave', () => { removeBtn.style.color = 'rgba(255,100,100,0.65)'; });
     removeBtn.addEventListener('click', () => {
+      if (layer._custom && window._customLayers) { window._customLayers.removeById(layer._custom.id); return; }
       removeCatalogLayer(layer);
       saveSession();
       renderLayerList();
@@ -7913,7 +7917,7 @@ function renderLayerList() {
     'background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.2);',
     'border-radius:4px; color:rgba(255,255,255,0.75); cursor:pointer; letter-spacing:0.03em;',
   ].join('');
-  if (available.length === 0) {
+  if (available.length === 0 && !window._customLayers) {
     addBtn.disabled = true;
     addBtn.style.opacity = '0.38';
     addBtn.title = 'All catalog layers are already active';
@@ -7949,6 +7953,17 @@ function renderLayerList() {
     picker.appendChild(item);
   });
 
+  if (window._customLayers) {            // your own: a GeoTIFF or a tile link (custom_layers.js); in a project they go into it (📁)
+    [['📄 GeoTIFF file…', () => window._customLayers.pickFile()], ['🔗 Tile link…', () => window._customLayers.askTiles()]].forEach(([label, fn]) => {
+      const item = document.createElement('div');
+      item.textContent = label;
+      item.style.cssText = 'padding:6px 10px; font-size:11px; color:rgba(255,255,255,0.85); cursor:pointer; white-space:nowrap; border-top:1px solid rgba(255,255,255,0.1);';
+      item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,0.1)'; });
+      item.addEventListener('mouseleave', () => { item.style.background = ''; });
+      item.addEventListener('click', () => { picker.style.display = 'none'; fn(); });
+      picker.appendChild(item);
+    });
+  }
   footer.appendChild(picker);
   body.appendChild(footer);
 
