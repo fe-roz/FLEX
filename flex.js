@@ -1900,10 +1900,13 @@ setInterval(() => {
   
   // Entity selection changed
   if (currentEntity !== lastSelectedEntity) {
+    // "Add Point Cloud" only for things that link to one (LiDAR dataset
+    // outlines); it shows in the details panel (inspector.js).
+    const pcUrl = currentEntity && currentEntity.properties && currentEntity.properties._url && currentEntity.properties._url._value;
+    if (currentEntity && pcUrl) showFloatingButton(); else hideFloatingButton();
     if (currentEntity && !lastSelectedEntity) {
       // Entity was selected
       console.log('Entity selected:', currentEntity.id);
-      showFloatingButton();
       onWorkflowEntitySelected(currentEntity);
     } else if (currentEntity && lastSelectedEntity) {
       onWorkflowEntitySelected(currentEntity);

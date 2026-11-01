@@ -876,8 +876,7 @@
   .pjs-page img { width: 100%; display: block; background: #fff; cursor: zoom-in; }
   .pjs-page.zoom img { width: 220%; max-width: none; cursor: zoom-out; }
   .pjs-page iframe { width: 100%; height: 75vh; border: 0; background: #fff; }
-  .pjs-docked .cesium-viewer-infoBoxContainer { display: none; }
-  .pjs-docked .cesium-viewer-toolbar { right: calc(var(--pjs-w, 460px) + 8px); }`;
+  .pjs-docked .cesium-viewer-infoBoxContainer { display: none; }`;
   document.head.appendChild(style);
 
   window._pjSeg = { on, changed, card, section, review: showList, showList, showSegment, closeDock, step, setLabels, drawVersions, info, effectText };
