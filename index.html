@@ -902,48 +902,24 @@
         <div class="collapse" id="featuresCollapsible">
           <div class="lp-panel-wrap">
 
-            <!-- Project | My data, two columns (surface_columns.js) -->
+            <!-- 📍 Surface: the master switch and tools, then Project | My data
+                 in two columns with folders opening in place (surface_columns.js) -->
             <div id="surf-cols"></div>
-            <div class="lp-group-label">Project folders</div>
-            <!-- Project features and overlay folders (project_features.js) -->
-            <div id="pjf-panel"></div>
-
-            <!-- Points of Interest -->
-            <div class="lp-section">
-              <div class="lp-section-header" onclick="window._lpToggle(this)">
-                <span class="lp-section-arrow">▸</span> Points of Interest
-                <span id="lp-poi-count-badge"
-                  style="margin-left:4px; font-size:9px; background:rgba(255,200,80,0.25);
-                         color:rgba(255,200,80,0.9); border-radius:8px; padding:1px 5px;
-                         font-weight:400; letter-spacing:0; text-transform:none; display:none;">0</span>
-              </div>
-              <div class="lp-section-body open" id="lp-poi-body">
-                <label class="lp-row" style="cursor:pointer; margin-bottom:4px;">
-                  <input type="checkbox" id="html_labels_toggle" checked style="margin:0;">
-                  <span class="lp-row-name">Show labels</span>
-                </label>
-                <div id="lp-poi-group" style="display:none;">
-                  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:3px;">
-                    <span style="font-size:10px; opacity:0.55; text-transform:uppercase; letter-spacing:0.05em;" title="Kept in My data; each sitting's points form a group “Points <date time>”">Points (in My data)</span>
-                    <div style="display:flex; gap:4px;">
-                      <button class="btn btn-sm btn-secondary" style="font-size:9px; padding:1px 5px;"
-                        onclick="window._exportPoi('kmz')">KMZ</button>
-                      <button class="btn btn-sm btn-secondary" style="font-size:9px; padding:1px 5px;"
-                        onclick="window._exportPoi('geojson')">GeoJSON</button>
-                    </div>
-                  </div>
-                  <div id="lp-poi-list"></div>
-                </div>
-              </div>
+            <div class="sc-extra">
+              <label title="Names next to points on the map"><input type="checkbox" id="html_labels_toggle" checked> Show labels</label>
+              <span class="sc-sep">·</span>
+              <span title="Your points in 👤 My data, as a file">⇩ My points: <a href="#" onclick="window._exportPoi('kmz');return false;">KMZ</a> <a href="#" onclick="window._exportPoi('geojson');return false;">GeoJSON</a></span>
             </div>
+            <!-- Kept for flex.js; the columns show these now. -->
+            <div hidden><span id="lp-poi-count-badge"></span><div id="lp-poi-body"><div id="lp-poi-group"><div id="lp-poi-list"></div></div></div><div id="lp-data-body"><div id="lp-data-list"></div></div><div id="pjf-panel"></div></div>
 
             <!-- CalTopo Maps -->
             <div class="lp-section">
               <div class="lp-section-header" onclick="window._lpToggle(this)">
-                <span class="lp-section-arrow">▸</span> CalTopo Maps
+                <span class="lp-section-arrow">▸</span> CalTopo map: link and key
                 <span id="lp-ct-dot" style="font-size:9px; margin-left:4px; color:rgba(255,255,255,0.3);">⬤</span>
               </div>
-              <div class="lp-section-body open" id="lp-caltopo-body">
+              <div class="lp-section-body" id="lp-caltopo-body">
                 <!-- Status line -->
                 <div style="font-size:10px; color:rgba(255,255,255,0.55); margin-bottom:5px;">
                   <span id="lp-ct-text">Not loaded</span>
@@ -998,21 +974,6 @@
               </div>
             </div>
 
-            <div class="lp-group-label">Data Files</div>
-
-            <!-- Data files (KMZ, GeoJSON, GPX) -->
-            <div class="lp-section">
-              <div class="lp-section-header" onclick="window._lpToggle(this)">
-                <span class="lp-section-arrow">▸</span> Data Files
-              </div>
-              <div class="lp-section-body open" id="lp-data-body">
-                <div id="lp-data-list"></div>
-                <div style="margin-top:4px;">
-                  <button class="btn btn-sm btn-primary lp-add-btn" onclick="window._addDataFile()">+ Add KMZ / GeoJSON</button>
-                </div>
-              </div>
-            </div>
-
           </div>
         </div>
 
@@ -1061,6 +1022,8 @@
                 <div id="lp-plt-recents"></div>
               </div>
             </div>
+            <!-- Cave entrances marked on surface points (project_features.js) -->
+            <div id="pjf-tags"></div>
 
           </div>
         </div>
@@ -1738,6 +1701,19 @@
           <div class="lp-panel-wrap">
             <div style="padding:2px 0; font-size:11px; color:rgba(255,255,255,0.8); line-height:1.75;">
 
+              <div id="help-guide-links" style="margin-bottom:12px;">
+                <button type="button" class="btn btn-sm btn-primary" data-guide="" style="font-size:12px; width:100%; margin-bottom:6px;">📘 Open the FLEX guide</button>
+                <div style="display:flex; flex-wrap:wrap; gap:4px;">
+                  <button type="button" class="btn btn-sm btn-secondary" data-guide="setup" style="font-size:10.5px; padding:1px 7px;">Setting up</button>
+                  <button type="button" class="btn btn-sm btn-secondary" data-guide="first" style="font-size:10.5px; padding:1px 7px;">First area</button>
+                  <button type="button" class="btn btn-sm btn-secondary" data-guide="screen" style="font-size:10.5px; padding:1px 7px;">The screen</button>
+                  <button type="button" class="btn btn-sm btn-secondary" data-guide="tree" style="font-size:10.5px; padding:1px 7px;">Projects</button>
+                  <button type="button" class="btn btn-sm btn-secondary" data-guide="saving" style="font-size:10.5px; padding:1px 7px;">Saving</button>
+                  <button type="button" class="btn btn-sm btn-secondary" data-guide="caltopo" style="font-size:10.5px; padding:1px 7px;">CalTopo</button>
+                  <button type="button" class="btn btn-sm btn-secondary" data-guide="export" style="font-size:10.5px; padding:1px 7px;">Phone app</button>
+                  <button type="button" class="btn btn-sm btn-secondary" data-guide="trouble" style="font-size:10.5px; padding:1px 7px;">Problems</button>
+                </div>
+              </div>
               <div style="margin-bottom:10px;">
                 <a href="https://github.com/ferozfeerasta/FLEX" target="_blank" rel="noopener noreferrer"
                   style="color:#7bbfff; font-size:11px; text-decoration:none;">
@@ -2075,6 +2051,7 @@
 <!-- Projects: notes, leads, documents, sync files (the same library as FLEX Field) -->
 <script src="viewer_build/libs/flexlib.js"></script>
 <script src="my_data.js"></script>
+<script src="viewer_build/libs/pako_inflate.min.js"></script>  <!-- pako 2.2.0 (MIT, Zlib): Deflate-compressed TIFFs -->
 <script src="viewer_build/libs/utif.js"></script>
 <script src="viewer_build/libs/jszip.min.js"></script>
 <script src="project.js"></script>
@@ -2095,6 +2072,7 @@
 <script src="cave_columns.js"></script>
 <!-- 📍 Surface: project | My data -->
 <script src="surface_columns.js"></script>
+<script src="custom_layers.js"></script>
 <!-- Brings the globe back if a map layer stalls at startup -->
 <script src="globe_watchdog.js"></script>
 

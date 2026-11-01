@@ -99,5 +99,5 @@
       .map(l => ({ id: l.id, url: l.blob ? '/api/lib/blob/' + l.blob : l.url, label: l.name || '' }));
   }
 
-  window._myData = { keepPoint, forgetPoint, points, keepFile, forgetFile, filesToRestore, state };
+  window._myData = { keepPoint, forgetPoint, points, keepFile, forgetFile, filesToRestore, state, record: rec };
 })();

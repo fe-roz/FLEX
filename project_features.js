@@ -398,114 +398,32 @@
     h.addEventListener('click', () => { F.open[k] = !b.classList.contains('open'); b.classList.toggle('open', F.open[k]); h.querySelector('.lp-section-arrow').textContent = F.open[k] ? '▾' : '▸'; });
     s.append(h, b); root.appendChild(s); build(b);
   }
+  // The project's features, CalTopo and data-file folders are listed in
+  // 📍 Surface's columns (surface_columns.js). Here: cave entrances marked on
+  // points, in 🕳 Caves.
   function render() {
-    const root = document.getElementById('pjf-panel');
+    const root = document.getElementById('pjf-tags');
+    if (window._surfCols) window._surfCols.render();
     if (!root) return;
     root.textContent = '';
-    // Project features.
-    sec(root, pj.pid ? 'Project features — FLEX only, not in CalTopo' : 'Project features', true, b => {
-      if (!pj.pid) {
-        b.appendChild(el('div', 'pj-note', 'Points, lines and areas you draw or import are kept in a project, in folders, and can be downloaded for CalTopo. A local project is enough — it needs no CalTopo map.'));
-        const r = el('div', 'pj-row');
-        r.appendChild(btn('📁 New local project…', () => A.newProject(), 'small primary'));
-        r.appendChild(btn('Open a project', () => document.getElementById('pj-top-btn') && document.getElementById('pj-top-btn').click(), 'small'));
+    if (!pj.pid) return;
+    const tags = scanTags();
+    sec(root, `Cave entrances on the map (${tags.length})`, tags.some(t => !t.placedHere), b => {
+      b.appendChild(el('div', 'pj-note', 'A point whose description has a line “flex: cave=<cave name>; station=<entrance station>” — in CalTopo or in this project — marks where a cave’s entrance is. FLEX places the cave there when you say so. 📁 → What this project loads → “Copy CalTopo tag” gives you the line.'));
+      if (!tags.length) b.appendChild(el('div', 'pj-sub', 'None found.'));
+      tags.forEach(t => {
+        const r = el('div', 'pj-item');
+        r.appendChild(el('div', 'pj-item-t', `🕳 ${t.cave} · station ${t.station || '?'}`));
+        r.appendChild(el('div', 'pj-sub', `${t.point || 'point'} (${t.from}) · ${t.at[1].toFixed(5)}, ${t.at[0].toFixed(5)}`));
+        const row = el('div', 'pj-row');
+        if (!t.cid && !t.file) row.appendChild(el('span', 'pj-sub', 'No cave of that name in this project (check the name, or add the cave).'));
+        else if (!t.file) row.appendChild(el('span', 'pj-sub', 'The cave’s survey file isn’t stored in the project yet: load it and save.'));
+        else if (t.placedHere) row.appendChild(el('span', 'pj-sub', '✓ placed here'));
+        else row.appendChild(btn('Place the cave here', () => placeAtTag(t), 'small primary'));
+        r.appendChild(row);
         b.appendChild(r);
-        return;
-      }
-      const bar = el('div', 'pj-row');
-      bar.append(btn('＋ Point', () => startDraw('point', ''), 'small'), btn('＋ Line', () => startDraw('line', ''), 'small'), btn('＋ Area', () => startDraw('area', ''), 'small'),
-        btn('＋ Folder', () => editGroup(null, ''), 'small'), btn('⇪ Import…', () => importFile(''), 'small'), btn('⇩ Download', () => downloadMenu(''), 'small'));
-      b.appendChild(bar);
-      const un = V() ? V().entities.values.filter(e => e.properties && e.properties.isUserLabel).length : 0;
-      if (un) b.appendChild(el('div', 'pj-sub', `${un} point(s) of yours are in 👤 My data (above): ← moves a sitting’s points into the project.`));
-      const all = FL.liveFeatures(pj.P), groups = FL.liveGroups(pj.P);
-      if (!all.length && !groups.length) b.appendChild(el('div', 'pj-note', 'Nothing yet. Draw on the map, or import a GPX / KML / GeoJSON file. Download a folder to upload it to CalTopo.'));
-      const h = hidden();
-      const rootRow = el('label', 'pj-row pjf-row');
-      const rcb = el('input'); rcb.type = 'checkbox'; rcb.checked = !h['root'];
-      rcb.addEventListener('change', () => { setHidden('root', !rcb.checked); draw(); });
-      rootRow.append(rcb, el('span', 'pj-sub', `Show all (${all.length})`));
-      b.appendChild(rootRow);
-      const icon = { point: '•', line: '〰', area: '▱' };
-      const featRow = (f, depth) => {
-        const r = el('div', 'pjf-item');
-        r.style.paddingLeft = (8 + depth * 14) + 'px';
-        r.innerHTML = `<span style="color:${esc(colorOf(f))}">${icon[f.kind]}</span> <span class="pjf-name">${esc(f.name || '(no name)')}${FL.flexTag(f.desc) ? ' <span class="pj-sub">🕳</span>' : ''}</span>`;
-        rowActs(r, () => ({ kind: f.kind, coords: f.coords, key: 'f:' + f.id }));
-        r.appendChild(btn('✏️', () => editFeature(f.id), 'small pjf-edit'));
-        return r;
-      };
-      const folder = (pid, depth) => {
-        groups.filter(g => (g.parent || '') === pid).forEach(g => {
-          const n = FL.liveFeatures(pj.P).filter(f => FL.groupPath(pj.P, f.group).some(x => x.id === g.id)).length;
-          const r = el('div', 'pjf-folder');
-          r.style.paddingLeft = (4 + depth * 14) + 'px';
-          const open = !!F.open['g:' + g.id];
-          const arrow = el('span', 'pjf-arrow', open ? '▾' : '▸');
-          arrow.addEventListener('click', () => { F.open['g:' + g.id] = !open; render(); });
-          const cb = el('input'); cb.type = 'checkbox'; cb.checked = !h['g:' + g.id];
-          cb.addEventListener('change', () => { setHidden('g:' + g.id, !cb.checked); draw(); });
-          const nm = el('span', 'pjf-name'); nm.innerHTML = `<span class="pjs-sw" style="background:${esc(groupColor(g.id))}"></span>📁 ${esc(g.name)} <span class="pj-sub">(${n})</span>`;
-          nm.addEventListener('click', () => { F.open['g:' + g.id] = !open; render(); });
-          const tools = el('span', 'pjf-tools');
-          tools.append(btn('＋', async () => {
-            const k = await A.choose(`Add to “${g.name}”`, '', [{ label: '• Point', value: 'point' }, { label: '〰 Line', value: 'line' }, { label: '▱ Area', value: 'area' }, { label: '📁 Folder', value: 'folder' }, { label: '⇪ Import a file', value: 'import' }]);
-            if (k === 'folder') editGroup(null, g.id); else if (k === 'import') importFile(g.id); else if (k) startDraw(k, g.id);
-          }, 'small'), btn('⇩', () => downloadMenu(g.id), 'small'), btn('✏️', () => editGroup(g.id), 'small'));
-          r.append(arrow, cb, nm, tools);
-          b.appendChild(r);
-          if (open) { folder(g.id, depth + 1); all.filter(f => f.group === g.id).forEach(f => b.appendChild(featRow(f, depth + 1))); }
-        });
-      };
-      folder('', 0);
-      all.filter(f => !f.group).forEach(f => b.appendChild(featRow(f, 0)));
-    }, 'features');
-    // Cave entrances found in point descriptions.
-    if (pj.pid) {
-      const tags = scanTags();
-      sec(root, `Cave entrances (${tags.length})`, tags.some(t => !t.placedHere), b => {
-        b.appendChild(el('div', 'pj-note', 'A point whose description has a line “flex: cave=<cave name>; station=<entrance station>” — in CalTopo or here — marks where a cave’s entrance is. FLEX places the cave there when you say so. 📁 → What this project loads → “Copy CalTopo tag” gives you the line.'));
-        if (!tags.length) b.appendChild(el('div', 'pj-sub', 'None found.'));
-        tags.forEach(t => {
-          const r = el('div', 'pj-item');
-          r.appendChild(el('div', 'pj-item-t', `🕳 ${t.cave} · station ${t.station || '?'}`));
-          r.appendChild(el('div', 'pj-sub', `${t.point || 'point'} (${t.from}) · ${t.at[1].toFixed(5)}, ${t.at[0].toFixed(5)}`));
-          const row = el('div', 'pj-row');
-          if (!t.cid && !t.file) row.appendChild(el('span', 'pj-sub', 'No cave of that name in this project (check the name, or add the cave).'));
-          else if (!t.file) row.appendChild(el('span', 'pj-sub', 'The cave’s survey file isn’t stored in the project yet: load it and save.'));
-          else if (t.placedHere) row.appendChild(el('span', 'pj-sub', '✓ placed here'));
-          else row.appendChild(btn('Place the cave here', () => placeAtTag(t), 'small primary'));
-          r.appendChild(row);
-          b.appendChild(r);
-        });
-      }, 'tags');
-    }
-    // Overlay folders.
-    const w = ws(), srcs = w ? w.vectorSources() : [];
-    sec(root, `Map overlay folders (${srcs.length})`, false, b => {
-      if (!srcs.length) { b.appendChild(el('div', 'pj-note', 'The project’s CalTopo map (📁 Project → CalTopo map) and KML / GeoJSON files (Data Files below) show their folders here, each with show / hide.')); return; }
-      const h = hidden();
-      srcs.forEach(src => {
-        const kids = overlayTree(src);
-        b.appendChild(el('div', 'pj-h', (src.kind === 'caltopo' ? '🗺 ' : '📄 ') + src.name));
-        const visit = (parent, path, depth) => (kids.get(parent) || []).forEach(e => {
-          const p = path + '/' + (e.name || e.id), isFolder = kids.has(e);
-          if (!isFolder && depth > 0 && !F.srcOpen[srcKey(src, path)]) return;
-          if (!isFolder && depth === 0 && (kids.get(null) || []).length > 40) return;      // long flat lists: folders only
-          const r = el('div', isFolder ? 'pjf-folder' : 'pjf-item');
-          r.style.paddingLeft = (4 + depth * 14) + 'px';
-          const cb = el('input'); cb.type = 'checkbox'; cb.checked = !h[srcKey(src, p)];
-          cb.addEventListener('change', () => { setHidden(srcKey(src, p), !cb.checked); applyOverlayHidden(); });
-          const nm = el('span', 'pjf-name', (isFolder ? (F.srcOpen[srcKey(src, p)] ? '▾ 📁 ' : '▸ 📁 ') : '') + (e.name || '(no name)') + (isFolder ? ` (${(kids.get(e) || []).length})` : ''));
-          if (isFolder) nm.addEventListener('click', () => { F.srcOpen[srcKey(src, p)] = !F.srcOpen[srcKey(src, p)]; render(); });
-          else rowActs(r, () => Object.assign(entCoords(e) || {}, { key: 'e:' + e.id }));
-          r.append(cb, nm);
-          b.appendChild(r);
-          if (isFolder && F.srcOpen[srcKey(src, p)]) visit(e, p, depth + 1);
-        });
-        visit(null, '', 0);
       });
-    }, 'overlays');
+    }, 'tags');
   }
   // ── Fly to and highlight (double-click a row; a click only highlights) ───
   // Heights: imported / CalTopo points are clamped to the ground and stored at
@@ -637,7 +555,7 @@
     });
     changed(null);
   }, 300);
-  document.querySelector('[data-target="#featuresCollapsible"]')?.addEventListener('click', () => setTimeout(render, 0));
+  ['#featuresCollapsible', '#caveCollapsible'].forEach(t => document.querySelector(`[data-target="${t}"]`)?.addEventListener('click', () => setTimeout(render, 0)));
 
   const st = document.createElement('style');
   st.textContent = `
@@ -653,5 +571,5 @@
   .pjf-item { user-select: none; }`;
   document.head.appendChild(st);
 
-  window._pjf = { hidden, setHidden, highlight, clearHighlight, updateHtml, changed, render, draw, startDraw, stopDraw, editFeature, editGroup, importFile, download, scanTags, placeAtTag, copyTag, applyOverlayHidden, walk };
+  window._pjf = { hidden, setHidden, groupColor, colorOf, downloadMenu, overlayTree, srcKey, entCoords, adoptPoints, highlight, clearHighlight, updateHtml, changed, render, draw, startDraw, stopDraw, editFeature, editGroup, importFile, download, scanTags, placeAtTag, copyTag, applyOverlayHidden, walk };
 })();

@@ -365,5 +365,16 @@ const pid = 'proj1', cid = 'cave1', cid2 = 'cave2';
   ok('removing a group moves its features to the top', L.liveFeatures(S2).find(f => f.id === 'f1').group === '' && L.liveGroups(S2).length === 0);
 }
 
+// Map layers: a picture with its bounds; bad bounds ignored.
+{
+  const PL = (op, d, t) => Object.assign({ id: 'ml' + Math.random().toString(36).slice(2, 8), t: t || '2026-11-01T00:00:00Z', who: 'T', dev: 'pc', op }, d);
+  const S = L.replayProject([PL('layer.set', { layer: 'img1', kind: 'imagery', blob: 'ab.webp', bounds: [-123.2, 41.5, -123.1, 41.6], name: 'Hillshade' }),
+    PL('layer.set', { layer: 'img2', kind: 'imagery', blob: 'cd.webp', bounds: [1, 2, 'x', 4], name: 'Bad' }),
+    PL('layer.set', { layer: 't1', kind: 'tiles', url: 'https://t/{z}/{x}/{y}.png', name: 'Tiles' })], 'p-ml');
+  ok('map image keeps its bounds', JSON.stringify(S.layers.img1.bounds) === '[-123.2,41.5,-123.1,41.6]' && S.layers.img1.kind === 'imagery', S.layers.img1);
+  ok('bad bounds are not kept', S.layers.img2.bounds === undefined);
+  ok('tile link kept as a layer', S.layers.t1.url === 'https://t/{z}/{x}/{y}.png' && L.liveLayers(S).length === 3);
+}
+
 console.log((fail ? 'FAILED ' : 'ok ') + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

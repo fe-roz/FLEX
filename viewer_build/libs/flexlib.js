@@ -418,6 +418,7 @@
           if (e.interval != null) l.interval = Number(e.interval);
           if (e.lastUsed != null) l.lastUsed = String(e.lastUsed);
           if (e.blob != null) l.blob = String(e.blob);                         // a data file stored by fingerprint ("<sha>.<ext>")
+          if (Array.isArray(e.bounds) && e.bounds.length === 4 && e.bounds.every(Number.isFinite)) l.bounds = e.bounds.map(Number);   // a map image: [west, south, east, north]
           if (e.order != null) l.order = Number(e.order);
           if (e.removed != null) l.removed = !!e.removed;
           l.updated = { t: e.t, who: e.who };
