@@ -300,7 +300,8 @@ const projectsOut = () => projects().filter(p => !p.private).map(p => ({ id: p.i
 
 // ── The project folder, read only (📄 Docs) ────────────────────────────────
 const FILE_MIME = Object.assign({}, MIME, { jpeg: 'image/jpeg', tiff: 'image/tiff', gif: 'image/gif', txt: 'text/plain; charset=utf-8', csv: 'text/plain; charset=utf-8',
-  md: 'text/plain; charset=utf-8', dat: 'text/plain; charset=utf-8', svx: 'text/plain; charset=utf-8', geojson: 'application/json', gpx: 'application/gpx+xml', svg: 'image/svg+xml' });
+  md: 'text/plain; charset=utf-8', dat: 'text/plain; charset=utf-8', svx: 'text/plain; charset=utf-8', geojson: 'application/json', gpx: 'application/gpx+xml', svg: 'image/svg+xml',
+  mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', mkv: 'video/x-matroska', mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav' });
 const TREE_MAX = 20000;
 /** Every file under a project folder but .flex: [{ p: 'Caves/x.pdf', s: bytes, m: ms }]. */
 function listTree(pd) {
@@ -372,7 +373,15 @@ async function handle(req, res, rest, query) {
       if (!f) return json(res, { error: 'not found' }, 404);
       const ext = path.extname(f).slice(1).toLowerCase();
       const type = FILE_MIME[ext] || 'application/octet-stream';
-      res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache', 'Content-Disposition': (FILE_MIME[ext] ? 'inline' : 'attachment') + '; filename*=UTF-8\'\'' + encodeURIComponent(path.basename(f)) });
+      const size = fs.statSync(f).size, head = { 'Content-Type': type, 'Cache-Control': 'no-cache', 'Accept-Ranges': 'bytes', 'Content-Disposition': (FILE_MIME[ext] ? 'inline' : 'attachment') + '; filename*=UTF-8\'\'' + encodeURIComponent(path.basename(f)) };
+      const m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || ''));        // video and audio seek by ranges
+      if (m && (m[1] || m[2])) {
+        let a = m[1] ? +m[1] : Math.max(0, size - +m[2]), b = m[1] && m[2] ? Math.min(+m[2], size - 1) : size - 1;
+        if (a > b || a >= size) { res.writeHead(416, { 'Content-Range': 'bytes */' + size }); return res.end(); }
+        res.writeHead(206, Object.assign(head, { 'Content-Range': `bytes ${a}-${b}/${size}`, 'Content-Length': b - a + 1 }));
+        return fs.createReadStream(f, { start: a, end: b }).pipe(res);
+      }
+      res.writeHead(200, Object.assign(head, { 'Content-Length': size }));
       return fs.createReadStream(f).pipe(res);
     }
     // A file written into the project folder (e.g. FLEX maps/…): never .flex, never outside, never over a different file unless overwrite=1.

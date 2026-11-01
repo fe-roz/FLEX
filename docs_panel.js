@@ -27,7 +27,7 @@
     A.render();
   }
   const icon = n => { const x = (n.split('.').pop() || '').toLowerCase();
-    return /^(jpe?g|png|webp|gif|tiff?)$/.test(x) ? '🖼' : x === 'pdf' ? '📄' : /^(plt|dat|svx|mak|th|tro)$/.test(x) ? '🕳' : /^(kml|kmz|gpx|geojson|json)$/.test(x) ? '🗺' : /^(txt|md|csv|docx?|odt|rtf)$/.test(x) ? '📝' : '•'; };
+    return /^(mp4|m4v|mov|webm|mkv)$/.test(x) ? '🎞' : /^(jpe?g|png|webp|gif|tiff?)$/.test(x) ? '🖼' : x === 'pdf' ? '📄' : /^(plt|dat|svx|mak|th|tro)$/.test(x) ? '🕳' : /^(kml|kmz|gpx|geojson|json)$/.test(x) ? '🗺' : /^(txt|md|csv|docx?|odt|rtf)$/.test(x) ? '📝' : '•'; };
   const size = b => (b > 1 << 20 ? (b / (1 << 20)).toFixed(1) + ' MB' : b > 1024 ? Math.round(b / 1024) + ' kB' : b + ' B');
 
   function build(files) {

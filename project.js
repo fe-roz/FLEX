@@ -633,7 +633,8 @@
     g.querySelector('.pjg-title').innerHTML = `<b>${esc(d.title || 'Untitled')}</b> <span>${n ? (G.i + 1) + ' / ' + n : 'no pages'}${p && p.name ? ' · ' + esc(p.name) : ''}${p && p.kind ? ' · ' + esc(FL.DOC_KIND_LABELS[p.kind] || p.kind) : ''}</span>` +
       (p && p.ext !== 'pdf' && d.file ? ` <span class="pjg-render" title="FLEX shows page images made from the original for quick viewing; the original file is unchanged in the project folder: ${esc(d.file.path)}">page image for viewing</span>` : '');
     const bb = g.querySelector('.pjg-btns'); bb.textContent = '';
-    if (d.file) { const a = el('a', 'pj-btn'); a.textContent = '📄 Original'; a.href = API + 'blob/' + d.file.h + '.' + d.file.ext; a.target = '_blank'; a.rel = 'noopener'; a.title = d.file.path + (d.file.ext === 'tif' ? ' (TIFF: opens in your image viewer)' : ''); bb.appendChild(a); }
+    const isVid = !!(d.file && /^(mp4|m4v|mov|webm|mkv)$/i.test(d.file.ext)), fileUrl = d.file && d.file.path ? API + 'file?project=' + encodeURIComponent(pj.pid) + '&path=' + encodeURIComponent(d.file.path) : null;
+    if (d.file) { const a = el('a', 'pj-btn'); a.textContent = isVid ? '🎞 Original' : '📄 Original'; a.href = isVid && fileUrl ? fileUrl : API + 'blob/' + d.file.h + '.' + d.file.ext; a.target = '_blank'; a.rel = 'noopener'; a.title = d.file.path + (d.file.ext === 'tif' ? ' (TIFF: opens in your image viewer)' : ''); bb.appendChild(a); }
     if (p && p.ext !== 'pdf') {
       bb.appendChild(btn('⟲', () => record('doc.rotate', { doc: d.id, h: p.h, rot: ((p.rot || 0) + 270) % 360, prev: p.rot || 0 }, 'docs')));
       bb.appendChild(btn('⟳', () => record('doc.rotate', { doc: d.id, h: p.h, rot: ((p.rot || 0) + 90) % 360, prev: p.rot || 0 }, 'docs')));
@@ -645,7 +646,14 @@
     bb.appendChild(btn('⋯', () => docMenu(d.id)));
     bb.appendChild(btn('✕', galleryClose));
     const v = g.querySelector('.pjg-view'); v.textContent = '';
-    if (p && p.ext === 'pdf') { const f = el('iframe', 'pjg-pdf'); f.src = blobUrl(p); v.appendChild(f); }
+    if (isVid && fileUrl) {                       // a video in the project folder: played from there, with seeking (Range)
+      const vd = el('video', 'pjg-img'); vd.controls = true; vd.preload = 'metadata'; vd.playsInline = true; vd.src = fileUrl; if (p) vd.poster = blobUrl(p);
+      vd.style.maxWidth = 'calc(100vw - 120px)'; vd.style.maxHeight = 'calc(100vh - 160px)'; vd.style.background = '#000';
+      const note = el('div'); note.style.cssText = 'font-size:11px;opacity:.7;margin-top:4px;display:none'; note.textContent = 'This browser cannot play this video (probably HEVC). Use 🎞 Original to open it in your own player.';
+      vd.addEventListener('error', () => { note.style.display = 'block'; });
+      v.appendChild(vd); v.appendChild(note);
+    }
+    else if (p && p.ext === 'pdf') { const f = el('iframe', 'pjg-pdf'); f.src = blobUrl(p); v.appendChild(f); }
     else if (p) {
       const im = el('img', 'pjg-img'); im.src = blobUrl(p);
       const rot = p.rot || 0;
