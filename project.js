@@ -1139,6 +1139,17 @@
       if (c.imp) box.appendChild(btn('Link it to a cave…', async () => { await linkFile(c.imp); c.cid = caveFor(c.imp, c.code); renderCard(); }, 'primary'));
       return;
     }
+    // Picked with selection.js: Details / Files / History.
+    if (c.level) {
+      const tgt = cardTarget(c), tab = pj.cardTab && pj.cardTabFor === tgt ? pj.cardTab : 'details';
+      const files = filesOf(c), hist = historyOf(c);
+      const tabs = el('div', 'pj-tabs pj-card-tabs');
+      [['details', 'Details'], ['files', `Files (${files.own.length + files.below.length})`], ['history', `History (${hist.length})`]].forEach(([k, l]) =>
+        tabs.appendChild(btn(l, () => { pj.cardTab = k; pj.cardTabFor = tgt; renderCard(); }, tab === k ? 'on' : '')));
+      box.appendChild(tabs);
+      if (tab === 'files') { filesTab(box, c, files); return; }
+      if (tab === 'history') { box.appendChild(historyBody(hist)); return; }
+    }
     if (c.level === 'cave') { caveCard(box, c); return; }
     box.appendChild(el('div', 'pj-sub', caveName(c.cid) + (c.code && !c.survey ? ` · survey ${c.code}` : '')));
     const target = c.survey ? FL.T.survey(c.cid, c.code) : FL.T.station(c.cid, c.name);
@@ -1165,6 +1176,76 @@
     row.appendChild(btn('📄 Add pages', () => addPages({ tags: [target] })));
     row.appendChild(btn('🏷 From inbox', () => tagFromInbox(target)));
     box.appendChild(row);
+  }
+  // ── Files and History of what is selected (Details / Files / History) ─────
+  const cardTarget = c => (c.level === 'cave' ? FL.T.cave(c.cid) : c.survey ? FL.T.survey(c.cid, c.code) : FL.T.station(c.cid, c.name));
+  /** Stations of a survey, in the loaded survey files. */
+  function stationsOfSurvey(cid, code) {
+    const out = new Set();
+    partsOf(cid).forEach(({ imp, codes }) => {
+      if (!codes.has(code)) return;
+      (imp.parsed.stations || []).forEach(st => { if ((st.survey || '') === code && st.name) out.add(st.name); });
+      (imp.parsed.segments || []).forEach(sg => { if ((sg.survey || '') === code) sg.points.forEach(q => { if (q.name) out.add(q.name); }); });
+    });
+    return out;
+  }
+  /** Is a target string (tag, note, lead…) below the selected thing? */
+  function belowOf(c) {
+    if (c.level === 'cave') return t => { const p = FL.parseTarget(t); return p.cave === c.cid && p.kind !== 'cave'; };
+    if (c.survey) { const st = stationsOfSurvey(c.cid, c.code); return t => { const p = FL.parseTarget(t); return p.cave === c.cid && p.kind === 'station' && st.has(p.name); }; }
+    return () => false;
+  }
+  /** Its own files, then everything below it (folded). */
+  function filesOf(c) {
+    const tgt = cardTarget(c), below = belowOf(c);
+    const all = FL.docsOf(pj.D, pj.P);
+    const own = all.filter(d => d.tags[tgt]);
+    return { own, below: all.filter(d => !d.tags[tgt] && Object.keys(d.tags).some(below)) };
+  }
+  function filesTab(box, c, f) {
+    if (!f.own.length && !f.below.length) box.appendChild(el('div', 'pj-note', 'No files here yet.'));
+    f.own.forEach(d => box.appendChild(docEl(d)));
+    if (f.below.length) {
+      const k = 'below:' + cardTarget(c);
+      const fold = btn(`${pj.fold === k ? '▾' : '▸'} ${f.below.length} more further down (${c.level === 'cave' ? 'its surveys and stations' : 'its stations'})`, () => { pj.fold = pj.fold === k ? null : k; renderCard(); }, 'link');
+      box.appendChild(fold);
+      if (pj.fold === k) f.below.forEach(d => box.appendChild(docEl(d)));
+    }
+    const row = el('div', 'pj-row pj-card-btns');
+    row.appendChild(btn('📄 Add pages', () => addPages({ tags: [cardTarget(c)] })));
+    row.appendChild(btn('🏷 From inbox', () => tagFromInbox(cardTarget(c))));
+    box.appendChild(row);
+  }
+  /** Changes about it (and, for a cave or survey, about what is in it), newest first. */
+  function historyOf(c) {
+    const tgt = cardTarget(c), below = belowOf(c);
+    const files = c.level === 'cave' ? new Set(((pj.P.caves[c.cid] || {}).sources || []).map(s => s.file)) : null;
+    const about = e => {
+      const ts = [e.target, e.cave ? FL.T.cave(e.cave) : null].concat(Array.isArray(e.tags) ? e.tags : []).filter(Boolean);   // doc.add carries its tags
+      if (ts.some(t => t === tgt || below(t))) return true;
+      if (files && e.op === 'cavefile.set' && files.has(e.file)) return true;
+      if (c.level === 'cave' && e.op === 'segment.set' && e.cave === c.cid) return true;
+      return false;
+    };
+    const docs = pj.docs.filter(e => { const d = pj.D.docs[e.doc]; return d && FL.docInProject(d, pj.P); });
+    return FL.sortEntries(pj.proj.filter(about).concat(docs.filter(about))).slice().reverse();
+  }
+  function historyBody(list) {
+    const body = el('div', 'pj-list');
+    if (!list.length) body.appendChild(el('div', 'pj-note', 'Nothing yet.'));
+    list.slice(0, 400).forEach(e => {
+      const r = el('div', 'pj-item');
+      r.appendChild(el('div', 'pj-item-t', describe(e)));
+      r.appendChild(el('div', 'pj-sub', `${e.who || '?'} · ${when(e.t)}${e.dev === pj.dev ? '' : ' · from ' + e.dev}${e.undoOf ? ' · undo' : ''}`));
+      const inv = e.dev === pj.dev && inverse(e);
+      if (inv) r.appendChild(btn('Undo', async () => {
+        const { op, _w, ...data } = inv;
+        await record(op, Object.assign(data, { undoOf: e.id }), _w || (/^doc\./.test(e.op) ? 'docs' : null));
+        r.remove();
+      }, 'small'));
+      body.appendChild(r);
+    });
+    return body;
   }
   // A whole cave (selection.js, the first click on it): its files, notes, leads, documents.
   function caveCard(box, c) {
