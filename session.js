@@ -157,14 +157,17 @@ export function loadSession(pid) {
  * Restore camera from a saved session object.
  * Safe to call immediately after cesiumViewer is created (before initSession).
  */
-export function restoreCamera(session, cesiumViewer) {
+export function restoreCamera(session, cesiumViewer, { fly = false } = {}) {
   if (!session?.camera) return;
   const c = session.camera;
   try {
-    cesiumViewer.camera.setView({
+    const view = {
       destination: Cesium.Cartesian3.fromDegrees(c.lon, c.lat, c.height),
       orientation: { heading: c.heading, pitch: c.pitch, roll: c.roll },
-    });
+    };
+    // fly: a smooth flight there (opening a project), not a jump.
+    if (fly) cesiumViewer.camera.flyTo(Object.assign(view, { duration: 3, easingFunction: Cesium.EasingFunction.QUADRATIC_IN_OUT }));
+    else cesiumViewer.camera.setView(view);
   } catch (e) {
     console.warn('[session] camera restore failed:', e);
   }

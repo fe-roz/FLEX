@@ -40,7 +40,8 @@
   function fnv(s) { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16).padStart(8, '0'); }
   const layerId = (kind, url) => 'l' + fnv(kind + '|' + url);
   const placeKey = g => (g ? JSON.stringify(sortDeep(g)) : '');
-  function sortDeep(x) { if (Array.isArray(x)) return x.map(sortDeep); if (x && typeof x === 'object') { const o = {}; Object.keys(x).sort().forEach(k => { if (x[k] !== undefined) o[k] = sortDeep(x[k]); }); return o; } return x; }
+  // Empty fields don't count (a placement stored without "survey": "" is the same placement).
+  function sortDeep(x) { if (Array.isArray(x)) return x.map(sortDeep); if (x && typeof x === 'object') { const o = {}; Object.keys(x).sort().forEach(k => { if (x[k] !== undefined && x[k] !== null && x[k] !== '') o[k] = sortDeep(x[k]); }); return o; } return x; }
 
   // ── What is loaded now, as the project would store it ────────────────────
   function loadedLayers() {
@@ -257,6 +258,15 @@
     await badge();
     return pending.length;
   }
+  /**
+   * A project cave's look (colours, labels…) is yours, kept with the project's
+   * view in this browser. None kept yet (a new project, another browser): the
+   * look My data has for a cave of that name, area labels included.
+   */
+  function mineStyle(name) {
+    const w = ws(), r = w && w.recents ? w.recents().find(x => x.name === name) : null;
+    return (r && r.displayOptions) ? JSON.parse(JSON.stringify(r.displayOptions)) : null;
+  }
   /** Load one of the project's caves (its saved file and placement). */
   async function loadProjectCave(name) {
     const f = pj.P && pj.P.cavefiles[name], w = ws();
@@ -266,7 +276,7 @@
     const snap = await readSnap(pj.pid);
     const st = ((snap && snap.caves) || []).find(c => c.name === name);
     w.switching = true;
-    try { w.loadCave(name, await r.text(), f.place || null, (st && st.displayOptions) || null); } finally { w.switching = false; }
+    try { w.loadCave(name, await r.text(), f.place || null, (st && st.displayOptions) || mineStyle(name)); } finally { w.switching = false; }
     return true;
   }
   /** The Save button: with changes waiting, a menu (save them / discard them); else saves the view. */
@@ -371,7 +381,7 @@
         const r = await fetch('/api/lib/blob/' + f.h + '.' + (f.ext || 'plt'));
         if (!r.ok) { missing.push(f.file); continue; }
         if (loaded.has(f.file)) w.removeCave(f.file);                 // the project's version and placement win
-        w.loadCave(f.file, await r.text(), f.place || null, style[f.file] || null);
+        w.loadCave(f.file, await r.text(), f.place || null, style[f.file] || mineStyle(f.file));
       }
       const layers = FL.liveLayers(pj.P), pcs = new Set(w.pointClouds()), files = new Set(w.dataFiles().map(f => f.url));
       layers.filter(l => l.kind === 'pointcloud' && !pcs.has(l.url)).forEach(l => w.addPointCloud(l.url));
@@ -391,8 +401,13 @@
         }
       }
       if (missing.length) toast(`Survey file(s) not on this computer yet: ${missing.join(', ')} — import the sync file that has them`);
-      if (snap && snap.camera) w.restoreView(snap);
-      else if (!startup && (window._caveImports || []).length) setTimeout(() => window._flyToCave && window._flyToCave(0), 300);
+      if (snap && snap.camera) w.restoreView(snap, { fly: !startup });          // opening: fly there; at start: just be there
+      else if (!startup) setTimeout(() => {                                   // no view kept yet: over the project's area
+        if (window._pjx && window._pjx.flyToProject(pid)) return;
+        const files = new Set(FL.liveCavefiles(pj.P).map(f => f.file));
+        const i = (window._caveImports || []).findIndex(x => x && files.has(x.name));
+        if (i >= 0 && window._flyToCave) window._flyToCave(i);
+      }, 300);
     } finally { w.switching = false; W.entering = false; label(); await badge(); }
   }
   /** A new project that starts with what is loaded now: all of it goes in. */

@@ -108,7 +108,10 @@
   }
   function descHtml(I) {
     return '<table class="cesium-infoBox-defaultTable"><tbody>' + statsOf(I).map(([v, l]) => `<tr><th>${esc(l)}</th><td>${esc(v)}</td></tr>`).join('') +
-      (I.folder ? `<tr><th>folder</th><td>${esc(I.folder)}</td></tr>` : '') + '</tbody></table><p style="opacity:.7">Open it from its card in 📁 Projects.</p>';
+      (I.folder ? `<tr><th>folder</th><td>${esc(I.folder)}</td></tr>` : '') + '</tbody></table>' +
+      // The details panel shows this in a frame of the page (same origin): its button reaches the page.
+      `<p><button type="button" data-pid="${esc(I.id)}" onclick="parent._pjx && parent._pjx.open(this.dataset.pid)" ` +
+      `style="font:600 13px system-ui,sans-serif;padding:5px 16px;border-radius:6px;border:1px solid #ff9a62;background:#ff9a62;color:#1d1206;cursor:pointer">Open ${esc(I.name)}</button></p>`;
   }
   function drawFootprints() {
     const d = ds(); if (!d) return;
@@ -137,7 +140,7 @@
   function select(id, fly) {
     X.sel = id;
     const v = V(), e = X.ds && X.ds.entities.getById('pjx-fp-' + id);
-    if (v && e) { v.selectedEntity = e; if (fly) v.flyTo(e, { duration: 1.4 }); }
+    if (v && e) { v.selectedEntity = e; if (fly) v.flyTo(e, { duration: 2.5, offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-50), 0) }); }
     A.render();
   }
 
@@ -183,7 +186,7 @@
           const c = el('div', 'pjx-card' + (X.sel === p.id ? ' on' : ''));
           const h = el('div', 'pjx-card-h');
           h.appendChild(el('b', '', '📁 ' + (p.name || p.id)));
-          h.appendChild(btn('Open', () => A.setProject(p.id), 'small primary'));
+          h.appendChild(btn('Open', () => open(p.id), 'small primary'));
           c.appendChild(h);
           c.appendChild(el('div', 'pj-sub', I ? short(I) : 'counting…'));
           if (I && I.desc) c.appendChild(el('div', 'pjx-desc', I.desc));
@@ -284,5 +287,17 @@
   .pjx-kind:hover { background: rgba(255,255,255,.07); }`;
   document.head.appendChild(st);
 
-  window._pjx = { top, info, hull, drawFootprints, select, ensureInfos };
+  /** Fly smoothly over a project's area (its footprint); false if it has none yet. */
+  function flyToProject(id) {
+    const v = V(), I = X.info[id], fp = I && I.footprint;
+    if (!v || !fp || !fp.length) return false;
+    const pts = fp.map(q => Cesium.Cartesian3.fromDegrees(q[0], q[1]));
+    const bs = Cesium.BoundingSphere.fromPoints(pts);
+    bs.radius = Math.max(bs.radius, 150);
+    v.camera.flyToBoundingSphere(bs, { duration: 3, offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-50), bs.radius * 2.6), easingFunction: Cesium.EasingFunction.QUADRATIC_IN_OUT });
+    return true;
+  }
+  /** Open a project (its card's Open, or the Open in its popup on the map). */
+  function open(id) { const v = V(); if (v) v.selectedEntity = undefined; return A.setProject(id); }
+  window._pjx = { top, info, hull, drawFootprints, select, ensureInfos, open, flyToProject };
 })();

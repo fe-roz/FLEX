@@ -5079,7 +5079,7 @@ window._ws = {
   // Map overlays with their folders (CalTopo map, KML / GeoJSON data files).
   vectorSources: () => [].concat(caltopoState.dataSource ? [{ kind: 'caltopo', name: 'CalTopo map', url: caltopoState.url, ds: caltopoState.dataSource }] : [],
     loadedDataFiles.filter(f => f.dataSource).map(f => ({ kind: 'file', name: f.label, url: f.url, ds: f.dataSource }))),
-    restoreView(snap) { if (!snap) return; if (snap.camera) restoreCamera(snap, cesiumViewer); if (snap.layers) restoreLayerState(snap, viewModel); },
+    restoreView(snap, opts) { if (!snap) return; if (snap.camera) restoreCamera(snap, cesiumViewer, opts || {}); if (snap.layers) restoreLayerState(snap, viewModel); },
   recentCave(name) { const i = (_recents.plt || []).findIndex(r => r.name === name); return i >= 0 ? window._loadPltRecent(i) : null; },
   // My data's caves (the old Recent list) and cave sets, for cave_columns.js.
   recents: () => (_recents.plt || []).map(r => ({ name: r.name, georef: r.georef || null, displayOptions: r.displayOptions || null, lastUsed: r.lastUsed || null })),
