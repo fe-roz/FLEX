@@ -116,9 +116,29 @@
         color: rgba(255,255,255,0.3); padding: 8px 4px 3px;
         border-top: 1px solid rgba(255,255,255,0.08); margin-top: 2px;
       }
-      /* Nav button row */
-      .flex-nav { display: flex; flex-wrap: wrap; gap: 3px; padding: 3px 2px 4px; }
-      .flex-nav .btn { font-size: 11px; padding: 3px 7px; }
+      /* ── Icon strip (flex_rail.js) and the panel box beside it ─────────── */
+      #flex-rail { position: absolute; top: 8px; bottom: 8px; left: 8px; width: 52px; z-index: 11; box-sizing: border-box;
+        background: rgba(12,15,21,0.9); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;
+        display: flex; flex-direction: column; align-items: center; padding: 6px 0; gap: 2px; overflow-y: auto; scrollbar-width: none; }
+      #flex-rail button { width: 44px; min-height: 40px; flex: none; border: none; background: none; border-radius: 7px; position: relative;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+        font-size: 17px; line-height: 1.1; color: #98a3a0; cursor: pointer; padding: 2px 0; }
+      #flex-rail button small { font-size: 8.5px; letter-spacing: .02em; max-width: 44px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #flex-rail button:hover { background: rgba(255,255,255,0.07); color: #e8ece9; }
+      #flex-rail button.on { background: rgba(255,154,98,0.16); color: #e8ece9; }
+      #flex-rail button.on::before { content: ""; position: absolute; left: -4px; top: 9px; bottom: 9px; width: 3px; border-radius: 2px; background: #ff9a62; }
+      #flex-rail button:disabled { opacity: .28; cursor: not-allowed; background: none; }
+      #flex-rail button.pj-open, #flex-rail button.pj-open small { color: #6fd39a; }
+      #flex-rail button.pj-open small { font-weight: 700; }
+      #flex-rail .rail-sep { width: 28px; height: 1px; flex: none; background: rgba(255,255,255,0.12); margin: 4px 0; }
+      #flex-rail .rail-grow { flex: 1; min-height: 6px; }
+      #flex-rail .rail-dot { position: absolute; top: 5px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: #f2c24e; }
+      #flex-rail button:focus { outline: none; }
+      #flex-rail button:focus-visible { outline: 2px solid #ff9a62; outline-offset: 1px; }
+      /* The panel box: as wide as its widest control, but long notes wrap rather than stretch it across the map. */
+      #toolbar { position: absolute; top: 8px; left: 68px; max-height: calc(100% - 16px); max-width: min(520px, calc(100% - 76px)); overflow-y: auto; box-sizing: border-box; }
+      .cesium-viewer-bottom { left: 68px; }
+      #toolbar .lp-section-header { scroll-margin-top: 44px; }   /* clear of the sticky Save row */
 
       /* ── Right-click context menu ───────────────────────────────────────── */
       .map-context-menu {
@@ -789,11 +809,34 @@
       </div>
       <div id="html_label_container"></div>
       <div id="loadingOverlay"><h1>Loading...</h1></div>
+      <!-- ── Icon strip: one panel per kind of thing (flex_rail.js). Each icon
+           opens one of the panels in #toolbar, one at a time; the project-only
+           ones (Docs, Leads, Trips, Review) are greyed with no project open. -->
+      <nav id="flex-rail" aria-label="Panels">
+        <button type="button" data-target="#projectCollapsible" id="rail-pj" title="Projects">📁<small id="rail-pj-name">Project</small></button>
+        <div class="rail-sep"></div>
+        <button type="button" data-target="#mapLayersCollapsible" title="Map layers">🗺<small>Layers</small></button>
+        <button type="button" data-target="#lidarCollapsible" title="LiDAR: point clouds, scene, ground and height, incidence">☁<small>LiDAR</small></button>
+        <div class="rail-sep"></div>
+        <button type="button" data-target="#featuresCollapsible" title="Surface: points, CalTopo, data files">📍<small>Surface</small></button>
+        <button type="button" data-target="#caveCollapsible" title="Caves">🕳<small>Caves</small></button>
+        <div class="rail-sep"></div>
+        <button type="button" data-rail-pj="Documents" title="The project's documents">📄<small>Docs</small></button>
+        <button type="button" data-rail-pj="Leads" title="The project's leads">❓<small>Leads</small></button>
+        <button type="button" data-rail-pj="Trips" title="Trips — not built yet" data-rail-later>🧭<small>Trips</small></button>
+        <button type="button" data-rail-pj="Suggestions" title="Suggestions to review">✓<small>Review</small><span class="rail-dot" id="rail-review-dot" hidden></span></button>
+        <div class="rail-sep"></div>
+        <button type="button" data-target="#exportCollapsible" title="Export an offline map">📦<small>Export</small></button>
+        <button type="button" data-target="#lidarDeriveCollapsible" title="Analyze the point clouds">🌿<small>Analyze</small></button>
+        <div class="rail-grow"></div>
+        <button type="button" data-target="#settingsCollapsible" title="Settings">⚙<small>Settings</small></button>
+        <button type="button" data-target="#helpCollapsible" title="Help">ⓘ<small>Help</small></button>
+      </nav>
       <div id="toolbar" style="z-index: 10;">
 
-        <!-- ── Save + Updates ────────────────────────────────────────────── -->
-        <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap; padding:4px 2px 2px;">
-          <button id="pj-top-btn" class="btn btn-sm btn-secondary" type="button" data-target="#projectCollapsible"
+        <!-- ── Save + Updates (stays at the top while a panel scrolls) ───── -->
+        <div id="flex-topbar" style="display:flex; align-items:center; gap:4px; flex-wrap:wrap; position:sticky; top:-4px; z-index:5; background:rgba(30,32,36,0.97); margin:-4px -4px 0; padding:8px 6px 4px;">
+          <button id="pj-top-btn" class="btn btn-sm btn-secondary" type="button" data-target="#projectCollapsible" hidden
             title="No project open: FLEX as usual. Open or create a project here."
             style="font-size:11px; padding:2px 8px; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">📁 No project</button>
           <button id="session_save_btn" class="btn btn-sm btn-secondary" type="button"
@@ -810,17 +853,7 @@
             style="font-size:10px; display:none;"></span>
         </div>
 
-        <!-- ── Main nav ──────────────────────────────────────────────────── -->
-        <div class="flex-nav">
-          <button class="btn btn-primary" type="button" data-target="#mapLayersCollapsible">🗺 Map Layers</button>
-          <button class="btn btn-primary" type="button" data-target="#featuresCollapsible">📍 Features</button>
-          <button class="btn btn-primary" type="button" data-target="#caveCollapsible">🕳 Cave</button>
-          <button class="btn btn-primary" type="button" data-target="#lidarCollapsible">☁ LiDAR</button>
-          <button class="btn btn-primary" type="button" data-target="#toolsCollapsible">🔧 Tools</button>
-          <button class="btn btn-primary" type="button" data-target="#exportCollapsible">📦 Export</button>
-          <button class="btn btn-primary" type="button" data-target="#lidarDeriveCollapsible">🌿 Analyze</button>
-          <button class="btn btn-primary" type="button" data-target="#helpCollapsible">❓ Help</button>
-        </div>
+        <!-- The main nav is the icon strip (#flex-rail, flex_rail.js), outside this box. -->
 
         <!-- ── Server controls: hidden — JS still needs these IDs ────────── -->
         <button id="top_server_status_btn" type="button" style="display:none;">Connect to LAN Server</button>
@@ -1117,13 +1150,6 @@
               </div>
             </div>
 
-          </div>
-        </div>
-
-        <!-- ══════════════ TOOLS ═══════════════════════════════════════════ -->
-        <div class="collapse" id="toolsCollapsible">
-          <div class="lp-panel-wrap">
-
             <!-- Ground and height. No job and no bbox: it works on whatever is
                  streamed in right now, so it belongs with the live tools rather
                  than next to the batch Analyze run. Starts collapsed - it is
@@ -1292,6 +1318,13 @@
                 </div>
               </div>
             </div>
+
+          </div>
+        </div>
+
+        <!-- ══════════════ SETTINGS ════════════════════════════════════════ -->
+        <div class="collapse" id="settingsCollapsible">
+          <div class="lp-panel-wrap">
 
             <!-- 3Dconnexion SpaceMouse (spacemouse.js, WebHID: Chrome/Edge) -->
             <div class="lp-section">
@@ -1818,14 +1851,14 @@
             '#featuresCollapsible',
             '#caveCollapsible',
             '#lidarCollapsible',
-            '#toolsCollapsible',
+            '#settingsCollapsible',
             '#exportCollapsible',
             '#projectCollapsible',
             '#lidarDeriveCollapsible',
             '#helpCollapsible',
           ];
 
-          document.querySelectorAll('.flex-nav .btn-primary[data-target], #pj-top-btn').forEach(button => {
+          document.querySelectorAll('#flex-rail [data-target], #pj-top-btn').forEach(button => {
             const targetId = button.getAttribute('data-target');
             const target   = document.querySelector(targetId);
             if (!target) return;
@@ -2028,6 +2061,8 @@
 <script src="project_segments.js"></script>
 <script src="project_workspace.js"></script>
 <script src="project_features.js"></script>
+<!-- The icon strip down the left -->
+<script src="flex_rail.js"></script>
 <!-- Brings the globe back if a map layer stalls at startup -->
 <script src="globe_watchdog.js"></script>
 
