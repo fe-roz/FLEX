@@ -33,13 +33,13 @@ conda create -n entwine -c conda-forge python pdal python-pdal gdal numpy scipy 
 node server.js
 ```
 
-then open http://localhost:8081/index.html.
+then open http://localhost:8081/index.html. **ⓘ Help → Open the FLEX guide**
+(or http://localhost:8081/help.html) walks through setting up, projects, saving,
+CalTopo, LiDAR, your own map layers and the phone app, with diagrams.
 
 On Windows, `FLEX.bat` starts the server and a browser together. Copy
 `Tokens.js.example` to `Tokens.js` and fill in your own API keys; both are
 gitignored.
-
-**Your own caves:** [docs/GETTING-STARTED-CAVES.md](docs/GETTING-STARTED-CAVES.md) walks through projects, importing and placing surveys, surface features, CalTopo and sharing. An AI agent setting FLEX up with someone's data can follow [docs/AGENT-CONVERT-SURVEYS.md](docs/AGENT-CONVERT-SURVEYS.md): `tools/shots_to_plt.py` turns a CSV of shots into a Compass `.plt`, and `tools/make_flex_project.py` builds a whole project (caves placed, surface features, leads, estimated passages) as one file FLEX imports.
 
 ---
 
@@ -85,24 +85,27 @@ Useful flags: `--resolution` (DEM cell size, default 0.5 m), `--max-triangles`
 
 ---
 
-## Android app
+## Android app (FLEX Field)
 
-A WebView wrapper that carries one export offline, in `android/`:
+One app, in `android/`, that imports export zips and opens them offline —
+terrain, imagery and cave surveys, with GPS and compass underground, plus
+notes, leads and field survey that come back to FLEX in sync files. Build it
+in PowerShell (it needs the Android SDK):
 
 ```powershell
 cd android
-python tools\assemble_assets.py <export_dir> .. app\src\main\assets\flex
 .\gradlew.bat installRelease
 ```
+
+On the phone: **Import map** (or Open with / Share a zip from Files or Drive).
 
 It exists for one specific reason. Chrome refuses geolocation to `file://`,
 `content://` and bare LAN-IP origins — they are not "potentially trustworthy"
 origins, so the request is denied and no permission prompt ever appears. The app
-serves the identical files over `https://appassets.androidplatform.net/` through
+serves the files over `https://appassets.androidplatform.net/` through
 `WebViewAssetLoader` and grants the permission itself, so GPS and the compass
 work with no network at all. It declares no `INTERNET` permission.
-
-Each cave gets its own `applicationId`, so several install side by side.
+`android/README.md` has the details.
 
 ---
 

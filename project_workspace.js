@@ -395,6 +395,7 @@
       if (ct.length > 1) toast(`This project has ${ct.length} CalTopo maps; FLEX shows one at a time (the first)`);
       for (const l of layers.filter(l => l.kind === 'file')) { await L.step('Data file: ' + (l.name || '')); if (!files.has(l.url)) await w.addDataFile(l.url, l.name, { noKeep: true }); }
       for (const l of layers.filter(l => !['pointcloud', 'caltopo', 'file'].includes(l.kind))) await L.step(l.name || 'Layer');
+      if (layers.some(l => l.kind === 'imagery' || l.kind === 'tiles') && window._customLayers) await withTimeout(window._customLayers.sync(true), 10000);   // map layers: custom_layers.js
       if (startup) {
         // At start, what else was loaded with this project open comes back too (from My data).
         const inP = new Set(FL.liveCavefiles(pj.P).map(f => f.file));
@@ -440,13 +441,22 @@
     return {
       async step(text) {
         n++;
-        if (!shown && (total > 1 || Date.now() - t0 > 300)) { shown = true; box.classList.add('on'); }
+        if (!shown && (total > 1 || box.classList.contains('on') || Date.now() - t0 > 300)) { shown = true; box.classList.add('on'); }
         bar.style.width = Math.min(100, Math.round(100 * n / Math.max(1, total))) + '%';
         sub.textContent = text || '';
         await tick();
       },
       done() { bar.style.width = '100%'; box.classList.remove('on'); },
     };
+  }
+  /** The loading screen at once when a project is chosen (reading its library
+   *  comes before enter()); null hides it. */
+  function opening(pid) {
+    if (!pid) { const b = document.getElementById('pj-loading'); if (b) b.classList.remove('on'); return; }
+    const p = ((window._pj || {}).projects || []).find(x => x.id === pid);
+    const L = loading((p && p.name) || 'Project', 1);
+    document.getElementById('pj-loading').classList.add('on');
+    L.step('Reading the project…');
   }
   /** Until the caves are drawn and the map has caught up (or a few seconds pass). */
   async function settle(ms = 5000) {
@@ -499,8 +509,8 @@
     if (loaded) ctSlot.parentNode.insertBefore(ctNode, ctSlot.nextSibling);
     else ctHold.appendChild(ctNode);
   }
-  const icon = { pointcloud: '☁', caltopo: '🗺', file: '📄' };
-  const kindName = k => (k === 'caltopo' ? 'CalTopo map' : k === 'pointcloud' ? 'point cloud' : 'data file');
+  const icon = { pointcloud: '☁', caltopo: '🗺', file: '📄', imagery: '🖼', tiles: '🧩' };
+  const kindName = k => ({ caltopo: 'CalTopo map', pointcloud: 'point cloud', imagery: 'map image (🗺 Layers)', tiles: 'tile link (🗺 Layers)' }[k] || 'data file');
   function section(root, mk) {
     if (!pj.pid) { placeCaltopo(null); return; }
     mk(root, 'What this project loads', true, b => {
@@ -523,7 +533,7 @@
       layers.forEach(l => {
         const r = el('div', 'pj-item');
         r.appendChild(el('div', 'pj-item-t', `${icon[l.kind] || '•'} ${l.name || l.url}`));
-        r.appendChild(el('div', 'pj-sub', `${kindName(l.kind)} · ${l.url}`));
+        r.appendChild(el('div', 'pj-sub', `${kindName(l.kind)}${l.url ? ' · ' + l.url : ''}`));
         const row = el('div', 'pj-row');
         row.appendChild(btn('Remove from project', async () => { await record('layer.set', { layer: l.id, removed: true }); await badge(); }, 'small'));
         r.appendChild(row);
@@ -563,6 +573,6 @@
   setInterval(() => { if (pj.pid && !W.busy && !W.entering) badge(); }, 5000);
 
   window._saveAll = saveClick;
-  window._pjWs = { placeCaltopo, autosave, save, saveClick, discard, badge, scan, removed, leave, enter, adopt, label, section, unloadProject,
+  window._pjWs = { opening, placeCaltopo, autosave, save, saveClick, discard, badge, scan, removed, leave, enter, adopt, label, section, unloadProject,
                    owns, moveCave, moving, loadProjectCave, projName, moveItem, movingItem, layerId };
 })();

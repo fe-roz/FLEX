@@ -174,12 +174,16 @@
     const prev = pj.pid, change = (pid || null) !== prev;
     if (change && window._pjWs && !keep && (await window._pjWs.leave(prev)) === false) { render(); return false; }   // stayed (unsaved changes, Cancel)
     pj.pid = pid || null;
-    try { pid ? localStorage.setItem('flex.project', pid) : localStorage.removeItem('flex.project'); } catch (_) {}
-    await loadAll();
-    render(); refreshCard(); drawField(); drawLeads();
-    if (window._pjSeg) window._pjSeg.changed(null);
-    if (window._pjf) window._pjf.changed(null);
-    if (change && window._pjWs) { if (keep) await window._pjWs.adopt(); else await window._pjWs.enter(pj.pid); }
+    const shown = change && pid && !keep && window._pjWs && window._pjWs.opening;
+    if (shown) window._pjWs.opening(pid);            // the loading screen at once; reading the library comes first
+    try {
+      try { pid ? localStorage.setItem('flex.project', pid) : localStorage.removeItem('flex.project'); } catch (_) {}
+      await loadAll();
+      render(); refreshCard(); drawField(); drawLeads();
+      if (window._pjSeg) window._pjSeg.changed(null);
+      if (window._pjf) window._pjf.changed(null);
+      if (change && window._pjWs) { if (keep) await window._pjWs.adopt(); else await window._pjWs.enter(pj.pid); }
+    } finally { if (shown) window._pjWs.opening(null); }
     if (window._pjWs) window._pjWs.label();
     if (window._pjf) window._pjf.changed(null);
   }
@@ -798,7 +802,7 @@
       'cave.update': () => `Updated ${caveName(e.cave)} from ${e.file || 'a file'} on a phone (approximate)`,
       'cave.revert': () => `Put ${caveName(e.cave)} back as exported`,
       'cavefile.set': () => e.removed ? `Removed survey file ${e.file} from the project` : e.h ? `Survey file ${e.file}${e.place ? ' and where it is placed' : ''}` : `Placed ${e.file}${e.place && e.place.station ? ' at station ' + e.place.station : ''}`,
-      'layer.set': () => e.removed ? `Removed ${(pj.P.layers[e.layer] || {}).name || 'a layer'} from the project` : `${{ pointcloud: 'Point cloud', caltopo: 'CalTopo map', file: 'Data file' }[e.kind || (pj.P.layers[e.layer] || {}).kind] || 'Layer'} ${e.name || (pj.P.layers[e.layer] || {}).name || ''}`,
+      'layer.set': () => e.removed ? `Removed ${(pj.P.layers[e.layer] || {}).name || 'a layer'} from the project` : `${{ pointcloud: 'Point cloud', caltopo: 'CalTopo map', file: 'Data file', imagery: 'Map layer', tiles: 'Tile link' }[e.kind || (pj.P.layers[e.layer] || {}).kind] || 'Layer'} ${e.name || (pj.P.layers[e.layer] || {}).name || ''}`,
       'survey.version': () => e.raw && e.raw.tie ? `Survey ${e.code || ''} missing from the file: ${(e.raw.shots || []).length} shot(s) from ${e.raw.tie}${e.note ? ' — ' + e.note : ''}`
         : `New version of survey ${e.code} (${e.version || 'transcribed'})`,
       'segment.set': () => `Segment “${e.name || (pj.P.segments[e.seg] || {}).name || e.seg}” (${(e.shots || []).length} shots)`,

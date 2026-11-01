@@ -8901,7 +8901,10 @@ if ((flags.looking) && (flags.TouchFly)) {
 
 
 const _flyNow = performance.now();
-const _flyDt = _flyLastTick === null ? 0 : Math.min(0.1, Math.max(0, (_flyNow - _flyLastTick) / 1000));
+// Time-based: a slow frame moves further, so the speed holds at low frame
+// rates; a frame longer than 0.25 s (a stall, a hidden tab) counts as 0.25 s,
+// so the camera never leaps after a pause.
+const _flyDt = _flyLastTick === null ? 0 : Math.min(0.25, Math.max(0, (_flyNow - _flyLastTick) / 1000));
 _flyLastTick = _flyNow;
 if (flags.Fly) {
     // Speed follows the distance to the ground (above or below it, so it is
