@@ -146,13 +146,16 @@
     const list = (pj.projects || []).filter(p => !X.info[p.id]);       // only the ones not counted yet
     if (!list.length) return;
     X.docs = null;
-    for (const p of list) { if (X.busy.has(p.id)) continue; X.busy.add(p.id); try { await info(p); } catch (e) { console.warn('[projects]', p.id, e); } finally { X.busy.delete(p.id); } }
+    let n = 0;
+    for (const p of list) { if (X.busy.has(p.id)) continue; X.busy.add(p.id); try { await info(p); n++; } catch (e) { console.warn('[projects]', p.id, e); } finally { X.busy.delete(p.id); } }
+    if (!n) return;                                    // all being counted elsewhere: they redraw when done
     drawFootprints();
     if (!pj.pid) A.render();
   }
   let loading = null;
   function ensureInfos() {
-    if (loading || !(pj.projects || []).some(p => !X.info[p.id])) return;
+    if (loading || !(pj.projects || []).some(p => !X.info[p.id] && !X.busy.has(p.id))) return;
+    loading = true;                                    // before the call: its first part runs now and may draw
     loading = loadInfos().finally(() => { loading = null; if (!pj.pid) setTimeout(ensureInfos, 0); });   // any dropped meanwhile
   }
   function switchMenu() {
@@ -223,10 +226,10 @@
         box.append(
           go('🕳 Caves', `${I.caves} · ${I.length ? km(I.length) : '—'}`, rail('[data-target="#caveCollapsible"]')),
           go('📍 Surface', `${I.points} point${I.points === 1 ? '' : 's'}, lines, areas · ${I.folders} folder${I.folders === 1 ? '' : 's'}`, rail('[data-target="#featuresCollapsible"]')),
-          go('❓ Leads', `${I.open} open · ${I.closed} closed`, rail('[data-rail-pj="Leads"]')),
-          go('📄 Documents', String(I.docs), rail('[data-rail-pj="Documents"]')),
+          go('❓ Leads', `${I.open} open · ${I.closed} closed`, rail('[data-target="#leadsCollapsible"]')),
+          go('📄 Documents', String(I.docs), rail('[data-target="#docsCollapsible"]')),
           go('🗺 Layers', String(I.layers), () => { const h = [...document.querySelectorAll('#pj-panel .lp-section-header')].find(x => /What this project loads/.test(x.textContent)); if (h) { if (!h.nextElementSibling.classList.contains('open')) h.click(); h.scrollIntoView({ block: 'start', behavior: 'smooth' }); } }));
-        if (I.review) box.appendChild(go('✓ To review', String(I.review), rail('[data-rail-pj="Suggestions"]')));
+        if (I.review) box.appendChild(go('✓ To review', String(I.review), rail('[data-target="#reviewCollapsible"]')));
         b.appendChild(box);
       }
       author(b);
@@ -234,7 +237,7 @@
     if (!X.info[pj.pid] && !X.busy.has(pj.pid)) {
       const p = (pj.projects || []).find(x => x.id === pj.pid) || { id: pj.pid };
       X.busy.add(pj.pid);
-      info(p).catch(e => console.warn('[projects]', e)).finally(() => { X.busy.delete(pj.pid); A.render(); });
+      info(p).catch(e => console.warn('[projects]', e)).finally(() => { X.busy.delete(p.id); A.render(); });
     }
   }
 

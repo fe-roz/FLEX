@@ -298,6 +298,40 @@ const pidOf = q => (q && ID_RE.test(String(q.project || '')) ? String(q.project)
 /** What the page gets: id, name and where the folder is (for showing; no folder → still in the old library). */
 const projectsOut = () => projects().filter(p => !p.private).map(p => ({ id: p.id, name: p.name, folder: p.dir ? absDir(p.dir) : null }));
 
+// ── The project folder, read only (📄 Docs) ────────────────────────────────
+const FILE_MIME = Object.assign({}, MIME, { jpeg: 'image/jpeg', tiff: 'image/tiff', gif: 'image/gif', txt: 'text/plain; charset=utf-8', csv: 'text/plain; charset=utf-8',
+  md: 'text/plain; charset=utf-8', dat: 'text/plain; charset=utf-8', svx: 'text/plain; charset=utf-8', geojson: 'application/json', gpx: 'application/gpx+xml', svg: 'image/svg+xml' });
+const TREE_MAX = 20000;
+/** Every file under a project folder but .flex: [{ p: 'Caves/x.pdf', s: bytes, m: ms }]. */
+function listTree(pd) {
+  const out = [];
+  const walk = rel => {
+    if (out.length >= TREE_MAX) return;
+    let ents;
+    try { ents = fs.readdirSync(path.join(pd, rel), { withFileTypes: true }); } catch (_) { return; }
+    for (const e of ents) {
+      if (!rel && e.name === '.flex') continue;
+      if (e.name.startsWith('.') && e.name !== '.') continue;
+      const r = rel ? rel + '/' + e.name : e.name;
+      if (e.isDirectory()) walk(r);
+      else if (e.isFile()) { try { const st = fs.statSync(path.join(pd, r)); out.push({ p: r, s: st.size, m: Math.round(st.mtimeMs) }); } catch (_) {} }
+      if (out.length >= TREE_MAX) return;
+    }
+  };
+  walk('');
+  return out;
+}
+/** A file inside the project folder (never .flex, never outside it), or null. */
+function projFile(pid, rel) {
+  const pd = projDir(pid);
+  if (!pd || !rel || rel.includes('\0')) return null;
+  let f, base;
+  try { base = fs.realpathSync(pd); f = fs.realpathSync(path.resolve(pd, rel)); } catch (_) { return null; }   // links followed, then checked
+  const r = path.relative(base, f);
+  if (!r || r.startsWith('..') || path.isAbsolute(r) || r.split(path.sep)[0] === '.flex') return null;
+  try { return fs.statSync(f).isFile() ? f : null; } catch (_) { return null; }
+}
+
 /** /api/lib/<rest> */
 async function handle(req, res, rest, query) {
   try {
@@ -327,6 +361,20 @@ async function handle(req, res, rest, query) {
         return json(res, { ok: true });
       }
     }
+    // 📄 Docs: the project folder as it is on disk (not .flex), and a file from it.
+    if (req.method === 'GET' && rest === 'tree' && pidOf(q)) {
+      const pd = projDir(pidOf(q));
+      if (!pd) return json(res, { folder: null, files: [] });
+      return json(res, { folder: pd, files: listTree(pd) });
+    }
+    if (req.method === 'GET' && rest === 'file' && pidOf(q)) {
+      const f = projFile(pidOf(q), String(q.path || ''));
+      if (!f) return json(res, { error: 'not found' }, 404);
+      const ext = path.extname(f).slice(1).toLowerCase();
+      const type = FILE_MIME[ext] || 'application/octet-stream';
+      res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache', 'Content-Disposition': (FILE_MIME[ext] ? 'inline' : 'attachment') + '; filename*=UTF-8\'\'' + encodeURIComponent(path.basename(f)) });
+      return fs.createReadStream(f).pipe(res);
+    }
     if (req.method === 'GET' && rest === 'kv') return json(res, { v: kv()[q.k] ?? null });
     if (req.method === 'POST' && rest === 'kv') { const o = JSON.parse((await body(req, 1 << 20)).toString('utf8')); kvSet(o.k, o.v); return json(res, { ok: true }); }
     if (req.method === 'POST' && rest === 'blob') return json(res, putBlob(await body(req, MAX_BLOB + 1), String(q.ext || ''), q.h ? String(q.h) : null, pidOf(q)));
@@ -348,4 +396,4 @@ async function handle(req, res, rest, query) {
   }
 }
 
-module.exports = { handle, device, read, append, merge, putBlob, blobPath, projects, setProject, adoptFolder, registerPrivate, indexFile, makeFolder, safeName, projDir, kv, kvSet, ROOT, PROJECTS_DIR };
+module.exports = { listTree, projFile, handle, device, read, append, merge, putBlob, blobPath, projects, setProject, adoptFolder, registerPrivate, indexFile, makeFolder, safeName, projDir, kv, kvSet, ROOT, PROJECTS_DIR };

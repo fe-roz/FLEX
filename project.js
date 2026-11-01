@@ -852,18 +852,22 @@
   }
 
   // ── Suggestions to review (proposals from the archive or any helper) ───────
+  /** Accept every open suggestion at or above confidence t (0..1); how many. */
+  async function acceptAbove(t) {
+    const q = FL.reviewQueue(pj.P, pj.D).filter(p => (p.confidence || 0) >= t);
+    if (!q.length) { toast('None at that level'); return 0; }
+    const proj = q.filter(p => pj.P.proposals[p.id]), docs = q.filter(p => pj.D.proposals[p.id]);
+    if (proj.length) await record('accept', { refs: proj.map(p => p.id), base: proj.map(p => p.id).concat(...proj.map(headsFor)) });
+    if (docs.length) await record('accept', { refs: docs.map(p => p.id), base: docs.map(p => p.id) }, 'docs');
+    toast(`Accepted ${q.length} suggestion${q.length > 1 ? 's' : ''}`);
+    return q.length;
+  }
   async function review() {
     const body = el('div', 'pj-list');
     const thr = el('input', 'pj-input pj-num'); thr.type = 'number'; thr.min = 0; thr.max = 100; thr.value = 80;
     const top = el('div', 'pj-row');
     top.append('Accept all at or above ', thr, '% ', btn('Accept', async () => {
-      const t = Number(thr.value) / 100;
-      const q = FL.reviewQueue(pj.P, pj.D).filter(p => (p.confidence || 0) >= t);
-      if (!q.length) { toast('None at that level'); return; }
-      const proj = q.filter(p => pj.P.proposals[p.id]), docs = q.filter(p => pj.D.proposals[p.id]);
-      if (proj.length) await record('accept', { refs: proj.map(p => p.id), base: proj.map(p => p.id).concat(...proj.map(headsFor)) });
-      if (docs.length) await record('accept', { refs: docs.map(p => p.id), base: docs.map(p => p.id) }, 'docs');
-      paint();
+      if (await acceptAbove(Number(thr.value) / 100)) paint();
     }, 'primary'));
     const paint = () => {
       body.textContent = '';
@@ -1191,6 +1195,10 @@
     const root = $('pj-panel');
     if (!root) return;
     root.textContent = '';
+    // 📄 Docs, ❓ Leads, ✓ Review have panels of their own (strip icons); the
+    // 📁 panel keeps the rest. Without them (older page), all in one.
+    const docsRoot = $('pj-docs-panel') || root, leadsRoot = $('pj-leads-panel') || root, revRoot = $('pj-review-panel') || root;
+    [docsRoot, leadsRoot, revRoot].forEach(r => { if (r !== root) r.textContent = ''; });
     // The Projects list / the open project's overview (projects_panel.js).
     if (window._pjx) window._pjx.top(root, section);
     else section(root, 'Project', true, b => {
@@ -1216,11 +1224,24 @@
     if (window._pjWs) window._pjWs.section(root, section);
     if (!pj.pid) { if (!window._pjx) section(root, 'Sync files', true, b => b.appendChild(btn('⇩ Import a sync file…', () => importSync()))); return; }
     const q = FL.reviewQueue(pj.P, pj.D);
-    if (q.length) section(root, `Suggestions (${q.length})`, true, b => {
+    section(revRoot, `Suggestions (${q.length})`, true, b => {
+      if (!q.length) { b.appendChild(el('div', 'pj-note', 'Nothing waiting. Suggestions come from the archive processor or a helper, in sync files; they change nothing until accepted.')); return; }
       b.appendChild(el('div', 'pj-note', `${q.length} suggestion(s) waiting — from ${[...new Set(q.map(p => p.by))].join(', ')}. They change nothing until accepted.`));
-      b.appendChild(btn('Review…', () => (window._pjSeg ? window._pjSeg.review() : review()), 'primary'));
+      const by = {};
+      q.forEach(p => { const k = p.op === 'lead.set' ? '❓ Leads' : p.op === 'note.set' ? '📝 Notes' : /^doc\./.test(p.op) ? '📄 Document links' : p.op === 'survey.version' ? '🕳 Missing surveys' : '• Other'; by[k] = (by[k] || 0) + 1; });
+      const kinds = el('div', 'pj-sub');
+      kinds.textContent = Object.entries(by).map(([k, n]) => `${k} ${n}`).join(' · ');
+      b.appendChild(kinds);
+      const sure = q.filter(p => (p.confidence || 0) >= 0.8);
+      const row = el('div', 'pj-row');
+      row.appendChild(btn('Review…', () => (window._pjSeg ? window._pjSeg.review() : review()), 'primary'));
+      if (sure.length) row.appendChild(btn(`Accept all ≥ 80% (${sure.length})`, async () => {
+        const ok = await choose(`Accept ${sure.length} suggestion${sure.length > 1 ? 's' : ''} at 80% or more?`, 'Each is logged under your name; the history can undo any of them.', [{ label: 'Accept them', value: 'yes', primary: true }, { label: 'Not now', value: 'no' }]);
+        if (ok === 'yes') await acceptAbove(0.8);
+      }, 'small'));
+      b.appendChild(row);
     });
-    if (window._pjSeg) window._pjSeg.section(root, section);
+    if (window._pjSeg) window._pjSeg.section(revRoot, section);
     section(root, 'Caves', true, b => {
       const caves = FL.liveCaves(pj.P);
       if (!caves.length) b.appendChild(el('div', 'pj-note', 'No caves yet: link a loaded survey file below.'));
@@ -1247,7 +1268,7 @@
         });
       }
     });
-    section(root, 'Leads', false, b => {
+    section(leadsRoot, 'Leads', true, b => {
       const all = allLeads();
       const tabs = el('div', 'pj-tabs');
       [['active', `Active (${all.filter(x => x.active).length})`], ['closed', `Closed (${all.filter(x => !x.active).length})`], ['all', `All (${all.length})`]].forEach(([k, l]) => {
@@ -1272,7 +1293,8 @@
       });
       b.appendChild(btn('⇩ CSV', leadsCsv, 'small'));
     });
-    section(root, 'Documents', true, b => {
+    if (window._pjDocs && docsRoot !== root) window._pjDocs.tree(docsRoot, section);
+    section(docsRoot, 'Documents', true, b => {
       const all = FL.docsOf(pj.D, pj.P);
       const inbox = all.filter(d => FL.docInbox(d, pj.P));
       const tabs = el('div', 'pj-tabs');
@@ -1366,7 +1388,7 @@
   // ── For project_segments.js (segments and the review queue) ───────────────
   window._pjApi = { pj, FL, el, btn, esc, when, toast, dialog, choose, record, render, refreshCard, openCard, flyTo,
     caveFor, caveName, partsOf, stationPos, stationsOf, docEl, docOpen, docByPage, describe, headsFor, targetLabel,
-    editNote, noteEl, declAt, yearOf, imps, who, ensureAuthor, newProject, refresh, editLead, renameProject, editDescription, setProject, importSync };
+    editNote, noteEl, declAt, yearOf, imps, who, ensureAuthor, newProject, refresh, editLead, renameProject, editDescription, setProject, importSync, acceptAbove };
 
   // ── What the export takes from the project (index.html _collectCavesInBbox) ─
   window._pjExport = () => pj.pid ? {

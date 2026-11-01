@@ -86,6 +86,17 @@ const lines = t => t.split('\n').filter(Boolean).map(JSON.parse);
   await get('stats?project=proj1', { method: 'POST', body: JSON.stringify({ v: 1, caves: {} }) });
   ok('stats of a project with no folder → settings', (await get('stats?project=proj1')).body.v === 1 && !!lib.kv()['stats:proj1']);
   ok('stats: bad project id → not found', (await get('stats?project=..%2Fx')).s === 404);
+  // 📄 Docs: the project folder as on disk, and a file from it (read only, never .flex, never outside).
+  const pd2 = lib.projDir('proj2');
+  fs.mkdirSync(path.join(pd2, 'Caves', 'Ridge'), { recursive: true });
+  fs.writeFileSync(path.join(pd2, 'Caves', 'Ridge', 'notes.txt'), 'hello');
+  const tr = (await get('tree?project=proj2')).body;
+  ok('GET tree: files under the folder, not .flex', tr.files.some(f => f.p === 'Caves/Ridge/notes.txt' && f.s === 5) && !tr.files.some(f => f.p.startsWith('.flex')), tr.files);
+  ok('GET tree: a project with no folder → none', (await get('tree?project=proj1')).body.files.length === 0);
+  const fl = await get('file?project=proj2&path=' + encodeURIComponent('Caves/Ridge/notes.txt'));
+  ok('GET file: served, as text', fl.s === 200 && fl.body === 'hello' && /text\/plain/.test(fl.ct));
+  ok('GET file: outside the folder, .flex, missing → 404', (await get('file?project=proj2&path=' + encodeURIComponent('../../library/projects.json'))).s === 404
+     && (await get('file?project=proj2&path=' + encodeURIComponent('.flex/stats.json'))).s === 404 && (await get('file?project=proj2&path=nope.txt')).s === 404);
   const bl = await get('blob?ext=jpg', { method: 'POST', body: Buffer.from('not really a jpeg') });
   ok('POST blob', HASH(bl.body.h) && bl.body.ext === 'jpg');
   const rb = await fetch(base + 'blob/' + bl.body.h + '.jpg');

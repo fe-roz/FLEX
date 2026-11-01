@@ -821,10 +821,10 @@
         <button type="button" data-target="#featuresCollapsible" title="Surface: points, CalTopo, data files">📍<small>Surface</small></button>
         <button type="button" data-target="#caveCollapsible" title="Caves">🕳<small>Caves</small></button>
         <div class="rail-sep"></div>
-        <button type="button" data-rail-pj="Documents" title="The project's documents">📄<small>Docs</small></button>
-        <button type="button" data-rail-pj="Leads" title="The project's leads">❓<small>Leads</small></button>
-        <button type="button" data-rail-pj="Trips" title="Trips — not built yet" data-rail-later>🧭<small>Trips</small></button>
-        <button type="button" data-rail-pj="Suggestions" title="Suggestions to review">✓<small>Review</small><span class="rail-dot" id="rail-review-dot" hidden></span></button>
+        <button type="button" data-target="#docsCollapsible" data-pj-only title="The project's folder and documents">📄<small>Docs</small></button>
+        <button type="button" data-target="#leadsCollapsible" data-pj-only title="The project's leads">❓<small>Leads</small></button>
+        <button type="button" data-pj-only data-rail-later title="Trips — not built yet">🧭<small>Trips</small></button>
+        <button type="button" data-target="#reviewCollapsible" data-pj-only title="Suggestions to review, segments">✓<small>Review</small><span class="rail-dot" id="rail-review-dot" hidden></span></button>
         <div class="rail-sep"></div>
         <button type="button" data-target="#exportCollapsible" title="Export an offline map">📦<small>Export</small></button>
         <button type="button" data-target="#lidarDeriveCollapsible" title="Analyze the point clouds">🌿<small>Analyze</small></button>
@@ -1372,6 +1372,17 @@
         <div class="collapse" id="projectCollapsible">
           <div class="lp-panel-wrap" id="pj-panel"></div>
         </div>
+        <!-- The open project's documents (the folder as on disk, docs_panel.js; the
+             documents list, project.js), leads, and suggestions to review. -->
+        <div class="collapse" id="docsCollapsible">
+          <div class="lp-panel-wrap pj-side" id="pj-docs-panel"></div>
+        </div>
+        <div class="collapse" id="leadsCollapsible">
+          <div class="lp-panel-wrap pj-side" id="pj-leads-panel"></div>
+        </div>
+        <div class="collapse" id="reviewCollapsible">
+          <div class="lp-panel-wrap pj-side" id="pj-review-panel"></div>
+        </div>
 
         <div class="collapse" id="exportCollapsible">
           <div class="lp-panel-wrap">
@@ -1859,6 +1870,9 @@
             '#settingsCollapsible',
             '#exportCollapsible',
             '#projectCollapsible',
+            '#docsCollapsible',
+            '#leadsCollapsible',
+            '#reviewCollapsible',
             '#lidarDeriveCollapsible',
             '#helpCollapsible',
           ];
@@ -2067,6 +2081,8 @@
 <script src="project_workspace.js"></script>
 <!-- 📁 Project: the Projects list, the open project's overview -->
 <script src="projects_panel.js"></script>
+<!-- 📄 Docs: the project folder as on disk -->
+<script src="docs_panel.js"></script>
 <script src="project_features.js"></script>
 <!-- One details panel on the right: card, segment panel, map feature info -->
 <script src="inspector.js"></script>
