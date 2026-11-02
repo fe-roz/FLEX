@@ -1422,6 +1422,14 @@
               </div>
             </div>
 
+            <!-- Offline cache (offline-cache.js): saves tiles and point-cloud data as they load -->
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▸</span> Offline maps
+              </div>
+              <div class="lp-section-body" id="offline-cache-body"></div>
+            </div>
+
           </div>
         </div>
 
@@ -2045,6 +2053,7 @@
 <script src="client/src/modules/survey-export.js"></script>  <!-- a cave's survey as Survex / CSV / PLT (window._surveyExport) -->
 <script src="client/src/modules/cave-columns.js"></script>
 <!-- 📍 Surface: project | My data -->
+<script src="client/src/modules/offline-cache.js"></script>  <!-- saves tiles and point-cloud data as they load; registers client/src/sw.js (window._offline) -->
 <script src="client/src/modules/folder-style.js"></script>  <!-- a folder's display settings for everything in it (window._folderStyle) -->
 <script src="client/src/modules/surface-columns.js"></script>
 <script src="client/src/modules/row-menu.js"></script>  <!-- the ⋯ menu on 📍 Surface rows (window._rowMenu) -->

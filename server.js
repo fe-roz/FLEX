@@ -172,7 +172,10 @@ function handleFileRequest(req, res, sanitizedPath) {
             return;
         }
 
-        res.writeHead(200, { 'Content-Type': getContentType(filePath) });
+        const head = { 'Content-Type': getContentType(filePath) };
+        // The offline-cache worker lives in client/src/ but covers the whole app (scope "/").
+        if (sanitizedPath === '/client/src/sw.js') { head['Service-Worker-Allowed'] = '/'; head['Cache-Control'] = 'no-cache'; }
+        res.writeHead(200, head);
         fs.createReadStream(filePath).pipe(res);
     });
 }
