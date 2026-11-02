@@ -27,6 +27,9 @@
       'cave.moved': () => e.dir === 'in' ? `Cave “${e.name || caveName(e.cave)}” moved in from ${(e.peer && e.peer.name) || 'another project'}` : `Cave “${e.name || caveName(e.cave)}” moved to ${(e.peer && e.peer.name) || 'another project'}`,
       'project.lists': () => 'Added to lists: ' + Object.values(e.add || {}).flat().join(', '),
       'cave.set': () => e.removed ? `Removed cave ${caveName(e.cave)}` : `Cave “${e.name || caveName(e.cave)}”${e.sources ? ' (made of ' + e.sources.map(s => s.file + (s.surveys && s.surveys.length ? ' ' + s.surveys.join(',') : '')).join('; ') + ')' : ''}`,
+      'system.set': () => { const g = pj.P.systems[e.system] || {}, nm = e.name || g.name || 'system', cn = ids => (ids || []).map(caveName).join(', ');
+        return e.removed ? `Deleted system “${nm}”` : e.removed === false ? `System “${nm}” back` : e.created ? `System “${nm}”${e.add && e.add.length ? ' of ' + cn(e.add) : ''}`
+          : [e.name != null ? `Renamed system to “${e.name}”` : '', e.add && e.add.length ? `Put ${cn(e.add)} in system “${nm}”` : '', e.remove && e.remove.length ? `Took ${cn(e.remove)} out of system “${nm}”` : ''].filter(Boolean).join('; ') || `System “${nm}”`; },
       'cave.alias': () => `“${e.alias}” is ${caveName(e.cave)}`,
       'cave.unalias': () => `“${e.alias}” is no longer ${caveName(e.cave)}`,
       'note.set': () => (e.text ? (e.prev ? 'Edited note at ' : 'Note at ') : 'Removed note at ') + at(pj.P.notes, e.note) + (e.text ? ': ' + e.text.slice(0, 60) : ''),
@@ -53,7 +56,7 @@
       'shot.delete': () => `Deleted shot in “${sv(e.sid)}”`,
       'cave.update': () => `Updated ${caveName(e.cave)} from ${e.file || 'a file'} on a phone (approximate)`,
       'cave.revert': () => `Put ${caveName(e.cave)} back as exported`,
-      'cavefile.set': () => e.removed ? `Removed survey file ${e.file} from the project` : e.h ? `Survey file ${e.file}${e.place ? ' and where it is placed' : ''}` : `Placed ${e.file}${e.place && e.place.station ? ' at station ' + e.place.station : ''}`,
+      'cavefile.set': () => (e.multi != null || e.surfaceAdd || e.surfaceDel) && !e.h ? [e.multi === true ? `${e.file} is a multi-cave file` : e.multi === false ? `${e.file} is no longer a multi-cave file` : '', e.surfaceAdd && e.surfaceAdd.length ? `Surface traverse: ${e.surfaceAdd.join(', ')} of ${e.file}` : '', e.surfaceDel && e.surfaceDel.length ? `Not a surface traverse any more: ${e.surfaceDel.join(', ')} of ${e.file}` : ''].filter(Boolean).join('; ') : e.removed ? `Removed survey file ${e.file} from the project` : e.h ? `Survey file ${e.file}${e.place ? ' and where it is placed' : ''}` : `Placed ${e.file}${e.place && e.place.station ? ' at station ' + e.place.station : ''}`,
       'layer.set': () => e.removed ? `Removed ${(pj.P.layers[e.layer] || {}).name || 'a layer'} from the project` : `${{ pointcloud: 'Point cloud', caltopo: 'CalTopo map', file: 'Data file', imagery: 'Map layer', tiles: 'Tile link' }[e.kind || (pj.P.layers[e.layer] || {}).kind] || 'Layer'} ${e.name || (pj.P.layers[e.layer] || {}).name || ''}`,
       'survey.version': () => e.raw && e.raw.tie ? `Survey ${e.code || ''} missing from the file: ${(e.raw.shots || []).length} shot(s) from ${e.raw.tie}${e.note ? ' — ' + e.note : ''}`
         : `New version of survey ${e.code} (${e.version || 'transcribed'})`,
@@ -84,7 +87,9 @@
       case 'doc.set': return e.prev ? { op: 'doc.set', doc: e.doc, fields: e.prev, prev: e.fields, _w: 'docs' } : null;
       case 'doc.droppage': return e.page ? { op: 'doc.pages', doc: e.doc, add: [e.page], at: e.at, _w: 'docs' } : null;
       case 'cave.alias': return { op: 'cave.unalias', cave: e.cave, alias: e.alias };
-      case 'cavefile.set': return e.removed ? { op: 'cavefile.set', file: e.file, removed: false } : null;
+      case 'system.set': return FL.systemUndo(e);
+      case 'cave.set': return FL.multiUndo(e);
+      case 'cavefile.set': if (e.multi != null || e.surfaceAdd || e.surfaceDel) return FL.multiUndo(e); return e.removed ? { op: 'cavefile.set', file: e.file, removed: false } : null;
       case 'layer.set': return e.removed ? { op: 'layer.set', layer: e.layer, removed: false } : null;
       case 'arealabel.set': return FL.areaLabelUndo(e);
       case 'trip.set': return FL.tripUndo(e);

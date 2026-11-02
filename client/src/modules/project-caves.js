@@ -16,12 +16,14 @@
   const imps = () => (window._caveImports || []).filter(i => i && i.parsed);
   function caveFor(imp, code) {
     if (!imp || !pj.pid) return null;
+    const cf = pj.P.cavefiles[imp.name], multi = !!(cf && cf.multi && !cf.removed);
+    if (multi && (cf.surface || []).includes(code || '')) return null;      // a surface traverse belongs to no cave
     for (const c of FL.liveCaves(pj.P)) {
       for (const s of c.sources || []) {
         if (s && s.file === imp.name && (!s.surveys || !s.surveys.length || s.surveys.includes(code || ''))) return c.id;
       }
     }
-    return FL.caveForName(pj.P, imp.name);
+    return multi ? null : FL.caveForName(pj.P, imp.name);                  // multi-cave: a survey nobody claimed is "Surface / not yet sorted"
   }
   const caveName = cid => (pj.P.caves[cid] && pj.P.caves[cid].name) || 'a cave';
   // Loaded files (and their surveys) of a project cave.
@@ -34,10 +36,11 @@
     });
     return out;
   }
+  const surfaceMarked = (file, code) => { const f = pj.P && pj.P.cavefiles[file]; return !!(f && !f.removed && (f.surface || []).includes(code)); };
   function suggest(imp) {
     const dopt = imp.displayOptions || {};
     return FL.suggestCaves((imp.parsed.segments || []).map(sg => ({
-      survey: sg.survey || '', surface: !!(sg.isSurface || (dopt.surfaceSurveys && dopt.surfaceSurveys[sg.survey || ''])),
+      survey: sg.survey || '', surface: !!(sg.isSurface || (dopt.surfaceSurveys && dopt.surfaceSurveys[sg.survey || '']) || surfaceMarked(imp.name, sg.survey || '')),
       points: sg.points.filter(p => !p.excluded).map(p => ({ name: p.name, surface: !!p.isSurface })),
     })));
   }
@@ -47,7 +50,8 @@
     const cur = caveFor(imp, '');
     const opts = FL.liveCaves(pj.P).map(c => ({ label: (c.id === cur ? '✓ ' : '') + c.name, sub: 'this file is part of it', value: 'c:' + c.id }));
     opts.push({ label: ['plus', `A new cave “${imp.name}”`], sub: 'the whole file', value: 'new', primary: !opts.length });
-    if (sug.caves.length > 1) opts.push({ label: ['scissors', `${sug.caves.length} caves in this file`], sub: 'surveys joined underground form a cave: ' +
+    const multiNow = !!(pj.P.cavefiles[imp.name] && pj.P.cavefiles[imp.name].multi);
+    if (sug.caves.length > 1 || multiNow) opts.push({ label: ['scissors', multiNow ? 'Caves in this multi-cave file…' : `${sug.caves.length} caves in this file`], sub: multiNow ? 'change which survey belongs to which cave' : 'a multi-cave file: surveys joined underground form a cave: ' +
       sug.caves.map(c => c.surveys.slice(0, 3).join(', ') + (c.surveys.length > 3 ? '…' : '')).join(' · '), value: 'split' });
     if (cur) opts.push({ label: 'Unlink this file', value: 'unlink' });
     const r = await choose(`“${imp.name}” is…`, 'Notes, leads and documents hang on project caves, so a renamed or re-versioned file stays the same cave.', opts);
@@ -60,7 +64,7 @@
       if (pj.P.aliases[imp.name]) await record('cave.unalias', { cave: pj.P.aliases[imp.name], alias: imp.name });
       return;
     }
-    if (r === 'split') return splitFile(imp, sug);
+    if (r === 'split') return multiCave(imp);
     let cid;
     if (r === 'new') {
       const n = await dialog({ title: 'New cave', input: { value: imp.name.replace(/\.(plt|json)$/i, '') }, buttons: [{ label: 'Cancel', value: null }, { label: 'Create', value: 'ok', primary: true }] });
@@ -75,34 +79,169 @@
     }
     if (pj.P.aliases[imp.name] !== cid) await record('cave.alias', { cave: cid, alias: imp.name });
   }
-  async function splitFile(imp, sug) {
-    const form = el('div', 'pj-form');
-    const base = imp.name.replace(/\.(plt|json)$/i, '');
-    const descOf = {};
-    (imp.parsed.surveys || []).forEach(s => { if (!(s.code in descOf)) descOf[s.code] = s.desc; });
-    sug.caves.forEach((c, i) => {
-      const row = el('div', 'pj-f');
-      row.appendChild(el('div', 'pj-f-l', `${c.stations} stations · surveys ${c.surveys.join(', ')}`));
-      const inp = el('input', 'pj-input'); inp.value = i === 0 ? base : `${base} – ${descOf[c.surveys[0]] || c.surveys[0]}`; inp.dataset.i = i;
-      row.appendChild(inp); form.appendChild(row);
+  // ── Multi-cave survey files (doc 14, rule 3) ──────────────────────────────
+  // One file placed once, marked multi-cave; its caves are named groups of its surveys (project caves with
+  // sources [{ file, surveys }]), surveys nobody claimed are "Surface / not yet sorted", surface traverses are marked.
+  function codesOf(imp) {
+    const m = new Map();
+    (imp.parsed.surveys || []).forEach(sv => { if (!m.has(sv.code)) m.set(sv.code, { code: sv.code, desc: sv.desc || '', stations: 0 }); });
+    (imp.parsed.segments || []).forEach(sg => {
+      const c = sg.survey || '';
+      if (!m.has(c)) m.set(c, { code: c, desc: '', stations: 0 });
+      m.get(c).stations += (sg.points || []).filter(p => p.name).length;
     });
-    if (sug.surface.length) form.appendChild(el('div', 'pj-note', 'Surface surveys (not part of a cave): ' + sug.surface.join(', ')));
-    const r = await dialog({ title: `Caves in “${imp.name}”`, text: 'Name them. Each becomes a project cave made of these surveys of this file.', body: form, wide: true,
-      buttons: [{ label: 'Cancel', value: null }, { label: 'Create caves', value: 'ok', primary: true }] });
-    if (!r) return;
-    const names = [...form.querySelectorAll('input')].map(i => i.value.trim());
-    for (let i = 0; i < sug.caves.length; i++) {
-      if (!names[i]) continue;
-      await record('cave.set', { cave: FL.uid(10), name: names[i].slice(0, 60), sources: [{ file: imp.name, surveys: sug.caves[i].surveys }] });
+    return [...m.values()];
+  }
+  async function multiCave(imp) {
+    const cf = pj.P.cavefiles[imp.name];
+    if (!cf || cf.removed) { toast('Put the file in the project first (💾 Save)'); return; }
+    const list = codesOf(imp), codes = list.map(x => x.code);
+    const g = FL.fileGroups(pj.P, imp.name, codes);
+    const base = imp.name.replace(/\.(plt|json)$/i, '');
+    const caves = [], assign = {};
+    let seq = 0;
+    const addCave = (id, name) => { const c = { key: 'k' + (++seq), id: id || FL.uid(10), name, isNew: !id }; caves.push(c); return c; };
+    const fromSuggestion = () => {
+      const sug = suggest(imp), keep = g.caves.slice();
+      caves.length = 0; Object.keys(assign).forEach(k => delete assign[k]);
+      sug.caves.forEach((c, i) => {
+        const ex = keep[i], d = (list.find(x => x.code === c.surveys[0]) || {}).desc;
+        const k = addCave(ex && ex.id, ex ? ex.name : i === 0 ? base : `${base} – ${d || c.surveys[0] || i + 1}`);
+        c.surveys.forEach(sv => { assign[sv] = k.key; });
+      });
+      codes.forEach(sv => { if (!assign[sv]) assign[sv] = sug.surface.includes(sv) || surfaceMarked(imp.name, sv) ? 'surface' : 'unsorted'; });
+    };
+    if (g.multi || g.caves.length > 1) {
+      g.caves.forEach(c => { const k = addCave(c.id, c.name); k.isNew = false; c.surveys.forEach(sv => { assign[sv] = k.key; }); });
+      g.surface.forEach(sv => { assign[sv] = 'surface'; });
+      codes.forEach(sv => { if (!assign[sv]) assign[sv] = 'unsorted'; });
+    } else fromSuggestion();
+    const body = el('div', 'pj-form'), top = el('div', 'pj-f'), tbl = el('div', 'pj-f');
+    body.append(top, tbl);
+    const label = c => c.name || '(unnamed cave)';
+    function paint() {
+      top.textContent = '';
+      top.appendChild(el('div', 'pj-f-l', 'Caves in this file'));
+      caves.forEach(c => {
+        const row = el('div', 'pj-row'), inp = el('input', 'pj-input'); inp.value = c.name; inp.placeholder = 'Cave name';
+        inp.addEventListener('input', () => { c.name = inp.value; tbl.querySelectorAll(`option[value="${c.key}"]`).forEach(o => { o.textContent = label(c); }); });
+        row.append(inp, btn('✕', () => { codes.forEach(sv => { if (assign[sv] === c.key) assign[sv] = 'unsorted'; }); caves.splice(caves.indexOf(c), 1); paint(); }, 'small'));
+        row.lastChild.title = 'Take this cave out of the list (its surveys go to “Surface / not yet sorted”)';
+        top.appendChild(row);
+      });
+      const row = el('div', 'pj-row');
+      row.append(btn(['plus', 'Add a cave'], () => { addCave(null, ''); paint(); }, 'small'), btn('Start from the caves FLEX finds', () => { fromSuggestion(); paint(); }, 'small'));
+      top.appendChild(row);
+      tbl.textContent = '';
+      tbl.appendChild(el('div', 'pj-f-l', 'Surveys: which cave, or not part of one'));
+      list.forEach(x => {
+        const row = el('div', 'pj-row'), sel = el('select', 'pj-input');
+        const opt = (v, t) => { const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o); };
+        caves.forEach(c => opt(c.key, label(c)));
+        opt('unsorted', 'Surface / not yet sorted'); opt('surface', 'Surface traverse');
+        sel.value = assign[x.code] && [...sel.options].some(o => o.value === assign[x.code]) ? assign[x.code] : 'unsorted';
+        assign[x.code] = sel.value;
+        sel.addEventListener('change', () => { assign[x.code] = sel.value; });
+        row.append(el('span', 'pj-sub', `${x.code || '(no code)'}${x.desc ? ' · ' + x.desc : ''} · ${x.stations} stations`), sel);
+        tbl.appendChild(row);
+      });
     }
+    paint();
+    const buttons = [{ label: 'Cancel', value: null }];
+    if (g.multi) buttons.push({ label: 'Not a multi-cave file', value: 'off' });
+    buttons.push({ label: 'Save', value: 'ok', primary: true });
+    const r = await dialog({ title: `Caves in “${imp.name}”`, wide: true, body, buttons,
+      text: 'A multi-cave file is placed once; each cave is a named group of its surveys. Surveys under “Surface / not yet sorted” belong to no cave yet; surface traverses are marked so they stay out of every cave. Entrance markers of its caves fit the whole file.' });
+    if (!r) return;
+    if (r.button === 'off') { await record('cavefile.set', { file: imp.name, multi: false }); return; }
+    const map = {};
+    codes.forEach(sv => {
+      const a = assign[sv], c = caves.find(x => x.key === a);
+      map[sv] = a === 'surface' ? 'surface' : c ? { cave: c.id, name: (c.name || '').trim().slice(0, 60) || base } : 'unsorted';
+    });
+    const plan = FL.planMulti(pj.P, imp.name, codes, map, () => FL.uid(10));
+    for (const o of plan.ops) { const d = Object.assign({}, o); delete d.op; await record(o.op, d); }
+    const empty = g.caves.filter(c => !plan.caves[c.id]);
+    toast(plan.ops.length ? `${imp.name}: ${Object.keys(plan.caves).length} cave${Object.keys(plan.caves).length === 1 ? '' : 's'}` + (empty.length ? `; “${empty[0].name}” has no survey here now` : '') : 'Nothing changed');
+  }
+
+  // ── Systems: caves grouped, their files separate ───────────────────────────
+  function caveStatsOf(cid) {
+    const parts = partsOf(cid);
+    if (!parts.length) return null;
+    let len = 0, lo = Infinity, hi = -Infinity, n = 0;
+    parts.forEach(({ imp, codes }) => (imp.parsed.segments || []).forEach(sg => {
+      if (codes && !codes.has(sg.survey || '')) return;
+      for (let i = 1; i < sg.points.length; i++) { const p = sg.points[i - 1], q = sg.points[i]; if (!q.excluded) len += Math.hypot(q.n - p.n, q.e - p.e, q.v - p.v); }
+      sg.points.forEach(p => { if (p.isSurface) return; if (p.v < lo) lo = p.v; if (p.v > hi) hi = p.v; n++; });
+    }));
+    return { len, depth: n ? hi - lo : 0, lo: n ? lo : undefined, hi: n ? hi : undefined };
+  }
+  const fmtM = v => (v >= 1000 ? (v / 1000).toFixed(2) + ' km' : Math.round(v) + ' m');
+  function systemLine(sys) {
+    const T = FL.systemTotals(sys, caveStatsOf);
+    return `${sys.caves.length} cave${sys.caves.length === 1 ? '' : 's'}` + (T.loaded ? ` · ${fmtM(T.len)} surveyed · ${Math.round(T.depth)} m deep` + (T.loaded < T.caves ? ` (${T.loaded} of ${T.caves} loaded)` : '') : ' · not loaded');
+  }
+  /** Create (sid null) or edit a system: its name and which caves are in it; or delete it. */
+  async function editSystem(sid, pre) {
+    const cur = sid ? FL.liveSystems(pj.P).find(g => g.id === sid) : null;
+    if (sid && !cur) return;
+    const all = FL.liveCaves(pj.P);
+    if (!all.length) { toast('No caves in the project yet'); return; }
+    const body = el('div', 'pj-form'), inp = el('input', 'pj-input'); inp.value = cur ? cur.name : ''; inp.placeholder = 'System name';
+    body.appendChild(inp);
+    const ticks = all.map(c => {
+      const lab = el('label', 'pj-row'), cb = document.createElement('input'); cb.type = 'checkbox'; cb.className = 'keep-box';
+      cb.checked = cur ? cur.caves.includes(c.id) : (pre || []).includes(c.id);
+      lab.append(cb, ' ' + c.name); body.appendChild(lab);
+      return { c, cb };
+    });
+    const buttons = [{ label: 'Cancel', value: null }];
+    if (cur) buttons.push({ label: 'Delete system', value: 'del', danger: true });
+    buttons.push({ label: cur ? 'Save' : 'Create', value: 'ok', primary: true });
+    const r = await dialog({ title: cur ? 'System: ' + cur.name : 'New system', text: 'A system groups caves that connect or belong together. Their survey files stay separate.', body, buttons });
+    if (!r) return;
+    if (r.button === 'del') { await record('system.set', { system: sid, removed: true }); return; }
+    const name = inp.value.trim().slice(0, 60);
+    if (!name) { toast('A system needs a name'); return; }
+    const want = ticks.filter(x => x.cb.checked).map(x => x.c.id), have = cur ? cur.caves : [];
+    const add = want.filter(c => !have.includes(c)), remove = have.filter(c => !want.includes(c));
+    if (!cur) { await record('system.set', { system: FL.uid(10), name, add, created: true }); return; }
+    const d = { system: sid };
+    if (name !== cur.name) { d.name = name; d.prevName = cur.name; }
+    if (add.length) d.add = add;
+    if (remove.length) d.remove = remove;
+    if (Object.keys(d).length > 1) await record('system.set', d);
+  }
+  /** A cave's systems: tick the ones it is part of, or start a new one with it. */
+  async function caveSystems(cid) {
+    const sys = FL.liveSystems(pj.P), inIt = new Set(FL.systemsOf(pj.P, cid).map(g => g.id));
+    const opts = sys.map(g => ({ label: (inIt.has(g.id) ? '✓ ' : '') + g.name, sub: inIt.has(g.id) ? 'take ' + caveName(cid) + ' out of it' : 'put ' + caveName(cid) + ' in it', value: 's:' + g.id }));
+    opts.push({ label: ['plus', 'A new system with this cave…'], value: 'new', primary: !opts.length });
+    const r = await choose('Systems of “' + caveName(cid) + '”', 'A system groups caves; their survey files stay separate.', opts);
+    if (!r) return;
+    if (r === 'new') { await editSystem(null, [cid]); return; }
+    const id = r.slice(2);
+    await record('system.set', inIt.has(id) ? { system: id, remove: [cid] } : { system: id, add: [cid] });
+  }
+  /** Systems of the project (⋯ on a cave, the Caves pane): list, new, edit. */
+  async function systemsDialog() {
+    const opts = FL.liveSystems(pj.P).map(g => ({ label: ['folder', g.name], sub: systemLine(g) + (g.caves.length ? ' · ' + g.caves.map(caveName).join(', ') : ''), value: 's:' + g.id }));
+    opts.push({ label: ['plus', 'New system…'], sub: 'a system groups caves; their survey files stay separate', value: 'new', primary: !opts.length });
+    const r = await choose('Systems', opts.length > 1 ? 'Pick one to rename it, change its caves or delete it.' : 'No systems yet.', opts);
+    if (r === 'new') return editSystem(null);
+    if (r) return editSystem(r.slice(2));
   }
   async function editCave(cid) {
     const c = pj.P.caves[cid];
     const r = await dialog({ title: 'Cave', input: { value: c.name }, wide: true,
       html: 'Made of: ' + ((c.sources || []).map(s => esc(s.file) + (s.surveys && s.surveys.length ? ' (surveys ' + esc(s.surveys.join(', ')) + ')' : '')).join('; ') || 'nothing loaded yet') +
-        (Object.keys(pj.P.aliases).filter(a => pj.P.aliases[a] === cid).length ? '<br>Also known as: ' + esc(Object.keys(pj.P.aliases).filter(a => pj.P.aliases[a] === cid).join(', ')) : ''),
-      buttons: [{ label: 'Cancel', value: null }, { label: 'Remove from project', value: 'rm', danger: true }, { label: 'Save', value: 'ok', primary: true }] });
+        (Object.keys(pj.P.aliases).filter(a => pj.P.aliases[a] === cid).length ? '<br>Also known as: ' + esc(Object.keys(pj.P.aliases).filter(a => pj.P.aliases[a] === cid).join(', ')) : '') +
+        (FL.systemsOf(pj.P, cid).length ? '<br>In the system: ' + esc(FL.systemsOf(pj.P, cid).map(g => g.name).join(', ')) : '') +
+        ((c.sources || []).some(s => pj.P.cavefiles[s.file] && pj.P.cavefiles[s.file].multi) ? '<br>Its file holds several caves (a multi-cave file).' : ''),
+      buttons: [{ label: 'Cancel', value: null }, { label: 'Remove from project', value: 'rm', danger: true }, { label: 'Systems…', value: 'sys' }, { label: 'Save', value: 'ok', primary: true }] });
     if (!r) return;
+    if (r.button === 'sys') return caveSystems(cid);
     if (r.button === 'rm') { await record('cave.set', { cave: cid, removed: true }); return; }
     if (r.value.trim() && r.value.trim() !== c.name) await record('cave.set', { cave: cid, name: r.value.trim().slice(0, 60) });
   }
@@ -303,7 +442,12 @@
   }
 
 
+  // The multi-cave and system tools, for the 🕳 Caves pane, the info panel and project_workspace.js's ⋯ menu.
+  const redraw = fn => async (...a) => { const r = await fn(...a); if (window._caveCols) window._caveCols.render(); return r; };
+  window._pjMulti = { multiCave: redraw(multiCave), editSystem: redraw(editSystem), caveSystems: redraw(caveSystems), systemsDialog: redraw(systemsDialog), systemLine, caveStatsOf, codesOf, surfaceMarked };
+
   Object.assign(X, {
+    multiCave, editSystem, caveSystems, systemsDialog,
     imps, caveFor, caveName, partsOf, linkFile, editCave, stationsOf, stationPos, leadsAt, allLeads, leadSummary, targetLabel, editNote, noteEl, editLead, leadEl,
   });
 })();

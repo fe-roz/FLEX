@@ -288,10 +288,18 @@
     const S = caveStats(parts, null);
     if (codes.length) out.push(['Surveys', codes.join(', ')]);
     out.push(['Length', fmtLen(S.len)], ['Depth', S.depth.toFixed(1) + ' m'], ['Stations', String(S.stations.size)]);
+    if (c.cid && pj.pid && pj.P && FL.systemsOf) {
+      FL.systemsOf(pj.P, c.cid).forEach(g => {
+        out.push(['System', g.name + (g.caves.length > 1 ? ' · with ' + g.caves.filter(x => x !== c.cid).map(A.caveName).join(', ') : '')]);
+        if (window._pjMulti) out.push(['System totals', window._pjMulti.systemLine(g)]);
+      });
+      const mf = ((pj.P.caves[c.cid] || {}).sources || []).map(s => s.file).find(f => pj.P.cavefiles[f] && pj.P.cavefiles[f].multi);
+      if (mf) out.push(['Multi-cave file', mf + ' · shared with ' + (FL.liveCaves(pj.P).filter(x => x.id !== c.cid && (x.sources || []).some(s => s.file === mf)).map(x => x.name).join(', ') || 'no other cave yet')]);
+    }
     if (S.dates.length) out.push(['Surveyed', S.dates.length > 1 ? S.dates[0] + ' – ' + S.dates[S.dates.length - 1] : S.dates[0]]);
     let tags = [];
     if (pj.pid && window._pjf) try { tags = window._pjf.scanTags().filter(t => t.cid && t.cid === c.cid); } catch (_) {}
-    if (tags.length) out.push(['Entrances', tags.map(t => `${t.point || 'point'} (station ${t.station || '?'}, ${t.from})`).join('\n')]);
+    if (tags.length) out.push(['Entrances', tags.map((t, k) => `${t.point || 'point'} (station ${t.station || '?'}, ${t.from})${tags.length > 1 && t.main ? ' · main' : ''}`).join('\n')]);
     const anchor = parts.map(p => p.imp.georef).find(g => g && g.mode === 'anchor' && g.station && g.station !== '__first__');
     if (!tags.length && anchor) out.push(['Placed at', 'station ' + anchor.station]);
     if (parts.length) out.push(['Survey files', parts.map(p => p.imp.name).join(', ')]);

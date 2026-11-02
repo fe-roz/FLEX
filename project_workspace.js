@@ -276,14 +276,14 @@
     if (!pj.pid || readOnly()) return;
     const cs = cavesOfFile(fileName);
     if (!cs.length) { toast('This file isn’t a cave of the project yet (⋯ → Caves in this file…)'); return; }
-    if (cs.length > 1) { toast('This file holds several caves; split it into its caves first (⋯ → Caves in this file…)'); return; }
+    if (cs.length > 1 || (pj.P.cavefiles[fileName] && pj.P.cavefiles[fileName].multi)) { toast('This is a multi-cave survey file: its caves share one file, so a cave can’t move on its own. Moving a cave out into its own file comes later.'); return; }
     const c = cs[0], q = queuedCaveMove(c.id);
     if (q) { W.moves = W.moves.filter(x => x !== q); saveMoves(); toast(`The move of “${c.name}” is cancelled`); await badge(); return; }
     const dests = await otherProjects();
     if (!dests.length) { toast('There is no other project to move it to (archived projects are read-only)'); return; }
     let pv = null;
     try { pv = await (await fetch(`/api/lib/move-preview?from=${encodeURIComponent(pj.pid)}&cave=${encodeURIComponent(c.id)}`)).json(); } catch (_) {}
-    if (pv && pv.shared && pv.shared.length) { toast(`“${pv.shared[0]}” also holds another cave; split the file into its caves first`); return; }
+    if (pv && pv.shared && pv.shared.length) { toast(`“${pv.shared[0]}” is a survey file shared with another cave, so “${c.name}” can’t move on its own. Moving a cave out into its own file comes later.`); return; }
     const to = await choose(`Move “${c.name}” to…`, 'The cave goes with its survey files, notes, leads, segments, area labels, sketches and documents.',
       dests.map(p => ({ label: ['folder', p.name || p.id], value: p.id })));
     if (!to) return;
@@ -464,7 +464,12 @@
     const snap = await readSnap(pj.pid);
     const st = ((snap && snap.caves) || []).find(c => c.name === name);
     w.switching = true;
-    try { w.loadCave(name, await r.text(), f.place || null, (st && st.displayOptions) || mineStyle(name)); } finally { w.switching = false; }
+    let style = (st && st.displayOptions) || mineStyle(name);
+    if (f.surface && f.surface.length) {           // surveys the project marked as surface traverses (multi-cave files)
+      style = Object.assign({}, style || {}); style.surfaceSurveys = Object.assign({}, style.surfaceSurveys);
+      f.surface.forEach(c => { style.surfaceSurveys[c] = true; });
+    }
+    try { w.loadCave(name, await r.text(), f.place || null, style); } finally { w.switching = false; }
     return true;
   }
   /** The Save button: with changes waiting, a menu (save them / discard them); else saves the view. */
@@ -725,10 +730,12 @@
     const out = [], saved = inProject.cave(name) && !moving(name, 'out');
     if (saved && window._pjf) out.push(['Copy CalTopo tag', () => window._pjf.copyTag(name), 'A line for the entrance marker’s description in CalTopo: FLEX places the cave there']);
     const imp = loaded && (window._caveImports || []).find(i => i && i.parsed && i.name === name);
+    if (saved && window._pjMulti && FL.liveCaves(pj.P).some(c => (c.sources || []).some(s => s.file === name)) && imp)
+      out.push([(pj.P.cavefiles[name] || {}).multi ? 'Multi-cave file…' : 'Mark as multi-cave file…', () => window._pjMulti.multiCave(imp), 'Several caves in one survey file: name them, sort the file’s surveys into them, mark surface traverses']);
     if (imp && owns(name) && A.linkFile) out.push(['Caves in this file…', () => A.linkFile(imp), 'Which project cave this file is, or split it into the caves FLEX finds inside it']);
     // The project caves made of this file (name, what they are made of, remove).
     FL.liveCaves(pj.P).filter(c => (c.sources || []).some(s => s.file === name)).slice(0, 4)
-      .forEach(c => A.editCave && out.push([`Cave “${c.name}”…`, () => A.editCave(c.id), 'Rename it, see what it is made of']));
+      .forEach(c => A.editCave && out.push([`Cave “${c.name}”…`, () => A.editCave(c.id), 'Rename it, see what it is made of, put it in a system']));
     if (saved && FL.liveCaves(pj.P).some(c => (c.sources || []).some(s => s.file === name) || pj.P.aliases[name] === c.id)) {
       const q = cavesOfFile(name).map(c => queuedCaveMove(c.id)).find(Boolean);
       out.push([q ? `Cancel the move to ${q.toName}` : 'Move to another project…', () => askCaveMove(name), 'The cave with its files, notes, leads, segments, labels, sketches and documents; it moves on Save, each project keeping a record']);
