@@ -438,6 +438,14 @@ svg.ico { vertical-align: -2px; }
   <li><b>Personal account:</b> the credential from <code>caltopo.com/api/v1/activate</code> (unofficial; it may stop working if CalTopo changes it).</li>
 </ul>
 <p>With an account or team ID, <b>Pick a map…</b> lists your maps. FLEX re-reads the map every so often, so the group's changes appear; only what changed is redrawn, and long tracks are drawn simplified (within about 2 m). A map the open project doesn't have shows in <svg class="ico" width="14" height="14"><use href="#i-pin"/></svg> Surface under 👤 My data, with its folders; ← makes it the project's map. To link a cave to its entrance marker, put a line like <code>flex: cave=Ridge Cave; station=E1</code> in the marker's description.</p>
+<h3>Editing the CalTopo map</h3>
+<p>With a private map loaded through a key, an edit to a CalTopo feature in FLEX (name, description, colour, symbol, folder, position, delete) <b>goes straight to CalTopo</b>: FLEX says it worked, or why not, and redraws the map. CalTopo stays the source of truth.</p>
+<ul>
+  <li><b>The key must be able to write.</b> A read-only key (a Team service account with READ) is refused at the first edit; FLEX then tells you to enter one that can write in <svg class="ico" width="14" height="14"><use href="#i-pin"/></svg> Surface → CalTopo map: link and key → <b>Change key…</b> (Team: a service account with WRITE).</li>
+  <li><b>Offline:</b> FLEX keeps a copy of the map on this computer and shows it when CalTopo can't be reached (the status line says so). Edits made then wait and are sent when CalTopo answers again; FLEX says when they've gone.</li>
+  <li><b>Changed in CalTopo meanwhile:</b> if someone changed the same feature in CalTopo while your edit waited (or since FLEX last read the map), FLEX shows both versions side by side; <b>Keep mine</b> sends yours, <b>Keep CalTopo's</b> drops yours. <b>Decide later</b> leaves it waiting.</li>
+  <li>Changes others make in CalTopo appear by themselves. FLEX keeps a list of what was added, changed or removed between reads, and a log of every read and every edit sent (<code>user_files/caltopo_log.jsonl</code>).</li>
+</ul>
 
 <h2 id="lidar">LiDAR</h2>
 <ul>
