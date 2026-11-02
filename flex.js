@@ -4079,6 +4079,7 @@ async function _fetchCaltopoKml() {
       let j; try { j = JSON.parse(txt); } catch (_) { j = {}; }
       if (!r.ok) throw new Error(j.error || r.statusText);
       if (window._ctWrite) window._ctWrite._pulled(mapId, j);           // edits, queue, changes (caltopo_write.js)
+      if (window._ctLayers) window._ctLayers.apply(mapId, j);           // the map's custom layers → 🗺 Layers (caltopo_layers.js)
       const offl = j.flexOffline ? `⚠ CalTopo not reachable: FLEX’s copy from ${new Date(j.flexPulled).toLocaleString()}, ` : '';
       const ds0 = caltopoState.dataSource;
       if (ds0 && ds0._ctJson && caltopoState._ctText === txt && caltopoState._ctMapId === mapId) {       // nothing changed: nothing to do
@@ -4106,6 +4107,7 @@ async function _fetchCaltopoKml() {
     return;
   }
   if (window._ctWrite) window._ctWrite._pulled(null);              // a public map (KML): no edits
+  if (window._ctLayers) window._ctLayers.apply(null);               // … and no custom layers (the KML has none)
   const proxiedUrl = ProxyUrlGenerator.generateProxyUrl(caltopoState.url);
   try {
     _setCaltopoStatus('updating…', '#aaa');
@@ -4179,6 +4181,7 @@ function clearCaltopo() {
   if (miniMapCaltopoSource) miniMapCaltopoSource.clear();
   caltopoState.url = null;
   if (window._ctWrite) window._ctWrite._pulled(null);
+  if (window._ctLayers) window._ctLayers.apply(null);
   if (window._onVectorSourcesChanged) window._onVectorSourcesChanged();
   _setCaltopoStatus('', '');
   notifyCaltopoChanged(null, 30);
@@ -7967,8 +7970,11 @@ function renderLayerList() {
 
     // Name label
     const nameSpan = document.createElement('span');
-    nameSpan.textContent = (layer._custom ? (layer._custom.owner === 'p' ? '📁 ' : '👤 ') : '') + layer.name;
-    if (layer._custom) nameSpan.title = layer._custom.owner === 'p' ? 'Part of the project' : 'In My data';
+    const ctl = layer._custom && layer._custom.owner === 'c';      // from the CalTopo map (caltopo_layers.js): a line icon, read-only
+    if (ctl && window.icon) { nameSpan.innerHTML = window.icon('map', 12, 'lp-ct-ico'); nameSpan.appendChild(document.createTextNode(' ' + layer.name)); }
+    else nameSpan.textContent = (layer._custom ? (layer._custom.owner === 'p' ? '📁 ' : '👤 ') : '') + layer.name;
+    if (layer._custom) nameSpan.title = ctl ? 'From the CalTopo map (change or remove it in CalTopo)' : layer._custom.owner === 'p' ? 'Part of the project' : 'In My data';
+    if (layer._custom && layer._custom.warn) { const w = document.createElement('span'); w.className = 'lp-warn'; w.textContent = ' no tiles'; w.style.color = '#fc6'; nameSpan.appendChild(w); nameSpan.title += '. ' + layer._custom.warn; }
     nameSpan.style.cssText = 'flex:1; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
 
     // Opacity slider
@@ -7984,6 +7990,7 @@ function renderLayerList() {
     removeBtn.textContent = '×';
     removeBtn.title = 'Remove from active layers';
     removeBtn.style.cssText = 'background:none; border:none; cursor:pointer; color:rgba(255,100,100,0.65); font-size:15px; flex-shrink:0; padding:0 2px; line-height:1;';
+    if (layer._custom && layer._custom.owner === 'c') { removeBtn.title = 'Part of the CalTopo map: remove it there'; removeBtn.style.visibility = 'hidden'; }   // read-only: no ✕ (space kept so sliders line up)
     removeBtn.addEventListener('mouseenter', () => { removeBtn.style.color = 'rgba(255,60,60,1)'; });
     removeBtn.addEventListener('mouseleave', () => { removeBtn.style.color = 'rgba(255,100,100,0.65)'; });
     removeBtn.addEventListener('click', () => {

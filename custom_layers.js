@@ -12,6 +12,11 @@
 // how see-through they are is personal (this computer), as for caves.
 // Drawn above the built-in layers, in the order listed.
 //
+// Also listed (owner 'c', read-only): the loaded CalTopo map's own custom layers
+// (caltopo_layers.js, window._ctLayers), drawn like tile links, marked with a map
+// icon; they come and go with the CalTopo map. A tile layer whose tiles don't load
+// gets a plain warning (toast, "no tiles" on its row).
+//
 // Library entries: layer.set { layer, kind: 'imagery', blob: '<sha>.webp',
 // bounds: [west, south, east, north], name } or { kind: 'tiles', url, name }
 // (+ bounds, minZoom, maxZoom for the tiles a project made), or { kind: 'terrain',
@@ -32,7 +37,8 @@
   // ── Personal view: shown, see-through ────────────────────────────────────
   const VK = 'flex.cl.view';
   const views = () => { try { return JSON.parse(localStorage.getItem(VK) || '{}'); } catch (_) { return {}; } };
-  const viewOf = id => Object.assign({ show: true, alpha: 1 }, views()[id] || {});
+  const defs = new Map();                        // a first look other than shown / opaque (CalTopo map layers: caltopo_layers.js)
+  const viewOf = id => Object.assign({ show: true, alpha: 1 }, defs.get(id) || {}, views()[id] || {});
   function setView(id, v) { const all = views(); all[id] = Object.assign(viewOf(id), v); try { localStorage.setItem(VK, JSON.stringify(all)); } catch (_) {} }
 
   // ── What there is ────────────────────────────────────────────────────────
@@ -46,10 +52,12 @@
     const out = [], pj = PJ();
     if (pj.pid && pj.P && FL()) FL().liveLayers(pj.P).filter(l => KINDS.has(l.kind)).forEach(l => out.push(Object.assign({ owner: 'p' }, l)));
     (await myLayers(force)).forEach(l => out.push(Object.assign({ owner: 'm' }, l)));
+    // The loaded CalTopo map's own custom layers (read-only; they come and go with the map).
+    if (window._ctLayers) window._ctLayers.list().forEach(l => { defs.set(l.id, { show: !!l.defShow, alpha: l.defAlpha }); out.push(Object.assign({ owner: 'c' }, l)); });
     return out;
   }
   const srcUrl = l => (l.kind === 'imagery' || l.kind === 'terrain' ? '/api/lib/blob/' + l.blob : l.url);
-  const sigOf = l => [l.kind, srcUrl(l), (l.bounds || []).join(',')].join('|');
+  const sigOf = l => [l.kind, srcUrl(l), (l.bounds || []).join(','), l.maxZoom, l.minZoom].join('|');
 
   // ── On the globe ─────────────────────────────────────────────────────────
   const drawn = new Map();                       // 'p:<id>' / 'm:<id>' → { layer, sig, id } (the same file can be in the project and in My data)
@@ -93,15 +101,17 @@
               rectangle: l.bounds ? Cesium.Rectangle.fromDegrees(...l.bounds) : undefined });     // a project's own tiles: only where and at the levels they exist
           } catch (e) { console.warn('[layers] could not show', l.name, e); }
           if (!prov) continue;
+          watchTiles(prov, l);
           const z0 = views()[l.id] && views()[l.id].z, vw0 = viewOf(l.id);
           const layer = v.imageryLayers.addImageryProvider(prov, z0 != null ? Math.min(Math.max(0, z0), v.imageryLayers.length) : undefined);
           layer.show = !!vw0.show; layer.alpha = Math.max(0, Math.min(1, +vw0.alpha));
-          layer.name = l.name || 'Layer'; layer._custom = { id: l.id, owner: l.owner };       // shows in the one list (flex.js renderLayerList)
+          layer.name = l.name || 'Layer'; layer._custom = { id: l.id, owner: l.owner, warn: '' };       // shows in the one list (flex.js renderLayerList)
           Cesium.knockout.track(layer, ['alpha', 'show', 'name']);
           const kid = l.id;
           Cesium.knockout.getObservable(layer, 'show').subscribe(s => setView(kid, { show: !!s }));
           Cesium.knockout.getObservable(layer, 'alpha').subscribe(a => setView(kid, { alpha: +a }));
           drawn.set(keyOf(l), { layer, sig: sigOf(l), id: l.id });
+          prov._flexLayer = layer;
           listChanged = true;
         }
         const d = drawn.get(keyOf(l)), vw = viewOf(l.id);
@@ -110,6 +120,32 @@
       if (listChanged && window._updateLayerList) { window._updateLayerList(); if (window._renderLayerList) window._renderLayerList(); }
       if (v.scene.requestRender) v.scene.requestRender();
     }
+  }
+
+  // A tile layer whose tiles don't come: a plain warning (once, and on its row), not an error.
+  // Cesium reports each failed tile on errorEvent (a listener also keeps it out of the console);
+  // a few failures and not one tile → the warning. Missing tiles here and there are normal.
+  function watchTiles(prov, l) {
+    let bad = 0, good = 0, warned = false;
+    const req = prov.requestImage;
+    if (typeof req === 'function') prov.requestImage = function () {
+      const pr = req.apply(this, arguments);
+      if (pr && pr.then) pr.then(img => { if (img) good++; }, () => {});
+      return pr;
+    };
+    if (prov.errorEvent) prov.errorEvent.addEventListener(err => {
+      if (err) err.retry = false;
+      bad++;
+      if (warned || good > 0 || bad < 3) return;
+      warned = true;
+      const where = l.owner === 'c' ? 'CalTopo map layer' : 'Map layer';
+      const why = l.owner === 'c' ? 'the link may need a CalTopo sign-in or a key, its server may not allow other sites, or you are offline' : 'check the link, or you may be offline';
+      const msg = `${where} “${l.name}”: its tiles don’t load (${why}).`;
+      console.warn('[layers] ' + msg);
+      toast(msg);
+      const layer = prov._flexLayer;
+      if (layer && layer._custom) { layer._custom.warn = 'Its tiles don’t load: ' + why; if (window._renderLayerList) window._renderLayerList(); }
+    });
   }
 
   // ── Reading a GeoTIFF ────────────────────────────────────────────────────
@@ -403,6 +439,11 @@
   }
   async function removeById(id) {
     const l = (await entries()).find(x => x.id === id); if (!l) return;
+    if (l.owner === 'c') {                       // CalTopo's: FLEX doesn't change the map; hidden here instead
+      setView(l.id, { show: false }); await sync(); if (window._renderLayerList) window._renderLayerList();
+      toast(`“${l.name}” is part of the CalTopo map: hidden here. Remove it in CalTopo to drop it.`);
+      return;
+    }
     if (window.confirm(l.owner === 'p' ? `Remove “${l.name}” from the project? (It stays in the project's history.)` : `Forget “${l.name}”?`)) remove(l);
   }
   async function onClick(e) {
@@ -585,6 +626,7 @@
   document.querySelector('[data-target="#mapLayersCollapsible"]')?.addEventListener('click', () => setTimeout(() => render(true), 0));
   const st = document.createElement('style');
   st.textContent = `
+  #lp-layers-body .lp-ct-ico { vertical-align: -2px; opacity: .85; }
   #cl-panel { margin: 0 0 8px; font-size: 11px; }
   #cl-panel .cl-row { display: grid; grid-template-columns: 24px 1fr auto; gap: 5px; align-items: center; padding: 2px 3px; border-radius: 5px; font-size: 11px; }
   #cl-panel .cl-row:hover { background: rgba(255,255,255,.07); }
