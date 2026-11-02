@@ -82,6 +82,34 @@ there as GPX/KML first if you want them).
 A made-up test map: `python tools\make_synthetic_export.py out\test` writes
 `out\FLEX-Cave-Ridge.zip` (needs the exporter's conda environment).
 
+## Building on Linux (the FLEX server)
+
+Nothing system-wide: the JDK and the SDK live under `~/opt/`, environment
+variables are set per command, no shell profile is touched.
+
+```bash
+# one-time: JDK 17 (Temurin) and the Android command-line tools
+mkdir -p ~/opt/dl ~/opt/jdk17 ~/opt/android-sdk/cmdline-tools
+curl -fsSL -o ~/opt/dl/jdk17.tgz "https://api.adoptium.net/v3/binary/latest/17/ga/linux/x64/jdk/hotspot/normal/eclipse"
+tar xzf ~/opt/dl/jdk17.tgz -C ~/opt/jdk17 --strip-components=1
+# commandlinetools-linux-<n>_latest.zip: current <n> is on https://developer.android.com/studio
+curl -fsSL -o ~/opt/dl/cmdtools.zip https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip
+unzip -q ~/opt/dl/cmdtools.zip -d ~/opt/dl/x && mv ~/opt/dl/x/cmdline-tools ~/opt/android-sdk/cmdline-tools/latest
+export JAVA_HOME=~/opt/jdk17 ANDROID_HOME=~/opt/android-sdk ANDROID_SDK_ROOT=~/opt/android-sdk
+yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
+$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+
+# every build
+cd android
+export JAVA_HOME=~/opt/jdk17 ANDROID_HOME=~/opt/android-sdk ANDROID_SDK_ROOT=~/opt/android-sdk
+./gradlew --no-daemon assembleDebug
+# -> app/build/outputs/apk/debug/app-debug.apk
+```
+
+The APK bundles only `viewer_build/` (viewer template and `libs/`) and
+`flexfield-assets/`; no map data. `unzip -l` the APK and check `assets/` before
+handing it out. Gradle puts its caches in `~/.gradle`.
+
 ## Debugging on device
 
 Build `assembleDebug`, connect USB, open `chrome://inspect` on the desktop and
