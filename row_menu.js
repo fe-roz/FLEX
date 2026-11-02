@@ -132,6 +132,16 @@
     if (!s) { toast('Nothing to show for it'); return; }
     I.show(s); I.expand();
   }
+  // Send to CalTopo (caltopo_send.js): project items and folders. Off, with the reason, when it can't be done now.
+  const pjFeat = id => { const P = PJ().P, f = P && P.features && P.features[id]; return f && !f.removed ? f : null; };
+  function sendEntry(target, f) {
+    const S = window._ctSend;
+    if (!target || !S) return [];
+    let why = S.can();
+    if (!why && f && !S.isNotIn(f)) why = 'It is already in the CalTopo map';
+    if (!why && target.group && !S.notIn(PJ().P).some(x => FL().groupPath(PJ().P, x.group).some(g => g.id === target.group))) why = 'Everything in it is already in the CalTopo map';
+    return [Object.assign({ id: 'ctsend', icon: 'upload', label: 'Send to CalTopo…', run: () => S.send(target) }, why ? { disabled: true, title: why } : {})];
+  }
   function itemEntries(rkey) {
     const E = FE(), x = ref(rkey), r = E && x ? E.refOf(x) : null;
     if (!r) return { title: '', list: [] };
@@ -151,6 +161,7 @@
         if (f !== null && f !== (r.folder || '')) await E.moveTo(x, f);
       } }),
       Object.assign({ id: 'fly', icon: 'target', label: 'Fly to', run: () => flyTo(r, rkey) }, r.coords && r.coords.length ? {} : { disabled: true, title: 'It has no position' }),
+      ...sendEntry(r.source === 'project' ? { feature: r.id } : null, r.source === 'project' && window._ctSend && pjFeat(r.id)),
       '-',
       ed({ id: 'delete', icon: 'trash', label: 'Delete…', run: () => E.del(x) }),
     ];
@@ -180,6 +191,7 @@
     return [
       { id: 'rename', icon: 'text', label: 'Rename…', run: async () => { const n = await askText(`Rename the folder “${g.name}”`, g.name, 'Rename'); if (n && n !== g.name) await a.record('group.set', { group: gid, name: n.slice(0, 80) }); } },
       { id: 'newsub', icon: 'folder-plus', label: 'New subfolder…', run: () => PF().editGroup(null, gid) },
+      ...sendEntry({ group: gid }, null),
       { id: 'move', icon: 'folder-move', label: 'Move…', run: async () => {
         const inside = desc(), list = [];
         const walk = (pid, d) => L.liveGroups(P).filter(x => (x.parent || '') === pid).sort((x, y) => String(x.name).localeCompare(String(y.name), undefined, { numeric: true }))

@@ -447,7 +447,13 @@
     }
     if (r.source === 'project') {
       const src = ctSrc(), f = pj.P && pj.P.features[r.id];
-      if (src && f && window._ctMatch) { let m = null; try { m = window._ctMatch.matchFeature(f, src); } catch (_) { m = true; } if (!m) out.push({ text: 'not in CalTopo', cls: 'not', title: 'The project’s CalTopo map has no feature of this kind and name here' }); }
+      if (src && f && window._ctMatch) {
+        let nin = false; try { nin = window._ctSend ? window._ctSend.isNotIn(f) : !window._ctMatch.matchFeature(f, src); } catch (_) { nin = false; }
+        if (nin) {
+          out.push({ text: 'not in CalTopo', cls: 'not', title: 'The project’s CalTopo map has no feature of this kind and name here' });
+          if (window._ctSend) out.push({ text: 'Send to CalTopo', cls: 'not', title: 'Add it to the CalTopo map (you see what goes first)', click: () => window._ctSend.send({ feature: r.id }) });
+        }
+      }
     }
     if (!r.editable) out.push({ text: 'read-only', cls: 'ro', title: r.reason || '' });
     return out;

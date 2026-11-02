@@ -10,7 +10,8 @@
 //   Overlay folders    the folders of the loaded CalTopo map and KML / GeoJSON
 //                      files, each with show / hide. Works without a project.
 //   Cave entrances     a point whose description has a line
-//                        flex: cave=<cave name>; station=<entrance station>
+//                        flex: cave=<cave name>; station=<entrance station>; z=<metres>; id=<cave id>
+//                      (z and id are optional; caltopo_send.js reads and writes the line)
 //                      (a CalTopo marker, or a project point) places that cave
 //                      at it, when you say so.
 //
@@ -354,20 +355,23 @@
   }
 
   // ── Cave entrances from point descriptions ───────────────────────────────
+  // The tag with its optional z and id (caltopo_send.js); the plain reader when that module is missing.
+  const tagOf = d => (window._ctSend ? window._ctSend.parseTag(d) : FL.flexTag(d));
   function scanTags() {
     const out = [], w = ws(), now = window.Cesium ? Cesium.JulianDate.now() : null;
     if (!pj.pid || !w) return out;
     w.vectorSources().forEach(src => src.ds.entities.values.forEach(e => {
       if (!e.position) return;
       const d = e.description && (e.description.getValue ? e.description.getValue(now) : e.description);
-      const t = FL.flexTag(d);
+      const t = tagOf(d);
       if (!t) return;
       const p = e.position.getValue(now); if (!p) return;
       out.push(Object.assign({ from: src.kind === 'caltopo' ? 'CalTopo' : src.name, point: e.name || '', at: lonlat(p) }, t));
     }));
-    FL.liveFeatures(pj.P).forEach(f => { const t = FL.flexTag(f.desc); if (t && f.kind === 'point') out.push(Object.assign({ from: 'this project', point: f.name, at: f.coords[0] }, t)); });
+    FL.liveFeatures(pj.P).forEach(f => { const t = tagOf(f.desc); if (t && f.kind === 'point') out.push(Object.assign({ from: 'this project', point: f.name, at: f.coords[0] }, t)); });
     out.forEach(t => {
-      const cid = FL.caveForName(pj.P, t.cave);
+      const byId = t.id && pj.P.caves[t.id] && !pj.P.caves[t.id].removed ? t.id : null;      // the id wins: the cave may have been renamed
+      const cid = byId || FL.caveForName(pj.P, t.cave);
       const cv = cid && pj.P.caves[cid];
       t.cid = cid || null;
       t.file = cv ? ((cv.sources || []).map(s => s.file).find(fl => pj.P.cavefiles[fl] && !pj.P.cavefiles[fl].removed) || null) : (pj.P.cavefiles[t.cave] ? t.cave : null);
@@ -381,11 +385,14 @@
   async function placeAtTag(t) {
     const w = ws(), cf = pj.P.cavefiles[t.file];
     if (!cf) return;
-    let elev = t.at[2] || 0;
+    // Height: the tag's z when it has one (else the marker's own); the terrain's reading wins only when it has one worth using
+    // (no terrain loaded reads 0, which must not override a z).
+    const zTag = isFinite(t.z) ? t.z : (t.at[2] || 0);
+    let elev = zTag;
     try {
       const k = [Cesium.Cartographic.fromDegrees(t.at[0], t.at[1])];
       const s = await Cesium.sampleTerrainMostDetailed(V().terrainProvider, k);
-      if (s && s[0] && isFinite(s[0].height)) elev = s[0].height;
+      if (s && s[0] && isFinite(s[0].height) && !(Math.abs(s[0].height) < 0.01 && zTag)) elev = s[0].height;
     } catch (_) {}
     const old = cf.place || {};
     const place = { mode: 'anchor', station: t.station, lat: t.at[1], lon: t.at[0], elev: +elev.toFixed(1), survey: '', declination: old.declination ?? null };
@@ -405,8 +412,10 @@
     const place = (pj.P.cavefiles[file] || {}).place;
     const imp = (window._caveImports || []).find(i => i.name === file);
     const st = (place && place.station && place.station !== '__first__' && place.station) || (imp && imp.parsed.stations[0] && imp.parsed.stations[0].name) || '?';
-    const tag = FL.makeFlexTag(cv ? cv.name : file.replace(/\.plt$/i, ''), st);
-    (navigator.clipboard ? navigator.clipboard.writeText(tag) : Promise.reject()).then(() => toast('Copied: ' + tag), () => dialog({ title: 'CalTopo tag', text: 'Put this line in the description of the entrance marker in CalTopo:', input: { value: tag } }));
+    const z = place && isFinite(place.elev) && place.mode === 'anchor' ? place.elev : undefined;
+    const mk = window._ctSend ? window._ctSend.makeTag : (c, s) => FL.makeFlexTag(c, s);
+    const tag = mk(cv ? cv.name : file.replace(/\.plt$/i, ''), st, { z, id: cv ? cv.id : undefined });
+    (navigator.clipboard ? navigator.clipboard.writeText(tag) : Promise.reject()).then(() => toast('Copied: ' + tag), () => dialog({ title: 'CalTopo tag', text: 'Put this line in the description of the entrance marker in CalTopo (z is the entrance height, id the cave’s id in the project; the marker still works with only cave and station):', input: { value: tag } }));
     return tag;
   }
 
@@ -432,7 +441,7 @@
     if (!pj.pid) return;
     const tags = scanTags();
     sec(root, `Cave entrances on the map (${tags.length})`, tags.some(t => !t.placedHere), b => {
-      b.appendChild(el('div', 'pj-note', 'A point whose description has a line “flex: cave=<cave name>; station=<entrance station>” — in CalTopo or in this project — marks where a cave’s entrance is. FLEX places the cave there when you say so. 🕳 Caves → ⋯ on the cave → “Copy CalTopo tag” gives you the line.'));
+      b.appendChild(el('div', 'pj-note', 'A point whose description has a line “flex: cave=<cave name>; station=<entrance station>; z=<metres>; id=<cave id>” (z and id are optional) — in CalTopo or in this project — marks where a cave’s entrance is. FLEX places the cave there when you say so. 🕳 Caves → ⋯ on the cave → “Copy CalTopo tag” gives you the line.'));
       if (!tags.length) b.appendChild(el('div', 'pj-sub', 'None found.'));
       tags.forEach(t => {
         const r = el('div', 'pj-item');

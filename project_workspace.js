@@ -340,7 +340,7 @@
           w.loadCave(p.name, await r.text(), f.place || null, disp);
         } else if (p.kind === 'layer') {
           const cur = pj.P.layers[layerId(p.l.kind, p.l.url)];
-          if (cur && p.l.kind === 'caltopo') w.setCaltopo(cur.url, cur.interval ?? 30);
+          if (cur && p.l.kind === 'caltopo') w.setCaltopo(cur.url, cur.interval ?? 60);
         }
       }
     } finally { w.switching = false; }
@@ -479,7 +479,7 @@
       for (const l of layers.filter(l => l.kind === 'pointcloud')) { await L.step('Point cloud: ' + (l.name || l.url)); if (!pcs.has(l.url)) w.addPointCloud(l.url); }
       const ct = layers.filter(l => l.kind === 'caltopo');
       for (const l of ct) await L.step('CalTopo map');
-      if (ct.length && !(w.caltopo() && w.caltopo().url === ct[0].url)) await withTimeout(w.setCaltopo(ct[0].url, ct[0].interval ?? 30), 15000);
+      if (ct.length && !(w.caltopo() && w.caltopo().url === ct[0].url)) await withTimeout(w.setCaltopo(ct[0].url, ct[0].interval ?? 60), 15000);
       if (ct.length > 1) toast(`This project has ${ct.length} CalTopo maps; FLEX shows one at a time (the first)`);
       for (const l of layers.filter(l => l.kind === 'file')) { await L.step('Data file: ' + (l.name || '')); if (!files.has(l.url)) await w.addDataFile(l.url, l.name, { noKeep: true }); }
       for (const l of layers.filter(l => !['pointcloud', 'caltopo', 'file'].includes(l.kind))) await L.step(l.name || 'Layer');

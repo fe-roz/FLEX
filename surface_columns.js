@@ -189,7 +189,7 @@
   function notInCt(P) {
     const src = ctSrc(), M = window._ctMatch;
     if (!src || !M || !P) return null;
-    try { return new Set(M.unmatched(P, src).map(f => f.id)); } catch (e) { console.warn('[surface] match', e); return null; }
+    try { return window._ctSend ? window._ctSend.notInIds(P, src) : new Set(M.unmatched(P, src).map(f => f.id)); } catch (e) { console.warn('[surface] match', e); return null; }
   }
   const NICT_TIP = 'Not in the CalTopo map: it has no point, line or area of the same kind and name within 15 m';
   const nictMark = () => `<b class="sc-st sc-nict" title="${NICT_TIP}">not in CalTopo</b>`;
@@ -381,10 +381,10 @@
   function bar(isOpen) {
     const on = !MS.off;
     const tools = isOpen
-      ? `<button type="button" data-draw="point" title="Draw a point in the project">＋ Point</button><button type="button" data-draw="line" title="Draw a line">＋ Line</button><button type="button" data-draw="area" title="Draw an area">＋ Area</button><button type="button" data-tool="folder" title="A new folder">＋ Folder</button><button type="button" data-tool="import" title="GPX / KML / KMZ / GeoJSON into the project's features">⇪ Import</button><button type="button" data-tool="download" title="All the project's features, for CalTopo">⇩ Download</button><button type="button" data-tool="file" title="Show a KMZ / GeoJSON / GPX file as it is (a data file)">📄 Add file</button>${ctSrc() && window._ctMatch ? '<button type="button" data-tool="dups" title="The project’s features that the loaded CalTopo map already has (same name, within 15 m)">⧉ Duplicates of CalTopo</button>' : ''}`
+      ? `<button type="button" data-draw="point" title="Draw a point in the project">＋ Point</button><button type="button" data-draw="line" title="Draw a line">＋ Line</button><button type="button" data-draw="area" title="Draw an area">＋ Area</button><button type="button" data-tool="folder" title="A new folder">＋ Folder</button><button type="button" data-tool="import" title="GPX / KML / KMZ / GeoJSON into the project's features">⇪ Import</button><button type="button" data-tool="download" title="All the project's features, for CalTopo">⇩ Download</button><button type="button" data-tool="file" title="Show a KMZ / GeoJSON / GPX file as it is (a data file)">📄 Add file</button>${NICT && NICT.size && window._ctSend ? `<button type="button" data-tool="ctsend" title="Add the items that are not in the CalTopo map to it (you see the list first)">⇪ Send ${NICT.size} to CalTopo</button>` : ''}${ctSrc() && window._ctMatch ? '<button type="button" data-tool="dups" title="The project’s features that the loaded CalTopo map already has (same name, within 15 m)">⧉ Duplicates of CalTopo</button>' : ''}`
       : `<button type="button" data-tool="file" title="Show a KMZ / GeoJSON / GPX file">📄 Add KMZ / GeoJSON / GPX</button>`;
     const lab = labelsOn();
-    return `<div class="sc-bar"><button type="button" class="sc-master${on ? ' on' : ''}" data-master role="switch" aria-checked="${!!on}" title="${on ? 'Hide every feature on the surface (each keeps its own setting)' : 'Show the features again, as each was set'}"><span class="ui-sw ui-sw-sm"></span>Show features</button><button type="button" class="sc-master sc-lab${lab ? ' on' : ''}" data-labels role="switch" aria-checked="${!!lab}" title="${lab ? 'Hide the names on the map' : 'Show the names on the map'}"><span class="ui-sw ui-sw-sm"></span>Labels</button><span class="sc-tools">${tools}</span></div>`;
+    return `<div class="sc-bar"><button type="button" class="sc-master${on ? ' on' : ''}" data-master role="switch" aria-checked="${!!on}" title="${on ? 'Hide every feature on the surface (each keeps its own setting)' : 'Show the features again, as each was set'}"><span class="ui-sw ui-sw-sm"></span>Show features</button><button type="button" class="sc-master sc-lab${lab ? ' on' : ''}" data-labels role="switch" aria-checked="${!!lab}" title="${lab ? 'Hide the names on the map' : 'Show the names on the map'}"><span class="ui-sw ui-sw-sm"></span>Labels</button><span class="sc-tools">${tools}</span></div>${isOpen && window._ctSend && window._ctSend.reminder() ? window._ctSend.reminder().html : ''}`;
   }
 
   async function render() {
@@ -575,7 +575,7 @@
     if (kind === 'pgroup') { const ents = pointEntities(new Set(x.points.map(f => f.id))); ents.forEach(e => { e.show = !x.shown; }); }
     else if (kind === 'folder' || kind === 'loose') { if (PF()) { PF().setHidden(kind === 'loose' ? 'root' : 'g:' + id, x.shown); PF().draw(); } }
     else if (kind === 'caltopo') {
-      if (!x.loaded) await w.setCaltopo(x.url, x.interval ?? 30);
+      if (!x.loaded) await w.setCaltopo(x.url, x.interval ?? 60);
       else { const src = w.vectorSources().find(s => s.kind === 'caltopo'); if (src) src.ds.show = !x.shown; }
     } else if (kind === 'file') {
       if (!x.loaded) await w.addDataFile(x.url, x.name, x.inProject ? { noKeep: true } : { myId: x.id });
@@ -589,7 +589,7 @@
     if (kind === 'pgroup' && dir === 'out' && x.dir !== 'in') return;   // project features don't go back to My data (yet)
     if (kind === 'caltopo') {                                           // the loaded CalTopo map becomes the project's
       if (dir !== 'in' || !window._pjApi) return;
-      await window._pjApi.record('layer.set', { layer: pw.layerId('caltopo', x.url), kind: 'caltopo', url: x.url, interval: x.interval ?? 30, order: (window.FlexLib.liveLayers(PJ().P) || []).length, removed: false });
+      await window._pjApi.record('layer.set', { layer: pw.layerId('caltopo', x.url), kind: 'caltopo', url: x.url, interval: x.interval ?? 60, order: (window.FlexLib.liveLayers(PJ().P) || []).length, removed: false });
       if (pw.badge) await pw.badge();
       soon(); return;
     }
@@ -631,6 +631,9 @@
       else if (t === 'import' && P) { masterOnFirst(); P.importFile(''); }
       else if (t === 'download' && P) P.downloadMenu('');
       else if (t === 'dups') dupsDialog();
+      else if (t === 'ctsend') window._ctSend.send({ all: true });
+      else if (t === 'ctretry') { if (window._ctWrite) window._ctWrite.retry(); }
+      else if (t === 'ctdismiss') { window._ctSend.dismiss(); last = ''; render(); }
       return;
     }
     const ex = e.target.closest('[data-expand]');
@@ -737,6 +740,8 @@
   #surf-cols .cc-tools { display: inline-flex; gap: 1px; opacity: .35; }
   #surf-cols .cc-it:hover .cc-tools, #surf-cols .cc-it:focus-within .cc-tools { opacity: 1; }
   #surf-cols .cc-tools button { background: none; border: none; color: rgba(255,255,255,.7); padding: 0 3px; font-size: 12px; line-height: 16px; border-radius: 3px; cursor: pointer; }
+  .sc-remind { display: flex; align-items: center; gap: 6px; margin: 4px 0; padding: 3px 8px; font-size: 11px; color: #f2c24e; background: rgba(242,194,78,.08); border: 1px solid rgba(242,194,78,.25); border-radius: 6px; }
+  .sc-remind > span { flex: 1; } .sc-remind .sc-link { background: none; border: none; padding: 0; color: #8ab4ec; text-decoration: underline; cursor: pointer; font-size: inherit; }
   .sc-dups { max-height: 50vh; overflow: auto; margin: 6px 0; }
   .sc-dup { display: flex; align-items: center; gap: 6px; padding: 3px 2px; font-size: 12px; }
   .sc-dup-all { border-bottom: 1px solid rgba(255,255,255,.12); margin-bottom: 3px; }

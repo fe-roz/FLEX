@@ -346,7 +346,7 @@
     const ok = st && /✓/.test(st.textContent);
     return { lay, now, src: loaded ? src : null, loaded, id: lay && mapId(lay.url), other: !lay && now ? mapId(now.url) || 'a map' : null,
       n: loaded && window._ctMatch ? window._ctMatch.countShapes(src) : 0, shown: loaded ? src.ds.show !== false : false,
-      when: loaded && tm ? (ok ? 'refreshed ' : 'tried ') + tm : '', interval: lay ? (lay.interval ?? 30) : null, warn: st && /⚠/.test(st.textContent) ? st.textContent : '' };
+      when: loaded && tm ? (ok ? 'refreshed ' : 'tried ') + tm : '', interval: lay ? (lay.interval ?? 60) : null, warn: st && /⚠/.test(st.textContent) ? st.textContent : '' };
   }
   function row(cls) { return el('div', 'pjx-row' + (cls ? ' ' + cls : '')); }
   function rowText(main, sub) { const t = el('span', 'pjx-rt'); t.appendChild(el('span', 'pjx-rn', main)); if (sub) t.appendChild(el('small', '', sub)); return t; }
@@ -392,7 +392,7 @@
       r.appendChild(rowText(['map', 'CalTopo map ' + (ct.id || '')], ct.loaded ? [ct.n + ' feature' + (ct.n === 1 ? '' : 's'), ct.when, ct.interval ? 'every ' + ct.interval + ' s' : 'manual refresh'].filter(Boolean).join(' · ') : (ct.warn || 'not loaded')));
       const t = el('span', 'pjx-tools');
       if (ct.id) { const a = el('a', 'pjx-ext', 'Open in CalTopo ↗'); a.href = 'https://caltopo.com/m/' + ct.id; a.target = '_blank'; a.rel = 'noopener'; a.title = 'The map on caltopo.com, in a new tab'; t.appendChild(a); }
-      if (!ct.loaded) t.appendChild(btn('Load', async () => { await w.setCaltopo(ct.lay.url, ct.interval ?? 30); paintLive(); }, 'small'));
+      if (!ct.loaded) t.appendChild(btn('Load', async () => { await w.setCaltopo(ct.lay.url, ct.interval ?? 60); paintLive(); }, 'small'));
       t.appendChild(goBtn('surface', 'pin', 'Open Surface (the map’s folders, its link and key)'));
       r.appendChild(t);
       box.appendChild(r);

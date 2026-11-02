@@ -15,7 +15,8 @@
 //   .create(feature)                     a new Marker / Shape ({geometry, properties})
 //        → { ok:true, feature } | { queued:true } | { conflict:true, mine, theirs } | { ok:false, error, readOnly? }
 //        A short message is shown either way; a conflict opens the side-by-side dialog
-//        unless {dialog:false}.
+//        unless {dialog:false}. create(feature, {quiet:true}) says nothing and doesn't re-read the map (bulk send);
+//        the caller calls refresh() once at the end.
 //   .status(fid)                         null | 'waiting' | 'conflict' | 'failed' | 'changed' (in CalTopo, since last looked)
 //   .pending()                           [{fid, title, what, at, state, error?}] waiting, conflicting, failed edits
 //   .resolve(fid, 'mine'|'theirs')       keep my edit (sent now) or CalTopo's (my edit dropped)
@@ -96,10 +97,10 @@
     fire('flex-caltopo-queue', { pending: pending() });
     schedule();
   }
-  function schedule() {                      // waiting edits: try again every 20 s while there are some
-    clearTimeout(S.poll);
+  function schedule() {                      // waiting edits: only the server retries them (caltopo_api.js, backing off);
+    clearTimeout(S.poll);                    // here we just look at its queue (a local answer, no CalTopo request)
     if (!S.map || !S.pending.some(p => p.state === 'waiting')) return;
-    S.poll = setTimeout(retry, 20000);
+    S.poll = setTimeout(state, 20000);
   }
   async function retry() {
     if (!S.map) return;
@@ -111,6 +112,7 @@
   // ── Edits ─────────────────────────────────────────────────────────────────
   async function answered(r, fid, title, opts) {
     opts = opts || {};
+    if (opts.quiet) { if (r.conflict) S.shown.add('c:' + fid); return r; }   // a bulk send: it tells once at the end and refreshes once
     if (r.ok) toast(r.dropped ? `Kept CalTopo’s version of “${title}”` : opts.done || `Saved to CalTopo: “${title}”`);
     else if (r.queued) toast(`CalTopo can’t be reached: “${title}” will be sent when it is back`);
     else if (r.conflict) toast(`“${title}” was changed in CalTopo meanwhile: pick a version`);
@@ -211,8 +213,11 @@
     return r;
   }
 
+  /** Refresh seconds as FLEX reads them: 0 = off, nothing below 30 s (old projects and sessions had 10 s). */
+  const interval = s => { s = +s; return s > 0 ? Math.max(30, s) : 0; };
+  window._ctInterval = interval;
   window._ctWrite = {
-    available: () => !!S.map, mapId: () => S.map, feature, folders, update, remove, create, status, pending, resolve, showConflict,
+    available: () => !!S.map, refresh: refreshMap, interval, has: fid => S.idx.has(String(fid || '').replace(/^ct-/, '')), mapId: () => S.map, feature, folders, update, remove, create, status, pending, resolve, showConflict,
     changes: () => S.changes.slice(), seen: () => S.seen, markSeen, offline: () => S.offline, retry, _pulled, _state: state,
   };
 })();
