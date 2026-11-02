@@ -2,7 +2,7 @@
 // newer survey file adds, drops and moves, which stations the cave's placement
 // (anchor, control points) would lose, the suggested stand-ins, and the
 // placement rewritten for the new file. Pulls the real functions out of
-// flex.js (and its parsePLT). Synthetic surveys only.
+// flex.js (and parsePLT from client/src/modules/compass-plt.js). Synthetic surveys only.
 //
 //   node tools/test_replace_survey.js
 'use strict';
@@ -14,8 +14,9 @@ const grab = name => {
   return m[0];
 };
 const jsonCopy = src.match(/const _jsonCopy = [^\n]+\n/)[0];
-const api = new Function(jsonCopy + ['parsePLT', '_caveFindStation', '_replaceSurveyPlan', '_replaceGeoref'].map(grab).join('\n') +
-  '\nreturn { parsePLT, _caveFindStation, _replaceSurveyPlan, _replaceGeoref };')();
+const { parsePLT } = require(path.join(__dirname, '..', 'client', 'src', 'modules', 'compass-plt.js'));
+const api = new Function('parsePLT', jsonCopy + ['_caveFindStation', '_replaceSurveyPlan', '_replaceGeoref'].map(grab).join('\n') +
+  '\nreturn { parsePLT, _caveFindStation, _replaceSurveyPlan, _replaceGeoref };')(parsePLT);
 
 let pass = 0, fail = 0;
 const ok = (label, cond, info) => { if (cond) pass++; else { fail++; console.error('FAIL ' + label + (info !== undefined ? '\n  ' + JSON.stringify(info) : '')); } };
