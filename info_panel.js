@@ -239,6 +239,13 @@
     if (pj.pid && pj.P) out.push(['Project', (pj.P.name || pj.pid) + (source === 'project' ? '' : source === 'mydata' ? ' (open; this point is in My data)' : ' (open)')]);
     return out;
   }
+  // Trips that visited a cave or hold one of its segments.
+  function tripsRelated(cid, segIds) {
+    if (!cid || !pj.P || !FL.tripsOf) return [];
+    const ts = FL.tripsOf(pj.P).filter(t => (!segIds && t.caves.includes(cid)) || (segIds || []).some(id => t.links.includes('segment:' + id)));
+    const tx = ts.map(t => (window._pjTrips ? window._pjTrips.range(t) : t.start) + ' · ' + (t.name || 'Trip'));
+    return tx.length ? [['Trips', tx.join('\n')]] : [];
+  }
   function stationRelated(c) {
     const out = [], imp = c.imp;
     if (!imp) return out;
@@ -249,6 +256,7 @@
       try { ids = (window._pjSeg.info(c.cid).idx.station.get(c.name) || []); } catch (_) {}
       const gs = ids.map(segRec).filter(g => g && !g.removed);
       if (gs.length) out.push(['Segment', gs.map(segText).join('\n')]);
+      out.push(...tripsRelated(c.cid, gs.map(g => g.id)));
     }
     const { shots, lrud } = shotsAt(imp, c.name);
     if (shots.length) {
@@ -271,6 +279,7 @@
     if (dates.length) out.push(['Dates', dates.join(', ')]);
     const team = [...new Set(segs.map(g => g.team).filter(Boolean))];
     if (team.length) out.push(['Team', team.join('; ')]);
+    out.push(...tripsRelated(c.cid, segs.map(g => g.id)));
     return out;
   }
   function caveRelated(c) {
@@ -286,6 +295,7 @@
     const anchor = parts.map(p => p.imp.georef).find(g => g && g.mode === 'anchor' && g.station && g.station !== '__first__');
     if (!tags.length && anchor) out.push(['Placed at', 'station ' + anchor.station]);
     if (parts.length) out.push(['Survey files', parts.map(p => p.imp.name).join(', ')]);
+    out.push(...tripsRelated(c.cid));
     return out;
   }
 
