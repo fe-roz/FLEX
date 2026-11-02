@@ -18,6 +18,12 @@
 // how the textures are handed to Potree: they are plain descriptors, never
 // THREE.DataTexture.
 
+import {
+  HAG_FORMAT, BinLedger, MarginCache, marginCapture, marginRestore, nodeCovered, cloudFingerprint, datasetKey, hash64,
+  gridPrefix, recordId, pickSnapshot, supersededIds, encodeGrid, decodeGridInto, filterProcessed,
+  listIds, getRecord, putRecord, clearAll as clearGridStore, storeStats as gridStoreStats,
+} from "./hag-persist.js";
+
 // ── Height-Above-Ground live filter ──────────────────────────────────────────
 //
 // Restores the filter removed in bdecc3f0 ("the Z-coordinate mapping between the
@@ -176,13 +182,15 @@ function _hagAnchor(g, cell, cx, cy) {
 }
 
 /** Move a grid to sit on (cx, cy), keeping everything still in range. */
-function _hagShift(g, cx, cy) {
+function _hagShift(g, cx, cy, hooks) {
   const cov = g.dim * g.cell;
   const nx = Math.floor((cx - cov / 2) / g.cell) * g.cell;
   const ny = Math.floor((cy - cov / 2) / g.cell) * g.cell;
   const dx = Math.round((nx - g.originX) / g.cell);
   const dy = Math.round((ny - g.originY) / g.cell);
   if (dx === 0 && dy === 0) return false;
+  const oldOx = g.originX, oldOy = g.originY;
+  if (hooks && hooks.before) hooks.before(nx, ny);      // hag-persist.js: keep the margin that is about to leave
   _hagTranslate(g.ground,    g.dim, 1, dx, dy, _HAG_NONE);
   _hagTranslate(g.groundMax, g.dim, 1, dx, dy, -_HAG_NONE);
   _hagTranslate(g.fallback,  g.dim, 1, dx, dy, _HAG_NONE);
@@ -190,6 +198,7 @@ function _hagShift(g, cx, cy) {
   g.originX = nx; g.originY = ny;
   g.texture.version++;
   _hagRecount(g);
+  if (hooks && hooks.after) hooks.after(oldOx, oldOy);  // ... and put back what scrolled in again
   return true;
 }
 
@@ -309,6 +318,17 @@ export function setupPointcloudHag({ potreeViewer } = {}) {
     _lastShift: 0,
     _catchup: null,
     _pointsSeen: 0,
+    // Keeping the grid (hag-persist.js). margins: tiles that scrolled out of the
+    // window, kept in memory so panning back does not re-bin. the ledger counts binnings so a
+    // restored tile can be compared with the node that was binned (BinLedger). _rev / _savedRev:
+    // changed since the last save. _cloudFps: the clouds that fed the grid, as hashes
+    // (a cloud whose placement changes mid-session taints the grid: it is not saved).
+    margins: new MarginCache(),
+    ledger: new BinLedger(),
+    _rev: 0, _savedRev: 0, _lastChange: 0, _saving: false,
+    _cloudFps: new Map(), _tainted: false,
+    _restore: { state: 'idle', rec: null, prefix: '' },
+    _srcId: null,
   };
 
   function _hagCoverage() {
@@ -316,6 +336,96 @@ export function setupPointcloudHag({ potreeViewer } = {}) {
       detail:   _HAG_DETAIL_DIM   * _hag.cellSize,
       fallback: _HAG_FALLBACK_DIM * _hagFallbackCell(_hag.cellSize),
     };
+  }
+
+  // ── Keeping the grid across reloads (hag-persist.js) ────────────────────────
+  // Off when Settings has the offline cache off (and in automated browsers unless a
+  // test turns it on): offline-cache.js answers.
+  const _persistOn = () => !!(typeof window !== 'undefined' && window._offline &&
+                              window._offline.gridsOn && window._offline.gridsOn());
+
+  /** A hash of one cloud as placed: where it is from, its bounds and spacing, its world matrix. */
+  function _hagFp(pc) {
+    const geo = pc.pcoGeometry || {};
+    const box = b => b && b.min && b.max ? [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z] : [];
+    return hash64(cloudFingerprint({
+      id: geo.url || pc.url || pc.name || '',
+      bbox: box(geo.boundingBox || pc.boundingBox), tight: box(geo.tightBoundingBox),
+      spacing: geo.spacing, matrix: pc.matrixWorld ? Array.from(pc.matrixWorld.elements) : [],
+    }));
+  }
+  const _hagPrefix = ds => gridPrefix({ ds, cell: _hag.cellSize, env: _hag.envRadius,
+                                        dimD: _HAG_DETAIL_DIM, dimF: _HAG_FALLBACK_DIM });
+  const _hagVisibleDs = () => {
+    const pcs = ((typeof potreeViewer !== 'undefined' && potreeViewer?.scene?.pointclouds) || []).filter(pc => pc.visible);
+    return pcs.length ? datasetKey(pcs.map(_hagFp)) : null;
+  };
+
+  /** Look for a saved grid of this dataset around the view; resolves into _hag._restore. */
+  function _hagStartRestore(view) {
+    const ds = _hagVisibleDs();
+    const prefix = ds ? _hagPrefix(ds) : '';
+    _hag._restore = { state: 'pending', rec: null, prefix };
+    const lookup = (async () => {
+      if (!prefix) return null;
+      const ids = await listIds(prefix);
+      const id = pickSnapshot(ids, prefix, view.x, view.y, _HAG_DETAIL_DIM * _hag.cellSize);
+      const rec = id ? await getRecord(id) : null;
+      return rec && rec.fmt === HAG_FORMAT && rec.det && rec.fb ? rec : null;
+    })().catch(() => null);
+    const timeout = new Promise(r => setTimeout(() => r(null), 2500));   // never hold the filter up for long
+    Promise.race([lookup, timeout]).then(rec => { _hag._restore = { state: 'done', rec, prefix }; });
+  }
+
+  /** Build the grids from a saved record instead of empty. False = not usable, build empty. */
+  function _hagApplySnapshot(rec) {
+    if (!rec || !(rec.obsLo <= rec.obsHi)) return false;
+    _hagAlloc();
+    const D = _hag.detail, F = _hag.fallbackGrid;
+    if (!decodeGridInto(D, rec.det) || !decodeGridInto(F, rec.fb)) return false;
+    _hag.margins.clear(); _hag.ledger.reset();
+    _hag.processed.clear();
+    // A node is trusted as binned only when it lay wholly inside both saved windows.
+    for (const p of filterProcessed(rec.processed || [], [_hagExtent(D), _hagExtent(F)]))
+      _hag.processed.set(p[0], { minX: p[1], minY: p[2], maxX: p[3], maxY: p[4], seq: 0 });
+    _hag._pointsSeen = rec.pts || 0;
+    _hag.obsLo = rec.obsLo; _hag.obsHi = rec.obsHi;
+    _hagWindowFrom(rec.obsLo, rec.obsHi);
+    _hagRepackAll();                       // texture bytes from the accumulators; empty cells stay alpha 0
+    _hag._lastShift = performance.now();
+    _hag._srcId = rec.id;
+    _hag._cloudFps.clear();                // the clouds on screen are the ones the record was found for
+    for (const pc of ((typeof potreeViewer !== 'undefined' && potreeViewer?.scene?.pointclouds) || []))
+      if (pc.visible) _hag._cloudFps.set(pc.name || '', _hagFp(pc));
+    _hag._savedRev = _hag._rev;            // what we just loaded is what is saved
+    console.log(`[hag] restored a saved grid: detail ${D.filled.toLocaleString()} cells, ` +
+                `${_hag.processed.size} nodes already binned`);
+    return true;
+  }
+
+  /** Save the grids as they are now (sparse). Quiet on any failure. */
+  async function _hagSaveNow() {
+    if (!_hag.detail || _hag._saving || _hag._tainted || !_persistOn()) return;
+    if (_hag._rev === _hag._savedRev) return;
+    const D = _hag.detail, F = _hag.fallbackGrid;
+    if (D.filled + F.filled < 1000 || !_hag._cloudFps.size) return;
+    _hag._saving = true;
+    const rev = _hag._rev;
+    try {
+      const prefix = _hagPrefix(datasetKey([..._hag._cloudFps.values()]));
+      const det = encodeGrid(D), fb = encodeGrid(F);
+      const processed = [];
+      for (const [k, b] of _hag.processed) processed.push([k, b.minX, b.minY, b.maxX, b.maxY]);
+      const rec = {
+        id: recordId(prefix, D.originX, D.originY), fmt: HAG_FORMAT, det, fb, processed,
+        obsLo: _hag.obsLo, obsHi: _hag.obsHi, pts: _hag._pointsSeen,
+        bytes: (det.n + fb.n) * 16 + processed.length * 64, saved: Date.now(),
+      };
+      const ids = await listIds(prefix);
+      const ok = await putRecord(rec, supersededIds(ids, prefix, D.originX, D.originY, _HAG_DETAIL_DIM * D.cell));
+      if (ok) { _hag._savedRev = rev; _hag._srcId = rec.id; }
+    } catch (_) { /* a failed save only means the next visit starts empty */ }
+    _hag._saving = false;
   }
 
   /**
@@ -414,6 +524,8 @@ export function setupPointcloudHag({ potreeViewer } = {}) {
     _hagAnchor(_hag.detail,       _hag.cellSize,                    cx, cy);
     _hagAnchor(_hag.fallbackGrid, _hagFallbackCell(_hag.cellSize),  cx, cy);
     _hag.processed.clear();
+    _hag.margins.clear(); _hag.ledger.reset();
+    _hag._cloudFps.clear(); _hag._tainted = false; _hag._srcId = null;
     _hag._pointsSeen = 0;
     _hag.obsLo = Infinity; _hag.obsHi = -Infinity;   // the pack window itself survives
     _hag._lastShift = performance.now();
@@ -524,7 +636,18 @@ export function setupPointcloudHag({ potreeViewer } = {}) {
     if (!view) return;
 
     if (!_hag.detail) {
-      _hagReset(view.x, view.y);
+      // A saved grid of this dataset around the view is looked up first (async, at
+      // most 2.5 s); the first binning waits for the answer.
+      if (_persistOn() && _hag._restore.state !== 'done') {
+        if (_hag._restore.state === 'idle') _hagStartRestore(view);
+        return;
+      }
+      const rs = _hag._restore;
+      _hag._restore = { state: 'idle', rec: null, prefix: '' };
+      // The record is used only if what is on screen still has the dataset / cell size
+      // / radius it was looked up for.
+      const ds = rs.rec && _hagVisibleDs();
+      if (!(ds && _hagPrefix(ds) === rs.prefix && _hagApplySnapshot(rs.rec))) _hagReset(view.x, view.y);
       _hagPushUniforms();
     } else if (performance.now() - _hag._lastShift > _HAG_SHIFT_MS) {
       // Each grid follows the view on its own schedule, against its own coverage.
@@ -532,23 +655,51 @@ export function setupPointcloudHag({ potreeViewer } = {}) {
       // and keeps answering while the detail grid is refilling its margin.
       const before = [_hagExtent(_hag.detail), _hagExtent(_hag.fallbackGrid)];
       const movedIdx = [];
+      const shifts = {};      // grid index -> { oax, oay, restored } for the margin cache
       [_hag.detail, _hag.fallbackGrid].forEach((g, i) => {
         const cov = g.dim * g.cell;
         const e = before[i];
         if (Math.max(Math.abs(view.x - e.cx), Math.abs(view.y - e.cy)) > cov * 0.25 &&
-            _hagShift(g, view.x, view.y)) movedIdx.push(i);
+            _hagShift(g, view.x, view.y, {
+              before: (nx, ny) => marginCapture(_hag.margins, g.label, g, Math.round(nx / g.cell), Math.round(ny / g.cell), _hag.ledger.captured()),
+              after: (ox, oy) => {
+                const oax = Math.round(ox / g.cell), oay = Math.round(oy / g.cell);
+                shifts[i] = { oax, oay, r: marginRestore(_hag.margins, g.label, g, oax, oay) };
+              },
+            })) movedIdx.push(i);
       });
       if (movedIdx.length) {
+        _hag._rev++; _hag._lastChange = performance.now();
+        // Margins that came back from the cache: rebuild the texture bytes of those grids
+        // (and the packing window first, if the restored heights fall outside it).
+        let widened = false;
+        for (const i of movedIdx) {
+          const r = shifts[i] && shifts[i].r;
+          if (!r || !r.n) continue;
+          if (r.lo < _hag.obsLo) _hag.obsLo = r.lo;
+          if (r.hi > _hag.obsHi) _hag.obsHi = r.hi;
+          if (r.lo < _hag.zMin || r.hi > _hag.zMin + _hag.zSpan) widened = true;
+        }
+        if (widened) { _hagWindowFrom(_hag.obsLo, _hag.obsHi); _hagRepackAll(); }
+        else for (const i of movedIdx) if (shifts[i] && shifts[i].r.n) {
+          const g = i ? _hag.fallbackGrid : _hag.detail;
+          hagRepackGrid(g, _hag.zMin, _hag.zSpan); g.texture.version++;
+        }
         // A node only has to be re-binned if a grid moved over ground it never
         // covered before; everything already accumulated travelled with the
         // translation.
         const after = [_hagExtent(_hag.detail), _hagExtent(_hag.fallbackGrid)];
-        const exposed = [];
-        for (const i of movedIdx) exposed.push(..._hagExposed(before[i], after[i]));
+        const exposed = movedIdx.map(i => _hagExposed(before[i], after[i]));
         let requeued = 0;
         for (const [key, bb] of _hag.processed) {
-          for (const rect of exposed) {
-            if (_hagOverlaps(bb, rect)) { _hag.processed.delete(key); requeued++; break; }
+          for (let m = 0; m < movedIdx.length; m++) {
+            if (!exposed[m].some(rect => _hagOverlaps(bb, rect))) continue;
+            // Only if its points that fall in the newly covered ground are not already
+            // back from the margin cache (copied after the node was binned).
+            const i = movedIdx[m], sh = shifts[i];
+            if (sh && nodeCovered(i ? 'fallback' : 'detail', i ? _hag.fallbackGrid : _hag.detail,
+                                            sh.oax, sh.oay, bb, sh.r.restored, bb.seq || 0)) continue;
+            _hag.ledger.requeued(key, bb.seq); _hag.processed.delete(key); requeued++; break;
           }
         }
         _hag._lastShift = performance.now();
@@ -617,15 +768,23 @@ export function setupPointcloudHag({ potreeViewer } = {}) {
         if (!node.sceneNode) continue;
         const key = (pc.name || '') + '/' + (node.name || node.id || '?');
         if (_hag.processed.has(key)) continue;
+        // The cloud as placed: if it moved since it first fed the grid (georeferencing
+        // changed), the grid is a mix and must not be saved.
+        {
+          const fp = _hagFp(pc), had = _hag._cloudFps.get(pc.name || '');
+          if (had === undefined) _hag._cloudFps.set(pc.name || '', fp);
+          else if (had !== fp) _hag._tainted = true;
+        }
 
         const geom = node.geometryNode?.geometry || node.geometry;
         const pos = geom?.attributes?.position?.array;
         if (!pos || pos.length < 3) continue;
         const nbb = (node.boundingBox || node.geometryNode?.boundingBox)
           ?.clone().applyMatrix4(pc.matrixWorld);
+        const seq = _hag.ledger.next(key);
         _hag.processed.set(key, nbb
-          ? { minX: nbb.min.x, minY: nbb.min.y, maxX: nbb.max.x, maxY: nbb.max.y }
-          : { minX: -Infinity, minY: -Infinity, maxX: Infinity, maxY: Infinity });
+          ? { minX: nbb.min.x, minY: nbb.min.y, maxX: nbb.max.x, maxY: nbb.max.y, seq }
+          : { minX: -Infinity, minY: -Infinity, maxX: Infinity, maxY: Infinity, seq });
         const cls = geom.attributes?.classification?.array;
 
         // Node-local -> world. Inlined from matrixWorld.elements: nine multiplies
@@ -726,6 +885,9 @@ export function setupPointcloudHag({ potreeViewer } = {}) {
     }
 
     _hag.obsLo = obsLo; _hag.obsHi = obsHi;
+    if (updated) { _hag._rev++; _hag._lastChange = performance.now(); }
+    // Quiet for 8 s and nothing waiting to be binned: keep the grid for the next visit.
+    if (!backlog && _hag._rev !== _hag._savedRev && performance.now() - _hag._lastChange > 8000) _hagSaveNow();
     if (needRepack && obsLo <= obsHi) {
       _hagWindowFrom(obsLo, obsHi);
       _hagRepackAll();
@@ -971,6 +1133,11 @@ export function setupPointcloudHag({ potreeViewer } = {}) {
     window._hagSetDebugColor = _hagSetDebugColor;
     window._hagDebug = _hagDebug;
     window._hagScan = _hagScan;
+    // The saved grids (hag-persist.js): Settings' "Clear cached map data" empties them.
+    window._hagStore = { clearAll: clearGridStore, stats: gridStoreStats, saveNow: _hagSaveNow };
+    const _saveOnHide = () => { if (document.visibilityState === 'hidden') _hagSaveNow(); };
+    document.addEventListener('visibilitychange', _saveOnHide);
+    window.addEventListener('pagehide', () => _hagSaveNow());
     if (!_hag._scan) _hag._scan = setInterval(() => { try { _hagScan(); } catch (err) { console.warn('[hag]', err); } }, 250);
   }
 

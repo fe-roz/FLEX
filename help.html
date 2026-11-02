@@ -517,6 +517,9 @@ svg.ico { vertical-align: -2px; }
   <li><svg class="ico" width="14" height="14"><use href="#i-leaf"/></svg> <b>Analyze</b> works out, for an area, how dense the vegetation is (how bad the bushwhack) and where returns reach below the local ground — often where entrances are. If a run fails, the panel shows the reason in its status line (<b>Error: …</b>), and a <code>log.txt</code> is written next to the output with the same reason.</li>
 </ul>
 
+<h3>Offline maps (Settings → Offline maps)</h3>
+<p>As you browse, FLEX keeps the map tiles and point-cloud data it loads on this computer, so a place you have already looked at opens faster and still opens when the network is gone (open FLEX once while online so the app itself is kept too). The height filter also keeps its ground grid, so coming back to a place is instant. The oldest data goes first once the size limit (2 GB at first; change it there) is reached, and <b>Clear cached map data</b> empties it. Not kept: anything that needs a key or login (CalTopo's private maps, the CalTopo API) and Cesium ion's terrain and imagery. It only works at <code>localhost</code> or an <code>https</code> address. The app's own files are always fetched fresh, so an update shows up the next time you open FLEX.</p>
+
 <h2 id="export">Offline viewer and FLEX Field</h2>
 <p><svg class="ico" width="14" height="14"><use href="#i-pack"/></svg> <b>Export</b> bakes an area into a viewer that needs no network: draw a box or polygon (or load a KML), choose the terrain source (LiDAR for the finest, or the map's terrain for any size), imagery, and how caves are drawn. The result is a zip:</p>
 <ul>
