@@ -214,3 +214,5 @@ Short, in this order:
 |---|---|---|
 | `modules/compass-plt.js` | UTM → WGS84, Compass PLT parser, PLT → Cartesian3 (wave 0, the template) | `utmToLatLon`, `parsePLT` (pure); `setupCompassPlt({ Cesium })` → `{ pltToCartesian }` |
 | `modules/cesium-interactions.js` | mouse-button mapping, SpaceMouse init, input handler, fly speed, key flags, touch fly, fly tick (wave 1) | `getFlagForKeyCode`, `isLatchedFlag`, `clampFlyMult`, `flySpeedMps`, `downloadBlob` (pure); `setupCesiumInteractions({…})` → `{ handler, spaceMouse, getFlyMultiplier, setCameraButtons }` |
+| `modules/cave-import.js` | Cave Survey: recents (EPT + PLT), cave sets, wizard, Walls / Breakout loading, anchored / UTM render, replace survey, globe pick, `_displayUpdateRecent` | `jsonCopy`, `escH`, `btnCss`, `georefLabel`, `caveFindStation`, `replaceSurveyPlan`, `replaceGeoref` (pure); `setupCaveImport({ Cesium, cesiumViewer, viewModel, caveImports, state, … })` |
+| `modules/cave-georef.js` | Georectification (rectify panel, control points) and the warp | `computeWarpedOffset` (pure); `setupCaveGeoref({ … })` |
