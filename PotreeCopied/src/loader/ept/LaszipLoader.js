@@ -1,113 +1,105 @@
-
 import * as THREE from "../../../libs/three.js/build/three.module.js";
-import {XHRFactory} from "../../XHRFactory.js";
-
-/**
- * laslaz code taken and adapted from plas.io js-laslaz
- *	  http://plas.io/
- *	https://github.com/verma/plasio
- *
- * Thanks to Uday Verma and Howard Butler
- *
- */
 
 export class EptLaszipLoader {
-	load(node) {
+	async load(node) {
 		if (node.loaded) return;
 
-		let url = node.url() + '.laz';
+		const { Key } = window.Copc
 
-		let xhr = XHRFactory.createXMLHttpRequest();
-		xhr.open('GET', url, true);
-		xhr.responseType = 'arraybuffer';
-		xhr.overrideMimeType('text/plain; charset=x-user-defined');
-		// See the same block in BinaryLoader: a failure that does not release
-		// the node strands it forever and leaks a concurrency slot.
-		xhr.timeout = 60000;
-		xhr.onreadystatechange = () => {
-			if (xhr.readyState === 4) {
-				if (xhr.status === 200) {
-					let buffer = xhr.response;
-					this.parse(node, buffer).catch(
-						(e) => node.loadFailed('laz parse: ' + e));
-				} else {
-					node.loadFailed('HTTP ' + xhr.status + ' ' + url);
-				}
-			}
-		};
-		xhr.onerror = () => node.loadFailed('network ' + url);
-		xhr.ontimeout = () => node.loadFailed('timeout ' + url);
-		xhr.onabort = () => node.loadFailed('aborted ' + url);
-
+		const url = `${node.owner.base}/ept-data/${Key.toString(node.key)}.laz`
+		// FLEX: a failed fetch must release the node (see
+		// PointCloudEptGeometryNode.loadFailed), or it stays loading for good
+		// and holds one of the global concurrency slots. Stock 1.8.2 had no
+		// check at all here. The timeout (60 s) matches EptBinaryLoader.
+		let buffer;
 		try {
-			xhr.send(null);
+			const response = await fetch(url, { signal: AbortSignal.timeout(60000) });
+			if (!response.ok) {
+				node.loadFailed('HTTP ' + response.status + ' ' + url);
+				return;
+			}
+			buffer = await response.arrayBuffer();
+		} catch (e) {
+			node.loadFailed('network ' + url + ': ' + e);
+			return;
 		}
-		catch (e) {
-			node.loadFailed('send threw: ' + e);
-		}
+		this.parse(node, buffer);
 	}
 
-	async parse(node, buffer){
-		let lf = new LASFile(buffer);
+	async parse(node, compressed){
 		let handler = new EptLazBatcher(node);
 
-		try{
-			await lf.open();
+		try {
+			const { Bounds, Las } = Copc
 
-			lf.isOpen = true;
+			const get = (begin, end) => new Uint8Array(compressed, begin, end - begin)
 
-			const header = await lf.getHeader();
+			const header = Las.Header.parse(new Uint8Array(compressed))
+			const vlrs = await Las.Vlr.walk(get, header)
+			let eb = []
+			const ebVlr = Las.Vlr.find(vlrs, 'LASF_Spec', 4)
+			if (ebVlr) eb = Las.ExtraBytes.parse(await Las.Vlr.fetch(get, ebVlr))
 
-			{
-				let i = 0;
-
-				let toArray = (v) => [v.x, v.y, v.z];
-				let mins = toArray(node.key.b.min);
-				let maxs = toArray(node.key.b.max);
-
-				let hasMoreData = true;
-
-				while(hasMoreData){
-					const data = await lf.readData(1000000, 0, 1);
-
-					let d = new LASDecoder(
-						data.buffer,
-						header.pointsFormatId,
-						header.pointsStructSize,
-						data.count,
-						header.scale,
-						header.offset,
-						mins,
-						maxs);
-
-					d.extraBytes = header.extraBytes;
-					d.pointsFormatId = header.pointsFormatId;
-					handler.push(d);
-
-					i += data.count;
-
-					hasMoreData = data.hasMoreData;
-				}
-
-				header.totalRead = i;
-				header.versionAsString = lf.versionAsString;
-				header.isCompressed = lf.isCompressed;
-
-				await lf.close();
-
-				lf.isOpen = false;
+			const message = {
+				isFullFile: true,
+				compressed,
+				header,
+				eb,
+				pointCount: header.pointCount,
+				nodemin: Bounds.min(node.bounds),
 			}
+			handler.push(message)
+		} catch (e) {
+			console.log('Failed:', e)
+			node.loadFailed('laz parse: ' + e) // FLEX
+		}
+	}
+};
 
-		}catch(err){
-			console.error('Error reading LAZ:', err);
-			
-			if (lf.isOpen) {
-				await lf.close();
+export class CopcLaszipLoader {
+	async load(node) {
+		if (node.loaded) return;
 
-				lf.isOpen = false;
-			}
-			
-			throw err;
+		// There are utilities to do all of this in one async call via copc.js,
+		// however we must split things out a bit to accommodate the expensive
+		// calls to go in the worker.  So in this non-worker context, we just
+		// isolate the compressed data buffer, which is passed to the worker.
+		// The time-consuming decompression and extracting the data into 
+		// GPU-compatible buffers happens in the worker.
+		const { pointCount, pointDataOffset, pointDataLength } = node.nodeinfo
+
+		// Note that COPC explicitly allows nodes to exist with no data.  They
+		// may have children, but there is no point cloud data.  Make sure we
+		// don't try to fetch a slice of point data in this case.
+		if (!pointCount) return this.parse(node, new ArrayBuffer())
+		// FLEX: release the node when the range request fails (see EptLaszipLoader.load).
+		let compressed;
+		try {
+			compressed = await node.owner.getter(
+				pointDataOffset,
+				pointDataOffset + pointDataLength)
+		} catch (e) {
+			node.loadFailed('copc range request: ' + e)
+			return
+		}
+		this.parse(node, compressed.buffer);
+	}
+
+	async parse(node, compressed) {
+		let handler = new EptLazBatcher(node);
+
+		try {
+			handler.push({
+				isFullFile: false,
+				compressed,
+				header: node.owner.copc.header,
+				eb: node.owner.copc.eb,
+				pointCount: node.nodeinfo.pointCount,
+				nodemin: node.bounds.slice(0, 3),
+			})
+		} catch (e) {
+			console.log('Failed:', e)
+			node.loadFailed('copc parse: ' + e) // FLEX
 		}
 	}
 };
@@ -116,23 +108,34 @@ export class EptLazBatcher {
 	constructor(node) { this.node = node; }
 
 	push(las) {
+		const { isFullFile, compressed, header, eb, pointCount, nodemin } = las
+
 		let workerPath = Potree.scriptPath +
 			'/workers/EptLaszipDecoderWorker.js';
 		let worker = Potree.workerPool.getWorker(workerPath);
+		const pointAttributes = this.node.owner.pointAttributes;
+
+		// FLEX: a worker that throws (corrupt chunk) or a malformed message would
+		// otherwise never reach doneLoading and strand the node, exactly like a
+		// failed request. See PointCloudEptGeometryNode.loadFailed.
+		worker.onerror = (err) => {
+			this.node.loadFailed('decode worker: ' + (err && err.message ? err.message : err));
+			Potree.workerPool.returnWorker(workerPath, worker);
+		};
 
 		worker.onmessage = (e) => {
+			try {
 			let g = new THREE.BufferGeometry();
-			let numPoints = las.pointsCount;
 
 			let positions = new Float32Array(e.data.position);
 			let colors = new Uint8Array(e.data.color);
-
+			
 			let intensities = new Float32Array(e.data.intensity);
 			let classifications = new Uint8Array(e.data.classification);
 			let returnNumbers = new Uint8Array(e.data.returnNumber);
 			let numberOfReturns = new Uint8Array(e.data.numberOfReturns);
-			let pointSourceIDs = new Uint16Array(e.data.pointSourceID);
-			let scanAngles = new Float32Array(e.data.scanAngle);
+			let pointSourceIds = new Uint16Array(e.data.pointSourceId);
+			let scanAngles = new Float32Array(e.data.scanAngle); // FLEX
 			let indices = new Uint8Array(e.data.indices);
 			let gpsTime = new Float32Array(e.data.gpsTime);
 
@@ -149,17 +152,31 @@ export class EptLazBatcher {
 			g.setAttribute('number of returns',
 					new THREE.BufferAttribute(numberOfReturns, 1));
 			g.setAttribute('source id',
-					new THREE.BufferAttribute(pointSourceIDs, 1));
-			// FLEX: scan angle rank for angle of incidence visualization
+					new THREE.BufferAttribute(pointSourceIds, 1));
+			// FLEX: scan angle for angle of incidence visualization
 			g.setAttribute('scan angle',
 					new THREE.BufferAttribute(scanAngles, 1));
 			g.setAttribute('indices',
 					new THREE.BufferAttribute(indices, 4));
-			g.setAttribute('gpsTime',
+			g.setAttribute('gps-time',
 					new THREE.BufferAttribute(gpsTime, 1));
 			this.node.gpsTime = e.data.gpsMeta;
 
 			g.attributes.indices.normalized = true;
+
+			for (const key in e.data.ranges) {
+				const range = e.data.ranges[key];
+				const attribute = pointAttributes.attributes.find(a => a.name === key);
+				if (attribute) {
+					attribute.range[0] = Math.min(attribute.range[0], range[0]);
+					attribute.range[1] = Math.max(attribute.range[1], range[1]);
+
+					// May not be right, but we need something here or we crash.
+					if (!attribute.initialRange) {
+						attribute.initialRange = attribute.range
+					}
+				}
+			}
 
 			let tightBoundingBox = new THREE.Box3(
 				new THREE.Vector3().fromArray(e.data.tightBoundingBox.min),
@@ -169,24 +186,18 @@ export class EptLazBatcher {
 			this.node.doneLoading(
 				g,
 				tightBoundingBox,
-				numPoints,
+				pointCount,
 				new THREE.Vector3(...e.data.mean));
 
 			Potree.workerPool.returnWorker(workerPath, worker);
+			} catch (err) {
+				this.node.loadFailed('decode: ' + err);
+				Potree.workerPool.returnWorker(workerPath, worker);
+			}
 		};
 
-		let message = {
-			buffer: las.arrayb,
-			numPoints: las.pointsCount,
-			pointSize: las.pointSize,
-			pointFormatID: las.pointsFormatId,
-			scale: las.scale,
-			offset: las.offset,
-			mins: las.mins,
-			maxs: las.maxs
-		};
+		let message = { isFullFile, compressed, header, eb, pointCount, nodemin };
 
-		worker.postMessage(message, [message.buffer]);
+		worker.postMessage(message, [message.compressed]);
 	};
 };
-

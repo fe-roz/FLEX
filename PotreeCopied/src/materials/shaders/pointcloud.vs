@@ -108,7 +108,7 @@ uniform float uExtraOffset;
 
 uniform vec3 uShadowColor;
 
-// ── Height-above-ground filter ────────────────────────────────────────────────
+// ── FLEX: Height-above-ground filter (uniforms, here and below in main) ────────────────────────────────────────────────
 // uGroundTex:      RGBA8. Ground Z is packed into RGB as a 24-bit fraction of
 //                  uGroundZRange, with A as the has-data flag (0 = unknown).
 //                  NOT a single-channel float texture: Potree's own renderer
@@ -852,7 +852,7 @@ void doClipping(){
 	#endif
 
 	#if defined(clip_hag_enabled)
-	{ // height-above-ground filter
+	{ // FLEX: height-above-ground filter
 		// MUST NOT bin by the raw 'position' attribute. Potree sets
 		// sceneNode.position to each node's boundingBox.min (PointCloudOctree.js
 		// ~line 213), so 'position' is relative to that node's own corner -- a
