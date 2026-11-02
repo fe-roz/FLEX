@@ -1,4 +1,4 @@
-// caltopo_match.js — which of the project's surface features (📍 points,
+// caltopo-match.js — which of the project's surface features (📍 points,
 // lines, areas) are already on the project's CalTopo map.
 //
 // window._ctMatch (and module.exports under Node, for tools/test_caltopo_match.js):
@@ -143,7 +143,7 @@
   }
   function matchFeature(f, ctEntities) { return find(f, index(entitiesOf(ctEntities))); }
   function features(P) {
-    const FL = (typeof window !== 'undefined' && window.FlexLib) || (typeof require === 'function' ? require('./viewer_build/libs/flexlib.js') : null);
+    const FL = (typeof window !== 'undefined' && window.FlexLib) || (typeof require === 'function' ? require('../../../viewer_build/libs/flexlib.js') : null);
     return FL ? FL.liveFeatures(P) : Object.values((P && P.features) || {}).filter(f => !f.removed && f.coords && f.coords.length);
   }
   function unmatched(P, src) { const by = index(entitiesOf(src)); return features(P).filter(f => !find(f, by)); }

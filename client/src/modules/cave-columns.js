@@ -1,10 +1,10 @@
-// cave_columns.js — 🕳 Caves as two columns: the open project's caves on the
+// cave-columns.js — 🕳 Caves as two columns: the open project's caves on the
 // left, 👤 My data's on the right (the old Imported / Recent lists).
 //
 // Each row: a box that loads it (or shows / hides it once loaded), its name,
 // ⌖ fly to, ⋯ for the rest (Rectify, Style, Labels, Replace survey file,
 // Export survey…, Unload, Forget), and ← / → to move it across, or drag it. Moves wait for
-// 💾 Save like every project change (project_workspace.js); until then the
+// 💾 Save like every project change (project-workspace.js); until then the
 // row shows where it is going, with a dot. Cave sets show as folders in My
 // data. With no project open, the left column invites to open or start one.
 //
@@ -210,7 +210,7 @@
     setTimeout(() => document.addEventListener('mousedown', off, true), 0);
     m.addEventListener('click', e => { const b = e.target.closest('[data-k]'); if (!b) return; m.remove(); document.removeEventListener('mousedown', off, true); acts[+b.dataset.k][1](); setTimeout(render, 50); });
   }
-  // ── ⇩ Export survey… (survey_export.js) ─────────────────────────────────
+  // ── ⇩ Export survey… (survey-export.js) ─────────────────────────────────
   // A cave in the open project: written into <project folder>/Caves/<cave>/Survey/
   // (POST /api/lib/survey-export). Otherwise (no project, My data): downloads.
   async function surveyOf(name) {
@@ -419,7 +419,7 @@
   document.head.appendChild(style);
 
   window._caveCols = { render, reveal };
-  // Draw once flex.js and the project are there; then on every change (flex.js and project_workspace.js call render).
+  // Draw once flex.js and the project are there; then on every change (flex.js and project-workspace.js call render).
   const t = setInterval(() => { if (ws() && ws().recents) { clearInterval(t); render(); } }, 300);
   // Systems and the caves of a multi-cave file change through project records (also another device's, History's undo):
   // draw again while the pane is open (an unchanged list keeps hover, focus and drags alive).

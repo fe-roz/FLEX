@@ -1,4 +1,4 @@
-// cave_ground.js — the ground above a cave, for colour by depth below ground.
+// cave-ground.js — the ground above a cave, for colour by depth below ground.
 //
 // Each cave gets a grid of ground heights over its footprint (every station
 // and shot, plus a margin), laid out in a level east/north frame centred on

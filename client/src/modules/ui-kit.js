@@ -1,4 +1,4 @@
-// ui_kit.js — the switch half of the UI kit (ui_kit.css has the look and the rule).
+// ui-kit.js — the switch half of the UI kit (ui_kit.css has the look and the rule).
 //
 // Panel checkboxes are drawn as switches by CSS alone; this file only adds
 // what CSS cannot:

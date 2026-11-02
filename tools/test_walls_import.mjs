@@ -6,7 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
-import { readWallsShapefileSets, wallsToPlt, parsePrj, isWallsSelection } from '../walls.js';
+import { readWallsShapefileSets, wallsToPlt, parsePrj, isWallsSelection } from '../client/src/modules/walls.js';
 import { parsePLT } from '../client/src/modules/compass-plt.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');

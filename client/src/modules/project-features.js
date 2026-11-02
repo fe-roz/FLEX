@@ -11,7 +11,7 @@
 //                      files, each with show / hide. Works without a project.
 //   Cave entrances     a point whose description has a line
 //                        flex: cave=<cave name>; station=<entrance station>; z=<metres>; id=<cave id>
-//                      (z and id are optional; caltopo_send.js reads and writes the line)
+//                      (z and id are optional; caltopo-send.js reads and writes the line)
 //                      (a CalTopo marker, or a project point) places that cave
 //                      at it, when you say so.
 //
@@ -92,7 +92,7 @@
       if (f.kind === 'point') {
         ents.push(F.src.entities.add(Object.assign(base, { position: pos[0],
           point: { pixelSize: 9, color: c, outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: 5000 },
-          label: f.style && f.style.label === false ? undefined : window._pjfLabel(f.name || '') })));          // name off: feature_editor.js
+          label: f.style && f.style.label === false ? undefined : window._pjfLabel(f.name || '') })));          // name off: feature-editor.js
       } else if (f.kind === 'line') {
         ents.push(F.src.entities.add(Object.assign(base, { polyline: { positions: pos, width: 3, material: c, clampToGround: true } })));
       } else {
@@ -102,7 +102,7 @@
       drawn.set(f.id, { sig, ents });
     });
     for (const [id, d] of drawn) if (!want.has(id)) { d.ents.forEach(e => F.src.entities.remove(e)); drawn.delete(id); }
-    if (window._folderStyle) window._folderStyle.apply();           // folders' display settings (folder_style.js)
+    if (window._folderStyle) window._folderStyle.apply();           // folders' display settings (folder-style.js)
     v.scene.requestRender && v.scene.requestRender();
   }
 
@@ -355,7 +355,7 @@
   }
 
   // ── Cave entrances from point descriptions ───────────────────────────────
-  // The tag with its optional z and id (caltopo_send.js); the plain reader when that module is missing.
+  // The tag with its optional z and id (caltopo-send.js); the plain reader when that module is missing.
   const tagOf = d => (window._ctSend ? window._ctSend.parseTag(d) : FL.flexTag(d));
   function scanTags() {
     const out = [], w = ws(), now = window.Cesium ? Cesium.JulianDate.now() : null;
@@ -478,7 +478,7 @@
     s.append(h, b); root.appendChild(s); build(b);
   }
   // The project's features, CalTopo and data-file folders are listed in
-  // 📍 Surface's columns (surface_columns.js). Here: cave entrances marked on
+  // 📍 Surface's columns (surface-columns.js). Here: cave entrances marked on
   // points, in 🕳 Caves.
   function render() {
     const root = document.getElementById('pjf-tags');
@@ -598,7 +598,7 @@
     const v = V(); if (!v) return;
     const on = lidarShown();
     const ents = labelled();
-    // 📍 Surface → Labels off: no names at all (surface_columns.js).
+    // 📍 Surface → Labels off: no names at all (surface-columns.js).
     if (window._surfLabelsOff) {
       if (HL.divs.size) { HL.divs.forEach(d => d.remove()); HL.divs.clear(); }
       ents.forEach(e => { if (e.label && !e._pjfLab) { e.label.show = false; e._pjfLab = true; } });
@@ -645,7 +645,7 @@
         d.append(lab, dot);
         HL.box.appendChild(d); HL.divs.set(e.id, d);
       }
-      d.firstChild.style.display = e._fsNoLabel ? 'none' : '';       // names off for its folder (folder_style.js)
+      d.firstChild.style.display = e._fsNoLabel ? 'none' : '';       // names off for its folder (folder-style.js)
       d.style.display = 'block'; d.style.left = Math.round(sp.x) + 'px'; d.style.top = Math.round(sp.y) + 'px';
     }
     for (const [id, d] of HL.divs) if (!live.has(id)) { d.remove(); HL.divs.delete(id); }
@@ -660,7 +660,7 @@
   }
   let tv = null;                                       // its own timer: sharing t cancelled a pending draw()
   window._onVectorSourcesChanged = () => { applyOverlayHidden(); clearTimeout(tv); tv = setTimeout(() => render(), 150); };
-  // A click on a project feature shows it in the details panel (info_panel.js);
+  // A click on a project feature shows it in the details panel (info-panel.js);
   // editing is a second step there (✏️ Edit), not the click itself.
   const hook = setInterval(() => {
     const v = V();

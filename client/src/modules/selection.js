@@ -10,7 +10,7 @@
 //   - Empty space or Esc clears it (inspector.js, project.js).
 // The details panel shows the path (Cave › Survey › Segment › Station), each
 // part clickable. The cave or survey is outlined on the map; a segment is
-// drawn by project_segments.js. Right-click on a cave object puts a "Select"
+// drawn by project-segments.js. Right-click on a cave object puts a "Select"
 // section on top of the map menu (context-menu.js asks window._selMenu).
 (function () {
   'use strict';
@@ -108,7 +108,7 @@
   }
 
   // ── The API ──────────────────────────────────────────────────────────────
-  /** A left click on a cave object (cave_layers.js). True: handled here. */
+  /** A left click on a cave object (cave-layers.js). True: handled here. */
   function click(ent) {
     const h = hitOf(ent);
     if (!h) return false;
@@ -144,7 +144,7 @@
     return out;
   }
   function toLevel(level, sid) { if (!S) return; show(at(level, S.hit, sid || S.sid)); }
-  /** A segment chip on a card (project_segments.js). */
+  /** A segment chip on a card (project-segments.js). */
   function toSegment(cid, sid) {
     if (S && S.cid === cid) { show(Object.assign(at('segment', S.hit, sid), { sid })); return; }
     if (window._pjSeg) window._pjSeg.showSegment(cid, sid);

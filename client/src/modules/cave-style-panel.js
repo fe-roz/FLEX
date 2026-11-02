@@ -1,5 +1,5 @@
 // The cave Style panel (survey colours, stations, passage walls) and the one
-// style setting applied to every loaded cave (cave_columns.js: All caves).
+// style setting applied to every loaded cave (cave-columns.js: All caves).
 // Moved out of flex.js unchanged (the flex.js split, wave 1; see
 // client/src/README.md for the pattern).
 //
@@ -242,7 +242,7 @@ export function setupCaveStylePanel({
     window._openStylePanel(_styleIdx);  // refresh panel
   };
 
-  // ── One style setting for every loaded cave (cave_columns.js: 🎨 All caves) ─
+  // ── One style setting for every loaded cave (cave-columns.js: 🎨 All caves) ─
   // key: showStations, showLabels, stationColor, stationSize, showSurface,
   // passageMode, passageUpAxis, passageLrudAt, passageOpacity, showAreaLabels,
   // visible, resetColours. What each cave has otherwise stays its own.

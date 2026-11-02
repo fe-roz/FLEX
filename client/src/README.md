@@ -41,9 +41,11 @@ export function setupThingList({ Cesium, cesiumViewer, viewModel, flags, state, 
   imports are evaluated before `flex.js`'s own body runs, so anything done at
   import time would run *earlier* than it does today.
 - A module may import another module of this folder (relative path) for its
-  pure exports. It never imports `flex.js`. Files at the repo root (`layers.js`,
-  `cave_layers.js`, …) are passed in by flex.js rather than imported, until they
-  move here themselves.
+  pure exports. It never imports `flex.js`. The older modules (`layers.js`,
+  `cave-layers.js`, …) now live in this folder too (kebab-case names); flex.js
+  imports them and passes them in. Only `flex.js`, `index.html` and the files the
+  Node server `require`s (`server.js`, `settings.js`, `library.js`, `mine.js`,
+  `caltopo_api.js`, `terrain_generate.js`) stay at the repo root.
 
 ## Names and places
 
@@ -65,7 +67,7 @@ export function setupThingList({ Cesium, cesiumViewer, viewModel, flags, state, 
 
 1. **Pick a contiguous range** (your brief gives it) and read it whole.
 2. **List every top-level name it touches**, with `grep -n` over all of
-   `flex.js`, `index.html` and the other root `.js` files:
+   `flex.js`, `index.html` and the other modules:
    - functions, `const`s and `let`s it **defines** — who else uses them?
    - names it **reads** that are defined elsewhere in flex.js (functions,
      `const`s, `let`s, imports, `cesiumViewer`, `scene`, `flags`, `viewModel` …);
@@ -222,6 +224,7 @@ Short, in this order:
 | `modules/cave-depth.js` | station points, level frame, ground grids, depth from loaded LiDAR | `caveElevAt`, `lidarGroundAt`; `setupCaveDepth(...)` |
 | `modules/cave-utm.js` | UTM placement of caves (`_caveUtmConvertFn`, `_pcDatumDz`) | `latLonToUtm`; `setupCaveUtm(...)` |
 | `modules/cave-style-panel.js` | the cave style panel and "one style for every loaded cave" | `setupCaveStylePanel(...)` |
+| `modules/*` (older, moved from the repo root) | `api`, `layers`, `session`, `context-menu`, `spacemouse`, `breakout`, `walls`, `cave-layers`, `cave-ground` (ES modules imported by flex.js) and the classic scripts index.html loads in order: `ui-kit`, `icons`, `proxy-url-generator`, `my-data`, `project`, `project-segments`, `project-workspace`, `caltopo-match/send/write/layers`, `projects-panel`, `docs-panel`, `trips`, `sketches`, `selection`, `project-features`, `inspector`, `feature-editor`, `info-panel`, `flex-rail`, `survey-export`, `cave-columns`, `folder-style`, `surface-columns`, `row-menu`, `terrain-patch`, `minimap-view`, `custom-layers`, `globe-watchdog` | unchanged; `survey-export`, `caltopo-match/send/layers`, `terrain-patch` also load under Node in `tools/test_*.js` |
 | `page/page-glue.js` | index.html's head script: `copyCoords`, `addEPT`, `addKMZ`, rail/nav-panel toggles | classic script (page wiring, not a feature module) |
 | `page/export-ui.js` | the export dialog: bbox/polygon draw, KML polygon, cave collection, LiDAR analysis, progress polling | classic script, window hooks (`_refreshEptDatasets`, …) |
 | `page/hag-controls.js` | live HAG filter controls (`#lp-hag-*`) | classic script, calls `window._hag*` |

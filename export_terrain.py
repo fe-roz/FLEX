@@ -1357,11 +1357,11 @@ def load_map_dem(dem_grid_path, rect, cell, zone, south=False, progress=print):
     return dem, x_bins, y_bins, x_min, y_min, valid
 
 
-RAMP_M = 60.0   # metres inside a patch's edge over which it hands over to the terrain beneath (as terrain_patch.js)
+RAMP_M = 60.0   # metres inside a patch's edge over which it hands over to the terrain beneath (as terrain-patch.js)
 
 
 def apply_terrain_patches(dem, x_bins, y_bins, zone, south, patch_files, progress=print):
-    """Lay the project's terrain patches (terrain_patch.js files, ellipsoid heights in the frame the caves
+    """Lay the project's terrain patches (terrain-patch.js files, ellipsoid heights in the frame the caves
     use, NaN = no data) over the map DEM, in order (a later one over an earlier). At each cell centre a
     patch gives its own height (bilinear), and fades into what lies beneath over the last RAMP_M metres
     before its edge, or before the edge of its data (a rotated DEM's empty corners), so there is no step.
@@ -1681,14 +1681,14 @@ def convert_caves(caves_path, utm_center_e, utm_center_n, progress=print, zone=N
 # ──────────────────────────────────────────────────────────────────────────────
 # The same ground, DEM and "From LiDAR" hillshade as the export, kept by a FLEX
 # project instead of packed into a viewer: the DEM as a terrain patch (the .bin
-# terrain_patch.js reads: uint32 LE header length, JSON header padded with
+# terrain-patch.js reads: uint32 LE header length, JSON header padded with
 # spaces to a 4-byte boundary, float32 LE ellipsoid heights on a lon/lat grid,
 # first row = north, NaN = no data) and the hillshade as web-mercator XYZ
 # tiles (PNG, grey + alpha, transparent outside the area and where the data
 # runs out). Nothing here reads a point cloud, so it is tested with synthetic
 # points (tools/test_project_terrain.py).
 
-PATCH_MAX_SIDE = 3000      # grid posts a side of one patch, as the browser bake (terrain_patch.js): ~36 MB, under the library's 40 MB blob limit
+PATCH_MAX_SIDE = 3000      # grid posts a side of one patch, as the browser bake (terrain-patch.js): ~36 MB, under the library's 40 MB blob limit
 TILE_PX = 256
 
 
@@ -1727,7 +1727,7 @@ def box_ring(bbox, step_deg=None):
                       np.c_[e - (e - w) * t, np.full_like(t, n)], np.c_[np.full_like(t, w), n - (n - s) * t]])
 
 
-PATCH_MAX_TILES = 9        # patches for one area (3 x 3): each is up to ~36 MB; same limit as the browser bake (terrain_patch.js)
+PATCH_MAX_TILES = 9        # patches for one area (3 x 3): each is up to ~36 MB; same limit as the browser bake (terrain-patch.js)
 PATCH_OVERLAP_M = 150      # neighbouring patches overlap by this, more than twice the hand-over strip
 
 
@@ -1763,7 +1763,7 @@ def terrain_patch_grid(dem, x_bins, y_bins, resolution, zone, south, ll_box, kee
     Posts about `resolution` apart, at most `max_side` a side (coarser if the
     box needs more; terrain_patch_tiles() keeps the resolution instead). Where
     `keep` (bool [x, y]) is False, or outside the DEM, the post is NaN:
-    terrain_patch.js fills it from the world terrain.
+    terrain-patch.js fills it from the world terrain.
     Returns (meta, grid float32 [ny, nx], row 0 = north)."""
     W, S, E, N = [float(v) for v in ll_box]
     lat0 = math.radians((S + N) / 2)
@@ -1791,7 +1791,7 @@ def _patch_meta(grid, W, S, E, N, nx, ny, mLon):
 def plan_patches(ll_box, resolution, max_side=PATCH_MAX_SIDE, max_tiles=PATCH_MAX_TILES,
                  overlap_m=PATCH_OVERLAP_M):
     """How a lon/lat box is cut into patches of at most max_side posts a side (the
-    same plan as terrain_patch.js plan()): the posts keep `resolution` and one lattice, the
+    same plan as terrain-patch.js plan()): the posts keep `resolution` and one lattice, the
     patches overlap by overlap_m, and if that takes more than max_tiles of them the
     posts are widened (by 4% steps) until it fits.
     Returns {cell_m, nx, ny, tiles: [(i0, j0, w, h)] in posts of the whole lattice}."""
@@ -1849,7 +1849,7 @@ def terrain_patch_tiles(dem, x_bins, y_bins, resolution, zone, south, ll_box, ke
 
 
 def pack_terrain_patch(meta, grid):
-    """Bytes of a terrain patch file, as terrain_patch.js pack() writes it."""
+    """Bytes of a terrain patch file, as terrain-patch.js pack() writes it."""
     head = json.dumps(dict({'format': 'flex-terrain-patch', 'version': 2}, **meta),
                       separators=(',', ':')).encode('utf-8')
     pad = (4 - ((4 + len(head)) % 4)) % 4
@@ -2103,7 +2103,7 @@ def main():
     ap.add_argument('--satellite-bounds', nargs=4, type=float, metavar=('W', 'S', 'E', 'N'), default=None,
                     help='Lon/lat box of --satellite-image, in degrees.')
     ap.add_argument('--terrain-patch', action='append', default=[], metavar='BIN',
-        help='With --dem-grid: a project terrain patch (terrain_patch.js file) laid over the map terrain '
+        help='With --dem-grid: a project terrain patch (terrain-patch.js file) laid over the map terrain '
              'where it covers the area; repeat for several (later ones on top).')
     ap.add_argument('--hillshade-image', default=None, help='Picture on a lon/lat box for --hillshade image.')
     ap.add_argument('--hillshade-bounds', nargs=4, type=float, metavar=('W', 'S', 'E', 'N'), default=None)

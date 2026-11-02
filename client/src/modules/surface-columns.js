@@ -1,4 +1,4 @@
-// surface_columns.js — 📍 Surface as two columns, like 🕳 Caves: the open
+// surface-columns.js — 📍 Surface as two columns, like 🕳 Caves: the open
 // project's surface things on the left, 👤 My data's on the right.
 //
 //   bar:      📍 Surface on/off — hides or shows everything on the surface
@@ -10,30 +10,30 @@
 //             and the data files you loaded
 // Box = show / hide (or load), ← / → moves across (a sitting's points, a
 // data file), waiting for 💾 Save like every project change
-// (project_workspace.js). ▸ opens a row in place: a project folder shows its
+// (project-workspace.js). ▸ opens a row in place: a project folder shows its
 // folders and features (click: highlight, double-click: fly there, ✏️ edit),
 // the CalTopo map and data files show their own folders.
 //
 // CalTopo features in no folder are listed under Markers / Lines / Polygons,
 // as CalTopo lists them (flex.js hangs them under 'ctf-_markers' …; nothing is
 // written to CalTopo). Every folder row has a display button (names, colour,
-// line width, symbol, opacity for everything inside: folder_style.js).
+// line width, symbol, opacity for everything inside: folder-style.js).
 // Marks: CalTopo rows show their edit state (waiting, conflict, changed,
 // failed: _ctWrite.status); project points, lines and areas the loaded
-// CalTopo map doesn't have say "not in CalTopo" (caltopo_match.js). The CalTopo
+// CalTopo map doesn't have say "not in CalTopo" (caltopo-match.js). The CalTopo
 // map row has the "changed since you last looked" button (also a dot on the
 // 📍 rail button): the list of what was added, changed or removed in CalTopo,
 // and the edits waiting for CalTopo, with their conflicts.
 //
-// Every item and folder row has a ⋯ menu (row_menu.js: info, edit, rename,
+// Every item and folder row has a ⋯ menu (row-menu.js: info, edit, rename,
 // colour, label, move, fly to, delete; a folder's display, names, rename, new
 // subfolder, move, delete); a feature's ✏️ opens the shared editor
-// (feature_editor.js), as ⋯ → Edit and the info panel do.
+// (feature-editor.js), as ⋯ → Edit and the info panel do.
 // Row attributes (for a row's ⋯ menu): an item row has data-rkey, a folder row
 // data-fkey, and each has a .cc-tools span to put buttons in.
 //   data-rkey   f:<project feature id> · my:<My data point id> · ct-<CalTopo feature id>
 //               · e:<data file url>#<entity id>
-//   data-fkey   a folder_style.js key: project:<group id> · project: (not in a folder)
+//   data-fkey   a folder-style.js key: project:<group id> · project: (not in a folder)
 //               · mydata:<group id> · caltopo:<folder id> · caltopo: (the map)
 //               · file:<url>|<path> · file:<url>| (the file)
 //
@@ -57,7 +57,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const V = () => window.cesiumViewer;
   const open = new Set();                      // expanded rows: point groups, 'o:<source url>' and its folders
-  const fOpen = () => ((window._pjfState || {}).open || {});   // project folders: shared with project_features.js
+  const fOpen = () => ((window._pjfState || {}).open || {});   // project folders: shared with project-features.js
   let my = null, last = '', busy = false, again = false;
   const ov = new Map();                        // overlay row key → entity (rebuilt each render)
 
@@ -90,7 +90,7 @@
   setInterval(() => { if (MS.off) applyMaster(); }, 1000);
 
   // ── Labels on/off: names of project features, CalTopo and data-file
-  // features (project_features.js draws those) and your points (flex.js,
+  // features (project-features.js draws those) and your points (flex.js,
   // through its old "Show labels" box, kept hidden).
   let LB = true;
   try { LB = localStorage.getItem('flex.surface.labels') !== '0'; } catch (_) {}
@@ -193,13 +193,13 @@
   }
   const NICT_TIP = 'Not in the CalTopo map: it has no point, line or area of the same kind and name within 15 m';
   const nictMark = () => `<b class="sc-st sc-nict" title="${NICT_TIP}">not in CalTopo</b>`;
-  // A CalTopo feature's edit state (caltopo_write.js).
+  // A CalTopo feature's edit state (caltopo-write.js).
   const CW = () => window._ctWrite;
   const ctStatus = id => { const W = CW(); if (!W || !W.status || !/^ct-/.test(String(id || ''))) return null; try { return W.status(id); } catch (_) { return null; } };
   const ST = { waiting: ['waiting', 'Your edit is waiting to go to CalTopo'], conflict: ['conflict', 'Changed in CalTopo while your edit waited: open the list (CalTopo map row) to choose'],
     changed: ['changed', 'Changed in CalTopo since you last looked'], failed: ['failed', 'Your edit could not be sent to CalTopo'] };
   const stMark = st => (st && ST[st] ? `<b class="sc-st sc-st-${st}" title="${ST[st][1]}">${ST[st][0]}</b>` : '');
-  /** The folder_style.js key of a top row. */
+  /** The folder-style.js key of a top row. */
   function fkeyOf(x) {
     if (x.kind === 'folder') return 'project:' + x.id;
     if (x.kind === 'loose') return 'project:';
@@ -210,7 +210,7 @@
   }
   const fsSet = k => { try { return Object.keys(window._folderStyle.get(k) || {}).filter(f => !(f === 'color' && /^project:./.test(k))).length > 0; } catch (_) { return false; } };
   const fsBtn = k => (k && window._folderStyle ? `<button type="button" class="sc-fs${fsSet(k) ? ' sc-fs-on' : ''}" data-fstyle="${esc(k)}" title="Display: names, colour, line width, symbol, opacity for everything inside">${window.icon ? window.icon('palette', 13) : '🎨'}</button>` : '');
-  // A row's ⋯ menu (row_menu.js): the row's data-rkey / data-fkey says what for.
+  // A row's ⋯ menu (row-menu.js): the row's data-rkey / data-fkey says what for.
   const moreBtn = () => `<button type="button" class="sc-more" data-rmenu aria-haspopup="menu" title="More: info, edit, rename, move, delete…">${window.icon ? window.icon('more', 13) : '⋯'}</button>`;
   // CalTopo: what changed since you last looked, and edits waiting.
   function ctNews() {
@@ -346,7 +346,7 @@
   // The CalTopo map loaded now (it is the source of truth when connected).
   const ctSrc = () => { const w = ws(); return (w && w.vectorSources && w.vectorSources().find(s => s.kind === 'caltopo')) || null; };
   // ⧉ Duplicates of CalTopo: the project's features that the loaded CalTopo
-  // map already has (caltopo_match.js: same kind and name, within 15 m), ticked
+  // map already has (caltopo-match.js: same kind and name, within 15 m), ticked
   // to remove from the project. Removing is a feature.set with removed: true,
   // so 📁 History can undo it.
   async function dupsDialog() {
@@ -718,7 +718,7 @@
   #surf-cols .sc-ic { text-align: center; }
   #surf-cols .pjs-sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 3px; vertical-align: 0; }
   #surf-cols .sc-pt:hover .cc-tools, #surf-cols .sc-sub:hover .cc-tools { opacity: 1; }
-  /* rows share the look of 🕳 Caves (cave_columns.js) */
+  /* rows share the look of 🕳 Caves (cave-columns.js) */
   #surf-cols .cc-head { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 2px 0 4px; font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
   #surf-cols .cc-hp { color: #6fd39a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; } #surf-cols .cc-hm { color: #8ab4ec; padding: 0 4px; }
   #surf-cols .cc-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; max-height: 52vh; overflow-y: auto; }

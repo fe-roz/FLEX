@@ -442,7 +442,7 @@
   }
 
 
-  // The multi-cave and system tools, for the 🕳 Caves pane, the info panel and project_workspace.js's ⋯ menu.
+  // The multi-cave and system tools, for the 🕳 Caves pane, the info panel and project-workspace.js's ⋯ menu.
   const redraw = fn => async (...a) => { const r = await fn(...a); if (window._caveCols) window._caveCols.render(); return r; };
   window._pjMulti = { multiCave: redraw(multiCave), editSystem: redraw(editSystem), caveSystems: redraw(caveSystems), systemsDialog: redraw(systemsDialog), systemLine, caveStatsOf, codesOf, surfaceMarked };
 

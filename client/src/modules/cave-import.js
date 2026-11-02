@@ -190,7 +190,7 @@ export function setupCaveImport({
 
   function _addPltRecent(name, rawText, georef, displayOptions, { force = false } = {}) {
     // A cave of the open project lives there, not in My data: placing or
-    // styling it here doesn't copy it back (project_workspace.js decides).
+    // styling it here doesn't copy it back (project-workspace.js decides).
     if (!force && window._pjWs && window._pjWs.owns && window._pjWs.owns(name)) return;
     // Save raw text to its own server-side file, not into recents.json
     _savePltCache(name, rawText);
@@ -256,7 +256,7 @@ export function setupCaveImport({
   function _renderPltRecents() {
     const el = document.getElementById('lp-plt-recents');
     if (!el) return;
-    // The two cave columns (cave_columns.js) show My data's caves and sets;
+    // The two cave columns (cave-columns.js) show My data's caves and sets;
     // here only the messages.
     if (window._caveCols) {
       el.innerHTML = _recentsNoteMsg ? `<div style="font-size:10px;color:${_recentsNoteMsg.color};padding:3px 6px;border:1px solid rgba(255,255,255,0.15);border-radius:3px;margin:4px 0;">${_escapeHtml(_recentsNoteMsg.text)}</div>` : '';

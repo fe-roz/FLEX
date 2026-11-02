@@ -1,13 +1,13 @@
-// row_menu.js — the ⋯ menu on every row of 📍 Surface (surface_columns.js puts
+// row-menu.js — the ⋯ menu on every row of 📍 Surface (surface-columns.js puts
 // the button in each row's .cc-tools and calls open()).
 //
 // Item (point, line, area; project, My data, CalTopo; data files):
 //   Info · Edit · Rename · Colour · Label on/off · Move to folder · Fly to · Delete
-//   Every edit goes through the shared editor (feature_editor.js, window._featEdit),
+//   Every edit goes through the shared editor (feature-editor.js, window._featEdit),
 //   so an item edits the same way from here and from the info panel. Where
 //   _featEdit.canEdit says no (data files, CalTopo read without a key that can
 //   write), the entries are there but off, with the reason as their tooltip.
-// Folder (the row's data-fkey, a folder_style.js key):
+// Folder (the row's data-fkey, a folder-style.js key):
 //   Display… (window._folderStyle.dialog) · Names on/off (_folderStyle.set labels)
 //   · Rename · New subfolder · Move · Delete (asks: move what is inside up one
 //   level, or delete it too).
@@ -132,7 +132,7 @@
     if (!s) { toast('Nothing to show for it'); return; }
     I.show(s); I.expand();
   }
-  // Send to CalTopo (caltopo_send.js): project items and folders. Off, with the reason, when it can't be done now.
+  // Send to CalTopo (caltopo-send.js): project items and folders. Off, with the reason, when it can't be done now.
   const pjFeat = id => { const P = PJ().P, f = P && P.features && P.features[id]; return f && !f.removed ? f : null; };
   function sendEntry(target, f) {
     const S = window._ctSend;

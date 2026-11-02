@@ -433,7 +433,7 @@ function projFile(pid, rel) {
   try { return fs.statSync(f).isFile() ? f : null; } catch (_) { return null; }
 }
 
-// ── A cave's survey export (survey_export.js) ───────────────────────────────
+// ── A cave's survey export (survey-export.js) ───────────────────────────────
 // <project folder>/Caves/<cave>/Survey/<cave>.svx|.csv|.plt — generated files,
 // rewritten each time, never read back (doc 14). Names are single plain path
 // parts (no / \ .. ), the folder must resolve inside the project, never .flex.

@@ -9,7 +9,7 @@
 //   setupCompassPlt({ Cesium }) -> { pltToCartesian(parsed, zoneOverride, southOverride) }
 //
 // flex.js imports parsePLT / utmToLatLon by name; window._ws.parse is parsePLT
-// (survey_export.js and the tests read survey files through it).
+// (survey-export.js and the tests read survey files through it).
 
 // ── UTM → WGS84 (Transverse Mercator inverse, WGS84 ellipsoid) ───────────────
 export function utmToLatLon(easting, northing, zoneNum, isNorth) {

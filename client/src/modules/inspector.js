@@ -2,11 +2,11 @@
 //
 // It holds, in one place with one × and one resizable edge:
 //   - the station / shot card (#pj-card, project.js),
-//   - the segment panel (#pjs-dock, project_segments.js), which keeps the
+//   - the segment panel (#pjs-dock, project-segments.js), which keeps the
 //     card at its own top while it is open,
 //   - Cesium's info box for anything else on the map (points, data files,
 //     CalTopo features), its own title bar replaced by the panel's,
-//   - the brief info of a clicked map feature, lead or point (info_panel.js,
+//   - the brief info of a clicked map feature, lead or point (info-panel.js,
 //     setBrief); it can hide Cesium's info box when it says the same.
 // Nothing here knows what those show: the elements are moved in as they
 // appear, and the panel shows while any of them is open.
@@ -24,7 +24,7 @@
   const crumbSlot = mk('nav', 'ins-crumbs'); crumbSlot.setAttribute('aria-label', 'Selected');
   const cardSlot = mk('div', 'ins-card'), infoSlot = mk('div', 'ins-info'), briefSlot = mk('div', 'ins-brief'), actSlot = mk('div', 'ins-acts'), mainSlot = mk('div', 'ins-main');
   box.append(grip, head, crumbSlot, cardSlot, infoSlot, briefSlot, actSlot, mainSlot);
-  let brief = null;                                   // { node, title, hideInfo } (info_panel.js)
+  let brief = null;                                   // { node, title, hideInfo } (info-panel.js)
   document.body.appendChild(box);
 
   // ── Width ──────────────────────────────────────────────────────────────
@@ -53,7 +53,7 @@
   const selLevel = () => (window._sel ? window._sel.level() : null);
   const infoOpen = () => { const ib = infoBox(); const l = selLevel(); return !!(ib && ib.viewModel.showInfo && V().selectedEntity) && !dockOpen() && (!l || l === 'station') && !(brief && brief.hideInfo); };
   const briefOpen = () => !!brief && !cardOpen() && !dockOpen();
-  /** The brief info of what was clicked (info_panel.js); null takes it away. */
+  /** The brief info of what was clicked (info-panel.js); null takes it away. */
   function setBrief(b) {
     brief = b || null;
     briefSlot.textContent = '';

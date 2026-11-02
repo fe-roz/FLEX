@@ -14,7 +14,7 @@
     const get = k => (pr && pr[k] ? pr[k].getValue() : null);
     if (!pr) { closeCard(); if (window._sel) window._sel.clear(); return; }
     if (get('isCaveSurvey') && window._sel && window._sel.active()) return;     // selection.js chose what to show
-    if (get('isFeatureLead')) { closeCard(); return; }        // the details panel shows it (info_panel.js); ✏️ there edits it
+    if (get('isFeatureLead')) { closeCard(); return; }        // the details panel shows it (info-panel.js); ✏️ there edits it
     if (get('isFieldStation')) { openCard({ cid: get('cave'), name: get('stationName'), field: true }); return; }
     if (!get('isCaveSurvey')) { closeCard(); return; }
     const imp = imps().find(i => i.name === get('surveyName'));

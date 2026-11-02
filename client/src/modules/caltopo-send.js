@@ -1,9 +1,9 @@
-// caltopo_send.js — hand project items over to the CalTopo map, only when the person asks.
+// caltopo-send.js — hand project items over to the CalTopo map, only when the person asks.
 //
 //   window._ctSend (and module.exports under Node, for tools/test_caltopo_send.js: the pure part)
 //
 //   send({ feature: id } | { group: gid } | { all: true })   preview → confirm → send → summary
-//   notIn(P, src)        the project's features that are not in CalTopo (caltopo_match.js, minus the ones
+//   notIn(P, src)        the project's features that are not in CalTopo (caltopo-match.js, minus the ones
 //                        already sent: see "The link")
 //   notInIds(P, src)     the same as a Set of ids, or null with no CalTopo map loaded
 //   isNotIn(f)           one feature
@@ -22,7 +22,7 @@
 // so it travels with the project and 📁 History shows it). A feature with a link to a feature the loaded map has
 // is "in CalTopo" and is never sent twice; if CalTopo's feature is later deleted, the link stops counting. Sent
 // while CalTopo was unreachable: `{ map, fid: null }`, which counts while the edit waits in the queue; once it is
-// sent, caltopo_match.js (same kind, name, within 15 m) pairs the two. _ctMatch itself pairs by name and place
+// sent, caltopo-match.js (same kind, name, within 15 m) pairs the two. _ctMatch itself pairs by name and place
 // only — it has no stored link.
 //
 // Cave entrance tags (a point's description, one line):

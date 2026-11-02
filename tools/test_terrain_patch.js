@@ -1,4 +1,4 @@
-// Terrain patch (terrain_patch.js) without a browser: a Cesium stand-in with just the maths it uses.
+// Terrain patch (terrain-patch.js) without a browser: a Cesium stand-in with just the maths it uses.
 //   node tools/test_terrain_patch.js
 // 1. a DEM with empty corners (what a rotated UTM DEM leaves in its lon/lat box) hands over to the world
 //    terrain at its own edge: no step there (before: a cliff of the whole difference);
@@ -17,7 +17,7 @@ const WORLD = (lon, lat) => 1000 + 20 * (lat - 45.1234);          // a gentle sl
 const base = { tilingScheme: {}, availability: null, errorEvent: {}, getLevelMaximumGeometricError: () => 1 };
 // the base's height in degrees: the stub samples through .height(lonRad, latRad) when present
 base.height = (lo, la) => WORLD(lo * 180 / Math.PI, la * 180 / Math.PI);
-require('../terrain_patch.js');
+require('./load_classic')(require('path').join(__dirname, '..', 'client', 'src', 'modules', 'terrain-patch.js'));
 const TP = window._terrainPatch;
 const D = Math.PI / 180;
 
