@@ -9218,7 +9218,7 @@ function estimateFlightDirections(pointclouds) {
       const posAttr = g.attributes.position;
       const psAttr = g.attributes['source id'];
       const saAttr = g.attributes['scan angle'];
-      const gpsAttr = g.attributes.gpsTime;
+      const gpsAttr = g.attributes['gps-time'] || g.attributes.gpsTime; // Potree 1.8.2 names it 'gps-time'
       if (!posAttr || !psAttr || !saAttr) continue;
       const snMatrix = node.sceneNode.matrixWorld;
       const numPts = posAttr.count;

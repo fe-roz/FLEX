@@ -149,8 +149,7 @@ export class PointCloudMaterial extends THREE.RawShaderMaterial {
 			uFilterGPSTimeClipRange:		{ type: "fv", value: [0, 7]},
 			uFilterPointSourceIDClipRange:	{ type: "fv", value: [0, 65535]},
 
-			// Height-above-ground filter
-			// Height-above-ground filter. Two grids: uGroundTex* is the detail
+			// FLEX: height-above-ground filter uniforms. Two grids: uGroundTex* is the detail
 			// grid (the DEM-resolution terrain reference) and uGround*C the coarse
 			// wide-area fallback, read only where the detail grid has no data.
 			// NOTE: adding a uniform here is NOT enough. Potree renders point

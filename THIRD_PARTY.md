@@ -22,7 +22,7 @@ code.
 
 | Library | Version | Licence | Source | Files |
 |---|---|---|---|---|
-| Potree | 1.8.0 | BSD-2-Clause | https://github.com/potree/potree | `PotreeCopied/` (licence: `PotreeCopied/LICENSE`) |
+| Potree | 1.8.2 (stock, plus FLEX's own edits listed in `PotreeCopied/FLEX_PATCHES.md`) | BSD-2-Clause | https://github.com/potree/potree | `PotreeCopied/` (licence: `PotreeCopied/LICENSE`) |
 
 Potree bundles further libraries in `PotreeCopied/libs/`, each with its licence
 file in its own folder. The ones desktop FLEX loads (`index.html`):
@@ -40,6 +40,7 @@ file in its own folder. The ones desktop FLEX loads (`index.html`):
 | i18next | 1.8.0 | MIT | https://www.i18next.com | `libs/i18next/` |
 | jsTree | 3.3.8 | MIT | https://www.jstree.com | `libs/jstree/` |
 | plasio laslaz.js | — | MIT | https://github.com/verma/plasio | `libs/plasio/` |
+| copc.js + laz-perf (COPC and LAZ decoding, bundled into Potree 1.8.2) | as shipped in Potree 1.8.2 | MIT (copc.js); laz-perf: check upstream | https://github.com/connormanning/copc.js | `libs/copc/` |
 | three.js (Potree's copy) | r124 | MIT | https://github.com/mrdoob/three.js | `libs/three.js/` |
 | CesiumJS (Potree's copy; FLEX uses its `Widgets/widgets.css`) | — | Apache-2.0 | https://github.com/CesiumGS/cesium | `libs/Cesium/` |
 

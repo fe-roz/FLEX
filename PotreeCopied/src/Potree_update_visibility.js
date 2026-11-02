@@ -370,7 +370,7 @@ export function updateVisibility(pointclouds, camera, renderer){
 				let projFactor = (0.5 * domHeight) / (slope * distance);
 				let screenPixelRadius = radius * projFactor;
 
-				// FLEX: distance-based level of detail. Two separate jobs.
+				// FLEX: distance-based level of detail (part 1 of 2: far cutoff). Two separate jobs.
 				//
 				// 1. A far cutoff. Past lodFarDistance a node has to be much
 				//    bigger on screen before it is refined at all, which is
@@ -402,7 +402,7 @@ export function updateVisibility(pointclouds, camera, renderer){
 
 				weight = screenPixelRadius;
 
-				// 2. A steeper falloff for loading ORDER. Screen radius alone
+				// FLEX: part 2 of 2. A steeper falloff for loading ORDER. Screen radius alone
 				//    falls off as 1/distance, gentle enough that the horizon
 				//    still outbids the foreground when it covers a lot of
 				//    screen. Nothing is excluded here; a far node just queues
