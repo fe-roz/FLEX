@@ -182,6 +182,7 @@ svg.ico { vertical-align: -2px; }
   <a href="#folder">The project folder</a>
   <div class="grp">Doing things</div>
   <a href="#caves">Caves</a>
+  <a href="#sketches">Sketches and files</a>
   <a href="#surface">Surface features</a>
   <a href="#maplayers">Your map layers</a>
   <a href="#caltopo">CalTopo</a>
@@ -196,7 +197,7 @@ svg.ico { vertical-align: -2px; }
 <h1>FLEX guide</h1>
 <p class="lede">FLEX shows everything about a piece of ground at once: the globe and terrain, map layers, LiDAR point clouds, surface points and tracks, and 3D cave surveys. Work is kept in <b>projects</b> (one per area), and any area can be baked into an offline viewer that runs on a phone underground.</p>
 <div class="toc" aria-label="Contents">
-  <a href="#setup">Setting up</a><a href="#first">First area</a><a href="#screen">The screen</a><a href="#tree">Projects</a><a href="#saving">Saving</a><a href="#caves">Caves</a><a href="#surface">Surface</a><a href="#caltopo">CalTopo</a><a href="#lidar">LiDAR</a><a href="#export">Phone app</a><a href="#keys">Keyboard</a><a href="#trouble">Problems</a>
+  <a href="#setup">Setting up</a><a href="#first">First area</a><a href="#screen">The screen</a><a href="#tree">Projects</a><a href="#saving">Saving</a><a href="#select">Selecting in 3D</a><a href="#places">Phone, computer, CalTopo</a><a href="#folder">Project folder</a><a href="#caves">Caves</a><a href="#sketches">Sketches and files</a><a href="#surface">Surface</a><a href="#maplayers">Your map layers</a><a href="#caltopo">CalTopo</a><a href="#lidar">LiDAR</a><a href="#export">Offline viewer and FLEX Field</a><a href="#sync">Sync files</a><a href="#keys">Keyboard</a><a href="#trouble">Problems</a>
 </div>
 
 <!-- ═════════════════════════════════════════════════════════════════════ -->
@@ -486,7 +487,7 @@ svg.ico { vertical-align: -2px; }
   <li><b>Team account:</b> Team Admin → Details → add a <b>service account</b> with READ. Enter its credential ID, secret, and the team ID.</li>
   <li><b>Personal account:</b> the credential from <code>caltopo.com/api/v1/activate</code> (unofficial; it may stop working if CalTopo changes it).</li>
 </ul>
-<p>With an account or team ID, <b>Pick a map…</b> lists your maps. FLEX re-reads the map at the <b>Refresh</b> you choose (30 s, 1 min — the default —, 5 min or Off); whatever you pick, FLEX never asks CalTopo more than about once a second, and a map read in the last half minute is not read again, so several windows or a bulk send don't wear out CalTopo's patience. If CalTopo can't be reached or says “too many requests”, FLEX waits longer (1, 2, then 5 minutes) and shows its saved copy meanwhile; only what changed is redrawn, and long tracks are drawn simplified (within about 2 m). A map the open project doesn't have shows in <svg class="ico" width="14" height="14"><use href="#i-pin"/></svg> Surface under 👤 My data, with its folders; ← makes it the project's map. To link a cave to its entrance marker, put a line like <code>flex: cave=Ridge Cave; station=E1</code> in the marker's description. <b>Copy CalTopo tag</b> also adds the entrance's height and the cave's id when it knows them (<code>flex: cave=Ridge Cave; station=E1; z=1500.5; id=ab12</code>); <code>z</code> is used for the cave's height when the terrain has none, <code>id</code> finds the cave if it was renamed. Tags without them keep working.</p>
+<p>With an account or team ID, <b>Pick a map…</b> lists your maps. FLEX re-reads the map at the <b>Refresh</b> you choose (Off, which reads by hand; 30 s; 1 min, the default; or 5 min); whatever you pick, FLEX never asks CalTopo more than about once a second, and a map read in the last half minute is not read again, so several windows or a bulk send don't wear out CalTopo's patience. If CalTopo can't be reached or says “too many requests”, FLEX waits longer (1, 2, then 5 minutes) and shows its saved copy meanwhile; only what changed is redrawn, and long tracks are drawn simplified (within about 2 m). A map the open project doesn't have shows in <svg class="ico" width="14" height="14"><use href="#i-pin"/></svg> Surface under 👤 My data, with its folders; ← makes it the project's map. To link a cave to its entrance marker, put a line like <code>flex: cave=Ridge Cave; station=E1</code> in the marker's description. <b>Copy CalTopo tag</b> also adds the entrance's height and the cave's id when it knows them (<code>flex: cave=Ridge Cave; station=E1; z=1500.5; id=ab12</code>); <code>z</code> is used for the cave's height when the terrain has none, <code>id</code> finds the cave if it was renamed. Tags without them keep working.</p>
 <h3>Editing the CalTopo map</h3>
 <p>With a private map loaded through a key, an edit to a CalTopo feature in FLEX (name, description, colour, symbol, folder, position, delete) <b>goes straight to CalTopo</b>: FLEX says it worked, or why not, and redraws the map. CalTopo stays the source of truth.</p>
 <ul>
@@ -501,10 +502,19 @@ svg.ico { vertical-align: -2px; }
 
 <h2 id="lidar">LiDAR</h2>
 <ul>
-  <li><svg class="ico" width="14" height="14"><use href="#i-cloud"/></svg> <b>LiDAR</b> loads point clouds in EPT format: public datasets (<b>Show OpenTopo Datasets</b> shows what's available where you are), or a link to an <code>ept.json</code>.</li>
+  <li><svg class="ico" width="14" height="14"><use href="#i-cloud"/></svg> <b>LiDAR</b> loads point clouds: public datasets (<b>Show OpenTopo Datasets</b> shows what's available where you are), or a link to an <code>ept.json</code>. Clouds in the laszip form of EPT work, and so do <code>.copc.laz</code> files. EPT in the plain binary form does not load (the laszip form, which Entwine makes, does).</li>
   <li><b>Your own scans:</b> convert them with <a href="https://entwine.io" target="_blank" rel="noopener">Entwine</a> into a folder, then <b>🗄 Link Entwine</b> with that folder and the address FLEX should serve it on (e.g. <code>http://localhost:8083</code>). FLEX starts and stops that server for you.</li>
   <li><b>Ground and height</b> (in the LiDAR panel) colours by height above ground and can hide everything but bare earth.</li>
-  <li><svg class="ico" width="14" height="14"><use href="#i-leaf"/></svg> <b>Analyze</b> works out, for an area, how dense the vegetation is (how bad the bushwhack) and where returns reach below the local ground — often where entrances are.</li>
+  <li><b>Point cloud look</b> (in the LiDAR panel, closed at first) sets how every loaded cloud is drawn:
+    <ul>
+      <li><b>Colour by</b>: composite (the default mix of intensity and class colour), RGB, intensity, elevation, classification or return number (needs a cloud that carries return numbers).</li>
+      <li><b>Point size</b> and <b>Sizing</b>: fixed (the same on screen at any distance), attenuated (smaller further away) or adaptive (follows how dense the cloud is where you look). <b>Shape</b>: circle, square or paraboloid.</li>
+      <li><b>Intensity</b>: the Low and High values set the range that runs from dark to bright; <b>Gamma</b> bends the middle tones (higher is darker).</li>
+      <li><b>Eye-dome lighting</b> shades points by depth, so shapes read without colour; its strength and radius are set below the switch.</li>
+      <li><b>Show classes</b>: a switch per class that only hides its points on the screen. Nothing is removed from the cloud, and the noise classes (7 and 18) stay in the data and in the height filter.</li>
+    </ul>
+    <b>Reset</b> goes back to FLEX's usual look. The settings are remembered on this computer and apply to every cloud, including ones loaded later.</li>
+  <li><svg class="ico" width="14" height="14"><use href="#i-leaf"/></svg> <b>Analyze</b> works out, for an area, how dense the vegetation is (how bad the bushwhack) and where returns reach below the local ground — often where entrances are. If a run fails, the panel shows the reason in its status line (<b>Error: …</b>), and a <code>log.txt</code> is written next to the output with the same reason.</li>
 </ul>
 
 <h2 id="export">Offline viewer and FLEX Field</h2>
@@ -513,6 +523,14 @@ svg.ico { vertical-align: -2px; }
   <li><code>viewer.html</code> opens in any browser on its own;</li>
   <li>the same zip opens in the <b>FLEX Field</b> Android app (Import map, or Open with / Share from Files or Drive), where GPS and compass work underground.</li>
 </ul>
+<h3>In FLEX Field</h3>
+<ul>
+  <li><b>Tap targets</b> (the stations and leads you tap on the map) are sized in screen pixels, so they are the same size on any phone.</li>
+  <li><b>Names are thinned</b>: where stations crowd together, the names that would overlap are hidden and the important ones stay. Zoom in to see the rest.</li>
+  <li><b>⋯ → Route difficulty</b> sets what counts as narrow (below 3 ft wide by default), stooping, crawling or steep, with − and + for each limit and a reset to the defaults. These limits set the difficulty colours and the route figures.</li>
+  <li><b>Big exports are tiled</b>: an export over about 5 km is cut into tiles, each with its own satellite and hillshade picture, so the imagery stays sharp at any zoom. Nothing to set.</li>
+</ul>
+
 <p><b>Exports need Python</b> with PDAL, GDAL, NumPy, SciPy and Pillow. The simplest route is conda:</p>
 <pre>conda create -n entwine -c conda-forge python pdal python-pdal gdal numpy scipy pillow</pre>
 <p><b>Building FLEX Field</b> needs Android Studio's SDK; in PowerShell:</p>
