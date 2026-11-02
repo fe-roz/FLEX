@@ -5185,6 +5185,7 @@ window._ws = {
   caveIndex: name => _caveImports.findIndex(x => x && x.name === name),
   caveVisible: name => { const x = _caveImports.find(c => c && c.name === name); return !!(x && x.visible !== false); },
   caveGeometry: (text, georef) => _caveGeometry(text, georef),
+  parse: text => parsePLT(text),                     // a survey file read as FLEX reads it (survey_export.js)
 };
 
 // A cave's size and where it lies, from its survey file and placement,
