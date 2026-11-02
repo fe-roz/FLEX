@@ -9,7 +9,9 @@ import { fileURLToPath } from 'url';
 import { readWallsShapefileSets, wallsToPlt, parsePrj, isWallsSelection } from '../walls.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const proj4 = createRequire(import.meta.url)(path.join(root, 'PotreeCopied/libs/proj4/proj4.js'));
+// proj4's UMD build: under require() it wants the 'wkt-parser' package (not installed); run its
+// browser branch instead, as the page does (no exports/module/define → it sets the global).
+const proj4 = (() => { const g = {}; new Function('exports', 'module', 'define', fs.readFileSync(path.join(root, 'PotreeCopied/libs/proj4/proj4.js'), 'utf8')).call(g); return g.proj4; })();
 const src = fs.readFileSync(path.join(root, 'flex.js'), 'utf8');
 const a = src.indexOf('function parsePLT('), b = src.indexOf('\nfunction ', a + 10);
 const parsePLT = new Function(src.slice(a, b) + '\nreturn parsePLT;')();

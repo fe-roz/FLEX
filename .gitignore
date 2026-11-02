@@ -2,8 +2,6 @@ node_modules/
 user_files/
 Tokens.js
 Tokens.js.example
-FLEX.sh
-FLEX.bat
 .caltopo_session
 
 # Dev/debug scratch files
