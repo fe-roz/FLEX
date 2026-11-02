@@ -27,6 +27,7 @@
     dev: null, pid: null, P: FL.replayProject([], ''), D: FL.replayDocs([]),
     proj: [], docs: [], projects: [], ready: false,
     leadShow: 'active', docTab: 'inbox', card: null, gallery: null,
+    at: null, mode: null, readonly: false,           // at: a snapshot's date (project open read-only as it was); mode: 'snapshot' | 'archived' | null
   };
   window._pj = pj;                               // for the console and tests
   const $ = id => document.getElementById(id);
@@ -129,18 +130,22 @@
   async function loadAll() {
     const pid = pj.pid;
     pj.projects = await api('projects');
-    const proj = pid ? parseLines(await api('read?scope=' + FL.projScope(pid))) : [];
-    const docs = parseLines(await api('read?scope=docs'));
+    const at = pj.at, q = at ? '&at=' + encodeURIComponent(at) : '';        // a snapshot: the entries up to then
+    const proj = pid ? parseLines(await api('read?scope=' + FL.projScope(pid) + q)) : [];
+    const docs = parseLines(await api('read?scope=docs' + q));
     const keep = (fresh, mine) => { const ids = new Set(fresh.map(e => e.id)); return fresh.concat(mine.filter(e => !ids.has(e.id))); };
     if (pid !== pj.pid) return;                                   // switched meanwhile: that load wins
-    pj.proj = pid && pj.projPid === pid ? keep(proj, pj.proj) : proj;
+    pj.proj = pid && pj.projPid === pid && !at ? keep(proj, pj.proj) : proj;
     pj.projPid = pid;
-    pj.docs = keep(docs, pj.docs);
+    pj.docs = at ? docs : keep(docs, pj.docs);
     replay();
   }
   function replay() {
     pj.P = FL.replayProject(pj.proj, pj.pid || '');
     pj.D = FL.replayDocs(pj.docs);
+    pj.mode = pj.pid && pj.at ? 'snapshot' : pj.pid && pj.P.archived ? 'archived' : null;
+    pj.readonly = !!pj.mode;
+    banner();
     // The project's area labels changed (an edit, undo, a sync file, another
     // project): the caves draw them again (flex.js).
     const al = JSON.stringify(FL.areaLabelsOf(pj.P).map(a => [a.id, a.file, a.text, a.n, a.e, a.v]));
@@ -151,6 +156,7 @@
   // afterwards with refresh().
   async function record(op, data, where, { quiet = false } = {}) {
     if (!pj.pid && where !== 'docs') { toast('Choose or create a project first (Project panel)'); return null; }
+    if (pj.readonly) { toast(pj.mode === 'snapshot' ? 'A snapshot is read-only: leave it to change the project' : 'This project is archived (read-only): unarchive it to change it'); return null; }
     if (!(await ensureAuthor())) return null;
     const scope = where === 'docs' ? FL.DOCS : FL.projScope(pj.pid);
     let e;
@@ -176,10 +182,11 @@
   // Switching project: what was on screen is saved and unloaded, the project's
   // things load (project_workspace.js). keep: a new project takes what is on
   // screen now instead.
-  async function setProject(pid, { keep = false } = {}) {
-    const prev = pj.pid, change = (pid || null) !== prev;
+  async function setProject(pid, { keep = false, at = null } = {}) {
+    const prev = pj.pid, snap = pid && at ? String(at) : null, change = (pid || null) !== prev || snap !== (pj.at || null);
     if (change && window._pjWs && !keep && (await window._pjWs.leave(prev)) === false) { render(); return false; }   // stayed (unsaved changes, Cancel)
     pj.pid = pid || null;
+    pj.at = snap;
     const shown = change && pid && !keep && window._pjWs && window._pjWs.opening;
     if (shown) window._pjWs.opening(pid);            // the loading screen at once; reading the library comes first
     try {
@@ -193,6 +200,34 @@
     if (window._pjWs) window._pjWs.label();
     if (window._pjf) window._pjf.changed(null);
   }
+
+  // ── Read-only: a snapshot of a past day, or an archived project ───────────
+  // The banner says so and offers the way out; record() refuses every change meanwhile.
+  function banner() {
+    let b = $('pj-banner');
+    if (!pj.readonly) { if (b) b.remove(); return; }
+    const day = pj.at ? new Date(FL.snapshotTime(pj.at) || pj.at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+    const text = pj.mode === 'snapshot' ? `Snapshot of ${day} — read-only` : 'Archived — read-only';
+    if (b && b.dataset.k === text) return;
+    if (b) b.remove();
+    b = el('div'); b.id = 'pj-banner'; b.dataset.k = text; b.setAttribute('role', 'status');
+    b.appendChild(el('span', '', text));
+    b.appendChild(btn(pj.mode === 'snapshot' ? 'Leave the snapshot' : 'Unarchive', () => (pj.mode === 'snapshot' ? setProject(pj.pid) : unarchive()), 'small'));
+    document.body.appendChild(b);
+  }
+  async function unarchive() { return archive(false); }
+  /** Archive (hidden from the list, read-only, still openable) or unarchive: recorded in the project's own log. */
+  async function archive(on) {
+    if (!pj.pid) return false;
+    if (!(await ensureAuthor())) return false;
+    try { await post('archive?project=' + encodeURIComponent(pj.pid), { archived: !!on, who: who() }); }
+    catch (err) { toast('Could not ' + (on ? 'archive' : 'unarchive') + ': ' + err.message); return false; }
+    await loadAll(); render(); refreshCard();
+    toast(on ? 'Archived: read-only, hidden from the project list' : 'Unarchived');
+    return true;
+  }
+  /** Read the logs again (after the server changed them — a cave moved to another project). */
+  async function reload() { await loadAll(); render(); refreshCard(); drawField(); drawLeads(); if (window._pjSeg) window._pjSeg.changed(null); if (window._pjf) window._pjf.changed(null); }
 
   // ── Caves: which project cave a loaded file (and survey) is ───────────────
   const imps = () => (window._caveImports || []).filter(i => i && i.parsed);
@@ -844,6 +879,9 @@
     const sv = id => (pj.P.surveys[id] && pj.P.surveys[id].name) || 'survey';
     const m = {
       'project.set': () => `Project “${e.name || ''}”`,
+      'project.archive': () => e.archived === false ? 'Project unarchived' : 'Project archived (read-only)' + (e.note ? ': ' + e.note : ''),
+      'project.footprint': () => Array.isArray(e.ring) && e.ring.length >= 3 ? `Footprint drawn by hand (${e.ring.length} corners)` : 'Hand-drawn footprint cleared (the computed one is used)',
+      'cave.moved': () => e.dir === 'in' ? `Cave “${e.name || caveName(e.cave)}” moved in from ${(e.peer && e.peer.name) || 'another project'}` : `Cave “${e.name || caveName(e.cave)}” moved to ${(e.peer && e.peer.name) || 'another project'}`,
       'project.lists': () => 'Added to lists: ' + Object.values(e.add || {}).flat().join(', '),
       'cave.set': () => e.removed ? `Removed cave ${caveName(e.cave)}` : `Cave “${e.name || caveName(e.cave)}”${e.sources ? ' (made of ' + e.sources.map(s => s.file + (s.surveys && s.surveys.length ? ' ' + s.surveys.join(',') : '')).join('; ') + ')' : ''}`,
       'cave.alias': () => `“${e.alias}” is ${caveName(e.cave)}`,
@@ -1562,11 +1600,12 @@
 
   pj._filesToPages = filesToPages;               // tests
   pj._setProject = setProject;                   // tests
+  pj._archive = archive;
 
   // ── For project_segments.js (segments and the review queue) ───────────────
   window._pjApi = { pj, FL, el, btn, esc, when, toast, dialog, choose, record, render, refreshCard, openCard, flyTo,
     caveFor, caveName, partsOf, stationPos, stationsOf, docEl, docOpen, docByPage, describe, headsFor, targetLabel,
-    editNote, noteEl, declAt, yearOf, imps, who, ensureAuthor, linkFile, editCave, newProject, refresh, editLead, renameProject, editDescription, setProject, importSync, acceptAbove, closeCard,
+    editNote, noteEl, declAt, yearOf, imps, who, ensureAuthor, linkFile, editCave, newProject, refresh, editLead, renameProject, editDescription, setProject, importSync, acceptAbove, reload, archive, post, closeCard,
     stopVideos, videoEl, fileOpen, galleryClose, addPages, editTags, leadEl, leadsAt, leadSummary, blobUrl, docSub,
     filesToPages, storeBytes, pickFiles, cardTarget };
 
@@ -1606,6 +1645,9 @@
   }
 
   const css = `
+  #pj-banner { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 9600; display: flex; align-items: center; gap: 10px; padding: 5px 8px 5px 14px; border-radius: 99px;
+               background: rgba(242,194,78,.96); color: #1b1b1b; font: 600 12.5px system-ui, sans-serif; box-shadow: 0 4px 16px rgba(0,0,0,.4); }
+  #pj-banner .pj-btn { margin: 0; background: rgba(0,0,0,.12); border-color: rgba(0,0,0,.35); color: #1b1b1b; }
   #pj-panel { font-size: 12px; }
   .pj-btn { font: inherit; font-size: 12px; padding: 4px 9px; border-radius: 5px; cursor: pointer; color: #e8e8ee; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.2); margin: 2px 4px 2px 0; }
   .pj-btn:hover { background: rgba(255,255,255,.14); }

@@ -74,8 +74,9 @@
    * ('point') or a data file ('file') to the project ('in') or My data ('out').
    * m = { kind, id, name, dir, url? }. The same again cancels it.
    */
+  const readOnly = () => { if (!pj.readonly) return false; toast(pj.mode === 'snapshot' ? 'A snapshot is read-only: leave it to change the project' : 'This project is archived (read-only): unarchive it first'); return true; };
   async function moveItem(m) {
-    if (!pj.pid) return;
+    if (!pj.pid || readOnly()) return;
     const k = W.moves.findIndex(x => x.kind === m.kind && x.id === m.id);
     if (k >= 0) W.moves.splice(k, 1); else W.moves.push(m);
     saveMoves();
@@ -84,7 +85,7 @@
   const movingItem = (kind, id) => (W.moves.find(x => x.kind === kind && x.id === id) || {}).dir || null;
   /** ← / →: a cave to the project ('in') or to My data ('out'); the same again cancels it. */
   async function moveCave(name, dir) {
-    if (!pj.pid) return;
+    if (!pj.pid || readOnly()) return;
     const other = W.moves.findIndex(m => m.kind === 'cave' && m.name === name);
     if (other >= 0) W.moves.splice(other, 1);
     const saved = inProject.cave(name);
@@ -180,7 +181,7 @@
     const w = ws(), out = { pending: [], extra: { caves: [], layers: [] } };
     if (!pj.pid || !w) return out;
     const S = pj.P;
-    W.moves.forEach(m => out.pending.push({ kind: 'move', move: m, name: m.name, dir: m.dir, what: m.dir === 'in' ? 'into the project' : 'out to My data' }));
+    W.moves.forEach(m => out.pending.push({ kind: 'move', move: m, name: m.name, dir: m.dir, what: m.kind === 'cavemove' ? 'to ' + (m.toName || 'another project') : m.dir === 'in' ? 'into the project' : 'out to My data' }));
     for (const c of w.caves()) {
       if (!c.text) continue;
       if (moving(c.name)) continue;
@@ -198,6 +199,8 @@
     return out;
   }
   async function commit(p) {
+    if (p.kind === 'move' && p.move && p.move.kind === 'cavemove') return commitCaveMove(p.move);
+    if (p.kind === 'move' && p.move && p.move.kind === 'feats') return commitFeats(p.move);
     if (p.kind === 'move') {
       const w = ws(), c = w.caves().find(x => x.name === p.name);
       if (p.move && p.move.kind !== 'cave') {
@@ -257,16 +260,111 @@
   }
   async function refreshAfter(op) { A.refresh && A.refresh(op); await badge(); }
 
+
+  // ── A cave to another project (doc 14, rule 9) ───────────────────────────
+  // Queued here like any move; 💾 Save asks the server (library.js moveCave) to copy the cave with its files, notes,
+  // leads, segments, area labels and documents into the other project, then lets it go from this one, each keeping a
+  // record ("moved to … / moved in from …", in History). Files are copied, never deleted. Repeating it adds nothing.
+  const cavesOfFile = name => FL.liveCaves(pj.P).filter(c => (c.sources || []).some(s => s.file === name) || pj.P.aliases[name] === c.id);
+  const queuedCaveMove = cid => W.moves.find(m => m.kind === 'cavemove' && m.id === cid) || null;
+  async function otherProjects() {
+    const list = (pj.projects || []).filter(p => p.id !== pj.pid && !p.archived);
+    const X = (window._pjx && window._pjx.state) || {};
+    return list.filter(p => !(X.info && X.info[p.id] && X.info[p.id].archived));
+  }
+  async function askCaveMove(fileName) {
+    if (!pj.pid || readOnly()) return;
+    const cs = cavesOfFile(fileName);
+    if (!cs.length) { toast('This file isn’t a cave of the project yet (⋯ → Caves in this file…)'); return; }
+    if (cs.length > 1) { toast('This file holds several caves; split it into its caves first (⋯ → Caves in this file…)'); return; }
+    const c = cs[0], q = queuedCaveMove(c.id);
+    if (q) { W.moves = W.moves.filter(x => x !== q); saveMoves(); toast(`The move of “${c.name}” is cancelled`); await badge(); return; }
+    const dests = await otherProjects();
+    if (!dests.length) { toast('There is no other project to move it to (archived projects are read-only)'); return; }
+    let pv = null;
+    try { pv = await (await fetch(`/api/lib/move-preview?from=${encodeURIComponent(pj.pid)}&cave=${encodeURIComponent(c.id)}`)).json(); } catch (_) {}
+    if (pv && pv.shared && pv.shared.length) { toast(`“${pv.shared[0]}” also holds another cave; split the file into its caves first`); return; }
+    const to = await choose(`Move “${c.name}” to…`, 'The cave goes with its survey files, notes, leads, segments, area labels, sketches and documents.',
+      dests.map(p => ({ label: ['folder', p.name || p.id], value: p.id })));
+    if (!to) return;
+    const dest = dests.find(p => p.id === to), n = pv && pv.counts ? pv.counts : null;
+    const what = n ? [n.files + ' survey file' + (n.files === 1 ? '' : 's'), n.notes + ' note' + (n.notes === 1 ? '' : 's'), n.leads + ' lead' + (n.leads === 1 ? '' : 's'), n.segments + ' segment' + (n.segments === 1 ? '' : 's'), n.docs + ' document' + (n.docs === 1 ? '' : 's')].join(', ') : 'its data';
+    const ok = await choose(`Move “${c.name}” to “${dest.name || dest.id}”?`, `Goes along: ${what}. “${projName()}” keeps a record (“moved to ${dest.name || dest.id}”) and so does the other project. Nothing is deleted: the files are copied. It moves when you press 💾 Save.`,
+      [{ label: 'Move it (on Save)', value: 'yes', primary: true }]);
+    if (ok !== 'yes') return;
+    W.moves.push({ kind: 'cavemove', id: c.id, name: c.name, files: cs.length ? (c.sources || []).map(s => s.file) : [fileName], to, toName: dest.name || dest.id, move: FL.uid(12), dir: 'project' });
+    saveMoves();
+    await badge();
+    toast(`“${c.name}” will move to “${dest.name || dest.id}” when you Save`);
+  }
+  async function commitCaveMove(m) {
+    const r = await fetch(`/api/lib/move-cave?from=${encodeURIComponent(pj.pid)}&to=${encodeURIComponent(m.to)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cave: m.id, move: m.move, who: A.who && A.who() }) });
+    const o = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(o.error || ('move failed (' + r.status + ')'));
+    const w = ws(), names = new Set(m.files || []);
+    Object.keys(pj.P.aliases).filter(a => pj.P.aliases[a] === m.id && pj.P.cavefiles[a]).forEach(f => names.add(f));
+    w.switching = true;
+    try { [...names].forEach(f => { if (w.caveIndex(f) >= 0) w.removeCave(f); }); } finally { w.switching = false; }
+    W.moves = W.moves.filter(x => x !== m && !(x.kind === 'cavemove' && x.id === m.id));
+    saveMoves();
+    await A.reload();
+    if (window._pjx && window._pjx.forget) { window._pjx.forget(pj.pid); window._pjx.forget(m.to); }
+    toast(`“${m.name}” moved to “${m.toName}”`);
+  }
+
+  // ── Surface features back to My data ───────────────────────────────────────
+  // A folder (with the folders in it), the features not in a folder, or single ones. Waits for 💾 Save; then they are
+  // made in My data (kept across projects, one home) and removed from the project (History can bring them back).
+  const featsOf = m => {
+    const all = FL.liveFeatures(pj.P);
+    if (m.id === 'loose') return all.filter(f => !f.group);
+    if (m.id.startsWith('g:')) return all.filter(f => FL.groupPath(pj.P, f.group).some(g => g.id === m.id.slice(2)));
+    if (m.id.startsWith('f:')) return all.filter(f => f.id === m.id.slice(2));
+    return [];
+  };
+  async function queueFeatures(items) {
+    if (!pj.pid || readOnly()) return 0;
+    let n = 0;
+    for (const it of items) { if (!W.moves.some(x => x.kind === 'feats' && x.id === it.id)) { W.moves.push(Object.assign({ kind: 'feats', dir: 'out' }, it)); n++; } }
+    saveMoves(); await badge();
+    return n;
+  }
+  async function commitFeats(m) {
+    const MD = window._myData;
+    if (!MD || !MD.adopt) throw new Error('My data is not available');
+    const feats = featsOf(m);
+    const pname = projName();
+    const groupName = f => { const path = FL.groupPath(pj.P, f.group); return path.length ? path.map(g => g.name || 'Folder').join(' / ') : 'From ' + pname; };
+    const color = f => (f.style && f.style.color) || ((FL.groupPath(pj.P, f.group).reverse().find(g => g.color) || {}).color) || null;
+    const items = feats.map(f => ({ id: f.id, kind: f.kind, coords: f.coords, name: f.name || '', desc: f.desc || '', group: groupName(f), color: color(f), style: f.style || null }));
+    await MD.adopt(items);                                      // made in My data first: never in neither
+    for (const f of feats) await record('feature.set', { feature: f.id, removed: true, movedTo: 'mydata' }, null, { quiet: true });
+    if (m.id.startsWith('g:')) {
+      const gone = new Set([m.id.slice(2)]);
+      FL.liveGroups(pj.P).forEach(g => { if (FL.groupPath(pj.P, g.id).some(x => x.id === m.id.slice(2))) gone.add(g.id); });
+      for (const g of gone) await record('group.set', { group: g, removed: true }, null, { quiet: true });
+    }
+    W.moves = W.moves.filter(x => !(x.kind === m.kind && x.id === m.id));
+    saveMoves();
+    A.refresh && A.refresh('feature.set');
+    if (window._pjf) window._pjf.draw();
+    toast(`${feats.length} feature${feats.length === 1 ? '' : 's'} moved to My data`);
+  }
+
   // ── 💾 Save ──────────────────────────────────────────────────────────────
   /** The Save button: your view, and the waiting project changes. */
   async function save() {
     if (window._sessionSave) window._sessionSave();
     if (!pj.pid || W.busy) return 0;
+    if (readOnly()) return 0;
     if (!(A.who && A.who()) && !(await A.ensureAuthor())) return 0;
     W.busy = true;
     let n = 0;
     try {
       const { pending } = await scan();
+      const late = p => (p.move && p.move.kind === 'cavemove' ? 1 : 0);     // a cave goes to the other project last, with its placement and file already saved
+      pending.sort((a, b) => late(a) - late(b));
       for (const p of pending) { await commit(p); n++; }
       if (n) { await refreshAfter('cavefile.set'); toast(`Saved ${n} change${n > 1 ? 's' : ''} into “${projName()}”`); }
     } catch (e) { console.warn('[workspace] save failed', e); toast('Could not save into the project: ' + e.message); }
@@ -631,6 +729,10 @@
     // The project caves made of this file (name, what they are made of, remove).
     FL.liveCaves(pj.P).filter(c => (c.sources || []).some(s => s.file === name)).slice(0, 4)
       .forEach(c => A.editCave && out.push([`Cave “${c.name}”…`, () => A.editCave(c.id), 'Rename it, see what it is made of']));
+    if (saved && FL.liveCaves(pj.P).some(c => (c.sources || []).some(s => s.file === name) || pj.P.aliases[name] === c.id)) {
+      const q = cavesOfFile(name).map(c => queuedCaveMove(c.id)).find(Boolean);
+      out.push([q ? `Cancel the move to ${q.toName}` : 'Move to another project…', () => askCaveMove(name), 'The cave with its files, notes, leads, segments, labels, sketches and documents; it moves on Save, each project keeping a record']);
+    }
     if (saved) out.push(['Remove from project', () => removeCaveFile(name), 'Out of the project (→ moves it to My data instead)']);
     return out;
   }
@@ -682,5 +784,6 @@
 
   window._saveAll = saveClick;
   window._pjWs = { opening, placeCaltopo, autosave, save, saveClick, discard, discardAsk, badge, scan, removed, leave, enter, adopt, label, unloadProject,
-                   owns, moveCave, moving, loadProjectCave, projName, moveItem, movingItem, layerId, addLayer, caveMenu, pcRow, removeCaveFile };
+                   owns, moveCave, moving, loadProjectCave, projName, moveItem, movingItem, layerId, addLayer, caveMenu, pcRow, removeCaveFile,
+                   askCaveMove, queueFeatures, featsOf, addCave, mineStyle, labels: LBL, readOnly };
 })();

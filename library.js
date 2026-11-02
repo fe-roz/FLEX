@@ -34,6 +34,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const FL = require('./viewer_build/libs/flexlib.js');            // the rules (replay, moves) — the same file the page runs
 
 const ROOT = process.env.FLEX_LIBRARY_DIR || path.join(__dirname, 'user_files', 'library');   // env: tests
 const USER_FILES = path.dirname(ROOT);
@@ -177,11 +178,15 @@ function lines(text) {
 }
 const fileText = f => { const t = fs.readFileSync(f, 'utf8'); return t && !t.endsWith('\n') ? t + '\n' : t; };
 
-function read(scope) {
+function read(scope, at) {
   const dirs = scopeDirs(scope);
   if (!dirs) return '';
-  return dirs.map(d => logFiles(d).map(n => fileText(path.join(d, n))).join('')).join('');
+  const text = dirs.map(d => logFiles(d).map(n => fileText(path.join(d, n))).join('')).join('');
+  // A snapshot: only the entries up to a moment (an ISO time, or a day = the end of it).
+  if (at) { const t = FL.snapshotTime(at); if (!t) return ''; return lines(text).filter(e => !e.t || e.t <= t).map(e => JSON.stringify(e)).join('\n') + '\n'; }
+  return text;
 }
+const entriesOf = scope => lines(read(scope));
 
 // Numbering: one series per device and scope. For "docs" the series spans
 // every project's docs folder (one replay reads them all, so ids must not repeat).
@@ -224,8 +229,10 @@ function merge(scope, entries, pid) {
   fresh.forEach(e => { if (!byDev.has(e.dev)) byDev.set(e.dev, []); byDev.get(e.dev).push(JSON.stringify(e)); });
   byDev.forEach((ls, dev) => fs.appendFileSync(path.join(d, `log-${dev}.jsonl`), ls.join('\n') + '\n'));
   if (byDev.has(device())) _seq.delete(scope);       // our own entries came back (a restore): renumber from the files
+  if (fresh.some(e => e.op === 'project.archive') && scopeProject(scope)) mirrorArchived(scopeProject(scope));   // archived on another device
   return fresh.length;
 }
+const scopeProject = scope => (String(scope).startsWith('p-') ? String(scope).slice(2) : null);
 
 // ── Stored files, by fingerprint ─────────────────────────────────────────────
 const nameRe = /^([0-9a-f]{64})\.([a-z]{2,4})$/;
@@ -284,6 +291,99 @@ function kvSet(k, v) {
   fs.writeFileSync(path.join(root(), 'kv.json'), JSON.stringify(o));
 }
 
+
+// ── Lifecycle: archive, move a cave to another project (doc 14, rule 9) ──────
+// Archived is recorded in the project's own log (`project.archive`, so every device sees it) and mirrored in
+// projects.json so the list and the write guard needn't replay a log. An archived project takes no new entries
+// from the page (read-only); sync files still merge into it. Nothing here deletes a file or a folder.
+function mirrorArchived(pid) {
+  const list = projects(), p = list.find(x => x.id === pid);
+  if (!p) return;
+  const last = FL.sortEntries(entriesOf('p-' + pid).filter(e => e.op === 'project.archive')).pop();
+  const on = !!(last && last.archived !== false);
+  if (!!p.archived === on) return;
+  if (on) p.archived = true; else delete p.archived;
+  saveProjects(list);
+}
+const isArchived = pid => { const p = projects().find(x => x.id === pid); return !!(p && p.archived); };
+function setArchived(pid, on, who, note) {
+  if (!projects().some(p => p.id === pid && !p.private)) throw new Error('unknown project');
+  const e = append('p-' + pid, { op: 'project.archive', archived: !!on, who: String(who || '').slice(0, 40) || 'FLEX', note: note ? String(note).slice(0, 200) : undefined }, pid);
+  mirrorArchived(pid);
+  return { ok: true, archived: !!on, entry: e.id };
+}
+/** Copy a stored file (by fingerprint) into another project's folder; the original stays. */
+function copyBlobTo(name, toPid) {
+  const m = nameRe.exec(name || ''), src = blobPath(name), pd = projDir(toPid);
+  if (!m || !src || !pd) return false;
+  const dir = path.join(pd, '.flex', IMAGE.has(m[2]) ? 'renders' : 'blobs'), dest = path.join(dir, name);
+  if (fs.existsSync(dest)) return true;
+  if (src.startsWith(pd + path.sep)) return true;
+  fs.mkdirSync(dir, { recursive: true });
+  fs.copyFileSync(src, dest + '.part'); fs.renameSync(dest + '.part', dest);
+  if (_blobIndex) _blobIndex.set(name, dest);
+  return true;
+}
+/** Copy a folder's files into another (never over an existing file, never a link); returns how many were copied. */
+function copyTree(from, to) {
+  let n = 0;
+  const walk = (a, b) => {
+    let ents; try { ents = fs.readdirSync(a, { withFileTypes: true }); } catch (_) { return; }
+    for (const e of ents) {
+      if (e.name.startsWith('.')) continue;
+      const x = path.join(a, e.name), y = path.join(b, e.name);
+      if (e.isDirectory()) walk(x, y);
+      else if (e.isFile() && !fs.existsSync(y)) { fs.mkdirSync(b, { recursive: true }); fs.copyFileSync(x, y + '.part'); fs.renameSync(y + '.part', y); n++; }
+    }
+  };
+  walk(from, to);
+  return n;
+}
+/**
+ * Move a project cave, with what hangs on it, from one project to another. The source keeps a record ("moved to …")
+ * and the destination one ("moved in from …"). Ids stay the same, so the cave's notes, leads, segments, labels and
+ * its documents (tagged by cave id) are the same things on the other side. Files are copied, never deleted.
+ * Safe to repeat: `move` is one id per move; what the destination already has is not added again.
+ */
+function moveCave(from, to, cid, move, who) {
+  if (!ID_RE.test(from || '') || !ID_RE.test(to || '') || from === to) throw new Error('two different projects, please');
+  if (!ID_RE.test(move || '')) throw new Error('bad move id');
+  const all = projects().filter(p => !p.private), pf = all.find(p => p.id === from), pt = all.find(p => p.id === to);
+  if (!pf || !pt) throw new Error('unknown project');
+  if (isArchived(from) || isArchived(to)) throw new Error('an archived project is read-only: unarchive it first');
+  const S = FL.replayProject(entriesOf('p-' + from), from), T = FL.replayProject(entriesOf('p-' + to), to);
+  if (S.moves[move] && S.moves[move].dir === 'out') return { ok: true, already: true };           // done before
+  const D = FL.replayDocs(entriesOf('docs'));
+  const B = FL.caveBundle(S, D, cid);
+  if (!B) throw new Error('that cave is not in the project');
+  if (B.shared.length) throw new Error('a survey file of this cave also holds another cave; split the file into its caves first');
+  const rename = FL.moveRenames(B, T), by = String(who || '').slice(0, 40) || 'FLEX';
+  // 1. The files: survey files, document pages and originals, the cave's folder.
+  B.blobs.forEach(b => copyBlobTo(b.h + '.' + b.ext, to));
+  const spd = projDir(from), tpd = projDir(to);
+  let copied = 0;
+  if (spd && tpd) {
+    B.readable.forEach(r => {
+      const rel = String(r.path || '').replace(/\\/g, '/').split('/').filter(x => x && x !== '.' && x !== '..').join('/');
+      const f = rel && rel.split('/')[0] !== '.flex' ? path.join(spd, rel) : null;
+      if (!f || !fs.existsSync(f) || !fs.statSync(f).isFile() || fs.lstatSync(f).isSymbolicLink()) return;
+      const dest = path.join(tpd, rel);
+      if (!fs.existsSync(dest)) { fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.copyFileSync(f, dest + '.part'); fs.renameSync(dest + '.part', dest); copied++; }
+      indexFile(to, r.h + '.' + r.ext, rel);
+    });
+    const cdir = path.join('Caves', safeName(B.cave.name));
+    if (fs.existsSync(path.join(spd, cdir))) copied += copyTree(path.join(spd, cdir), path.join(tpd, cdir));
+  }
+  // 2. The destination: the cave and what hangs on it, then its record.
+  const put = (scope, pid, e) => append(scope, Object.assign({ who: by }, e), pid);
+  FL.caveMoveEntries(B, T, rename).forEach(e => put('p-' + to, to, e));
+  if (!(T.moves[move] && T.moves[move].dir === 'in')) put('p-' + to, to, FL.moveRecord(move, 'in', B, { id: from, name: pf.name }));
+  // 3. The source lets it go, and keeps the record.
+  FL.caveMoveClear(B, S).forEach(e => put('p-' + from, from, e));
+  put('p-' + from, from, FL.moveRecord(move, 'out', B, { id: to, name: pt.name }));
+  return { ok: true, already: false, cave: B.cave.name, counts: B.counts, renamed: rename, copiedFiles: copied };
+}
+
 // ── HTTP ─────────────────────────────────────────────────────────────────────
 function body(req, max = MAX_BODY) {
   return new Promise((resolve, reject) => {
@@ -296,7 +396,7 @@ function body(req, max = MAX_BODY) {
 const json = (res, data, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
 const pidOf = q => (q && ID_RE.test(String(q.project || '')) ? String(q.project) : null);
 /** What the page gets: id, name and where the folder is (for showing; no folder → still in the old library). */
-const projectsOut = () => projects().filter(p => !p.private).map(p => ({ id: p.id, name: p.name, folder: p.dir ? absDir(p.dir) : null }));
+const projectsOut = () => projects().filter(p => !p.private).map(p => ({ id: p.id, name: p.name, folder: p.dir ? absDir(p.dir) : null, archived: !!p.archived }));
 
 // ── The project folder, read only (📄 Docs) ────────────────────────────────
 const FILE_MIME = Object.assign({}, MIME, { jpeg: 'image/jpeg', tiff: 'image/tiff', gif: 'image/gif', txt: 'text/plain; charset=utf-8', csv: 'text/plain; charset=utf-8',
@@ -374,9 +474,25 @@ async function handle(req, res, rest, query) {
     if (req.method === 'GET' && rest === 'read') {
       if (!SCOPE_RE.test(q.scope || '')) return json(res, { error: 'bad scope' }, 400);
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
-      return res.end(read(q.scope));
+      return res.end(read(q.scope, q.at ? String(q.at) : null));            // at=<time or day>: a snapshot, the entries up to then
     }
-    if (req.method === 'POST' && rest === 'append') return json(res, append(q.scope, JSON.parse((await body(req, 1 << 20)).toString('utf8')), pidOf(q)));
+    if (req.method === 'POST' && rest === 'append') {
+      // An archived project is read-only: nothing is added to it from the page (only un-archiving).
+      const sp = scopeProject(q.scope), o = JSON.parse((await body(req, 1 << 20)).toString('utf8'));
+      if (((sp && isArchived(sp)) || (q.scope === 'docs' && pidOf(q) && isArchived(pidOf(q)))) && o.op !== 'project.archive') return json(res, { error: 'this project is archived (read-only)' }, 403);
+      return json(res, append(q.scope, o, pidOf(q)));
+    }
+    if (req.method === 'POST' && rest === 'archive' && pidOf(q)) { const o = JSON.parse((await body(req, 1 << 14)).toString('utf8')); return json(res, setArchived(pidOf(q), o.archived !== false, o.who, o.note)); }
+    if (req.method === 'POST' && rest === 'move-cave') {
+      const o = JSON.parse((await body(req, 1 << 14)).toString('utf8'));
+      return json(res, moveCave(String(q.from || ''), String(q.to || ''), String(o.cave || ''), String(o.move || ''), o.who));
+    }
+    if (req.method === 'GET' && rest === 'move-preview') {          // what would move (counts), for the question before it
+      const f = String(q.from || ''), cid = String(q.cave || '');
+      if (!ID_RE.test(f)) return json(res, { error: 'bad project' }, 400);
+      const B = FL.caveBundle(FL.replayProject(entriesOf('p-' + f), f), FL.replayDocs(entriesOf('docs')), cid);
+      return json(res, B ? { name: B.cave.name, counts: B.counts, shared: B.shared } : null);
+    }
     if (req.method === 'POST' && rest === 'merge') return json(res, { added: merge(q.scope, JSON.parse((await body(req)).toString('utf8')), pidOf(q)) });
     if (req.method === 'GET' && rest === 'projects') return json(res, projectsOut());
     if (req.method === 'POST' && rest === 'projects') { const o = JSON.parse((await body(req, 1 << 16)).toString('utf8')); setProject(o.id, o.name); return json(res, projectsOut()); }
@@ -470,4 +586,4 @@ async function handle(req, res, rest, query) {
   }
 }
 
-module.exports = { listTree, projFile, surveyExport, handle, device, read, append, merge, putBlob, blobPath, projects, setProject, adoptFolder, registerPrivate, indexFile, makeFolder, safeName, projDir, kv, kvSet, ROOT, PROJECTS_DIR };
+module.exports = { moveCave, setArchived, isArchived, mirrorArchived, copyTree, listTree, projFile, surveyExport, handle, device, read, append, merge, putBlob, blobPath, projects, setProject, adoptFolder, registerPrivate, indexFile, makeFolder, safeName, projDir, kv, kvSet, ROOT, PROJECTS_DIR };
