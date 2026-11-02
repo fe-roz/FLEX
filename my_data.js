@@ -61,7 +61,30 @@
     const S = await state(true);
     return Object.values(S.features || {}).filter(f => !f.removed && f.kind === 'point' && f.coords && f.coords[0])
       .map(f => ({ id: f.id, name: f.name || 'Point', lon: f.coords[0][0], lat: f.coords[0][1], h: f.coords[0][2] || 0,
-                   scale: SIZE[(f.style && f.style.size) || 'M'] || 1, group: (S.groups[f.group] || {}).name || '' }));
+                   scale: SIZE[(f.style && f.style.size) || 'M'] || 1, group: (S.groups[f.group] || {}).name || '',
+                   color: (f.style && f.style.color) || null, label: !(f.style && f.style.label === false) }));
+  }
+  /**
+   * Change a kept point (feature_editor.js): patch { name, desc, coords, group,
+   * color, label }; its style (size) is kept. → { ok } | { ok: false, error }.
+   */
+  async function update(id, patch) {
+    try {
+      const S = await state(true), f = S.features && S.features[id];
+      if (!f || f.removed) return { ok: false, error: 'it isn’t in My data any more' };
+      const e = { feature: id };
+      ['name', 'desc', 'group'].forEach(k => { if (patch[k] != null) e[k] = String(patch[k]); });
+      if (Array.isArray(patch.coords)) e.coords = patch.coords;
+      if (patch.color !== undefined || patch.label !== undefined) {
+        const st = Object.assign({}, f.style || {});
+        if (patch.color) st.color = patch.color;
+        if (patch.label !== undefined) { if (patch.label === false) st.label = false; else delete st.label; }
+        e.style = st;
+      }
+      await rec('feature.set', e);
+      await state(true);
+      return { ok: true };
+    } catch (err) { return { ok: false, error: err.message || String(err) }; }
   }
 
   // ── Data files ────────────────────────────────────────────────────────────
@@ -99,5 +122,5 @@
       .map(l => ({ id: l.id, url: l.blob ? '/api/lib/blob/' + l.blob : l.url, label: l.name || '' }));
   }
 
-  window._myData = { keepPoint, forgetPoint, points, keepFile, forgetFile, filesToRestore, state, record: rec };
+  window._myData = { keepPoint, forgetPoint, update, cached: () => _state, points, keepFile, forgetFile, filesToRestore, state, record: rec };
 })();

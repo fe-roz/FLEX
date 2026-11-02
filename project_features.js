@@ -69,7 +69,7 @@
   F.simplify = simplify;                               // tests
   // Drawn entities per feature, rebuilt only when the feature (or its colour) changed.
   const drawn = new Map();                             // feature id → { sig, ents }
-  const sigOf = (f, color) => { const c = f.coords || [], m = c[c.length >> 1]; return [f.kind, f.name, f.desc, color, c.length, c[0], m, c[c.length - 1], window._pjfLabelSig || ''].map(x => JSON.stringify(x)).join('|'); };
+  const sigOf = (f, color) => { const c = f.coords || [], m = c[c.length >> 1]; return [f.kind, f.name, f.desc, color, c.length, c[0], m, c[c.length - 1], window._pjfLabelSig || '', !!(f.style && f.style.label === false)].map(x => JSON.stringify(x)).join('|'); };
   function draw() {
     const v = V();
     if (!v || !window.Cesium) return;
@@ -91,7 +91,7 @@
       if (f.kind === 'point') {
         ents.push(F.src.entities.add(Object.assign(base, { position: pos[0],
           point: { pixelSize: 9, color: c, outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: 5000 },
-          label: window._pjfLabel(f.name || '') })));
+          label: f.style && f.style.label === false ? undefined : window._pjfLabel(f.name || '') })));          // name off: feature_editor.js
       } else if (f.kind === 'line') {
         ents.push(F.src.entities.add(Object.assign(base, { polyline: { positions: pos, width: 3, material: c, clampToGround: true } })));
       } else {
@@ -590,7 +590,7 @@
     clearTimeout(t);
     t = setTimeout(() => { draw(); render(); }, 120);
   }
-  window._onVectorSourcesChanged = () => { applyOverlayHidden(); clearTimeout(t); t = setTimeout(() => render(), 150); };
+  window._onVectorSourcesChanged = () => { applyOverlayHidden(); clearTimeout(t); t = setTimeout(() => { draw(); render(); }, 150); };   // draw too: this timer may have replaced a pending draw
   // A click on a project feature shows it in the details panel (info_panel.js);
   // editing is a second step there (✏️ Edit), not the click itself.
   const hook = setInterval(() => {
