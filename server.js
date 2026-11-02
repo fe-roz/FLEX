@@ -100,7 +100,7 @@ const server = http.createServer((req, res) => {
         handleExportDownload(req, res, sanitizedPath.slice('/api/export/download/'.length));
     // ── A project's own terrain + hillshade from the LiDAR (terrain_generate.js) ──
     } else if (sanitizedPath.startsWith('/api/terrain/')) {
-        terrainGen.handle(req, res, sanitizedPath.slice('/api/terrain/'.length));
+        terrainGen.handle(req, res, sanitizedPath.slice('/api/terrain/'.length), parsedUrl.query);
     // ── LiDAR derivations (vegetation density, voids) ────────────────────────
     } else if (sanitizedPath === '/api/lidar/derive' && req.method === 'POST') {
         handleLidarDerive(req, res);
@@ -723,8 +723,11 @@ function handleExportTerrain(req, res) {
             z_offset          = null,        // the point clouds' vertical shift in FLEX (m)
             dem_grid          = null,        // terrain from the map instead of the LiDAR (see below)
             polygon           = null,        // [[lon, lat], ...]: export only inside it (hard cut)
+            terrain_patches   = null,        // ['<sha>.bin', ...]: the project's terrain patches, laid over the map terrain
+            satellite_layer   = null,        // a map layer as the satellite texture (satellite_source 'layer'): see exportLayerArgs
+            hillshade_layer   = null,        // a map layer as the hillshade texture (hillshade_mode 'layer')
         } = params;
-        const hsMode  = ['lidar', 'dem', 'url', 'none'].includes(hillshade_mode) ? hillshade_mode : 'lidar';
+        const hsMode  = ['lidar', 'dem', 'url', 'none', 'layer'].includes(hillshade_mode) ? hillshade_mode : 'lidar';
         // Map terrain: heights FLEX sampled from its own 3D terrain on a lon/lat
         // grid, base64 float32 (row 0 = lat0). Then no point cloud is needed.
         let demGrid = null;
@@ -796,9 +799,13 @@ function handleExportTerrain(req, res) {
             '--resolution',        String(resolution),
             '--max-triangles',     String(max_triangles),
             '--tex-size',          String(tex_size),
-            '--satellite-source',  satellite_source,
-            '--hillshade',         (hsMode === 'url' && !hillshade_url) ? 'lidar' : hsMode,
         ];
+        // Map layers as textures and the project's terrain patches (terrain_generate.js exportLayerArgs / exportPatchFiles)
+        const satArgs = satellite_source === 'layer' ? terrainGen.exportLayerArgs('satellite', satellite_layer, settings.server.port) : null;
+        args.push(...(satArgs || ['--satellite-source', satellite_source === 'esri' ? 'esri' : 'bing']));
+        const hsLayer = hsMode === 'layer' ? terrainGen.exportLayerArgs('hillshade', hillshade_layer, settings.server.port) : null;
+        args.push(...(hsMode === 'layer' ? (hsLayer || ['--hillshade', demGrid ? 'dem' : 'lidar']) : ['--hillshade', (hsMode === 'url' && !hillshade_url) ? 'lidar' : hsMode]));
+        if (demGrid) for (const f of terrainGen.exportPatchFiles(terrain_patches)) args.push('--terrain-patch', f);
         if (hsMode === 'url' && hillshade_url) args.push('--hillshade-url', hillshade_url);
         if (mapName) args.push('--name', mapName);
         if (cavesFilePath) args.push('--caves', cavesFilePath);

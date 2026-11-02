@@ -93,6 +93,27 @@ m2, g2 = et.terrain_patch_grid(dem + 1, xb + e0, yb + n0, 1.0, zone, False,
                                [LON0, LAT0, LON0 + 0.045, LAT0 + 0.00008], max_side=3000)
 ok('grid capped at 3000 a side', m2['nx'] == 3000 and g2.shape == (m2['ny'], 3000), (m2['nx'], m2['ny']))
 
+# A big area keeps its resolution: cut into overlapping patches of at most max_side posts on one lattice.
+yb_big = np.arange(601) - 300.0                    # the box is tilted in UTM (grid convergence): a tall DEM reaches it all along
+dem_big = (np.arange(4000)[:, None] * 0.01 + np.zeros((4000, 600))) + 100.0       # rises 0.01 m per cell eastwards
+box_big = [LON0, LAT0, LON0 + 0.045, LAT0 + 0.00008]
+parts = list(et.terrain_patch_tiles(dem_big, xb + e0, yb_big + n0, 1.0, zone, False, box_big))
+ok('big area: two patches, none over 3000 a side', len(parts) == 2 and all(max(m['nx'], m['ny']) <= 3000 for m, _ in parts), [(m['nx'], m['ny']) for m, _ in parts])
+ok('big area: posts keep ~1 m', all(0.9 < m['cell_m'] < 1.15 for m, _ in parts), [m['cell_m'] for m, _ in parts])
+(ma, ga), (mb, gb) = parts
+ov_m = (ma['east'] - mb['west']) * 111320 * math.cos(math.radians(LAT0))
+ok('big area: overlap about 150 m, numbered parts', 140 < ov_m < 175 and ma['part'] == 1 and mb['part'] == 2, ov_m)
+ok('big area: together they reach both ends', abs(ma['west'] - box_big[0]) < 1e-9 and abs(mb['east'] - box_big[2]) < 1e-9)
+dl = (ma['east'] - ma['west']) / (ma['nx'] - 1)
+ok('big area: one lattice (a post of the second is a post of the first)', abs(((mb['west'] - ma['west']) / dl + 0.5) % 1 - 0.5) < 1e-6)
+j = ga.shape[0] // 2; x_of = lambda m, i: m['west'] + i * (m['east'] - m['west']) / (m['nx'] - 1)
+ia = ga.shape[1] - 5; ib = int(round((x_of(ma, ia) - mb['west']) / dl))
+ok('big area: the same ground in the overlap', abs(float(ga[j, ia]) - float(gb[j, ib])) < 0.02 and np.isfinite(ga[j, ia]), (ga[j, ia], gb[j, ib]))
+huge = et.plan_patches([LON0, LAT0, LON0 + 0.4, LAT0 + 0.4], 0.5)
+ok('huge area: at most 9 patches, posts widened to fit', len(huge['tiles']) <= et.PATCH_MAX_TILES and huge['cell_m'] > 0.5, (len(huge['tiles']), huge['cell_m']))
+ok('1 km: one patch at the asked resolution', et.plan_patches([LON0, LAT0, LON0 + 0.011, LAT0 + 0.009], 0.5)['cell_m'] == 0.5)
+ok('result.json lists the patches', [p['file'] for p in res['terrain_tiles']] == ['terrain.bin'] and res['terrain_tiles'][0]['nx'] == meta['nx'])
+
 # 4) The tiles
 T = json.loads((out / 'tiles' / 'tiles.json').read_text())
 zmin, zmax = T['minzoom'], T['maxzoom']

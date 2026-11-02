@@ -962,11 +962,50 @@ def _bing_quadkey(tx, ty, z):
     return ''.join(key)
 
 
-def fetch_imagery(grid, tex_size, source='bing', url_template=None, progress=print):
+def xyz_url(template, tx, ty, z):
+    """A slippy-map URL for tile (tx, ty) at zoom z from a template with {z} {x} {y}
+    ({reverseY} or {-y}: rows counted from the south; {s}: a subdomain)."""
+    flip = str(2 ** z - 1 - ty)
+    return (template.replace('{z}', str(z)).replace('{x}', str(tx)).replace('{reverseY}', flip)
+            .replace('{-y}', flip).replace('{y}', str(ty)).replace('{s}', 'a'))
+
+
+def warp_lonlat_image(path, bounds, grid, out_w, out_h, fill=(160, 160, 160), step=256):
+    """A picture that lies on a lon/lat box (west, south, east, north; its rows run linearly
+    from north to south: how FLEX keeps a GeoTIFF layer) resampled onto the UTM grid, as
+    warp_mercator_to_utm() does for tiles. Returns (RGB image, share of pixels the picture covers);
+    pixels it does not cover (or has no alpha for) take `fill`."""
+    from scipy.ndimage import map_coordinates
+    Image.MAX_IMAGE_PIXELS = None
+    src = Image.open(path).convert('RGBA')
+    sw, sh = src.size
+    W, S, E, N = [float(v) for v in bounds]
+    arr = np.asarray(src, dtype=np.float32)
+    out = np.empty((out_h, out_w, 3), dtype=np.uint8)
+    covered = 0
+    cols = grid.e0 + (np.arange(out_w) + 0.5) / out_w * grid.width
+    for j0 in range(0, out_h, step):
+        j1 = min(out_h, j0 + step)
+        rows = grid.n1 - (np.arange(j0, j1) + 0.5) / out_h * grid.height
+        EE, NN = np.meshgrid(cols, rows)
+        lat, lon = utm_to_latlon(EE, NN, grid.zone, grid.south)
+        fx = (lon - W) / (E - W) * sw - 0.5
+        fy = (N - lat) / (N - S) * sh - 0.5
+        inside = (fx >= -0.5) & (fx <= sw - 0.5) & (fy >= -0.5) & (fy <= sh - 0.5)
+        bands = [map_coordinates(arr[:, :, b], [fy, fx], order=1, mode='nearest') for b in range(4)]
+        a = (bands[3] / 255.0) * inside
+        for b in range(3):
+            out[j0:j1, :, b] = np.clip(bands[b] * a + fill[b] * (1 - a) + 0.5, 0, 255).astype(np.uint8)
+        covered += int((a > 0.5).sum())
+    return Image.fromarray(out, 'RGB'), covered / float(out_w * out_h)
+
+
+def fetch_imagery(grid, tex_size, source='bing', url_template=None, progress=print, tile_px=None):
     """Imagery for the export rectangle, resampled onto the UTM grid.
 
     source: 'bing' or 'esri' (satellite), or 'xyz' with url_template holding
-    {z}/{x}/{y} (a hillshade or any other slippy-map layer; 512-px tiles).
+    {z}/{x}/{y} (a hillshade or any other slippy-map layer; 512-px tiles unless
+    tile_px says otherwise). {reverseY} / {-y} count rows from the south (TMS), {s} is 'a'.
     """
     import random as _rand
     out_w, out_h = grid.tex_dims(tex_size)
@@ -986,9 +1025,8 @@ def fetch_imagery(grid, tex_size, source='bing', url_template=None, progress=pri
     elif source == 'xyz':
         if not url_template:
             raise ValueError('xyz imagery needs a url_template')
-        tile_px, label = 512, 'XYZ'
-        url_for = lambda tx, ty, z: (url_template.replace('{z}', str(z))
-                                     .replace('{x}', str(tx)).replace('{y}', str(ty)))
+        tile_px, label = int(tile_px or 512), 'XYZ'
+        url_for = lambda tx, ty, z: xyz_url(url_template, tx, ty, z)
         headers = {'User-Agent': 'FLEX-CaveViewer/1.0'}
     else:
         raise ValueError(f'unknown imagery source {source!r}')
@@ -997,6 +1035,24 @@ def fetch_imagery(grid, tex_size, source='bing', url_template=None, progress=pri
     img = warp_mercator_to_utm(canvas, (ox, oy), zoom, tile_px, grid, out_w, out_h)
     progress(f"  {label} texture: {out_w}x{out_h} px, warped onto UTM zone {grid.zone} "
              f"({target_mpp:.2f} m/px)")
+    return img
+
+
+def layer_texture(grid, tex_size, kind, url, tile_px, image, bounds, progress=print):
+    """A project map layer as an export texture: kind 'xyz' (tiles from `url`, fetched now: needs the
+    internet unless the tiles are on this computer) or 'image' (a picture on a lon/lat box).
+    Raises when it gives nothing, so the caller can fall back."""
+    if kind == 'xyz':
+        if not url:
+            raise ValueError('no tile link')
+        return fetch_imagery(grid, tex_size, source='xyz', url_template=url, tile_px=tile_px, progress=progress)
+    if not image or not bounds:
+        raise ValueError('no picture')
+    out_w, out_h = grid.tex_dims(tex_size)
+    img, share = warp_lonlat_image(image, bounds, grid, out_w, out_h)
+    if share < 0.01:
+        raise ValueError('the picture is not on the exported area')
+    progress(f"  Map layer picture: {out_w}x{out_h} px, covers {share * 100:.0f}% of the area")
     return img
 
 
@@ -1301,6 +1357,50 @@ def load_map_dem(dem_grid_path, rect, cell, zone, south=False, progress=print):
     return dem, x_bins, y_bins, x_min, y_min, valid
 
 
+RAMP_M = 60.0   # metres inside a patch's edge over which it hands over to the terrain beneath (as terrain_patch.js)
+
+
+def apply_terrain_patches(dem, x_bins, y_bins, zone, south, patch_files, progress=print):
+    """Lay the project's terrain patches (terrain_patch.js files, ellipsoid heights in the frame the caves
+    use, NaN = no data) over the map DEM, in order (a later one over an earlier). At each cell centre a
+    patch gives its own height (bilinear), and fades into what lies beneath over the last RAMP_M metres
+    before its edge, or before the edge of its data (a rotated DEM's empty corners), so there is no step.
+    Returns (dem, share of the cells a patch reached)."""
+    from scipy.ndimage import distance_transform_edt
+    cell = float(x_bins[1] - x_bins[0])
+    E, N = np.meshgrid(x_bins[:-1] + cell / 2, y_bins[:-1] + cell / 2, indexing='ij')
+    lat, lon = utm_to_latlon(E, N, zone, south)
+    del E, N
+    reached = np.zeros(dem.shape, dtype=bool)
+    for path in patch_files:
+        meta, g = read_terrain_patch(Path(path).read_bytes())
+        W, S, Ee, Nn = meta['west'], meta['south'], meta['east'], meta['north']
+        nx, ny = int(meta['nx']), int(meta['ny'])
+        box = (lon >= W) & (lon <= Ee) & (lat >= S) & (lat <= Nn)
+        if not box.any():
+            continue
+        mLon = 111320 * math.cos(math.radians((S + Nn) / 2)); mLat = 110540
+        # metres from each post to the nearest post without data (the box edge counts, by a ring of "no data")
+        ok = np.zeros((ny + 2, nx + 2), dtype=bool)
+        ok[1:-1, 1:-1] = np.isfinite(g)
+        dist = distance_transform_edt(ok, sampling=((Nn - S) / (ny - 1) * mLat, (Ee - W) / (nx - 1) * mLon)).astype(np.float32)[1:-1, 1:-1]
+        ii, jj = np.nonzero(box)
+        fx = (lon[ii, jj] - W) / (Ee - W) * (nx - 1)
+        fy = (Nn - lat[ii, jj]) / (Nn - S) * (ny - 1)
+        x0 = np.clip(np.floor(fx).astype(np.int64), 0, nx - 2); y0 = np.clip(np.floor(fy).astype(np.int64), 0, ny - 2)
+        u = np.clip(fx - x0, 0, 1); v = np.clip(fy - y0, 0, 1)
+        h = (g[y0, x0] * (1 - u) * (1 - v) + g[y0, x0 + 1] * u * (1 - v) + g[y0 + 1, x0] * (1 - u) * v + g[y0 + 1, x0 + 1] * u * v).astype(np.float64)
+        d = (dist[y0, x0] * (1 - u) * (1 - v) + dist[y0, x0 + 1] * u * (1 - v) + dist[y0 + 1, x0] * (1 - u) * v + dist[y0 + 1, x0 + 1] * u * v)
+        t = np.clip(d / RAMP_M, 0, 1)
+        keep = np.isfinite(h) & (d > 0)
+        w = (t * t * (3 - 2 * t))                           # 0 at the edge, 1 from RAMP_M in
+        base = dem[ii, jj]
+        dem[ii[keep], jj[keep]] = (base + w * (h - base))[keep]
+        reached[ii[keep], jj[keep]] = True
+        progress(f"  Project terrain patch ({nx}x{ny} posts of {meta.get('cell_m', '?')} m): {int(keep.sum()):,} cells")
+    return dem, float(reached.mean())
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Step 5 — Compute UV coordinates
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1588,7 +1688,7 @@ def convert_caves(caves_path, utm_center_e, utm_center_n, progress=print, zone=N
 # runs out). Nothing here reads a point cloud, so it is tested with synthetic
 # points (tools/test_project_terrain.py).
 
-PATCH_MAX_SIDE = 3000      # grid posts a side, as the browser bake (custom_layers.js): ~36 MB, under the library's 40 MB blob limit
+PATCH_MAX_SIDE = 3000      # grid posts a side of one patch, as the browser bake (terrain_patch.js): ~36 MB, under the library's 40 MB blob limit
 TILE_PX = 256
 
 
@@ -1627,26 +1727,17 @@ def box_ring(bbox, step_deg=None):
                       np.c_[e - (e - w) * t, np.full_like(t, n)], np.c_[np.full_like(t, w), n - (n - s) * t]])
 
 
-def terrain_patch_grid(dem, x_bins, y_bins, resolution, zone, south, ll_box, keep=None,
-                       max_side=PATCH_MAX_SIDE):
-    """The DEM (build_dem's [x, y] layout, values at cell centres, already in
-    the frame's heights) sampled bilinearly on a lon/lat grid over ll_box.
-    Posts about `resolution` apart, at most `max_side` a side. Where `keep`
-    (bool [x, y]) is False, or outside the DEM, the post is NaN: terrain_patch.js
-    fills it from the world terrain.
-    Returns (meta, grid float32 [ny, nx], row 0 = north)."""
-    W, S, E, N = [float(v) for v in ll_box]
-    lat0 = math.radians((S + N) / 2)
-    mLon, mLat = 111320 * math.cos(lat0), 110540
-    nx = int(round((E - W) * mLon / resolution)) + 1
-    ny = int(round((N - S) * mLat / resolution)) + 1
-    k = min(1.0, max_side / max(nx, ny))
-    nx, ny = max(2, int(round(nx * k))), max(2, int(round(ny * k)))
-    lons = W + (E - W) * np.arange(nx) / (nx - 1)
+PATCH_MAX_TILES = 9        # patches for one area (3 x 3): each is up to ~36 MB; same limit as the browser bake (terrain_patch.js)
+PATCH_OVERLAP_M = 150      # neighbouring patches overlap by this, more than twice the hand-over strip
+
+
+def _sample_box(dem, x_bins, y_bins, resolution, zone, south, lons, lats_all, keep):
+    """The DEM sampled bilinearly at (lons x lats_all) (degrees; lats from north to south), NaN where
+    outside the DEM or where `keep` (bool [x, y]) is False. float32 [len(lats_all), len(lons)]."""
     nxc, nyc = dem.shape
-    grid = np.full((ny, nx), np.nan, dtype=np.float32)
-    for j0 in range(0, ny, 256):                         # in bands: a 3000 x 3000 grid at once is a GB of temporaries
-        lats = N - (N - S) * np.arange(j0, min(ny, j0 + 256)) / (ny - 1)
+    grid = np.full((len(lats_all), len(lons)), np.nan, dtype=np.float32)
+    for j0 in range(0, len(lats_all), 256):                # in bands: a 3000 x 3000 grid at once is a GB of temporaries
+        lats = lats_all[j0:j0 + 256]
         LON, LAT = np.meshgrid(lons, lats)
         e, n = latlon_to_utm_np(LAT, LON, zone, south)
         fx = (e - x_bins[0]) / resolution - 0.5            # cell centre i sits at x_bins[0] + (i + 0.5) * res
@@ -1662,6 +1753,31 @@ def terrain_patch_grid(dem, x_bins, y_bins, resolution, zone, south, ll_box, kee
             inside &= keep[np.clip(np.rint(fx).astype(np.int64), 0, nxc - 1),
                            np.clip(np.rint(fy).astype(np.int64), 0, nyc - 1)]
         grid[j0:j0 + len(lats)] = np.where(inside, h, np.nan)
+    return grid
+
+
+def terrain_patch_grid(dem, x_bins, y_bins, resolution, zone, south, ll_box, keep=None,
+                       max_side=PATCH_MAX_SIDE):
+    """The DEM (build_dem's [x, y] layout, values at cell centres, already in
+    the frame's heights) sampled bilinearly on ONE lon/lat grid over ll_box.
+    Posts about `resolution` apart, at most `max_side` a side (coarser if the
+    box needs more; terrain_patch_tiles() keeps the resolution instead). Where
+    `keep` (bool [x, y]) is False, or outside the DEM, the post is NaN:
+    terrain_patch.js fills it from the world terrain.
+    Returns (meta, grid float32 [ny, nx], row 0 = north)."""
+    W, S, E, N = [float(v) for v in ll_box]
+    lat0 = math.radians((S + N) / 2)
+    mLon, mLat = 111320 * math.cos(lat0), 110540
+    nx = int(round((E - W) * mLon / resolution)) + 1
+    ny = int(round((N - S) * mLat / resolution)) + 1
+    k = min(1.0, max_side / max(nx, ny))
+    nx, ny = max(2, int(round(nx * k))), max(2, int(round(ny * k)))
+    grid = _sample_box(dem, x_bins, y_bins, resolution, zone, south,
+                       W + (E - W) * np.arange(nx) / (nx - 1), N - (N - S) * np.arange(ny) / (ny - 1), keep)
+    return _patch_meta(grid, W, S, E, N, nx, ny, mLon)
+
+
+def _patch_meta(grid, W, S, E, N, nx, ny, mLon):
     ok = np.isfinite(grid)
     if not ok.any():
         sys.exit("ERROR: no terrain inside the area")
@@ -1670,6 +1786,66 @@ def terrain_patch_grid(dem, x_bins, y_bins, resolution, zone, south, ll_box, kee
             'min': float(grid[ok].min()), 'max': float(grid[ok].max()),
             'cell_m': round((E - W) * mLon / (nx - 1), 3)}
     return meta, grid
+
+
+def plan_patches(ll_box, resolution, max_side=PATCH_MAX_SIDE, max_tiles=PATCH_MAX_TILES,
+                 overlap_m=PATCH_OVERLAP_M):
+    """How a lon/lat box is cut into patches of at most max_side posts a side (the
+    same plan as terrain_patch.js plan()): the posts keep `resolution` and one lattice, the
+    patches overlap by overlap_m, and if that takes more than max_tiles of them the
+    posts are widened (by 4% steps) until it fits.
+    Returns {cell_m, nx, ny, tiles: [(i0, j0, w, h)] in posts of the whole lattice}."""
+    W, S, E, N = [float(v) for v in ll_box]
+    mLon, mLat = 111320 * math.cos(math.radians((S + N) / 2)), 110540
+    cell = max(float(resolution), 0.01)
+    while True:
+        nx = int(round((E - W) * mLon / cell)) + 1
+        ny = int(round((N - S) * mLat / cell)) + 1
+        ov = int(math.ceil(overlap_m / cell))
+        def cut(n):
+            if n <= max_side:
+                return [(0, n)]
+            out, a, st = [], 0, max_side - ov
+            while True:
+                b = min(n, a + max_side)
+                out.append((a, b - a))
+                if b >= n:
+                    return out
+                a += st
+        tx, ty = cut(nx), cut(ny)
+        if len(tx) * len(ty) <= max_tiles:
+            return {'cell_m': cell, 'nx': nx, 'ny': ny,
+                    'tiles': [(i0, j0, max(2, w), max(2, h)) for j0, h in ty for i0, w in tx]}
+        cell *= 1.04
+
+
+def terrain_patch_tiles(dem, x_bins, y_bins, resolution, zone, south, ll_box, keep=None,
+                        max_side=PATCH_MAX_SIDE, max_tiles=PATCH_MAX_TILES, overlap_m=PATCH_OVERLAP_M):
+    """Like terrain_patch_grid(), but a big area keeps its resolution: it is cut into
+    overlapping patches (plan_patches). Yields (meta, grid) one at a time, west to east then
+    north to south, leaving out a patch that holds no data. meta['part'] is its number (1-based)
+    when there are several; meta['dem_cell_m'] the resolution asked for."""
+    W, S, E, N = [float(v) for v in ll_box]
+    mLon = 111320 * math.cos(math.radians((S + N) / 2))
+    pl = plan_patches(ll_box, resolution, max_side, max_tiles, overlap_m)
+    dlon, dlat = (E - W) / (pl['nx'] - 1), (N - S) / (pl['ny'] - 1)
+    made = 0
+    for k, (i0, j0, w, h) in enumerate(pl['tiles']):
+        west, north = W + i0 * dlon, N - j0 * dlat
+        east, south_ = west + (w - 1) * dlon, north - (h - 1) * dlat
+        grid = _sample_box(dem, x_bins, y_bins, resolution, zone, south,
+                           west + dlon * np.arange(w), north - dlat * np.arange(h), keep)
+        if not np.isfinite(grid).any():
+            continue
+        meta, grid = _patch_meta(grid, west, south_, east, north, w, h, mLon)
+        meta['cell_m'] = round(dlon * mLon, 3)
+        meta['dem_cell_m'] = float(resolution)
+        if len(pl['tiles']) > 1:
+            meta['part'] = k + 1
+        made += 1
+        yield meta, grid
+    if not made:
+        sys.exit("ERROR: no terrain inside the area")
 
 
 def pack_terrain_patch(meta, grid):
@@ -1835,15 +2011,26 @@ def project_terrain(x, y, z, ground_mode, out_dir, bbox, poly_ll=None, resolutio
     from scipy.ndimage import binary_dilation as _bd
     keep = _bd(cells_in, iterations=1) & ~drop
 
-    # The terrain patch, on a lon/lat grid over the area
-    meta, tgrid = terrain_patch_grid(dem, x_bins, y_bins, resolution, zone, south, bbox, keep=keep)
-    meta.update({'name': name or 'LiDAR terrain', 'source': source or 'LiDAR ground returns',
-                 'datum_shift_m': round(float(z_offset), 3), 'ground': ground_mode,
-                 'dem_cell_m': float(resolution)})
-    (out_dir / 'terrain.bin').write_bytes(pack_terrain_patch(meta, tgrid))
-    say(2)(f"Terrain patch: {meta['nx']}x{meta['ny']} posts of {meta['cell_m']} m, "
-           f"heights {meta['min']:.1f} to {meta['max']:.1f} m (ellipsoid)")
-    del tgrid
+    # The terrain patch(es), on a lon/lat grid over the area: one, or a few overlapping ones for a big area
+    parts = []
+    nm = name or 'LiDAR terrain'
+    for meta, tgrid in terrain_patch_tiles(dem, x_bins, y_bins, resolution, zone, south, bbox, keep=keep):
+        fn = 'terrain.bin' if not parts else f'terrain_{len(parts) + 1}.bin'
+        meta.update({'name': nm if 'part' not in meta else f"{nm} (part {meta['part']})",
+                     'source': source or 'LiDAR ground returns',
+                     'datum_shift_m': round(float(z_offset), 3), 'ground': ground_mode,
+                     'dem_cell_m': float(resolution)})
+        (out_dir / fn).write_bytes(pack_terrain_patch(meta, tgrid))
+        parts.append({'file': fn, 'bounds': [meta['west'], meta['south'], meta['east'], meta['north']],
+                      'nx': meta['nx'], 'ny': meta['ny'], 'cell_m': meta['cell_m'],
+                      'min': meta['min'], 'max': meta['max'], 'name': meta['name']})
+        say(2)(f"Terrain patch {len(parts)}: {meta['nx']}x{meta['ny']} posts of {meta['cell_m']} m, "
+               f"heights {meta['min']:.1f} to {meta['max']:.1f} m (ellipsoid)")
+        del tgrid
+    meta = {'name': nm, 'west': min(p['bounds'][0] for p in parts), 'south': min(p['bounds'][1] for p in parts),
+            'east': max(p['bounds'][2] for p in parts), 'north': max(p['bounds'][3] for p in parts)}
+    meta.update(nx=parts[0]['nx'], ny=parts[0]['ny'], cell_m=parts[0]['cell_m'],
+                min=min(p['min'] for p in parts), max=max(p['max'] for p in parts))
 
     # The "From LiDAR" hillshade, transparent outside the area
     grid = UtmGrid(x_bins[0], y_bins[0], x_bins[-1], y_bins[-1], zone, south)
@@ -1864,15 +2051,16 @@ def project_terrain(x, y, z, ground_mode, out_dir, bbox, poly_ll=None, resolutio
              'count': count, 'cell_m': float(hs_cell), 'name': meta['name']}
     (out_dir / 'tiles' / 'tiles.json').write_text(json.dumps(tiles, indent=1))
     result = {
-        'terrain': {'file': 'terrain.bin', 'bounds': [meta['west'], meta['south'], meta['east'], meta['north']],
-                    'nx': meta['nx'], 'ny': meta['ny'], 'cell_m': meta['cell_m'],
+        'terrain': {'file': 'terrain.bin', 'bounds': parts[0]['bounds'],
+                    'nx': parts[0]['nx'], 'ny': parts[0]['ny'], 'cell_m': parts[0]['cell_m'],
                     'min': meta['min'], 'max': meta['max']},
+        'terrain_tiles': parts,              # every patch, in order (the first is 'terrain'); later ones lie over earlier ones
         'tiles': dict(tiles, dir='tiles'),
         'z_offset': float(z_offset), 'ground': ground_mode, 'name': meta['name'],
         'utm_zone': zone, 'area_km2': round(polygon_area(poly_utm) / 1e6, 4),
     }
     (out_dir / 'result.json').write_text(json.dumps(result, indent=1))
-    progress(f"[done] Project terrain: {meta['nx']}x{meta['ny']} posts, {count} tiles (zoom {zmin}-{zmax})")
+    progress(f"[done] Project terrain: {len(parts)} patch(es), {count} tiles (zoom {zmin}-{zmax})")
     return result
 
 
@@ -1905,9 +2093,22 @@ def main():
     ap.add_argument('--spike-threshold', type=float, default=1.5,
                     help='Remove upward spikes > this many metres above local median '
                          '(10m radius window). Set to 0 to disable. Default: 1.5')
-    ap.add_argument('--satellite-source', default='bing', choices=['esri', 'bing'],
-                    help='Satellite imagery source: esri (default) or bing')
-    ap.add_argument('--hillshade', default=None, choices=['none', 'lidar', 'dem', 'url'],
+    ap.add_argument('--satellite-source', default='bing', choices=['esri', 'bing', 'xyz', 'image'],
+                    help='Satellite imagery source: esri (default) or bing; xyz = tiles from '
+                         '--satellite-url; image = a picture on a lon/lat box (--satellite-image, '
+                         '--satellite-bounds). A layer that fails falls back to bing/esri.')
+    ap.add_argument('--satellite-url', default='', help='XYZ tile URL template for --satellite-source xyz.')
+    ap.add_argument('--satellite-tile-px', type=int, default=256, help='Tile size of --satellite-url (default 256).')
+    ap.add_argument('--satellite-image', default=None, help='Picture (png/webp/jpg) for --satellite-source image.')
+    ap.add_argument('--satellite-bounds', nargs=4, type=float, metavar=('W', 'S', 'E', 'N'), default=None,
+                    help='Lon/lat box of --satellite-image, in degrees.')
+    ap.add_argument('--terrain-patch', action='append', default=[], metavar='BIN',
+        help='With --dem-grid: a project terrain patch (terrain_patch.js file) laid over the map terrain '
+             'where it covers the area; repeat for several (later ones on top).')
+    ap.add_argument('--hillshade-image', default=None, help='Picture on a lon/lat box for --hillshade image.')
+    ap.add_argument('--hillshade-bounds', nargs=4, type=float, metavar=('W', 'S', 'E', 'N'), default=None)
+    ap.add_argument('--hillshade-tile-px', type=int, default=512, help='Tile size of --hillshade-url (default 512).')
+    ap.add_argument('--hillshade', default=None, choices=['none', 'lidar', 'dem', 'url', 'image'],
         help='Hillshade layer: lidar (built from the ground returns; default), '
              'dem (shaded terrain DEM, quick), url (tiles from --hillshade-url) '
              'or none. If omitted: url when --hillshade-url is given, otherwise '
@@ -2023,11 +2224,17 @@ def main():
             dem, x_bins, y_bins, x0, y0, valid = load_map_dem(
                 args.dem_grid, rect, args.resolution, zone, south,
                 progress=lambda m: print(f"[2/7] {m}"))
+            if args.terrain_patch:
+                dem, patch_share = apply_terrain_patches(dem, x_bins, y_bins, zone, south, args.terrain_patch,
+                                                         progress=lambda m: print(f"[2/7] {m}"))
+                print(f"[2/7] Project terrain used for {patch_share * 100:.0f}% of the area")
             drop = border_nodata_mask(valid, args.resolution,
                                       progress=lambda m: print(f"[2/7] {m}"))
             covered_m2 = float((~drop).sum()) * args.resolution ** 2
             del valid
         else:
+            if args.terrain_patch:
+                print("[1/7] Project terrain patches are for the map-terrain export; the LiDAR is used as it is")
             # 1. Fetch points
             x, y, z, r, g, b, ground_mode = fetch_ept_points(
                 args.ept, q_rect, bbox_latlon=q_ll,
@@ -2097,10 +2304,22 @@ def main():
 
         # 4. Satellite texture, warped onto the UTM grid
         print(f"[4/7] Fetching satellite texture ({args.satellite_source.upper()})...")
-        texture = fetch_satellite_texture(
-            grid, tex_size=args.tex_size, source=args.satellite_source,
-            progress=lambda m: print(f"[4/7] {m}")
-        )
+        texture = None
+        sat_used = args.satellite_source
+        if args.satellite_source in ('xyz', 'image'):
+            # a map layer of the project as the texture; if it can't be had, the usual satellite imagery
+            try:
+                texture = layer_texture(grid, args.tex_size, args.satellite_source, args.satellite_url,
+                                        args.satellite_tile_px, args.satellite_image, args.satellite_bounds,
+                                        progress=lambda m: print(f"[4/7] {m}"))
+            except Exception as e:
+                print(f"[4/7] WARNING: the map layer could not be used ({e}); taking Bing imagery instead")
+                sat_used = 'bing'
+        if texture is None:
+            texture = fetch_satellite_texture(
+                grid, tex_size=args.tex_size, source=('bing' if args.satellite_source in ('xyz', 'image') else args.satellite_source),
+                progress=lambda m: print(f"[4/7] {m}")
+            )
         if poly_utm is not None:
             blank_outside(texture, grid, poly_utm)
 
@@ -2141,7 +2360,7 @@ def main():
             print("[4b/7] Fetching hillshade tiles...")
             try:
                 hs_img = fetch_imagery(grid, args.tex_size, source='xyz',
-                                       url_template=args.hillshade_url,
+                                       url_template=args.hillshade_url, tile_px=args.hillshade_tile_px,
                                        progress=lambda m: print(f"[4b/7] {m}"))
                 if poly_utm is not None:
                     blank_outside(hs_img, grid, poly_utm)
@@ -2151,6 +2370,32 @@ def main():
                 del hs_img
             except Exception as e:
                 print(f"[4b/7] WARNING: hillshade fetch failed ({e}) - skipping")
+        elif hs_mode == 'image':
+            print("[4b/7] Hillshade from a map layer picture...")
+            try:
+                if not args.hillshade_image or not args.hillshade_bounds:
+                    raise ValueError('no picture')
+                hs_w, hs_h = grid.tex_dims(min(args.tex_size, args.hillshade_max_px))
+                hs_img, share = warp_lonlat_image(args.hillshade_image, args.hillshade_bounds, grid, hs_w, hs_h, fill=(180, 180, 180))
+                if share < 0.01:
+                    raise ValueError('the picture is not on the exported area')
+                print(f"[4b/7] Map layer picture: {hs_w}x{hs_h} px, covers {share * 100:.0f}% of the area")
+            except Exception as e:
+                print(f"[4b/7] WARNING: the hillshade layer could not be used ({e}); shading the terrain instead")
+                hs_mode = 'dem'
+                try:
+                    hs_img, hs_cell = dem_hillshade(dem, args.resolution, grid, max_px=args.hillshade_max_px,
+                                                    progress=lambda m: print(f"[4b/7] {m}"))
+                except Exception as e2:
+                    hs_img = None
+                    print(f"[4b/7] WARNING: terrain hillshade failed ({e2}) - skipping")
+            if hs_img is not None:
+                if poly_utm is not None:
+                    blank_outside(hs_img, grid, poly_utm)
+                hs_buf = _hs_io.BytesIO()
+                hs_img.save(hs_buf, format='JPEG', quality=90)
+                hs_bytes = hs_buf.getvalue()
+                del hs_img
         else:
             print("[4b/7] Hillshade: none")
         hs_b64 = None
@@ -2248,6 +2493,8 @@ def main():
                 "hillshade_cell_m": (float(hs_cell) if hs_cell else None),
                 "terrain":      ('map' if map_terrain else 'lidar'),
                 "terrain_cell_m": float(args.resolution),
+                "terrain_patches": len(args.terrain_patch) if map_terrain else 0,
+                "satellite":    sat_used,
             }
             if tile_files:
                 caves_out["meta"]["texture_tiles"] = meta_entry(tcols, trows, True, tile_hs)

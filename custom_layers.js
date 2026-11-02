@@ -271,51 +271,8 @@
   }
 
   // ── A DEM → a terrain patch ──────────────────────────────────────────────
-  const MAX_TERRAIN_SIDE = 3000;
-  /** Heights (m above the ellipsoid; dz is added to the DEM's) on a lon/lat grid: { meta, grid }. */
-  function bakeTerrain(T, dz) {
-    if (!T.vals) throw new Error('this is not a DEM (one band of heights)');
-    const P = window.proj4;
-    const fwd = T.proj === null ? (lon, lat) => [lon, lat] : (P ? (lon, lat) => P('WGS84', T.proj, [lon, lat]) : null);
-    const inv = T.proj === null ? (x, y) => [x, y] : (P ? (x, y) => P(T.proj, 'WGS84', [x, y]) : null);
-    if (!fwd) throw new Error('the projection library is missing');
-    let W = 180, S = 90, E = -180, N = -90;
-    const edge = (c, r) => { const ll = inv(...T.toXY(c, r)); W = Math.min(W, ll[0]); E = Math.max(E, ll[0]); S = Math.min(S, ll[1]); N = Math.max(N, ll[1]); };
-    for (let i = 0; i <= 32; i++) { const c = T.w * i / 32, r = T.h * i / 32; edge(c, 0); edge(c, T.h); edge(0, r); edge(T.w, r); }
-    if (!(E > W && N > S)) throw new Error('its position makes no sense (check its map projection)');
-    const mLon = 111320 * Math.cos((S + N) / 2 * Math.PI / 180), mLat = 110540;
-    const p0 = T.toXY(0, 0), p1 = T.toXY(1, 1);
-    let cm = Math.max(Math.abs(p1[0] - p0[0]) * (T.proj === null ? mLon : 1), Math.abs(p1[1] - p0[1]) * (T.proj === null ? mLat : 1));
-    let nx = Math.round((E - W) * mLon / cm) + 1, ny = Math.round((N - S) * mLat / cm) + 1;
-    const k = Math.min(1, MAX_TERRAIN_SIDE / Math.max(nx, ny)); nx = Math.max(2, Math.round(nx * k)); ny = Math.max(2, Math.round(ny * k));
-    const G = 48, gx = new Float64Array((G + 1) * (G + 1)), gy = new Float64Array((G + 1) * (G + 1));
-    const t = T.toXY(0, 0), tx = T.toXY(1, 0), ty = T.toXY(0, 1);
-    const a = tx[0] - t[0], b = ty[0] - t[0], c2 = tx[1] - t[1], d = ty[1] - t[1], det = a * d - b * c2;
-    for (let j = 0; j <= G; j++) for (let i = 0; i <= G; i++) {
-      const xy = fwd(W + (E - W) * i / G, N - (N - S) * j / G), dx = xy[0] - t[0], dy = xy[1] - t[1];
-      gx[j * (G + 1) + i] = (d * dx - b * dy) / det; gy[j * (G + 1) + i] = (-c2 * dx + a * dy) / det;
-    }
-    const z = T.vals, nd = T.nd, bad = v => v !== v || (nd != null && v === nd) || v < -1e30 || v > 1e30;
-    const grid = new Float32Array(nx * ny).fill(NaN);
-    let lo = Infinity, hi = -Infinity;
-    for (let y = 0; y < ny; y++) {
-      const fy = y / (ny - 1) * G, j = Math.min(G - 1, Math.floor(fy)), v = fy - j;
-      for (let x = 0; x < nx; x++) {
-        const fx = x / (nx - 1) * G, i = Math.min(G - 1, Math.floor(fx)), u = fx - i, q = j * (G + 1) + i, q2 = q + G + 1;
-        const sc = (gx[q] * (1 - u) + gx[q + 1] * u) * (1 - v) + (gx[q2] * (1 - u) + gx[q2 + 1] * u) * v - 0.5;     // pixel centres sit at +0.5
-        const sr = (gy[q] * (1 - u) + gy[q + 1] * u) * (1 - v) + (gy[q2] * (1 - u) + gy[q2 + 1] * u) * v - 0.5;
-        if (sc < -0.5 || sr < -0.5 || sc > T.w - 0.5 || sr > T.h - 0.5) continue;
-        const c0 = Math.min(T.w - 2, Math.max(0, Math.floor(sc))), r0 = Math.min(T.h - 2, Math.max(0, Math.floor(sr)));
-        const fc = Math.min(1, Math.max(0, sc - c0)), fr = Math.min(1, Math.max(0, sr - r0));
-        const v00 = z[r0 * T.w + c0], v10 = z[r0 * T.w + c0 + 1], v01 = z[(r0 + 1) * T.w + c0], v11 = z[(r0 + 1) * T.w + c0 + 1];
-        if (bad(v00) || bad(v10) || bad(v01) || bad(v11)) continue;
-        const h = (v00 * (1 - fc) + v10 * fc) * (1 - fr) + (v01 * (1 - fc) + v11 * fc) * fr + dz;
-        grid[y * nx + x] = h; if (h < lo) lo = h; if (h > hi) hi = h;
-      }
-    }
-    if (!(hi > lo) && lo === Infinity) throw new Error('no heights found in it');
-    return { meta: { west: W, south: S, east: E, north: N, nx, ny, units: 'm', heightReference: 'WGS84 ellipsoid', min: lo, max: hi, cell_m: +((E - W) * mLon / (nx - 1)).toFixed(3) }, grid };
-  }
+  /** A DEM → terrain patches (terrain_patch.js bake): one, or a few overlapping ones for a big area. [{ meta, grid }] */
+  async function bakeTerrain(T, dz) { return (await window._terrainPatch.bake(T, dz)).tiles; }
   /** A DEM GeoTIFF → a terrain patch in the project (or My data). Returns the layer id. */
   async function addTerrain(file, name) {
     if (!window._terrainPatch) throw new Error('the terrain patch code is missing');
@@ -327,14 +284,23 @@
     const dz = typeof window._pcDatumDz === 'function' ? window._pcDatumDz(ll0[1], ll0[0]) : -24.5;
     toast('Making terrain…');
     await new Promise(r => setTimeout(r, 30));
-    const { meta, grid } = bakeTerrain(T, dz);
-    meta.name = name || file.name.replace(/\.(tiff?|gtiff)$/i, ''); meta.source = file.name; meta.datum_shift_m = +dz.toFixed(3);
-    const packed = window._terrainPatch.pack(meta, grid), b = await store(packed, 'bin');
-    await keepCopy(meta.name + ' (terrain patch).bin', packed);
-    const id = 'ter-' + b.slice(0, 12);
-    await record({ layer: id, kind: 'terrain', blob: b, bounds: [meta.west, meta.south, meta.east, meta.north].map(n => +n.toFixed(8)), name: meta.name });
-    toast(`Terrain “${meta.name}” added: ${meta.nx}×${meta.ny} cells of ${meta.cell_m} m, heights moved ${dz.toFixed(1)} m to the ellipsoid`);
-    return id;
+    const base = name || file.name.replace(/\.(tiff?|gtiff)$/i, ''), ids = [];
+    let first = null, cell = 0, n = 0;
+    // each patch is stored and let go as it is made (a big area is up to MAX_TILES of 36 MB)
+    const res = await window._terrainPatch.bake(T, dz, async (r, k, plan) => {
+      const meta = r.meta; cell = meta.cell_m; n++;
+      const parts = plan.tiles.length;
+      meta.name = parts > 1 ? `${base} (part ${k + 1})` : base; meta.source = file.name; meta.datum_shift_m = +dz.toFixed(3);
+      if (parts > 1) meta.part = k + 1;
+      const packed = window._terrainPatch.pack(meta, r.grid), b = await store(packed, 'bin');
+      await keepCopy(meta.name + ' (terrain patch).bin', packed);
+      const id = 'ter-' + b.slice(0, 12);
+      await record({ layer: id, kind: 'terrain', blob: b, bounds: [meta.west, meta.south, meta.east, meta.north].map(n => +n.toFixed(8)), name: meta.name });
+      ids.push(id); if (!first) first = meta;
+    });
+    const cut = res.plan.cell_m > (first.dem_cell_m || 0) * 1.02 ? `; the DEM is ${first.dem_cell_m} m, so its posts were widened to fit ${res.plan.tiles.length} patches` : '';
+    toast(`Terrain “${base}” added: ${n > 1 ? n + ' patches of up to ' + first.nx + '×' + first.ny : first.nx + '×' + first.ny} posts of ${cell} m, heights moved ${dz.toFixed(1)} m to the ellipsoid${cut}`);
+    return ids[0];
   }
 
   // ── Adding ───────────────────────────────────────────────────────────────
@@ -424,8 +390,10 @@
   }
   let cache = [];
   async function render(force) {
+    const all = await entries(force);
+    fillExport(all);
     const h = ensureHost(); if (!h) return;
-    cache = (await entries(force)).filter(l => l.kind === 'terrain');
+    cache = all.filter(l => l.kind === 'terrain');
     const pj = PJ(), pjName = (window._pjWs && window._pjWs.projName && window._pjWs.projName()) || (pj.P && pj.P.name) || 'the project';
     const rows = cache.map(l => `<div class="cl-row" data-id="${esc(l.id)}">
         <button type="button" class="cl-eye ui-eye${viewOf(l.id).show ? ' on' : ' half'}" data-act="eye" title="${viewOf(l.id).show ? 'Hide' : 'Show'}"></button>
@@ -436,6 +404,45 @@
       <button type="button" data-act="gen"${pj.pid ? '' : ' disabled'} title="${pj.pid ? 'Terrain and a hillshade made from the LiDAR for the project’s area, once, and kept in 📁 ' + esc(pjName) : 'Open a project first'}">⛰ Generate terrain + hillshade…</button></div>`;
     if (html === last) return;
     last = html; document.getElementById('cl-terrain-body').innerHTML = html;
+  }
+
+  // ── In the offline exports (index.html export dialog; server.js → export_terrain.py) ─────────
+  // The project's terrain patches that cover the export box go over the map terrain (Terrain: Map terrain), at their own
+  // resolution. A map layer can be the viewer's satellite or hillshade picture: a GeoTIFF layer is the picture FLEX
+  // made from it (no internet); a tile link (project tiles, CalTopo layer, any XYZ / TMS link) is downloaded while the
+  // export runs (it needs the internet, unless the tiles are on this computer), cut to the area and baked in; if that fails
+  // the export takes Bing imagery (hillshade: shades the terrain) and says so in its log. WMS links are not exported.
+  const exportable = l => (l.kind === 'imagery' && l.blob && l.bounds) || (l.kind === 'tiles' && l.url && /\{z\}/.test(l.url) && /\{x\}/.test(l.url) && /\{(y|-y|reverseY)\}/.test(l.url));
+  function fillExport(all) {
+    const sat = document.getElementById('export_satellite_source'), hs = document.getElementById('export_hillshade_mode');
+    if (!sat || !hs) return;
+    const ls = all.filter(exportable), sig = ls.map(l => keyOf(l) + '|' + l.name).join(';');
+    if (fillExport.sig === sig) return;
+    fillExport.sig = sig;
+    for (const sel of [sat, hs]) {
+      const cur = sel.value;
+      [...sel.options].filter(o => o.value.startsWith('layer:')).forEach(o => o.remove());
+      for (const l of ls) { const o = document.createElement('option'); o.value = 'layer:' + keyOf(l); o.textContent = '🗺 ' + (l.owner === 'p' ? '📁 ' : l.owner === 'c' ? '' : '👤 ') + (l.name || 'Layer') + (l.kind === 'tiles' ? ' (tile link, needs internet)' : ''); sel.appendChild(o); }
+      if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+    }
+    const note = document.getElementById('export_layers_note');
+    if (note) note.textContent = ls.length ? 'Your map layers can be used as the satellite or hillshade picture: a GeoTIFF layer is baked in as it is; a tile link is downloaded during the export (needs the internet) and falls back to the usual source if it fails. With Terrain: Map terrain, the project’s terrain patches that cover the area are used too.' : '';
+  }
+  /** Fill an export request: the project's terrain patches over the box, and the chosen layers. `o`: { w, s, e, n, mapTerrain, satelliteSource, hillshadeMode }. */
+  async function exportExtras(body, o) {
+    const all = await entries(false), byKey = new Map(all.map(l => [keyOf(l), l]));
+    if (o.mapTerrain) {
+      const hit = all.filter(l => l.kind === 'terrain' && l.blob && l.bounds && viewOf(l.id).show && l.bounds[2] > o.w && l.bounds[0] < o.e && l.bounds[3] > o.s && l.bounds[1] < o.n);
+      if (hit.length) body.terrain_patches = hit.map(l => l.blob);
+    }
+    const desc = l => l.kind === 'imagery' ? { kind: 'imagery', blob: l.blob, bounds: l.bounds, name: l.name } : { kind: 'tiles', url: l.url, name: l.name };
+    const sat = byKey.get(String(o.satelliteSource || '').replace(/^layer:/, ''));
+    if (/^layer:/.test(o.satelliteSource || '') && sat && exportable(sat)) { body.satellite_source = 'layer'; body.satellite_layer = desc(sat); }
+    else if (/^layer:/.test(o.satelliteSource || '')) body.satellite_source = 'bing';
+    const hs = byKey.get(String(o.hillshadeMode || '').replace(/^layer:/, ''));
+    if (/^layer:/.test(o.hillshadeMode || '') && hs && exportable(hs)) { body.hillshade_mode = 'layer'; body.hillshade_layer = desc(hs); }
+    else if (/^layer:/.test(o.hillshadeMode || '')) body.hillshade_mode = o.mapTerrain ? 'dem' : 'lidar';
+    return body;
   }
   async function removeById(id) {
     const l = (await entries()).find(x => x.id === id); if (!l) return;
@@ -600,9 +607,11 @@
     async function keep(R, pid, name) {
       if (PJ().pid !== pid) throw new Error('the project was closed: the files are in its folder, but the layers were not added');
       const T = R.terrain, H = R.tiles, nm = R.name || name;
-      await record({ layer: 'ter-' + T.blob.slice(0, 12), kind: 'terrain', blob: T.blob, bounds: T.bounds.map(n => +(+n).toFixed(8)), name: nm });
+      // one terrain layer per patch (a big area is several, overlapping; later ones lie over earlier ones)
+      const parts = Array.isArray(R.terrains) && R.terrains.length ? R.terrains : [T];
+      for (const [k, P] of parts.entries()) await record({ layer: 'ter-' + P.blob.slice(0, 12), kind: 'terrain', blob: P.blob, bounds: P.bounds.map(n => +(+n).toFixed(8)), name: parts.length > 1 ? `${nm} (part ${k + 1})` : nm });
       await record({ layer: 'hs-' + T.blob.slice(0, 12), kind: 'tiles', url: H.url, bounds: H.bounds.map(n => +(+n).toFixed(8)), minZoom: H.minzoom, maxZoom: H.maxzoom, name: nm + ' hillshade' }, { alpha: 0.75 });
-      toast(`⛰ “${nm}”: terrain ${T.nx}×${T.ny} posts of ${T.cell_m} m, hillshade ${H.count} tiles (${R.folder})`);
+      toast(`⛰ “${nm}”: terrain ${parts.length > 1 ? parts.length + ' patches of up to ' : ''}${T.nx}×${T.ny} posts of ${T.cell_m} m, hillshade ${H.count} tiles (${R.folder})`);
       const v = V(); if (v && T.bounds) v.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(...T.bounds), duration: 1.5 });
     }
     // A job that was running when the page went away: pick it up again.
@@ -652,5 +661,5 @@
   #cl-gen .clg-bar { height: 4px; background: rgba(255,255,255,.1); border-radius: 2px; overflow: hidden; } #cl-gen .clg-bar > div { height: 100%; width: 0; background: #00e5ff; transition: width .4s; }`;
   document.head.appendChild(st);
 
-  window._customLayers = { keyOf, gen: Gen, sync, render, pickFile, askTiles, removeById, addTerrain, bakeTerrain, addTiff, addTiles, remove, entries, readTiff, toLonLat, hillshade, drawn };
+  window._customLayers = { exportExtras, fillExport, keyOf, gen: Gen, sync, render, pickFile, askTiles, removeById, addTerrain, bakeTerrain, addTiff, addTiles, remove, entries, readTiff, toLonLat, hillshade, drawn };
 })();
