@@ -520,9 +520,9 @@
   function revealKey(arg) {
     if (!arg) return null;
     if (arg.source === 'cave') return arg.file || arg.cave;
-    if (arg.source === 'caltopo') return arg.id ? 'ct-' + arg.id : arg.folder ? 'ctf-' + arg.folder : null;
-    if (arg.source === 'file') return { url: arg.url, entityId: arg.id ? arg.entityId : arg.folder };
-    return arg.id || arg.folder || null;
+    // 📍 Surface's reveal() takes this object as it is ({source, id, folder, entityId, url};
+    // id null with a folder = that folder), so nothing is lost turning it into a string key.
+    return (arg.id || arg.folder) ? arg : null;
   }
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   function flash(row) {
