@@ -222,3 +222,10 @@ Short, in this order:
 | `modules/cave-depth.js` | station points, level frame, ground grids, depth from loaded LiDAR | `caveElevAt`, `lidarGroundAt`; `setupCaveDepth(...)` |
 | `modules/cave-utm.js` | UTM placement of caves (`_caveUtmConvertFn`, `_pcDatumDz`) | `latLonToUtm`; `setupCaveUtm(...)` |
 | `modules/cave-style-panel.js` | the cave style panel and "one style for every loaded cave" | `setupCaveStylePanel(...)` |
+| `modules/search-pins.js` | search pins (geocoder result → pin + fly-in), `window._clearSearchPins` | `escapeHtml` (pure); `setupSearchPins(...)` |
+| `modules/selection-monitor.js` | floating "Add Point Cloud" button, 100 ms selected-entity watcher | `setupSelectionMonitor(...)` |
+| `modules/update-checker.js` | `window._checkForUpdates` | `setupUpdateChecker()` |
+| `modules/poi-list.js` | Points of Interest panel list, `window._exportPoi` | `setupPoiList(...)` (called early in flex.js) |
+| `modules/workspace-hooks.js` | `window._ws` (project workspace hooks), `_caveGeometry` | `setupWorkspaceHooks(...)` |
+| `modules/measure-mode.js` | depth / distance measurement mode (V) | `setupMeasureMode(...)` |
+| `modules/html-labels.js` | HTML screen-space label overlay | `setupHtmlLabels(...)` |
