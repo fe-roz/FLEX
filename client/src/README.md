@@ -222,3 +222,8 @@ Short, in this order:
 | `modules/cave-depth.js` | station points, level frame, ground grids, depth from loaded LiDAR | `caveElevAt`, `lidarGroundAt`; `setupCaveDepth(...)` |
 | `modules/cave-utm.js` | UTM placement of caves (`_caveUtmConvertFn`, `_pcDatumDz`) | `latLonToUtm`; `setupCaveUtm(...)` |
 | `modules/cave-style-panel.js` | the cave style panel and "one style for every loaded cave" | `setupCaveStylePanel(...)` |
+| `page/page-glue.js` | index.html's head script: `copyCoords`, `addEPT`, `addKMZ`, rail/nav-panel toggles | classic script (page wiring, not a feature module) |
+| `page/export-ui.js` | the export dialog: bbox/polygon draw, KML polygon, cave collection, LiDAR analysis, progress polling | classic script, window hooks (`_refreshEptDatasets`, …) |
+| `page/hag-controls.js` | live HAG filter controls (`#lp-hag-*`) | classic script, calls `window._hag*` |
+
+`page/` holds index.html's former inline scripts as **classic** `<script src>` files at the same place in the page, so they run at parse time exactly as the inline code did (an ES module would be deferred). They are not importable.
