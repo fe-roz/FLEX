@@ -1,7 +1,7 @@
 /**
  * context-menu.js — Right-click / long-press context menu for the Cesium globe.
  *
- * Adapted from Matt's FLEX implementation (git.code.taxi/matt/FLEX).
+ * Adapted from another FLEX implementation (credits: THIRD_PARTY.md).
  * Extra services added: Windy, PeakFinder.
  * All constants are inlined — no external module dependencies.
  */

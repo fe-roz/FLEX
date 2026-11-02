@@ -3482,7 +3482,7 @@ initSession(cesiumViewer, viewModel);
 
 // Shared helper: apply the correct Z matrix to a loaded point cloud based on
 // current toggle state.  Called at load time and on every toggle change.
-//   egm96 ON  → Matt's EGM96 precise geoid lookup (pcZscale + meanSeaLevel offset)
+//   egm96 ON  → precise EGM96 geoid lookup (pcZscale + meanSeaLevel offset; credits: THIRD_PARTY.md)
 //   usgsRef ON → fixed -32 m geoid lift (original USGS correction)
 //   both OFF   → original default: scale=1, fixed -32*0.766 offset
 function applyPcMatrix(pc) {

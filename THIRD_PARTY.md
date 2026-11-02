@@ -68,6 +68,11 @@ vendored copies are missing.
 | http-proxy | MIT | https://github.com/http-party/node-http-proxy |
 | potree (npm) | BSD-2-Clause | https://www.npmjs.com/package/potree |
 
+## Contributions from another FLEX branch
+
+- The context menu (`context-menu.js`) and the precise EGM96 geoid lookup (the EGM96 option in
+  🗺 Layers) were adapted from a contributor's FLEX branch. (Credit wording to be confirmed with them.)
+
 ## Icons
 
 `icons.js` holds FLEX's line icons. They follow the style of Lucide
