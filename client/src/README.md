@@ -222,3 +222,6 @@ Short, in this order:
 | `modules/cave-depth.js` | station points, level frame, ground grids, depth from loaded LiDAR | `caveElevAt`, `lidarGroundAt`; `setupCaveDepth(...)` |
 | `modules/cave-utm.js` | UTM placement of caves (`_caveUtmConvertFn`, `_pcDatumDz`) | `latLonToUtm`; `setupCaveUtm(...)` |
 | `modules/cave-style-panel.js` | the cave style panel and "one style for every loaded cave" | `setupCaveStylePanel(...)` |
+| `modules/cesium-datasources.js` | LiDAR footprint sources (USGS boundaries, backend catalog), OpenTopography WMS layer and click-to-query, Data Files list | `setupCesiumDatasources(...)` |
+| `modules/caltopo-map.js` | the CalTopo map link (KML and private-map JSON, in-place refresh), status row, key dialog, bookmarklet login | `normalizeCaltopoUrl`, `caltopoMapId`, `caltopoFeatureSig` (pure); `setupCaltopoMap(...)` |
+| `modules/layer-list.js` | the Layers panel: section toggle and the manual layer list | `setupLayerList(...)` |
