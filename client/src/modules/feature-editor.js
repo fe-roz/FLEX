@@ -1,6 +1,6 @@
-// feature_editor.js — one editor for a point, line or area on the surface,
+// feature-editor.js — one editor for a point, line or area on the surface,
 // wherever it comes from, so an item edits the same way from the info panel
-// (info_panel.js) and from a row's ⋯ menu in 📍 Surface (surface_columns.js).
+// (info-panel.js) and from a row's ⋯ menu in 📍 Surface (surface-columns.js).
 //
 // An item is known by a "ref" (refOf): where it comes from and what it is now.
 //   { source: 'project' | 'mydata' | 'caltopo' | 'file' | 'other',
@@ -12,7 +12,7 @@
 //     srcName (CalTopo map / data file name), created / updated ({ t, who }),
 //     editable, reason (why not, in plain words) }
 // Edits go to the item's own source:
-//   project   the project's records (feature.set, as project_features.js does)
+//   project   the project's records (feature.set, as project-features.js does)
 //   mydata    My data's records (window._myData.update / forgetPoint)
 //   caltopo   window._ctWrite.update / remove (caltopo write), whose answer
 //             { ok } | { queued } | { conflict, mine, theirs } | { ok: false, error, readOnly }

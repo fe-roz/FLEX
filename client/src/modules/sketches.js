@@ -12,8 +12,8 @@
 // Without a folder the original is kept as a stored file of the project.
 //
 // Hooks: project.js's Files tab calls filesList() (the grouped view, drop a scan
-// on it to attach); cave_columns.js ⋯ → Add sketch… calls addForFile(); the
-// details panel counts sketches (info_panel.js, isSketch).
+// on it to attach); cave-columns.js ⋯ → Add sketch… calls addForFile(); the
+// details panel counts sketches (info-panel.js, isSketch).
 //
 // window._sketches = { isSketch, attach, addForFile, filesList, targetLabel, ACCEPT }
 (function () {
@@ -127,7 +127,7 @@
     if (ids.length) { T.at = 0; A.toast(ids.length === 1 ? 'Sketch added to ' + labelOf(target) : ids.length + ' sketches added to ' + labelOf(target)); }
     return ids;
   }
-  /** ⋯ → Add sketch… on a cave row (cave_columns.js): the project cave(s) that survey file belongs to. */
+  /** ⋯ → Add sketch… on a cave row (cave-columns.js): the project cave(s) that survey file belongs to. */
   async function addForFile(name) {
     if (!pj.pid) { await needProject(); return; }
     const caves = FL.liveCaves(pj.P).filter(c => (c.sources || []).some(s => s.file === name));

@@ -46,17 +46,17 @@ export const CAVE_STATION_NEAR_M     = 1500;   // ... within this distance (m)
 
 // Colour by: 'survey' (each survey's colour), 'elev' (elevation), 'depth'
 // (depth below ground) or 'hard' (passage difficulty from the LRUDs, scored as
-// in the portable viewer: cave_layers.js). Every loaded cave at once; elevation
+// in the portable viewer: cave-layers.js). Every loaded cave at once; elevation
 // and depth over one shared range (2nd–98th percentile of all their stations)
 // so caves compare directly. Lines, dots and walls, each vertex from its own
 // drawn position, so it is right however the cave was placed.
 // 'review' / 'segment': by the open project's segments — their review state,
-// or a colour each (project_segments.js sets window._caveShotColour; without
+// or a colour each (project-segments.js sets window._caveShotColour; without
 // it, survey colours).
 export const CAVE_COLOUR_MODES = ['survey', 'elev', 'depth', 'hard', 'review', 'segment'];
 
 // The range the colour ramp spans for a set of values: the 2nd–98th percentile
-// (percentileRange, cave_layers.js); depth always starts at the surface.
+// (percentileRange, cave-layers.js); depth always starts at the surface.
 export function fitColourRange(vals, mode, percentileRange) {
   const R = percentileRange(vals);
   if (R && mode === 'depth' && R.lo < 0) R.lo = Math.min(0, R.hi - 1);   // starts at the surface
@@ -169,7 +169,7 @@ export function setupCaveDisplay({
   };
 
   // Cave lines and station dots are primitives with lazy pick ids: route the
-  // viewer's click through cave_layers.js so they still select like entities.
+  // viewer's click through cave-layers.js so they still select like entities.
   installLazyPick(cesiumViewer);
 
   // When a cave entity is selected on the globe, expand and highlight its survey in the list
@@ -587,7 +587,7 @@ export function setupCaveDisplay({
     if (convertFn) {
       // Lines: one primitive per cave, a polyline per chain of shots with a
       // colour per vertex (survey colour, or elevation). Each chain's pick id
-      // turns into the clicked shot's info (see cave_layers.js).
+      // turns into the clicked shot's info (see cave-layers.js).
       const dopt = imp.displayOptions || defaultDisplayOptions(imp.parsed);
       const colourAt = _caveColourAt(imp, convertFn), hard = state.colourMode === 'hard';
       const review = _caveHookMode() && typeof window._caveShotColour === 'function' ? window._caveShotColour(imp, state.colourMode) : null;

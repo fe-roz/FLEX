@@ -1,4 +1,4 @@
-// folder_style.js — a folder's display settings, applied to everything inside
+// folder-style.js — a folder's display settings, applied to everything inside
 // it (📍 Surface; the folder's ⋯ menu and its palette button open the dialog).
 //
 // Settings: { labels: true|false, color: '#rrggbb', width: 1–10 (lines and
@@ -158,7 +158,7 @@
       const f = P && P.features[fid]; if (!f || !F) return null;
       const st = readStore(store({ kind: 'project' }));
       const s = merge(f.group ? F.groupPath(P, f.group).map(g => st[g.id] || null) : [st[''] || null]);
-      if (s && f.group) delete s.color;                     // drawn by project_features.js from the records
+      if (s && f.group) delete s.color;                     // drawn by project-features.js from the records
       return s && Object.keys(s).length ? s : null;
     }
     const my = prop(e, 'myFeature');

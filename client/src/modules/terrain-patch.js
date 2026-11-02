@@ -1,4 +1,4 @@
-// terrain_patch.js — a high-resolution terrain patch inside world terrain.
+// terrain-patch.js — a high-resolution terrain patch inside world terrain.
 //
 // Wraps the viewer's terrain provider. Where a tile lies in the patch (a baked grid of WGS84
 // ellipsoid heights) its heights come from the grid; elsewhere from the original provider.
@@ -197,7 +197,7 @@
   }
 
 
-  // ── A DEM (GeoTIFF read by custom_layers.js) → one or several patches ───────────────────────
+  // ── A DEM (GeoTIFF read by custom-layers.js) → one or several patches ───────────────────────
   const MAX_SIDE = 3000;          // posts a side of one patch: 36 MB as float32, under the library's 40 MB blob limit
   const MAX_TILES = 9;            // patches for one DEM (3 x 3 at most: ~4.4 km a side at 0.5 m, 324 MB of heights in memory)
   const OVERLAP_M = 150;          // neighbouring patches overlap by this (more than twice the hand-over strip)

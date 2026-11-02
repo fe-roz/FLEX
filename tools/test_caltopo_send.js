@@ -1,6 +1,6 @@
-// caltopo_send.js, the part that runs without a browser: entrance tags (old and new forms), what a project
+// caltopo-send.js, the part that runs without a browser: entrance tags (old and new forms), what a project
 // item becomes in CalTopo, which folders are found or created. Made-up names only.
-const S = require('../caltopo_send.js');
+const S = require('./load_classic')(require('path').join(__dirname, '..', 'client', 'src', 'modules', 'caltopo-send.js'));
 let pass = 0, fail = 0;
 const ok = (l, c, i) => { if (c) pass++; else { fail++; console.log('FAIL ' + l + (i !== undefined ? ' ' + JSON.stringify(i) : '')); } };
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);

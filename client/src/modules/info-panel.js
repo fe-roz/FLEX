@@ -1,4 +1,4 @@
-// info_panel.js — what a click on the map shows, in two steps.
+// info-panel.js — what a click on the map shows, in two steps.
 //
 //   Brief      in the details panel on the right (inspector.js): the name,
 //              what it is, where it comes from (with its CalTopo status), a
@@ -26,7 +26,7 @@
 //              its header, pinned (📌) or used (a click inside, e.g. on a
 //              video). × or Esc closes it.
 //   Edit       a second step: Edit in either panel opens the shared editor
-//              (feature_editor.js, window._featEdit), which writes to the
+//              (feature-editor.js, window._featEdit), which writes to the
 //              item's own source (project, My data, CalTopo); data files are
 //              read-only and say so.
 //   Show in    opens the pane that lists it (📍 Surface, 🕳 Caves) and reveals
@@ -37,7 +37,7 @@
 //              until then project features are revealed here.
 //
 // What it can show (a "subject"): a project's own point, line or area
-// (project_features.js), a lead on a surface point, a cave, survey or station
+// (project-features.js), a lead on a surface point, a cave, survey or station
 // (their card in the details panel is the brief; selection.js, project.js),
 // a CalTopo feature, a data-file feature, a My data point, any other entity.
 //
@@ -95,7 +95,7 @@
 
   // ── Heights ──────────────────────────────────────────────────────────────
   // Terrain: sampled from the globe's terrain provider (most detailed where it
-  // says what it has, level 14 otherwise, as cave_ground.js does); kept until
+  // says what it has, level 14 otherwise, as cave-ground.js does); kept until
   // the terrain changes.
   const tCache = new Map();
   window.addEventListener('flex-terrain-changed', () => tCache.clear());
@@ -613,7 +613,7 @@
     t.appendChild(el('span', 'inf-tile-t', d.title || 'Untitled'));
     return t;
   }
-  // The last edit of this subject (feature_editor.js), said where it is seen.
+  // The last edit of this subject (feature-editor.js), said where it is seen.
   function resultNode(s) {
     const R = I.result;
     if (!R || !s || R.key !== s.key || Date.now() - R.at > 120000) return null;
@@ -803,7 +803,7 @@
     if (s && !same) setTimeout(() => { if (I.subject === s) reveal(s, { open: false }); }, 60);     // its pane open: its row
   }
   function clear() { I.subject = null; collapse(); if (window._inspector && window._inspector.brief()) window._inspector.setBrief(null); }
-  /** Saved changes (project.js, feature_editor.js, CalTopo): the same thing again, fresh. */
+  /** Saved changes (project.js, feature-editor.js, CalTopo): the same thing again, fresh. */
   let tChg = 0;
   function changed() {
     clearTimeout(tChg);
@@ -821,7 +821,7 @@
   }
   // The details panel closed (its ×, Esc, a click on empty map).
   function panelClosed() { if (I.subject || I.x) { I.subject = null; collapse(); } }
-  // An edit (feature_editor.js): say how it went here too, then show it fresh.
+  // An edit (feature-editor.js): say how it went here too, then show it fresh.
   window.addEventListener('flex-feature-edited', e => {
     const d = e.detail || {}, s = I.subject, r = d.ref;
     if (s && r && s.ref && !s.refIsHost && s.ref.source === r.source && String(s.ref.id) === String(r.id)) {

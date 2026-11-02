@@ -70,7 +70,7 @@
     return inProject.cave(name) && !moving(name, 'out');
   }
   /**
-   * 📍 Surface (surface_columns.js): a sitting's points ('pgroup'), one point
+   * 📍 Surface (surface-columns.js): a sitting's points ('pgroup'), one point
    * ('point') or a data file ('file') to the project ('in') or My data ('out').
    * m = { kind, id, name, dir, url? }. The same again cancels it.
    */
@@ -586,7 +586,7 @@
       if (ct.length > 1) toast(`This project has ${ct.length} CalTopo maps; FLEX shows one at a time (the first)`);
       for (const l of layers.filter(l => l.kind === 'file')) { await L.step('Data file: ' + (l.name || '')); if (!files.has(l.url)) await w.addDataFile(l.url, l.name, { noKeep: true }); }
       for (const l of layers.filter(l => !['pointcloud', 'caltopo', 'file'].includes(l.kind))) await L.step(l.name || 'Layer');
-      if (layers.some(l => l.kind === 'imagery' || l.kind === 'tiles' || l.kind === 'terrain') && window._customLayers) await withTimeout(window._customLayers.sync(true), 10000);   // map layers: custom_layers.js
+      if (layers.some(l => l.kind === 'imagery' || l.kind === 'tiles' || l.kind === 'terrain') && window._customLayers) await withTimeout(window._customLayers.sync(true), 10000);   // map layers: custom-layers.js
       if (startup) {
         // At start, what else was loaded with this project open comes back too (from My data).
         const inP = new Set(FL.liveCavefiles(pj.P).map(f => f.file));
@@ -722,7 +722,7 @@
     return true;
   }
   /**
-   * 🕳 Caves → a row's ⋯ (cave_columns.js): the project's actions for a cave
+   * 🕳 Caves → a row's ⋯ (cave-columns.js): the project's actions for a cave
    * file. [[label, fn, title]].
    */
   function caveMenu(name, loaded) {

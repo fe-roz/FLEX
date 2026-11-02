@@ -20,7 +20,7 @@ const library = {
 };
 const gen = require('../terrain_generate')({ python: 'python3', script: 'x.py', library });
 
-// a patch file, written as terrain_patch.js pack() / export_terrain.py do
+// a patch file, written as terrain-patch.js pack() / export_terrain.py do
 function patch(W, S, E, N, nx, ny, f, name) {
   const head = Buffer.from(JSON.stringify({ format: 'flex-terrain-patch', version: 2, west: W, south: S, east: E, north: N, nx, ny, cell_m: (E - W) * 111320 * Math.cos(S * Math.PI / 180) / (nx - 1), name }));
   const pad = (4 - ((4 + head.length) % 4)) % 4, g = Buffer.alloc(nx * ny * 4);

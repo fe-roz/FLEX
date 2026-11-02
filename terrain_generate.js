@@ -4,10 +4,10 @@
 // The job runs the FLEX Field export's pipeline (export_terrain.py
 // --project-terrain): the same ground points, DEM (cloth, spike filter, the
 // point clouds' vertical shift) and "From LiDAR" hillshade, written as a
-// terrain patch (.bin, terrain_patch.js) and XYZ map tiles. When it is done the
+// terrain patch (.bin, terrain-patch.js) and XYZ map tiles. When it is done the
 // .bin goes into the project's library (a blob, like a browser-baked patch)
 // and the tiles into the project folder, FLEX maps/<name>/{z}/{x}/{y}.png. The
-// page then records the two layers (custom_layers.js), as for any other layer.
+// page then records the two layers (custom-layers.js), as for any other layer.
 //
 //   POST /api/terrain/generate   { project, bbox, polygon?, ept: [url…], resolution?, z_offset?, name? } → { jobId }
 //   GET  /api/terrain/status/<jobId>   { status, progress, message, error, result? }
@@ -45,7 +45,7 @@ function pngLA(w, h, la) {
   const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 4;
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', require('zlib').deflateSync(raw, { level: 6 })), chunk('IEND', Buffer.alloc(0))]);
 }
-/** A terrain patch file (terrain_patch.js format) → { west, south, east, north, nx, ny, g: Float32Array }. */
+/** A terrain patch file (terrain-patch.js format) → { west, south, east, north, nx, ny, g: Float32Array }. */
 function readPatch(buf) {
   const n = buf.readUInt32LE(0), m = JSON.parse(buf.subarray(4, 4 + n).toString('utf8'));
   if (m.format !== 'flex-terrain-patch') throw new Error('not a terrain patch');

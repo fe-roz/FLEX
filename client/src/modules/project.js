@@ -24,7 +24,7 @@
   pj._setProject = setProject;                   // tests
   pj._archive = archive;
 
-  // ── For project_segments.js (segments and the review queue) ───────────────
+  // ── For project-segments.js (segments and the review queue) ───────────────
   window._pjApi = { pj, FL, el, btn, esc, when, toast, dialog, choose, record, render, refreshCard, openCard, flyTo,
     caveFor, caveName, partsOf, stationPos, stationsOf, docEl, docOpen, docByPage, describe, headsFor, targetLabel,
     editNote, noteEl, declAt, yearOf, imps, who, ensureAuthor, linkFile, editCave, newProject, refresh, editLead, renameProject, editDescription, setProject, importSync, acceptAbove, reload, archive, post, closeCard,

@@ -17,10 +17,10 @@
 
 // Elevation of a drawn point: its height on the globe less the cave's datum
 // shift (_heightDz), i.e. back to heights above sea level as in the file.
-// F: a level frame (cave_ground.js levelFrame) whose at(x, y, z) gives { h }.
+// F: a level frame (cave-ground.js levelFrame) whose at(x, y, z) gives { h }.
 export function caveElevAt(imp, F, x, y, z) { return F.at(x, y, z).h - (imp._heightDz || 0); }
 
-// The LiDAR ground under one spot (info_panel.js): the mean height of the
+// The LiDAR ground under one spot (info-panel.js): the mean height of the
 // ground returns (class 2) of the given clouds (lidarClouds() below) within r
 // metres, as drawn. → { h, n } or null (no cloud there, or none of its ground loaded).
 export function lidarGroundAt(clouds, lon, lat, r = 3) {
@@ -75,7 +75,7 @@ export function setupCaveDepth({
     return pts;
   }
 
-  // A level frame at the cave's middle (cave_ground.js), for elevations.
+  // A level frame at the cave's middle (cave-ground.js), for elevations.
   function _caveFrame(imp) {
     if (imp._frameFor === imp._convertFn && imp._frame) return imp._frame;
     const pts = _caveStationPts(imp);
@@ -88,7 +88,7 @@ export function setupCaveDepth({
   }
 
   // ── Ground grids (depth below ground) ──
-  // Sampled from the globe's terrain over each cave's footprint (cave_ground.js),
+  // Sampled from the globe's terrain over each cave's footprint (cave-ground.js),
   // once per placement that leaves the sampled area. Kept on the cave as
   // imp._ground: a grid, or { none: true } when there is no terrain to read.
   const GROUND_STEP_M = 20;               // footprint points along shots this far apart
@@ -171,7 +171,7 @@ export function setupCaveDepth({
 
   // ── Depth from loaded LiDAR (on demand) ──
   // The ground-classified returns of the point clouds in memory replace the
-  // terrain on each cave's ground grid where they reach (cave_ground.js), the
+  // terrain on each cave's ground grid where they reach (cave-ground.js), the
   // terrain stays elsewhere. Heights as the clouds are drawn (pc.matrix, i.e.
   // the _pcDatumDz shift), the frame the caves are drawn in. Only what Potree
   // has loaded counts, so it is best done with the clouds streamed in over the

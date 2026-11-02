@@ -1,4 +1,4 @@
-// Workspace hooks for projects (project_workspace.js): window._ws, and
+// Workspace hooks for projects (project-workspace.js): window._ws, and
 // _caveGeometry (a cave's size and footprint without drawing it).
 // Moved out of flex.js unchanged (flex.js split, wave 2; see client/src/README.md).
 // Members and their order are those of the old window._ws; what stays in
@@ -14,7 +14,7 @@ export function setupWorkspaceHooks({ Cesium, cesiumViewer, viewModel, parsePLT,
     _caveImports, _pcUrlByName, caltopoState, loadedDataFiles, _placeCave, _finishCaveLoad, removePc,
     loadCaltopoKml, clearCaltopo, renderDataFileList, addDataFile, removeDataFile, _fetchPltCache,
     _addPltRecent, _removePltRecent, _caveUtmConvertFn }) {
-  // ── Workspace hooks for projects (project_workspace.js) ──────────────────────
+  // ── Workspace hooks for projects (project-workspace.js) ──────────────────────
   // What is loaded (caves with their survey text and placement, point clouds,
   // CalTopo, URL data files), and loading / unloading them. "switching" is set
   // while a project opens or closes, so unloading isn't taken as removing.
@@ -55,7 +55,7 @@ export function setupWorkspaceHooks({ Cesium, cesiumViewer, viewModel, parsePLT,
       loadedDataFiles.filter(f => f.dataSource).map(f => ({ kind: 'file', name: f.label, url: f.url, ds: f.dataSource }))),
       restoreView(snap, opts) { if (!snap) return; if (snap.camera) restoreCamera(snap, cesiumViewer, opts || {}); if (snap.layers) restoreLayerState(snap, viewModel); },
     recentCave(name) { const i = (state.recents.plt || []).findIndex(r => r.name === name); return i >= 0 ? window._loadPltRecent(i) : null; },
-    // My data's caves (the old Recent list) and cave sets, for cave_columns.js.
+    // My data's caves (the old Recent list) and cave sets, for cave-columns.js.
     recents: () => (state.recents.plt || []).map(r => ({ name: r.name, georef: r.georef || null, displayOptions: r.displayOptions || null, lastUsed: r.lastUsed || null })),
     sets: () => (state.recents.pltSets || []).map(st => ({ name: st.name, savedAt: st.savedAt || null, caves: (st.caves || []).map(c => c.name) })),
     recentText: name => _fetchPltCache(name),
@@ -68,11 +68,11 @@ export function setupWorkspaceHooks({ Cesium, cesiumViewer, viewModel, parsePLT,
     caveIndex: name => _caveImports.findIndex(x => x && x.name === name),
     caveVisible: name => { const x = _caveImports.find(c => c && c.name === name); return !!(x && x.visible !== false); },
     caveGeometry: (text, georef) => _caveGeometry(text, georef),
-    parse: text => parsePLT(text),                     // a survey file read as FLEX reads it (survey_export.js)
+    parse: text => parsePLT(text),                     // a survey file read as FLEX reads it (survey-export.js)
   };
 
   // A cave's size and where it lies, from its survey file and placement,
-  // without drawing it (project cards and footprints, projects_panel.js).
+  // without drawing it (project cards and footprints, projects-panel.js).
   // → { length, depth (m), stations, pts: [[lon, lat], …] (at most ~1500) } or null.
   function _caveGeometry(text, georef) {
     if (!text || !georef) return null;

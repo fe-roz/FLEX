@@ -1,4 +1,4 @@
-// custom_layers.js — your own map layers, in 🗺 Layers → "Your map layers":
+// custom-layers.js — your own map layers, in 🗺 Layers → "Your map layers":
 //
 //   - a GeoTIFF (a hillshade, an orthophoto, a scanned map that has been
 //     georeferenced, or a DEM, which is turned into a hillshade), in
@@ -13,14 +13,14 @@
 // Drawn above the built-in layers, in the order listed.
 //
 // Also listed (owner 'c', read-only): the loaded CalTopo map's own custom layers
-// (caltopo_layers.js, window._ctLayers), drawn like tile links, marked with a map
+// (caltopo-layers.js, window._ctLayers), drawn like tile links, marked with a map
 // icon; they come and go with the CalTopo map. A tile layer whose tiles don't load
 // gets a plain warning (toast, "no tiles" on its row).
 //
 // Library entries: layer.set { layer, kind: 'imagery', blob: '<sha>.webp',
 // bounds: [west, south, east, north], name } or { kind: 'tiles', url, name }
 // (+ bounds, minZoom, maxZoom for the tiles a project made), or { kind: 'terrain',
-// blob: '<sha>.bin', bounds, name } (a terrain patch, terrain_patch.js).
+// blob: '<sha>.bin', bounds, name } (a terrain patch, terrain-patch.js).
 //
 // ⛰ Generate terrain + hillshade: the project's own DEM and hillshade made once
 // from the LiDAR by the server (terrain_generate.js, the FLEX Field export's
@@ -37,7 +37,7 @@
   // ── Personal view: shown, see-through ────────────────────────────────────
   const VK = 'flex.cl.view';
   const views = () => { try { return JSON.parse(localStorage.getItem(VK) || '{}'); } catch (_) { return {}; } };
-  const defs = new Map();                        // a first look other than shown / opaque (CalTopo map layers: caltopo_layers.js)
+  const defs = new Map();                        // a first look other than shown / opaque (CalTopo map layers: caltopo-layers.js)
   const viewOf = id => Object.assign({ show: true, alpha: 1 }, defs.get(id) || {}, views()[id] || {});
   function setView(id, v) { const all = views(); all[id] = Object.assign(viewOf(id), v); try { localStorage.setItem(VK, JSON.stringify(all)); } catch (_) {} }
 
@@ -271,7 +271,7 @@
   }
 
   // ── A DEM → a terrain patch ──────────────────────────────────────────────
-  /** A DEM → terrain patches (terrain_patch.js bake): one, or a few overlapping ones for a big area. [{ meta, grid }] */
+  /** A DEM → terrain patches (terrain-patch.js bake): one, or a few overlapping ones for a big area. [{ meta, grid }] */
   async function bakeTerrain(T, dz) { return (await window._terrainPatch.bake(T, dz)).tiles; }
   /** A DEM GeoTIFF → a terrain patch in the project (or My data). Returns the layer id. */
   async function addTerrain(file, name) {

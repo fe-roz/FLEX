@@ -13,26 +13,26 @@ import {
   setWorkflowActionStatus,
   setWorkflowBusy,
   registerUpdateWorkflowButtons
-} from "./api.js";
+} from "./client/src/modules/api.js";
 
-import { viewModel, loadLayers, updateLayerList, LAYER_CATALOG, addCatalogLayer, removeCatalogLayer } from "./layers.js";
-import { initializeContextMenu } from "./context-menu.js";
+import { viewModel, loadLayers, updateLayerList, LAYER_CATALOG, addCatalogLayer, removeCatalogLayer } from "./client/src/modules/layers.js";
+import { initializeContextMenu } from "./client/src/modules/context-menu.js";
 import {
   initSession, notifyPcLoaded, notifyCaltopoChanged, saveSession, loadSession,
   restoreCamera, restoreLayerState, onCameraFrame,
   notifyDataFilesChanged, notifyCaveVisibilityChanged, notifyPoiVisibilityChanged,
   notifyPanelSectionToggled, notifyPointBudgetChanged,
   notifySearchPinsChanged,
-} from "./session.js";
-import { initSpaceMouse } from "./spacemouse.js";
-import { breakoutToPlt, isBreakoutFile } from "./breakout.js";
-import { readWallsShapefileSets, wallsToPlt, isWallsSelection } from "./walls.js";
+} from "./client/src/modules/session.js";
+import { initSpaceMouse } from "./client/src/modules/spacemouse.js";
+import { breakoutToPlt, isBreakoutFile } from "./client/src/modules/breakout.js";
+import { readWallsShapefileSets, wallsToPlt, isWallsSelection } from "./client/src/modules/walls.js";
 import { parsePLT, utmToLatLon, setupCompassPlt } from "./client/src/modules/compass-plt.js";
 import { rampColor, rampRgb, rampCss, percentileRange, lazyPick, materialize, installLazyPick,
          addLinePrimitive, addStationLayer, removePrimitive,
-         lrudWH, steepScore, whRgb, wallHardRgb, hardLegendRows, HARD_UNKNOWN } from "./cave_layers.js";
+         lrudWH, steepScore, whRgb, wallHardRgb, hardLegendRows, HARD_UNKNOWN } from "./client/src/modules/cave-layers.js";
 import { levelFrame, planGroundGrid, pushFootLine, sampleGroundGrid, gridCovers, depthBelowGround,
-         binLidarGround, mergeLidarGround, gridFromLidar } from "./cave_ground.js";
+         binLidarGround, mergeLidarGround, gridFromLidar } from "./client/src/modules/cave-ground.js";
 
 // A line icon (icons.js) in front of a label in HTML built here: `${_ic('pin')}Label`.
 const _ic = name => (window.icon ? window.icon(name, '1.15em', 'ico-l') : '');

@@ -2,7 +2,7 @@
 // through the FLEX server's CalTopo API (key kept on this computer), and the
 // bookmarklet login. CalTopo JSON -> entities updates the same data source in
 // place; pulls are handed to window._ctWrite._pulled / window._ctLayers
-// (caltopo_write.js, caltopo_layers.js). Moved out of flex.js unchanged (the
+// (caltopo-write.js, caltopo-layers.js). Moved out of flex.js unchanged (the
 // flex.js split, wave 2; see client/src/README.md).
 //
 // Pure exports (no browser, no Cesium), node-testable:
@@ -84,7 +84,7 @@ const _ctColor = (c, d) => { c = String(c || '').replace(/^#/, ''); return /^[0-
 // source in place: a feature that didn't change keeps its entity, so its line
 // isn't draped on the ground again (that is the expensive part); a map that
 // didn't change at all costs nothing. Long tracks are drawn simplified (as
-// project features are, project_features.js): within ~2 m, at most 2000 points.
+// project features are, project-features.js): within ~2 m, at most 2000 points.
 function _ctSimplify(coords) {
   const S = window._pjfState && window._pjfState.simplify;
   return S && coords.length > 50 ? S(coords) : coords;
@@ -147,7 +147,7 @@ function _caltopoJsonToDataSource(result, ds) {
   return ds;
 }
 window._ctApplyJson = _caltopoJsonToDataSource;                // tests
-window._ctRefresh = () => _fetchCaltopoKml();                   // re-read the map now (caltopo_write.js, after an edit)
+window._ctRefresh = () => _fetchCaltopoKml();                   // re-read the map now (caltopo-write.js, after an edit)
 // Long KML lines (public maps, no key): simplified once after loading.
 function _ctSimplifyKml(ds) {
   const now = Cesium.JulianDate.now();
@@ -171,8 +171,8 @@ async function _fetchCaltopoKml() {
       const txt = await r.text();
       let j; try { j = JSON.parse(txt); } catch (_) { j = {}; }
       if (!r.ok) throw new Error(j.error || r.statusText);
-      if (window._ctWrite) window._ctWrite._pulled(mapId, j);           // edits, queue, changes (caltopo_write.js)
-      if (window._ctLayers) window._ctLayers.apply(mapId, j);           // the map's custom layers → 🗺 Layers (caltopo_layers.js)
+      if (window._ctWrite) window._ctWrite._pulled(mapId, j);           // edits, queue, changes (caltopo-write.js)
+      if (window._ctLayers) window._ctLayers.apply(mapId, j);           // the map's custom layers → 🗺 Layers (caltopo-layers.js)
       const offl = j.flexOffline ? `⚠ CalTopo not reachable: FLEX’s copy from ${new Date(j.flexPulled).toLocaleString()}, ` : '';
       const ds0 = caltopoState.dataSource;
       if (ds0 && ds0._ctJson && caltopoState._ctText === txt && caltopoState._ctMapId === mapId) {       // nothing changed: nothing to do
@@ -226,7 +226,7 @@ async function _fetchCaltopoKml() {
     cesiumViewer.dataSources.add(ds);
     caltopoState.dataSource = ds;
     syncMinimapCaltopoFeatures(ds);
-    if (window._onVectorSourcesChanged) window._onVectorSourcesChanged();   // folders, cave tags (project_features.js)
+    if (window._onVectorSourcesChanged) window._onVectorSourcesChanged();   // folders, cave tags (project-features.js)
     const t = new Date().toLocaleTimeString();
     _setCaltopoStatus(`✓ loaded ${t}`, '#8f8');
     renderCaltopoStatus();
@@ -243,7 +243,7 @@ async function loadCaltopoKml(rawUrl, intervalSecs) {
     _setCaltopoStatus('⚠ invalid CalTopo URL', '#f88');
     return;
   }
-  if (window._ctInterval) intervalSecs = window._ctInterval(intervalSecs);   // 0 = off, nothing under 30 s (caltopo_write.js)
+  if (window._ctInterval) intervalSecs = window._ctInterval(intervalSecs);   // 0 = off, nothing under 30 s (caltopo-write.js)
   { const s = document.getElementById('caltopo_interval_select'); if (s) s.value = String(intervalSecs); }
   _clearCaltopoTimers();
   caltopoState.url      = kmlUrl;

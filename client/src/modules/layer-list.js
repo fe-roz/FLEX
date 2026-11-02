@@ -136,13 +136,13 @@ function renderLayerList() {
     handle.style.userSelect = 'none';
     handle.title = 'Drag to reorder';
 
-    // Visibility switch (ui_kit.js)
+    // Visibility switch (ui-kit.js)
     const chk = window.uiSwitch(!!layer.show, on => { layer.show = on; }, null, { small: true });
     chk.setAttribute('aria-label', 'Show ' + layer.name);
 
     // Name label
     const nameSpan = document.createElement('span');
-    const ctl = layer._custom && layer._custom.owner === 'c';      // from the CalTopo map (caltopo_layers.js): a line icon, read-only
+    const ctl = layer._custom && layer._custom.owner === 'c';      // from the CalTopo map (caltopo-layers.js): a line icon, read-only
     if (ctl && window.icon) { nameSpan.innerHTML = window.icon('map', 12, 'lp-ct-ico'); nameSpan.appendChild(document.createTextNode(' ' + layer.name)); }
     else window.iconLabel(nameSpan, layer._custom ? [layer._custom.owner === 'p' ? 'folder' : 'user', layer.name] : layer.name);
     if (layer._custom) nameSpan.title = ctl ? 'From the CalTopo map (change or remove it in CalTopo)' : layer._custom.owner === 'p' ? 'Part of the project' : 'In My data';
@@ -253,7 +253,7 @@ function renderLayerList() {
     picker.appendChild(item);
   });
 
-  if (window._customLayers) {            // your own: a GeoTIFF or a tile link (custom_layers.js); in a project they go into it (📁)
+  if (window._customLayers) {            // your own: a GeoTIFF or a tile link (custom-layers.js); in a project they go into it (📁)
     [[['doc', 'GeoTIFF file…'], () => window._customLayers.pickFile()], [['link', 'Tile link…'], () => window._customLayers.askTiles()]].forEach(([label, fn]) => {
       const item = document.createElement('div');
       window.iconLabel(item, label);

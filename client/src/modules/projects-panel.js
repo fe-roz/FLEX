@@ -1,4 +1,4 @@
-// projects_panel.js — the top of 📁 Project.
+// projects-panel.js — the top of 📁 Project.
 //
 // No project open: Projects, a card per project (its numbers, its folder, an
 // Open button), ＋ New, and the projects' footprints on the map (click one,
@@ -7,7 +7,7 @@
 // changes (Save / Discard) when any wait; the numbers as tiles that open
 // where they come from (🕳 Caves, ❓ Leads, 📄 Docs, 📍 Surface, ✓ Review,
 // History); Connected: the CalTopo map (Open in CalTopo ↗, the surface
-// features it lacks as a KML; matching in caltopo_match.js), terrain and
+// features it lacks as a KML; matching in caltopo-match.js), terrain and
 // hillshade layers, point clouds, each with a switch and a link to its panel;
 // Folder: what waits in To sort. Field survey, Sync files and History follow
 // (project.js); "Entering as" at the bottom.
@@ -263,7 +263,7 @@
         });
         b.append(none, cards);
         filter();
-        // A switch (ui_kit.js): it takes effect at once.
+        // A switch (ui-kit.js): it takes effect at once.
         const tog = window.uiSwitch(showFootprints(), on => { try { localStorage.setItem(prefKey, on ? '1' : '0'); } catch (_) {} drawFootprints(); },
           'Show project footprints on the map', { className: 'pj-sub pjx-tog' });
         b.appendChild(tog);
@@ -339,7 +339,7 @@
   // ── The parts that follow what is loaded (redrawn when they change) ──────
   const ws_ = () => window._ws;
   const mapId = u => (String(u || '').match(/\/m\/([A-Za-z0-9]+)/) || [])[1] || null;
-  const VK = 'flex.cl.view';                             // custom_layers.js keeps each map layer's shown / hidden here
+  const VK = 'flex.cl.view';                             // custom-layers.js keeps each map layer's shown / hidden here
   const layerShown = id => { try { const v = JSON.parse(localStorage.getItem(VK) || '{}')[id]; return !v || v.show !== false; } catch (_) { return true; } };
   function setLayerShown(id, on) {
     try { const all = JSON.parse(localStorage.getItem(VK) || '{}'); all[id] = Object.assign({ show: true, alpha: 1 }, all[id] || {}, { show: !!on }); localStorage.setItem(VK, JSON.stringify(all)); } catch (_) {}

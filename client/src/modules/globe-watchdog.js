@@ -1,4 +1,4 @@
-// globe_watchdog.js — bring the globe back when a map layer stalls at startup.
+// globe-watchdog.js — bring the globe back when a map layer stalls at startup.
 //
 // Cesium draws a level-0 globe tile only once at least one shown imagery layer
 // has its picture for that tile (or every layer has finished, even by failing).

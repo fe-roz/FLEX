@@ -29,7 +29,7 @@
     // 📁 panel keeps the rest. Without them (older page), all in one.
     const docsRoot = $('pj-docs-panel') || root, leadsRoot = $('pj-leads-panel') || root, revRoot = $('pj-review-panel') || root, tripsRoot = $('pj-trips-panel');
     [docsRoot, leadsRoot, revRoot, tripsRoot].forEach(r => { if (r && r !== root) r.textContent = ''; });
-    // The Projects list / the open project's overview (projects_panel.js).
+    // The Projects list / the open project's overview (projects-panel.js).
     if (window._pjx) window._pjx.top(root, section);
     else section(root, 'Project', true, b => {
       const row = el('div', 'pj-row');

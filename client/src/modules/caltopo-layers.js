@@ -1,4 +1,4 @@
-// caltopo_layers.js — the CalTopo map's own custom layers, offered as map layers
+// caltopo-layers.js — the CalTopo map's own custom layers, offered as map layers
 // in 🗺 Layers (read-only: FLEX never writes a layer back to CalTopo).
 //
 // How CalTopo keeps them (worked out on 2026-11-01 from CalTopo's own web app,
@@ -30,7 +30,7 @@
 //   terrain shading) are other classes, drawn by CalTopo's servers: not read here.
 //
 // What FLEX does with them: TILE, TMS and WMS (in EPSG:3857 or lon/lat) are
-// drawn like a tile link (custom_layers.js), one row each in 🗺 Layers marked
+// drawn like a tile link (custom-layers.js), one row each in 🗺 Layers marked
 // as from the CalTopo map. Shown / hidden and see-through are kept per
 // computer, like other layers; the first time, an overlay is shown and a base
 // layer hidden (a base layer covers everything below it), unless the map's

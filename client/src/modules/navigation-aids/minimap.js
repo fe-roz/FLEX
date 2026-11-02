@@ -460,7 +460,7 @@ export function setupMinimap({ Cesium, ol, cesiumViewer, state }) {
         pinchRotate: false
       })
     });
-    // compass, view footprint, terrain / point-cloud outlines (minimap_view.js)
+    // compass, view footprint, terrain / point-cloud outlines (minimap-view.js)
     window._miniMapOl = state.miniMapMap;
     if (window._minimapView) window._minimapView.attach(state.miniMapMap);
     initMiniMapLayerControls();

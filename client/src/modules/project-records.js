@@ -94,7 +94,7 @@
     if (window._info) window._info.changed(e);
   }
   // Switching project: what was on screen is saved and unloaded, the project's
-  // things load (project_workspace.js). keep: a new project takes what is on
+  // things load (project-workspace.js). keep: a new project takes what is on
   // screen now instead.
   async function setProject(pid, { keep = false, at = null } = {}) {
     const prev = pj.pid, snap = pid && at ? String(at) : null, change = (pid || null) !== prev || snap !== (pj.at || null);

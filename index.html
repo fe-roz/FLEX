@@ -17,9 +17,9 @@
     <script src="settings.js"></script>
     <!-- UI kit: switches, row eyes, their tokens (switch = takes effect now; .keep-box = tick to act later) -->
     <link rel="stylesheet" href="ui_kit.css">
-    <script src="ui_kit.js"></script>
-    <script src="icons.js"></script>  <!-- line icons: inline sprite, window.icon() -->
-    <script src="proxy-url-generator.js"></script>
+    <script src="client/src/modules/ui-kit.js"></script>
+    <script src="client/src/modules/icons.js"></script>  <!-- line icons: inline sprite, window.icon() -->
+    <script src="client/src/modules/proxy-url-generator.js"></script>
 
 
   <title>FLEX</title>
@@ -116,7 +116,7 @@
         color: rgba(255,255,255,0.3); padding: 8px 4px 3px;
         border-top: 1px solid rgba(255,255,255,0.08); margin-top: 2px;
       }
-      /* ── Icon strip (flex_rail.js) and the panel box beside it ─────────── */
+      /* ── Icon strip (flex-rail.js) and the panel box beside it ─────────── */
       #flex-rail { position: absolute; top: 8px; bottom: 8px; left: 8px; width: 52px; z-index: 11; box-sizing: border-box;
         background: rgba(12,15,21,0.9); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;
         display: flex; flex-direction: column; align-items: center; padding: 6px 0; gap: 2px; overflow-y: auto; scrollbar-width: none; }
@@ -834,7 +834,7 @@
       </div>
       <div id="html_label_container"></div>
       <div id="loadingOverlay"><h1>Loading...</h1></div>
-      <!-- ── Icon strip: one panel per kind of thing (flex_rail.js). Each icon
+      <!-- ── Icon strip: one panel per kind of thing (flex-rail.js). Each icon
            opens one of the panels in #toolbar, one at a time; the project-only
            ones (Docs, Leads, Trips, Review) are greyed with no project open. -->
       <nav id="flex-rail" aria-label="Panels">
@@ -878,7 +878,7 @@
             style="font-size:10px; display:none;"></span>
         </div>
 
-        <!-- The main nav is the icon strip (#flex-rail, flex_rail.js), outside this box. -->
+        <!-- The main nav is the icon strip (#flex-rail, flex-rail.js), outside this box. -->
 
         <!-- ── Server controls: hidden — JS still needs these IDs ────────── -->
         <button id="top_server_status_btn" type="button" style="display:none;">Connect to LAN Server</button>
@@ -927,7 +927,7 @@
           <div class="lp-panel-wrap">
 
             <!-- 📍 Surface: the master switch and tools, then Project | My data
-                 in two columns with folders opening in place (surface_columns.js) -->
+                 in two columns with folders opening in place (surface-columns.js) -->
             <div id="surf-cols"></div>
             <div class="sc-extra">
               <input type="checkbox" id="html_labels_toggle" checked hidden>  <!-- driven by 📍 Surface → Labels -->
@@ -1008,7 +1008,7 @@
                 <span class="lp-section-arrow">▸</span> Caves
               </div>
               <div class="lp-section-body open">
-                <!-- Project | My data, two columns (cave_columns.js). The old
+                <!-- Project | My data, two columns (cave-columns.js). The old
                      list stays hidden: flex.js still fills it. -->
                 <div id="cave-cols"></div>
                 <div id="lp-cave-list" style="display:none;"></div>
@@ -1044,7 +1044,7 @@
                 <div id="lp-plt-recents"></div>
               </div>
             </div>
-            <!-- Cave entrances marked on surface points (project_features.js) -->
+            <!-- Cave entrances marked on surface points (project-features.js) -->
             <div id="pjf-tags"></div>
 
           </div>
@@ -1430,7 +1430,7 @@
         <div class="collapse" id="projectCollapsible">
           <div class="lp-panel-wrap" id="pj-panel"></div>
         </div>
-        <!-- The open project's documents (the folder as on disk, docs_panel.js; the
+        <!-- The open project's documents (the folder as on disk, docs-panel.js; the
              documents list, project.js), leads, and suggestions to review. -->
         <div class="collapse" id="docsCollapsible">
           <div class="lp-panel-wrap pj-side" id="pj-docs-panel"></div>
@@ -2006,7 +2006,7 @@
 <script type="module" src="flex.js"></script>
 <!-- Projects: notes, leads, documents, sync files (the same library as FLEX Field) -->
 <script src="viewer_build/libs/flexlib.js"></script>
-<script src="my_data.js"></script>
+<script src="client/src/modules/my-data.js"></script>
 <script src="viewer_build/libs/pako_inflate.min.js"></script>  <!-- pako 2.2.0 (MIT, Zlib): Deflate-compressed TIFFs -->
 <script src="viewer_build/libs/utif.js"></script>
 <script src="viewer_build/libs/jszip.min.js"></script>
@@ -2019,41 +2019,41 @@
 <script src="client/src/modules/project-field.js"></script>
 <script src="client/src/modules/project-card.js"></script>
 <script src="client/src/modules/project-panel.js"></script>
-<script src="project.js"></script>
-<script src="project_segments.js"></script>
-<script src="project_workspace.js"></script>
+<script src="client/src/modules/project.js"></script>
+<script src="client/src/modules/project-segments.js"></script>
+<script src="client/src/modules/project-workspace.js"></script>
 <!-- 📁 Project: the Projects list, the open project's overview -->
-<script src="caltopo_match.js"></script>  <!-- which project surface features are on the CalTopo map (📁 Project, 📍 Surface) -->
-<script src="caltopo_send.js"></script>  <!-- hand project items over to CalTopo, only when asked; entrance tag parsing (window._ctSend) -->
-<script src="caltopo_write.js"></script>  <!-- editing the CalTopo map: writes, offline queue, conflicts, changes (window._ctWrite) -->
-<script src="projects_panel.js"></script>
+<script src="client/src/modules/caltopo-match.js"></script>  <!-- which project surface features are on the CalTopo map (📁 Project, 📍 Surface) -->
+<script src="client/src/modules/caltopo-send.js"></script>  <!-- hand project items over to CalTopo, only when asked; entrance tag parsing (window._ctSend) -->
+<script src="client/src/modules/caltopo-write.js"></script>  <!-- editing the CalTopo map: writes, offline queue, conflicts, changes (window._ctWrite) -->
+<script src="client/src/modules/projects-panel.js"></script>
 <!-- 📄 Docs: the project folder as on disk -->
-<script src="docs_panel.js"></script>
+<script src="client/src/modules/docs-panel.js"></script>
 <!-- 🧭 Trips: dates, people, caves, and that trip's surveys, notes and photos -->
-<script src="trips.js"></script>
-<script src="sketches.js"></script>  <!-- sketches (scans) on a cave, survey or station; the Files view (window._sketches) -->
+<script src="client/src/modules/trips.js"></script>
+<script src="client/src/modules/sketches.js"></script>  <!-- sketches (scans) on a cave, survey or station; the Files view (window._sketches) -->
 <!-- What a click on a cave selects (cave › survey › segment › station) -->
-<script src="selection.js"></script>
-<script src="project_features.js"></script>
+<script src="client/src/modules/selection.js"></script>
+<script src="client/src/modules/project-features.js"></script>
 <!-- One details panel on the right: card, segment panel, map feature info -->
-<script src="inspector.js"></script>
-<script src="feature_editor.js"></script>  <!-- one editor for surface points, lines, areas (project, My data, CalTopo) -->
-<script src="info_panel.js"></script>
+<script src="client/src/modules/inspector.js"></script>
+<script src="client/src/modules/feature-editor.js"></script>  <!-- one editor for surface points, lines, areas (project, My data, CalTopo) -->
+<script src="client/src/modules/info-panel.js"></script>
 <!-- The icon strip down the left -->
-<script src="flex_rail.js"></script>
+<script src="client/src/modules/flex-rail.js"></script>
 <!-- 🕳 Caves: project | My data -->
-<script src="survey_export.js"></script>  <!-- a cave's survey as Survex / CSV / PLT (window._surveyExport) -->
-<script src="cave_columns.js"></script>
+<script src="client/src/modules/survey-export.js"></script>  <!-- a cave's survey as Survex / CSV / PLT (window._surveyExport) -->
+<script src="client/src/modules/cave-columns.js"></script>
 <!-- 📍 Surface: project | My data -->
-<script src="folder_style.js"></script>  <!-- a folder's display settings for everything in it (window._folderStyle) -->
-<script src="surface_columns.js"></script>
-<script src="row_menu.js"></script>  <!-- the ⋯ menu on 📍 Surface rows (window._rowMenu) -->
-<script src="terrain_patch.js"></script>
-<script src="minimap_view.js"></script>
-<script src="custom_layers.js"></script>
-<script src="caltopo_layers.js"></script>  <!-- the CalTopo map's custom layers in 🗺 Layers, read-only (window._ctLayers) -->
+<script src="client/src/modules/folder-style.js"></script>  <!-- a folder's display settings for everything in it (window._folderStyle) -->
+<script src="client/src/modules/surface-columns.js"></script>
+<script src="client/src/modules/row-menu.js"></script>  <!-- the ⋯ menu on 📍 Surface rows (window._rowMenu) -->
+<script src="client/src/modules/terrain-patch.js"></script>
+<script src="client/src/modules/minimap-view.js"></script>
+<script src="client/src/modules/custom-layers.js"></script>
+<script src="client/src/modules/caltopo-layers.js"></script>  <!-- the CalTopo map's custom layers in 🗺 Layers, read-only (window._ctLayers) -->
 <!-- Brings the globe back if a map layer stalls at startup -->
-<script src="globe_watchdog.js"></script>
+<script src="client/src/modules/globe-watchdog.js"></script>
 
 
   <!-- ══ Entwine link dialog ══════════════════════════════════════════════════ -->

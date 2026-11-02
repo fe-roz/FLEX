@@ -1,4 +1,4 @@
-// cave_layers.js — fast drawing for cave survey lines and station dots, and
+// cave-layers.js — fast drawing for cave survey lines and station dots, and
 // the colour ramp shared with the portable viewer.
 //
 // Lines and stations used to be one Cesium Entity per shot and per station.

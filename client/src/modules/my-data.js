@@ -1,4 +1,4 @@
-// my_data.js — the page side of My data (mine.js on the server): points of
+// my-data.js — the page side of My data (mine.js on the server): points of
 // interest and data files you add outside a project are kept there, so they
 // come back after a reload. (Caves go through the Recent list, which the
 // server now keeps in My data.)
@@ -65,7 +65,7 @@
                    color: (f.style && f.style.color) || null, label: !(f.style && f.style.label === false) }));
   }
   /**
-   * Change a kept point (feature_editor.js): patch { name, desc, coords, group,
+   * Change a kept point (feature-editor.js): patch { name, desc, coords, group,
    * color, label }; its style (size) is kept. → { ok } | { ok: false, error }.
    */
   async function update(id, patch) {
@@ -124,7 +124,7 @@
 
 
   // ── Features that came back from a project ─────────────────────────────────
-  // Points, lines and areas moved out of a project (project_workspace.js, "back to My data"). Ids come from the
+  // Points, lines and areas moved out of a project (project-workspace.js, "back to My data"). Ids come from the
   // project feature's, so moving the same one again finds it already here. Points are listed in 📍 Surface like any
   // other; lines and areas are drawn here (own layer) and kept; folders become My data groups named by their path.
   const hash = t => { let h = 0x811c9dc5; for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16).padStart(8, '0'); };

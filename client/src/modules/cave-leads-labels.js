@@ -12,7 +12,7 @@
 // after this module: flex.js passes lazy wrappers. displayUpdateRecent stays in flex.js.
 //
 // Hooks defined here, as before: window._caveAreaLabels, _refreshAllAreaLabels
-// (project.js / project_workspace.js, the terrain export, test_labels),
+// (project.js / project-workspace.js, the terrain export, test_labels),
 // _leadBillboardProps (project.js), _setCaveLeadsVisible, _setCaveAreaLabelsVisible,
 // _openLabelsPanel and the _labels* panel handlers.
 import { defaultDisplayOptions } from './cave-display.js';
@@ -110,7 +110,7 @@ export function setupCaveLeadsLabels({
   // camera to the spot and pressing Add. Each is stored in the cave's own survey
   // coordinates (n/e/v metres, like its stations), so it follows rectify and
   // restyles. A cave of the open project keeps them in the project
-  // (project_workspace.js `window._pjLabels`: straight in, undo in History,
+  // (project-workspace.js `window._pjLabels`: straight in, undo in History,
   // they travel with it); any other cave in its displayOptions, so My data keeps
   // them. The terrain export carries them to the portable viewer.
   const AREA_LABEL_COLOR = '#7fe7ff';

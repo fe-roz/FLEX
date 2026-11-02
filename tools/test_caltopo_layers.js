@@ -1,10 +1,10 @@
-// Tests of caltopo_layers.js — reading a CalTopo map's custom layers (class
+// Tests of caltopo-layers.js — reading a CalTopo map's custom layers (class
 // CustomLayer) into map layers FLEX can draw. Example links only.
 //
 //   node tools/test_caltopo_layers.js
 'use strict';
 const path = require('path');
-const C = require(path.join(__dirname, '..', 'caltopo_layers.js'));
+const C = require('./load_classic')(path.join(__dirname, '..', 'client', 'src', 'modules', 'caltopo-layers.js'));
 
 let pass = 0, fail = 0;
 const ok = (label, cond, info) => { if (cond) pass++; else { fail++; console.error('FAIL ' + label + (info !== undefined ? '\n  ' + JSON.stringify(info) : '')); } };

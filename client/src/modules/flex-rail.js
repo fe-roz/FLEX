@@ -1,4 +1,4 @@
-// flex_rail.js — the icon strip down the left (#flex-rail in index.html).
+// flex-rail.js — the icon strip down the left (#flex-rail in index.html).
 // The icons are line icons from icons.js (<svg class="ico"><use href="#i-…">),
 // drawn in currentColor, so the states below are colours on the button.
 //

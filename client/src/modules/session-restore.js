@@ -1,6 +1,6 @@
 // Start-up restore from the saved session (point-cloud prompt, CalTopo, data files, My data points,
 // cave / POI visibility, panel sections). Runs in a setTimeout(0) so the whole of flex.js has
-// been evaluated first; with a project open (flex.project) project_workspace.js does the loading.
+// been evaluated first; with a project open (flex.project) project-workspace.js does the loading.
 // Moved out of flex.js unchanged (flex.js split, wave 3; see client/src/README.md).
 //
 // Setup: setupSessionRestore({ Cesium, cesiumViewer, savedSession, showPcRestorePrompt, showCaltopoLoggedIn,
@@ -14,7 +14,7 @@ export function setupSessionRestore({
 }) {
 const _projectAtStart = (() => { try { return localStorage.getItem('flex.project') || ''; } catch (_) { return ''; } })();
 setTimeout(() => {
-  // With a project open, project_workspace.js loads its point clouds, CalTopo
+  // With a project open, project-workspace.js loads its point clouds, CalTopo
   // maps and data files; the prompts below are for FLEX without a project.
   if (_savedSession?.pointClouds?.length && !_projectAtStart) {
     showPcRestorePrompt(_savedSession.pointClouds);

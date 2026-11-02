@@ -1,4 +1,4 @@
-// docs_panel.js — 📄 Docs: the open project's folder as it is on disk.
+// docs-panel.js — 📄 Docs: the open project's folder as it is on disk.
 //
 // Every file under the project folder but .flex (/api/lib/tree), as folders
 // with counts. A file FLEX knows as a document (its original, doc.file)

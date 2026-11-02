@@ -1,10 +1,10 @@
-// Tests of caltopo_match.js — which project surface features are already on
+// Tests of caltopo-match.js — which project surface features are already on
 // the CalTopo map (same kind, same name, close). Synthetic places only.
 //
 //   node tools/test_caltopo_match.js
 'use strict';
 const path = require('path');
-const M = require(path.join(__dirname, '..', 'caltopo_match.js'));
+const M = require('./load_classic')(path.join(__dirname, '..', 'client', 'src', 'modules', 'caltopo-match.js'));
 
 let pass = 0, fail = 0;
 const ok = (label, cond, info) => { if (cond) pass++; else { fail++; console.error('FAIL ' + label + (info !== undefined ? '\n  ' + JSON.stringify(info) : '')); } };

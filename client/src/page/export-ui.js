@@ -366,7 +366,7 @@
     return true;
   };
   window._exportGetPolygon = () => (_exportPoly ? _exportPoly.map(p => p.slice()) : null);
-  // The area as it is now (box, polygon or nothing), for others that use it (⛰ project terrain, custom_layers.js).
+  // The area as it is now (box, polygon or nothing), for others that use it (⛰ project terrain, custom-layers.js).
   window._exportArea = () => (!_bboxCorner1 || !_bboxCorner2) ? null : { bbox: [Math.min(_bboxCorner1[0], _bboxCorner2[0]), Math.min(_bboxCorner1[1], _bboxCorner2[1]), Math.max(_bboxCorner1[0], _bboxCorner2[0]), Math.max(_bboxCorner1[1], _bboxCorner2[1])], polygon: window._exportGetPolygon(), crossing: !!(_exportPoly && _polySelfCrossing(_exportPoly)), label: _exportPolyLabel };
   function _polySyncBox() {
     if (!_exportPoly) return;
@@ -1143,7 +1143,7 @@
           return body;
         });
 
-    // The project's terrain patches over the box, and a map layer chosen as satellite / hillshade (custom_layers.js)
+    // The project's terrain patches over the box, and a map layer chosen as satellite / hillshade (custom-layers.js)
     const ready = ready0.then(b => window._customLayers && window._customLayers.exportExtras
       ? window._customLayers.exportExtras(b, { w, s, e, n, mapTerrain, satelliteSource, hillshadeMode: document.getElementById('export_hillshade_mode').value }) : b);
 

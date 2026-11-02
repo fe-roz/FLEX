@@ -7,7 +7,7 @@
  *
  * Switches are the real <input type="checkbox"> restyled (appearance: none),
  * so ids, .checked, change events and Knockout bindings work as before;
- * ui_kit.js adds role="switch" and window.uiSwitch() for JS-built ones.
+ * ui-kit.js adds role="switch" and window.uiSwitch() for JS-built ones.
  * The knob is a background gradient rather than ::before, which not every
  * engine draws on an <input>.
  *
@@ -99,7 +99,7 @@ span.ui-sw.ui-sw-xs { --sw-w: 20px; --sw-h: 11px; --sw-k: 7px; }
      .half  loaded but hidden  off: green ring, green knob
      (none) not loaded         off: solid grey ring, grey knob; on = load + show
    Rows that are always loaded (folders, features, map layers) use .on / .half.
-   .ui-eye-sm in folder/sub rows. ui_kit.js adds role="switch" and
+   .ui-eye-sm in folder/sub rows. ui-kit.js adds role="switch" and
    aria-checked. Don't copy this into a module. */
 .ui-eye { --sw-w: 24px; --sw-h: 13px; --sw-k: 9px;
   -webkit-appearance: none; appearance: none; box-sizing: border-box; flex: none; position: relative; display: inline-block;

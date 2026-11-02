@@ -1,4 +1,4 @@
-// survey_export.js — a cave's survey written out as Survex (.svx), CSV (one
+// survey-export.js — a cave's survey written out as Survex (.svx), CSV (one
 // row per shot) and Compass plot (.plt), from what FLEX holds of it: the
 // parsed survey file (flex.js parsePLT), its placement and, in a project, its
 // segments' dates and teams.
