@@ -4048,6 +4048,7 @@ function _caltopoJsonToDataSource(result, ds) {
   return ds;
 }
 window._ctApplyJson = _caltopoJsonToDataSource;                // tests
+window._ctRefresh = () => _fetchCaltopoKml();                   // re-read the map now (caltopo_write.js, after an edit)
 // Long KML lines (public maps, no key): simplified once after loading.
 function _ctSimplifyKml(ds) {
   const now = Cesium.JulianDate.now();
@@ -4071,9 +4072,11 @@ async function _fetchCaltopoKml() {
       const txt = await r.text();
       let j; try { j = JSON.parse(txt); } catch (_) { j = {}; }
       if (!r.ok) throw new Error(j.error || r.statusText);
+      if (window._ctWrite) window._ctWrite._pulled(mapId, j);           // edits, queue, changes (caltopo_write.js)
+      const offl = j.flexOffline ? `⚠ CalTopo not reachable: FLEX’s copy from ${new Date(j.flexPulled).toLocaleString()}, ` : '';
       const ds0 = caltopoState.dataSource;
       if (ds0 && ds0._ctJson && caltopoState._ctText === txt && caltopoState._ctMapId === mapId) {       // nothing changed: nothing to do
-        _setCaltopoStatus(`✓ private map, ${ds0._ctCount} feature(s), checked ${new Date().toLocaleTimeString()}`, '#8f8');
+        _setCaltopoStatus(offl ? offl + `${ds0._ctCount} feature(s)` : `✓ private map, ${ds0._ctCount} feature(s), checked ${new Date().toLocaleTimeString()}`, offl ? '#fc6' : '#8f8');
         renderCaltopoStatus();
         return;
       }
@@ -4088,7 +4091,7 @@ async function _fetchCaltopoKml() {
       }
       try { syncMinimapCaltopoFeatures(ds); } catch (_) {}
       if (window._onVectorSourcesChanged) window._onVectorSourcesChanged();
-      _setCaltopoStatus(`✓ private map, ${ds._ctCount} feature(s), ${new Date().toLocaleTimeString()}`, '#8f8');
+      _setCaltopoStatus(offl ? offl + `${ds._ctCount} feature(s)` : `✓ private map, ${ds._ctCount} feature(s), ${new Date().toLocaleTimeString()}`, offl ? '#fc6' : '#8f8');
     } catch (e) {
       console.warn('[caltopo] private map failed:', e);
       _setCaltopoStatus('⚠ ' + (e.message || e), '#f88');
@@ -4096,6 +4099,7 @@ async function _fetchCaltopoKml() {
     renderCaltopoStatus();
     return;
   }
+  if (window._ctWrite) window._ctWrite._pulled(null);              // a public map (KML): no edits
   const proxiedUrl = ProxyUrlGenerator.generateProxyUrl(caltopoState.url);
   try {
     _setCaltopoStatus('updating…', '#aaa');
@@ -4168,6 +4172,7 @@ function clearCaltopo() {
   }
   if (miniMapCaltopoSource) miniMapCaltopoSource.clear();
   caltopoState.url = null;
+  if (window._ctWrite) window._ctWrite._pulled(null);
   if (window._onVectorSourcesChanged) window._onVectorSourcesChanged();
   _setCaltopoStatus('', '');
   notifyCaltopoChanged(null, 30);
