@@ -213,3 +213,4 @@ Short, in this order:
 | Module | From flex.js | Exports |
 |---|---|---|
 | `modules/compass-plt.js` | UTM → WGS84, Compass PLT parser, PLT → Cartesian3 (wave 0, the template) | `utmToLatLon`, `parsePLT` (pure); `setupCompassPlt({ Cesium })` → `{ pltToCartesian }` |
+| `modules/cesium-interactions.js` | mouse-button mapping, SpaceMouse init, input handler, fly speed, key flags, touch fly, fly tick (wave 1) | `getFlagForKeyCode`, `isLatchedFlag`, `clampFlyMult`, `flySpeedMps`, `downloadBlob` (pure); `setupCesiumInteractions({…})` → `{ handler, spaceMouse, getFlyMultiplier, setCameraButtons }` |
