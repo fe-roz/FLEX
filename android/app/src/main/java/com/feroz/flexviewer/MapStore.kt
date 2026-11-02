@@ -39,6 +39,9 @@ class MapStore(private val ctx: Context) {
     companion object {
         /** The data files an export carries. Nothing else is extracted. */
         val DATA_FILES = setOf("terrain.glb", "tex_sat.jpg", "tex_hs.jpg", "walls.bin", "caves.json")
+        /** Texture tiles of a big export (tex_sat_<col>_<row>.jpg, tex_hs_…), see tex_tiles.py. */
+        private val TILE_RE = Regex("^tex_(sat|hs)_[0-9]{1,2}_[0-9]{1,2}\\.jpg$")
+        fun isDataFile(name: String): Boolean = name in DATA_FILES || TILE_RE.matches(name)
         private val ID_RE = Regex("^[A-Za-z0-9_-]{1,64}$")
         private val SAFE_RE = Regex("^[A-Za-z0-9._ -]{1,120}$")
         fun validId(id: String?): Boolean = id != null && ID_RE.matches(id)
@@ -122,7 +125,7 @@ class MapStore(private val ctx: Context) {
             while (e != null) {
                 if (!e.isDirectory) {
                     val base = e.name.replace('\\', '/').substringAfterLast('/')
-                    val wanted = base in DATA_FILES && base !in seen
+                    val wanted = isDataFile(base) && base !in seen
                     // viewer.html only when the sidecars it would stand in for
                     // have not turned up yet (exports before sidecars existed).
                     val legacy = base == "viewer.html" && !gotViewer &&

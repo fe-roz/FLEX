@@ -11,6 +11,13 @@ survey data. Every number here is synthetic; the place is the project's
 example coordinates.
 
     python tools/make_synthetic_export.py OUT_DIR [--name "Cave Ridge"]
+        [--extent-km 6]      a larger terrain (default 1 x 0.8 km); over 5 km it is
+                             tiled the way the exporter does (tex_tiles.py)
+        [--field-fixture]    extra data for tools/test_viewer_field.js: leads whose
+                             survey order differs from the straight-line one, shots
+                             with no from/to names, a bare survey code beside the
+                             same code with a description, a code shared by two
+                             surveys, and a station name used twice
 
 Needs the exporter's environment (numpy, Pillow, pygltflib).
 """
@@ -23,6 +30,7 @@ sys.path.insert(0, str(ROOT))
 import numpy as np
 from PIL import Image, ImageDraw
 from export_terrain import export_glb, latlon_to_utm, utm_zone_for
+from tex_tiles import plan_tiles, tile_name, meta_entry
 from viewer_inline import build_inline_viewer, local_viewer_libs
 from cave_walls import pack_walls
 
@@ -36,6 +44,7 @@ def ground(x, y):
 
 
 def terrain(n=81):
+    global W, H
     xs = np.linspace(-W / 2, W / 2, n)
     ys = np.linspace(-H / 2, H / 2, n)
     verts, uvs = [], []
@@ -121,13 +130,30 @@ def box_walls(stations):
     return pos, idx
 
 
-def caves_json(e0, n0, zone):
+# --field-fixture: a side loop that leaves A1, runs a long way round and comes
+# back close (in a straight line) to A0; and two small surveys sharing a code.
+LOOP = [
+    ('A1', None, None, None, None, None, None, None),
+    ('S1', -25, 200, 6, 3, 3, 4, 1),
+    ('S2', -60, 200, 6, 3, 3, 4, 1),
+    ('X1', -60, 62, 6, 3, 3, 4, 1),
+]
+CODE_C1 = [('C1', 60, 100, 5, 2, 2, 3, 1), ('C2', 70, 110, 5, 2, 2, 3, 1)]
+CODE_C2 = [('A1', 300, 300, 5, 2, 2, 3, 1), ('C3', 310, 310, 5, 2, 2, 3, 1)]
+
+
+def caves_json(e0, n0, zone, fixture=False):
     known = {}
     main = place(MAIN, known)
     branch = place(BRANCH, known)
     surveys = []
-    for name, cave, color, sts in (('Main line', 'Cave Ridge', '#00e5ff', main),
-                                   ('North branch', 'Cave Ridge', '#ffab40', branch)):
+    plan = [('Main line', 'Cave Ridge', '#00e5ff', main), ('North branch', 'Cave Ridge', '#ffab40', branch)]
+    if fixture:
+        # place() keys stations by name, so the second "A1" is placed on its own.
+        plan += [('Side loop', 'Cave Ridge', '#b388ff', place(LOOP, known)),
+                 ('C', 'Cave Ridge', '#69f0ae', place(CODE_C1, known)),
+                 ('C \u2014 Crawl to the north', 'Cave Ridge', '#ff80ab', place(CODE_C2, {}))]
+    for name, cave, color, sts in plan:
         lines, shots, stations = [], [], []
         for (n1, a, _), (n2, b, _) in zip(sts, sts[1:]):
             lines.append([a, b])
@@ -144,12 +170,21 @@ def caves_json(e0, n0, zone):
                 st['lrud'] = [round(v, 3) for v in lr]
             stations.append(st)
         sv = {'name': name, 'cave': cave, 'color': color, 'lines': lines, 'shots': shots, 'stations': stations}
+        if fixture and name in ('C', 'C \u2014 Crawl to the north'):
+            sv['code'] = 'C'
+        if fixture and name == 'North branch':
+            for sh in shots:                       # an older export: shots carry no station names
+                sh.pop('from_name', None); sh.pop('to_name', None)
+        if fixture and name == 'Main line':
+            sv['leads'] = [{'station': 'A10', 'xyz': known['A10'], 'description': 'Water crawl', 'width': 0.6, 'height': 0.4}]
+        if fixture and name == 'Side loop':
+            sv['leads'] = [{'station': 'X1', 'xyz': known['X1'], 'description': 'Dig at the end', 'width': 0.5, 'height': 0.5}]
         if name == 'North branch':
             sv['leads'] = [{'station': 'B3', 'xyz': known['B3'], 'description': 'Tight crawl continues north, air',
                             'width': 0.4, 'height': 0.3, 'date': '2026-09-01'}]
         surveys.append(sv)
     walls = []
-    for sts, color in ((main, '#00e5ff'), (branch, '#ffab40')):
+    for sts, color in ((main, '#00e5ff'), (branch, '#ffab40')):   # (walls: the first two surveys only)
         pos, idx = box_walls([s if s[2] is not None or s[0] != 'A4' else (s[0], s[1], [6 * FT, 6 * FT, 10 * FT, 2 * FT]) for s in sts])
         walls.append({'color': color, 'opacity': 0.55, 'positions': pos, 'indices': idx})
     out = {'surveys': surveys,
@@ -162,7 +197,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('out_dir')
     ap.add_argument('--name', default='Cave Ridge')
+    ap.add_argument('--extent-km', type=float, default=0, help='terrain size, long side (default 1 km x 0.8 km)')
+    ap.add_argument('--field-fixture', action='store_true')
     a = ap.parse_args()
+    global W, H
+    if a.extent_km:
+        W, H = a.extent_km * 1000.0, a.extent_km * 800.0
     out = Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     zone = utm_zone_for(LON0)
@@ -171,7 +211,7 @@ def main():
     v, f, uv = terrain()
     export_glb(v, f, uv, out / 'terrain.glb', progress=lambda m: None)
     texture(out / 'tex_sat.jpg')
-    caves = caves_json(e0, n0, zone)
+    caves = caves_json(e0, n0, zone, a.field_fixture)
     data, desc = pack_walls(caves.pop('passages'))
     (out / 'walls.bin').write_bytes(data)
     caves['walls'] = desc
@@ -182,6 +222,20 @@ def main():
         'extent_utm': [e0 - W / 2, n0 - H / 2, e0 + W / 2, n0 + H / 2],
         'hillshade': None, 'hillshade_cell_m': None, 'terrain': 'lidar', 'terrain_cell_m': 12.5,
     }
+    tiles = []
+    cols, rows = plan_tiles(W, H)
+    if cols * rows > 1:
+        # One flat colour per tile (so a test can see which tile is where), a
+        # grey hillshade, and the overview for a viewer that cannot read tiles.
+        Image.new('L', (512, 410), 128).save(out / 'tex_hs.jpg', 'JPEG')
+        for r in range(rows):
+            for c in range(cols):
+                col = (40 + 190 * c // max(1, cols - 1), 60 + 150 * r // max(1, rows - 1), 90 + 30 * (c + r))
+                Image.new('RGB', (256, 256), col).save(out / tile_name('sat', c, r), 'JPEG', quality=95)
+                Image.new('L', (256, 256), 60 + 40 * (c + r)).save(out / tile_name('hs', c, r), 'JPEG', quality=95)
+                tiles += [tile_name('sat', c, r), tile_name('hs', c, r)]
+        caves['meta']['texture_tiles'] = meta_entry(cols, rows, True, True)
+        caves['meta']['hillshade'] = 'lidar'
     (out / 'caves.json').write_text(json.dumps(caves), encoding='utf-8')
     libs = local_viewer_libs()
     (out / 'libs').mkdir(exist_ok=True)
@@ -189,12 +243,13 @@ def main():
         shutil.copyfile(p, out / 'libs' / p.name)
     import base64
     tex_b64 = base64.b64encode((out / 'tex_sat.jpg').read_bytes()).decode('ascii')
+    hs_b64 = base64.b64encode((out / 'tex_hs.jpg').read_bytes()).decode('ascii') if tiles else None
     html = build_inline_viewer(out / 'terrain.glb', tex_b64, caves, libs, progress=lambda m: None,
-                               walls_bytes=data)
+                               walls_bytes=data, hs_b64=hs_b64)
     (out / 'viewer.html').write_text(html, encoding='utf-8')
     slug = a.name.replace(' ', '-')
     with zipfile.ZipFile(out.parent / f'FLEX-{slug}.zip', 'w', zipfile.ZIP_DEFLATED) as zf:
-        for name in ('terrain.glb', 'tex_sat.jpg', 'walls.bin', 'caves.json', 'viewer.html'):
+        for name in ('terrain.glb', 'tex_sat.jpg', 'walls.bin', 'caves.json', 'viewer.html', *(['tex_hs.jpg'] if tiles else []), *tiles):
             zf.write(out / name, name)
         for p in sorted((out / 'libs').glob('*.js')):
             zf.write(p, 'libs/' + p.name)
