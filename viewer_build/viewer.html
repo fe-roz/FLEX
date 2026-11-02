@@ -473,7 +473,7 @@
     <div class="help-row"><span class="help-icon">📍</span><span class="help-desc">GPS: off / pin / follow / heading-up · record a track · drop pins · export GPX/KML · compass calibration</span></div>
     <div class="help-row"><span class="help-icon">🔧</span><span class="help-desc">Tools: find (stations, leads — active / closed), measure, route, reach, fly, crane, import KML · 📐 field survey · 📚 documents · 📝 change log (undo)</span></div>
     <div class="help-row"><span class="help-icon">🎨</span><span class="help-desc">Display: colour by survey / elevation / depth / difficulty (narrow blue, low red, steep green), walls, stations (with their names); show or hide leads, area names, tracks, imported layers; imagery and terrain</span></div>
-    <div class="help-row"><span class="help-icon">⋯</span><span class="help-desc">Units (ft / m), who is entering data, ⇄ project & sync files (share with other phones and FLEX), export project data, fullscreen, help</span></div>
+    <div class="help-row"><span class="help-icon">⋯</span><span class="help-desc">Units (ft / m), what counts as narrow, stooping, crawling or steep (Route difficulty), who is entering data, ⇄ project & sync files (share with other phones and FLEX), export project data, fullscreen, help</span></div>
     <div class="help-section">STATIONS</div>
     <div class="help-row"><span class="help-icon">👆</span><span class="help-desc">Tap: info · again: caver for scale · again: reach (what's within range along the survey) · again: off</span></div>
     <div class="help-row"><span class="help-icon">✏️</span><span class="help-desc">On a station's card: ✏️ notes · ❓ leads (status, what it needs, air, size…) · 📄 documents tagged to the station, its survey or cave (photos, scans incl. TIFF, PDF) · 📐 survey new passage from here</span></div>
@@ -804,7 +804,13 @@ function applyTerrainTexture(tex) {
   terrainGroup.traverse(obj => {
     if (!obj.isMesh) return;
     const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-    mats.forEach(m => { m.map = tex; m.color.set(0xffffff); m.needsUpdate = true; });
+    let t = tex;
+    if (obj.userData.tile) {                       // a tiled terrain: this tile's own texture
+      const T = obj.userData.tile;
+      t = tex && tex._tiled ? (tex._tiled === 'hs' ? TT.hs : TT.sat).get(T.c + '_' + T.r) || null
+        : tex ? tileOfOverview(tex, T.c, T.r) : null;
+    }
+    mats.forEach(m => { m.map = t; m.color.set(0xffffff); m.needsUpdate = true; });
   });
   // Texture arrives asynchronously — force a frame even if the scene is idle.
   if (typeof requestRender === 'function') { requestRender(); wakeRender(); }
@@ -836,7 +842,7 @@ function fitTextureToGpu(img) {
   return cv;
 }
 
-function loadB64Texture(src, onLoad) {
+function loadB64Texture(src, onLoad, onFail) {
   const img = new Image();
   img.onload = () => {
     const tex = new THREE.Texture(fitTextureToGpu(img));
@@ -846,7 +852,7 @@ function loadB64Texture(src, onLoad) {
     onLoad(tex);
     if (typeof requestRender === 'function') { requestRender(); wakeRender(); }
   };
-  img.onerror = () => console.warn('texture failed to load:', String(src).slice(0, 64));
+  img.onerror = () => { console.warn('texture failed to load:', String(src).slice(0, 64)); if (onFail) onFail(); };
   img.src = textureSrc(src);
 }
 
@@ -867,6 +873,122 @@ function textureSrc(src) {
   const mime = src.startsWith('iVBOR') ? 'image/png' : 'image/jpeg';
   return 'data:' + mime + ';base64,' + src;
 }
+// ── Texture tiles (exports over ~5 km) ──────────────────────────────────────
+// A big export carries meta.texture_tiles {cols, rows, sat, hs} and one
+// tex_sat_<col>_<row>.jpg (+ tex_hs_…) per tile, row 0 = north (tex_tiles.py).
+// The terrain mesh is cut along the tile edges, each piece gets its tile's
+// texture and UVs remapped to it. If the tile files can't be loaded (a
+// single-file viewer opened from disk) the overview texture is drawn over the
+// tiles instead, by a per-tile offset and repeat.
+const TT = { cols: 1, rows: 1, on: false, sat: new Map(), hs: new Map(), failed: false };
+function tileOfOverview(tex, c, r) {
+  tex._tileClones = tex._tileClones || {};
+  const k = c + '_' + r;
+  if (!tex._tileClones[k]) {
+    const t = tex.clone();
+    t.repeat.set(1 / TT.cols, 1 / TT.rows); t.offset.set(c / TT.cols, r / TT.rows);
+    t.needsUpdate = true;
+    tex._tileClones[k] = t;
+  }
+  return tex._tileClones[k];
+}
+
+// Cut a geometry along the tile grid in UV space. Triangles inside one tile
+// are copied as they are; the few that cross an edge are clipped to each tile
+// they touch. Returns a Map(tileIndex → BufferGeometry) with UVs in tile space.
+function splitGeometryByTiles(geo, cols, rows) {
+  const P = geo.attributes.position.array, UV = geo.attributes.uv.array;
+  const I = geo.index ? geo.index.array : Uint32Array.from({ length: P.length / 3 }, (_, i) => i);
+  const nT = I.length / 3, nV = P.length / 3, EPS = 1e-7;
+  const cellOf = new Int32Array(nT), cross = [];
+  const cl = (v, n) => Math.max(0, Math.min(n - 1, v));
+  for (let t = 0; t < nT; t++) {
+    const a = I[3 * t], b = I[3 * t + 1], c = I[3 * t + 2];
+    const u0 = Math.min(UV[2 * a], UV[2 * b], UV[2 * c]), u1 = Math.max(UV[2 * a], UV[2 * b], UV[2 * c]);
+    const v0 = Math.min(UV[2 * a + 1], UV[2 * b + 1], UV[2 * c + 1]), v1 = Math.max(UV[2 * a + 1], UV[2 * b + 1], UV[2 * c + 1]);
+    const cx0 = cl(Math.floor(u0 * cols + EPS), cols), cx1 = Math.max(cx0, cl(Math.floor(u1 * cols - EPS), cols));
+    const cy0 = cl(Math.floor(v0 * rows + EPS), rows), cy1 = Math.max(cy0, cl(Math.floor(v1 * rows - EPS), rows));
+    if (cx0 === cx1 && cy0 === cy1) cellOf[t] = cy0 * cols + cx0;
+    else { cellOf[t] = -1; cross.push(t); }
+  }
+  const out = new Map(), remap = new Int32Array(nV);
+  for (let cell = 0; cell < cols * rows; cell++) {
+    const cx = cell % cols, cy = (cell / cols) | 0;
+    let nTri = 0;
+    for (let t = 0; t < nT; t++) if (cellOf[t] === cell) nTri++;
+    const extraPos = [], extraUv = [], extraIdx = [];
+    // Clip the crossing triangles to this cell (Sutherland-Hodgman in UV).
+    const uA = cx / cols, uB = (cx + 1) / cols, vA = cy / rows, vB = (cy + 1) / rows;
+    const planes = [[1, 0, uA], [-1, 0, -uB], [0, 1, vA], [0, -1, -vB]];   // keep n·(u,v) >= d
+    for (const t of cross) {
+      let poly = [0, 1, 2].map(k => { const i = I[3 * t + k]; return [P[3 * i], P[3 * i + 1], P[3 * i + 2], UV[2 * i], UV[2 * i + 1]]; });
+      for (const [nu, nv, d] of planes) {
+        const nxt = [];
+        for (let i = 0; i < poly.length; i++) {
+          const A = poly[i], B = poly[(i + 1) % poly.length];
+          const da = nu * A[3] + nv * A[4] - d, db = nu * B[3] + nv * B[4] - d;
+          if (da >= 0) nxt.push(A);
+          if ((da >= 0) !== (db >= 0)) { const f = da / (da - db); nxt.push(A.map((x, k) => x + (B[k] - x) * f)); }
+        }
+        poly = nxt;
+        if (poly.length < 3) break;
+      }
+      if (poly.length < 3) continue;
+      const base = extraPos.length / 3;
+      for (const q of poly) { extraPos.push(q[0], q[1], q[2]); extraUv.push((q[3] - uA) * cols, (q[4] - vA) * rows); }
+      for (let k = 1; k + 1 < poly.length; k++) extraIdx.push(base, base + k, base + k + 1);
+    }
+    if (!nTri && !extraIdx.length) continue;
+    remap.fill(-1);
+    const pos = new Float32Array(3 * (3 * nTri) + extraPos.length), uv = new Float32Array(2 * (3 * nTri) + extraUv.length);
+    const idx = new Uint32Array(3 * nTri + extraIdx.length);
+    let nv = 0, ni = 0;
+    for (let t = 0; t < nT; t++) {
+      if (cellOf[t] !== cell) continue;
+      for (let k = 0; k < 3; k++) {
+        const i = I[3 * t + k];
+        let j = remap[i];
+        if (j < 0) {
+          j = remap[i] = nv++;
+          pos[3 * j] = P[3 * i]; pos[3 * j + 1] = P[3 * i + 1]; pos[3 * j + 2] = P[3 * i + 2];
+          uv[2 * j] = (UV[2 * i] - uA) * cols; uv[2 * j + 1] = (UV[2 * i + 1] - vA) * rows;
+        }
+        idx[ni++] = j;
+      }
+    }
+    const e0 = nv;
+    pos.set(extraPos, 3 * e0); uv.set(extraUv, 2 * e0);
+    for (const k of extraIdx) idx[ni++] = e0 + k;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos.subarray(0, 3 * (e0 + extraPos.length / 3)), 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(uv.subarray(0, 2 * (e0 + extraUv.length / 2)), 2));
+    g.setIndex(new THREE.BufferAttribute(idx.subarray(0, ni), 1));
+    out.set(cell, g);
+  }
+  return out;
+}
+
+// Replace the terrain mesh(es) by one mesh per tile. Each keeps a copy of the
+// material and userData.tile {c, r}.
+function splitTerrainIntoTiles(group, cols, rows) {
+  const meshes = [];
+  group.traverse(o => { if (o.isMesh && o.geometry && o.geometry.attributes.uv) meshes.push(o); });
+  meshes.forEach(m => {
+    const parts = splitGeometryByTiles(m.geometry, cols, rows);
+    const host = m.parent || group;
+    parts.forEach((g, cell) => {
+      const mat = Array.isArray(m.material) ? m.material[0].clone() : m.material.clone();
+      const t = new THREE.Mesh(g, mat);
+      t.position.copy(m.position); t.quaternion.copy(m.quaternion); t.scale.copy(m.scale);
+      t.userData.tile = { c: cell % cols, r: (cell / cols) | 0 };
+      host.add(t);
+    });
+    host.remove(m);
+    m.geometry.dispose();
+  });
+  TT.cols = cols; TT.rows = rows; TT.on = true;
+}
+
 const _downRay = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, 0, -1));
 
 function terrainZAt(x, y) {
@@ -1704,27 +1826,57 @@ setTimeout(() => {
     // (terrainTexSat, terrainTexHs, texMode, applyTerrainTexture, loadB64Texture
     //  are declared at top level so imagery toggle buttons can reach them.)
 
-    if (TERRAIN_TEX_B64 && TERRAIN_TEX_B64 !== 'PLACEHOLDER_TEX_B64') {
-      loadB64Texture(TERRAIN_TEX_B64, tex => {
-        terrainTexSat = tex;
-        applyTerrainTexture(tex); // satellite is the default
-      });
-    }
-    if (TERRAIN_HS_B64 && TERRAIN_HS_B64 !== 'PLACEHOLDER_HS_B64') {
-      loadB64Texture(TERRAIN_HS_B64, tex => {
-        terrainTexHs = tex;
-        // Say where the shading came from: built from this LiDAR, or tiles.
-        const hsBtn = document.getElementById('btn-layer-hs');
-        if (hsBtn && META.hillshade === 'lidar') {
-          hsBtn.textContent = '\u26f0\ufe0f LIDAR';
-          hsBtn.title = 'Hillshade built from the LiDAR ground returns' +
-            (META.hillshade_cell_m ? ' (' + META.hillshade_cell_m + ' m)' : '');
+    const hsReady = () => {
+      // Say where the shading came from: built from this LiDAR, or tiles.
+      const hsBtn = document.getElementById('btn-layer-hs');
+      if (hsBtn && META.hillshade === 'lidar') {
+        hsBtn.textContent = '\u26f0\ufe0f LIDAR';
+        hsBtn.title = 'Hillshade built from the LiDAR ground returns' +
+          (META.hillshade_cell_m ? ' (' + META.hillshade_cell_m + ' m)' : '');
+      }
+      // Reveal the imagery toggle section inside the map panel
+      const layerSection = document.getElementById('map-panel-layer');
+      if (layerSection) layerSection.style.display = 'block';
+    };
+    const loadOverview = () => {
+      if (TERRAIN_TEX_B64 && TERRAIN_TEX_B64 !== 'PLACEHOLDER_TEX_B64') {
+        loadB64Texture(TERRAIN_TEX_B64, tex => {
+          terrainTexSat = tex;
+          if (texMode === 'sat') applyTerrainTexture(tex); // satellite is the default
+        });
+      }
+      if (TERRAIN_HS_B64 && TERRAIN_HS_B64 !== 'PLACEHOLDER_HS_B64') {
+        loadB64Texture(TERRAIN_HS_B64, tex => {
+          terrainTexHs = tex;
+          if (texMode === 'hs') applyTerrainTexture(tex);
+          hsReady();
+        });
+      }
+    };
+    const tt = META.texture_tiles;
+    if (tt && tt.cols * tt.rows > 1) {
+      // Big export: cut the terrain along the tiles, load each tile's texture.
+      splitTerrainIntoTiles(terrainGroup, tt.cols, tt.rows);
+      const kinds = tt.hs ? ['sat', 'hs'] : ['sat'];
+      let pending = 0;
+      kinds.forEach(kind => {
+        const sentinel = { _tiled: kind };
+        for (let r = 0; r < tt.rows; r++) for (let c = 0; c < tt.cols; c++) {
+          pending++;
+          loadB64Texture('tex_' + kind + '_' + c + '_' + r + '.jpg', tex => {
+            (kind === 'hs' ? TT.hs : TT.sat).set(c + '_' + r, tex);
+            if (kind === 'sat') terrainTexSat = sentinel; else { terrainTexHs = sentinel; hsReady(); }
+            if (texMode === kind) applyTerrainTexture(sentinel);
+          }, () => {
+            // A tile file that won't load: draw the overview over the tiles.
+            if (TT.failed) return;
+            TT.failed = true; TT.sat.clear(); TT.hs.clear();
+            terrainTexSat = terrainTexHs = null;
+            loadOverview();
+          });
         }
-        // Reveal the imagery toggle section inside the map panel
-        const layerSection = document.getElementById('map-panel-layer');
-        if (layerSection) layerSection.style.display = 'block';
       });
-    }
+    } else loadOverview();
 
     // Collect all terrain materials so we can control opacity later.
     // Default opacity 0.5 (50%) on startup so cave lines are easier to see.
@@ -2516,7 +2668,20 @@ const FT = 0.3048;
 const HARD_EASY = new THREE.Color('#9aa0aa'), HARD_UNKNOWN = new THREE.Color('#3c3f46');
 const HARD_NARROW = new THREE.Color(0.10, 0.38, 1.0);    // blue
 const HARD_LOW    = new THREE.Color(1.0, 0.08, 0.05);    // red
-const STEEP_MIN_DEG = 50, STEEP_MIN_DZ = 10 * FT;      // both, to count as steep
+// What counts as tight or steep is a setting (⋯ More → Route difficulty),
+// kept on this phone: narrow below `narrow` ft wide (worst at a third of it),
+// stooping below `stoop` ft high, crawling below `crawl` (flat-out at half),
+// steep from `steepDeg` degrees with at least `steepDrop` ft up or down.
+const RT_DEFAULT = { narrow: 3, stoop: 6, crawl: 4, steepDeg: 50, steepDrop: 10 };
+const RT_KEY = 'flex_route_th_v1';
+const RT = Object.assign({}, RT_DEFAULT);
+try { const v = JSON.parse(localStorage.getItem(RT_KEY)); if (v) for (const k in RT_DEFAULT) if (isFinite(v[k]) && v[k] > 0) RT[k] = +v[k]; } catch (_) {}
+if (!(RT.crawl < RT.stoop)) { RT.crawl = RT_DEFAULT.crawl; RT.stoop = RT_DEFAULT.stoop; }
+let STEEP_MIN_DEG = RT.steepDeg, STEEP_MIN_DZ = RT.steepDrop * FT;      // both, to count as steep
+// The cut-offs in metres: narrow, tight (2/3 of narrow), squeeze (1/3), stooping, crawling, flat-out.
+function rtDims() {
+  return { N: RT.narrow * FT, Nt: RT.narrow * FT * 2 / 3, Nsq: RT.narrow * FT / 3, S: RT.stoop * FT, C: RT.crawl * FT, Fl: RT.crawl * FT / 2 };
+}
 const HARD_STEEP  = new THREE.Color(0.15, 0.95, 0.20);
 
 // {W, H} in metres (either may be null), or null with no usable LRUD.
@@ -2537,8 +2702,8 @@ const lerpScore = (x, pts) => {            // piecewise-linear [[value, score], 
   }
   return pts[pts.length - 1][1];
 };
-const narrowScore = W => W == null ? 0 : lerpScore(W, [[3 * FT, 0], [1 * FT, 1]]);
-const lowScore    = H => H == null ? 0 : lerpScore(H, [[6 * FT, 0], [4 * FT, 0.35], [2 * FT, 0.75], [1 * FT, 1]]);
+const narrowScore = W => W == null ? 0 : lerpScore(W, [[RT.narrow * FT, 0], [RT.narrow * FT / 3, 1]]);
+const lowScore    = H => H == null ? 0 : lerpScore(H, [[RT.stoop * FT, 0], [RT.crawl * FT, 0.35], [RT.crawl * FT / 2, 0.75], [RT.stoop * FT / 6, 1]]);
 // Steep only with both the angle and the height: 0.3 at 50°, 1 at vertical.
 const isSteep     = (deg, dz) => deg >= STEEP_MIN_DEG && Math.abs(dz) >= STEEP_MIN_DZ;
 const steepScore  = (deg, dz) => !isSteep(deg, dz) ? 0
@@ -2634,6 +2799,24 @@ function stationHardColor(st, out) {
   return hardColor(wh ? narrowScore(wh.W) : 0, wh ? lowScore(wh.H) : 0, 0, !!wh, out);
 }
 const ftm = m => U.dim(m);
+
+// Change the difficulty cut-offs: keep them, drop everything scored with the
+// old ones (colours, route graph, shown routes) and redraw.
+function setRouteThresholds(patch) {
+  const next = Object.assign({}, RT, patch);
+  for (const k in RT_DEFAULT) if (!(isFinite(next[k]) && next[k] > 0)) next[k] = RT[k];
+  next.steepDeg = Math.min(89, next.steepDeg);
+  if (!(next.crawl < next.stoop)) { if (patch && patch.crawl != null) next.stoop = next.crawl + 1; else next.crawl = next.stoop - 1; }
+  Object.assign(RT, next);
+  try { localStorage.setItem(RT_KEY, JSON.stringify(RT)); } catch (_) {}
+  STEEP_MIN_DEG = RT.steepDeg; STEEP_MIN_DZ = RT.steepDrop * FT;
+  if (caveLines) { delete caveLines.userData.steep; delete caveLines.userData.baseCol_m3; }
+  if (passageMesh) passageMesh.userData.meshes.forEach(m => { delete m.userData.baseCol_m3; });
+  routeEdges = null; _routeAdj = null;
+  if (routes.length) { routes = []; routeSel = -1; routeClearDrawing(); routeRenderPanel(); applyWallMode(); }
+  if (colourMode === 3 && caveLines) applyColourMode();
+  requestRender(); wakeRender();
+}
 
 // ── Reach: fade by distance along the survey (third tap) ────────────────────
 // Tap a station, tap it again (caver), tap a third time: everything fades by
@@ -3085,21 +3268,33 @@ function leadsRender() {
   if (sel) { origin = sel.pos; originName = 'from station ' + (sel.name || ''); }
   else if (gpsScenePos) { origin = new THREE.Vector3(gpsScenePos.x, gpsScenePos.y, gpsScenePos.z); originName = 'from you'; }
   else { origin = controls.target; originName = 'from the view centre'; }
+  // Distance is along the survey (the shots, as a caver walks them), from the
+  // selected station, or from the station nearest you / the view centre plus
+  // the straight gap to it. Not connected → last.
+  let anchor = sel, gap = 0;
+  if (!anchor) {
+    let bd = Infinity;
+    stationMap.forEach(st => { const d = st.pos.distanceToSquared(origin); if (d < bd) { bd = d; anchor = st; } });
+    gap = anchor ? Math.sqrt(bd) : 0;
+  }
+  const sd = anchor && anchor._key != null ? reachDistances(anchor._key) : new Map();
   const items = [];
   let nActive = 0;
   stationMap.forEach(st => (typeof ffLeadsAt === 'function' ? ffLeadsAt(st) : (st.leads || []).map(ld => ({ fields: { desc: ld.description, w: ld.width, h: ld.height }, active: true }))).forEach(it => {
     if (it.active) nActive++;
     if (leadShow === 'active' ? !it.active : leadShow === 'closed' ? it.active : false) return;
     const f = it.fields || {};
-    items.push({ st, it, d: st.pos.distanceTo(origin), size: Math.max(Number(f.w) || 0, Number(f.h) || 0), pri: Number(f.priority) || 9 });
+    const along = sd.get(st._key);
+    items.push({ st, it, d: along === undefined ? Infinity : along + gap, straight: st.pos.distanceTo(origin), size: Math.max(Number(f.w) || 0, Number(f.h) || 0), pri: Number(f.priority) || 9 });
   }));
   document.querySelector('#find-panel .fp-tab[data-tab="leads"]').textContent = nActive ? `Leads (${nActive})` : 'Leads';
   if (!items.length) { from.textContent = leadShow === 'closed' ? 'No closed leads.' : 'No open leads.'; return; }
-  from.textContent = leadSort === 'near' ? 'Straight-line distance ' + originName : leadSort === 'size' ? 'Biggest first (unsized last)' : 'Priority 1 first, then nearest';
-  items.sort(leadSort === 'near' ? (a, b) => a.d - b.d : leadSort === 'size' ? (a, b) => b.size - a.size || a.d - b.d : (a, b) => a.pri - b.pri || a.d - b.d);
+  from.textContent = leadSort === 'near' ? 'Distance along the survey ' + originName : leadSort === 'size' ? 'Biggest first (unsized last)' : 'Priority 1 first, then nearest';
+  const byD = (a, b) => a.d === b.d ? a.straight - b.straight : a.d < b.d ? -1 : 1;     // Infinity-safe
+  items.sort(leadSort === 'near' ? byD : leadSort === 'size' ? (a, b) => b.size - a.size || byD(a, b) : (a, b) => a.pri - b.pri || byD(a, b));
   items.slice(0, 300).forEach(x => {
     const f = x.it.fields || {};
-    const sub = [typeof ffLeadSummary === 'function' ? ffLeadSummary(f) : '', 'at ' + (x.st.name || 'station'), U.len(x.d)].filter(Boolean).join(' · ');
+    const sub = [typeof ffLeadSummary === 'function' ? ffLeadSummary(f) : '', 'at ' + (x.st.name || 'station'), isFinite(x.d) ? U.len(x.d) + ' along the survey' : 'not connected to the survey from here'].filter(Boolean).join(' · ');
     let edit = null;
     if (typeof ffEditLead === 'function') {
       edit = el('button', 'fp-btn', '✏️');
@@ -3237,18 +3432,19 @@ function routeStats(p) {
     if (e.known) S.knownLen += e.len;
     if (e.W != null && (!S.minW || e.W < S.minW.v)) S.minW = { v: e.W, at: from.name + '–' + to.name };
     if (e.H != null && (!S.minH || e.H < S.minH.v)) S.minH = { v: e.H, at: from.name + '–' + to.name };
-    if (e.W != null && e.W < 3 * FT) S.cat.narrow += e.len;
-    if (e.H != null && e.H < 6 * FT) S.cat.stoop += e.len;
-    if (e.H != null && e.H < 4 * FT) S.cat.crawl += e.len;
-    if (e.H != null && e.H < 2 * FT) S.cat.flat += e.len;
-    if (e.W != null && e.H != null && e.W < 2 * FT && e.H < 2 * FT) S.cat.tube += e.len;
+    const D = rtDims();
+    if (e.W != null && e.W < D.N) S.cat.narrow += e.len;
+    if (e.H != null && e.H < D.S) S.cat.stoop += e.len;
+    if (e.H != null && e.H < D.C) S.cat.crawl += e.len;
+    if (e.H != null && e.H < D.Fl) S.cat.flat += e.len;
+    if (e.W != null && e.H != null && e.W < D.Nt && e.H < D.Fl) S.cat.tube += e.len;
     if (e.steep) { S.cat.steep += e.len; S.steepShots++; }
     // Hard sections: crawl or lower, under 2 ft wide, or steep (≥50°, ≥10 ft).
     const kinds = [];
-    if (e.W != null && e.H != null && e.W < 2 * FT && e.H < 2 * FT) kinds.push('tube');
+    if (e.W != null && e.H != null && e.W < D.Nt && e.H < D.Fl) kinds.push('tube');
     else {
-      if (e.H != null && e.H < 4 * FT) kinds.push(e.H < 2 * FT ? 'flat crawl' : 'crawl');
-      if (e.W != null && e.W < 2 * FT) kinds.push('narrow');
+      if (e.H != null && e.H < D.C) kinds.push(e.H < D.Fl ? 'flat crawl' : 'crawl');
+      if (e.W != null && e.W < D.Nt) kinds.push('narrow');
     }
     if (e.steep) kinds.push(dz > 0 ? 'steep up' : 'steep down');
     if (kinds.length) {
@@ -4248,6 +4444,18 @@ function renderDisplaySheet() {
 function renderMoreSheet() {
   sheetHead('Units');
   sheetSeg(['Feet', 'Metres'], UNITS === 'm' ? 1 : 0, i => { setUnits(i ? 'm' : 'ft'); rerenderSheet(); });
+  sheetHead('Route difficulty');
+  [['Narrow below', 'narrow', 'ft wide', 0.5], ['Stooping below', 'stoop', 'ft high', 0.5], ['Crawling below', 'crawl', 'ft high', 0.5],
+   ['Steep from', 'steepDeg', '° (and at least the drop below)', 5], ['Steep drop of', 'steepDrop', 'ft up or down', 1]].forEach(([lab, k, unit, step]) => {
+    const r = el('div', 'fp-row rt-set'); r.dataset.rt = k;
+    r.appendChild(el('span', '', lab));
+    const dn = el('button', 'fp-btn', '−'), val = el('b', 'rt-val', String(RT[k])), up = el('button', 'fp-btn', '+');
+    const bump = d => { setRouteThresholds({ [k]: Math.max(step, +(RT[k] + d).toFixed(2)) }); rerenderSheet(); };
+    dn.addEventListener('click', () => bump(-step)); up.addEventListener('click', () => bump(step));
+    r.append(dn, val, up, el('span', 'sh-s', unit));
+    sheetEl.appendChild(r);
+  });
+  sheetRow('↺', 'Reset to the defaults', 'narrow 3 ft · stooping 6 ft · crawling 4 ft · steep 50° and 10 ft', () => { setRouteThresholds(RT_DEFAULT); rerenderSheet(); });
   sheetHead('Entering data as');
   const ar = el('div', 'fp-row'); ar.appendChild(ffAuthorChip()); sheetEl.appendChild(ar);
   sheetRow('⇄', 'Project & sync', ffPid ? (ffP.name || 'project') + ' · sync files to other phones and FLEX' : 'pick or start this map’s project', () => { ffOpenProject(); });
@@ -6280,6 +6488,69 @@ async function ffInit() {
 
 uiStash();          // the GPS sheet's body and the terrain sliders wait off-screen
 
+// Cleaning the export's survey data before it is drawn (exports from older
+// FLEX versions, or from caves FLEX could not name everything in):
+//  - a shot with no from_name / to_name gets the name of the station standing
+//    at that end (within 0.2 m, same cave), from any survey's station list or
+//    named shot;
+//  - a survey whose name is a bare code takes the description another survey
+//    of the same cave and code carries ("code — description");
+//  - returns the legend label per survey: surveys of one cave that share a
+//    full name (two PLT files with one code) get "(2)", "(3)" so they stay
+//    apart in the list.
+function prepareSurveys(surveys) {
+  const Q = 0.25, idx = new Map(), cell = v => Math.round(v / Q);
+  const put = (cave, p, name) => {
+    if (!name || !p || p.length < 3) return;
+    const k = cave + '|' + cell(p[0]) + ',' + cell(p[1]) + ',' + cell(p[2]);
+    if (!idx.has(k)) idx.set(k, []);
+    idx.get(k).push({ p, name });
+  };
+  surveys.forEach(sv => {
+    const cave = sv.cave || '';
+    (sv.stations || []).forEach(st => put(cave, st.xyz, st.name));
+    (sv.shots || []).forEach(sh => { put(cave, sh.from_xyz, sh.from_name); put(cave, sh.to_xyz, sh.to_name); });
+  });
+  const nameAt = (cave, p) => {
+    if (!p || p.length < 3) return '';
+    const cx = cell(p[0]), cy = cell(p[1]), cz = cell(p[2]);
+    let best = '', bd = 0.2 * 0.2;
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+      const L = idx.get(cave + '|' + (cx + dx) + ',' + (cy + dy) + ',' + (cz + dz));
+      if (!L) continue;
+      for (const c of L) {
+        const d = (c.p[0] - p[0]) ** 2 + (c.p[1] - p[1]) ** 2 + (c.p[2] - p[2]) ** 2;
+        if (d <= bd) { bd = d; best = c.name; }
+      }
+    }
+    return best;
+  };
+  surveys.forEach(sv => {
+    const cave = sv.cave || '';
+    (sv.shots || []).forEach(sh => {
+      if (!sh.from_name) { const n = nameAt(cave, sh.from_xyz); if (n) sh.from_name = n; }
+      if (!sh.to_name) { const n = nameAt(cave, sh.to_xyz); if (n) sh.to_name = n; }
+    });
+  });
+  // Descriptions: "code — description" from a sibling survey, for bare codes.
+  const codeOf = sv => sv.code != null && sv.code !== '' ? String(sv.code) : String(sv.name || '').split(' — ')[0].trim();
+  const full = new Map();
+  surveys.forEach(sv => { if (/ — ./.test(sv.name || '')) { const k = (sv.cave || '') + '|' + codeOf(sv); if (!full.has(k)) full.set(k, sv.name); } });
+  surveys.forEach(sv => {
+    if (!sv.name || / — ./.test(sv.name) || !sv.code) return;
+    if (String(sv.name).trim() !== String(sv.code).trim()) return;
+    const f = full.get((sv.cave || '') + '|' + codeOf(sv));
+    if (f) sv.name = f;
+  });
+  const seen = new Map(), labels = new Map();
+  surveys.forEach(sv => {
+    const k = (sv.cave || '') + '|' + (sv.name || 'Survey'), n = (seen.get(k) || 0) + 1;
+    seen.set(k, n);
+    labels.set(sv, n > 1 ? `${sv.name || 'Survey'} (${n})` : (sv.name || 'Survey'));
+  });
+  return labels;
+}
+
 function buildCaveLines() {
   buildCavePassages();
   if (!buildCaveLines._field) { buildCaveLines._field = true; fieldRebuild(); fieldRenderList(); }
@@ -6290,6 +6561,16 @@ function buildCaveLines() {
   const legendEl = document.getElementById('legend');
   if (!buildCaveLines._ff) { buildCaveLines._ff = true; setTimeout(ffInit, 0); }   // notes, log, field surveys
   if (!surveys.length) return;
+  const svLabel = prepareSurveys(surveys);
+  // A station name is one station within a cave. The same name far from the
+  // first (two PLT files that share a code, each with its own "1") is another
+  // station: it gets the key "name#2", so the two are not tied together.
+  const STATION_CLASH_M = 30;
+  const stKeyFor = (pfx, name, pos) => {
+    let k = pfx + name;
+    for (let n = 2; stationMap.has(k) && stationMap.get(k).pos.distanceTo(pos) > STATION_CLASH_M; n++) k = pfx + name + '#' + n;
+    return k;
+  };
 
   // Fixed physical sizes (metres) — independent of map extent.
   // Tuned for the ~0.8 km reference map; looks consistent at any scale.
@@ -6327,7 +6608,7 @@ function buildCaveLines() {
 
       // Register from station (fallback: derive from shot endpoint)
       const fromName = shot && shot.from_name;
-      const fromKey  = fromName ? cavePfx + fromName : `${Math.round(pts[0].x)},${Math.round(pts[0].y)},${Math.round(pts[0].z)}`;
+      const fromKey  = fromName ? stKeyFor(cavePfx, fromName, pts[0]) : `${Math.round(pts[0].x)},${Math.round(pts[0].y)},${Math.round(pts[0].z)}`;
       if (!stationMap.has(fromKey)) {
         stationMap.set(fromKey, { pos: pts[0].clone(), name: fromName || '', surveyName: sv.name || 'Survey', cave: sv.cave || '', hexColor, shots: [], lrud: null, dist: null });
       }
@@ -6335,7 +6616,7 @@ function buildCaveLines() {
 
       // Register to station (fallback: derive from shot endpoint)
       const toName = shot && shot.to_name;
-      const toKey  = toName ? cavePfx + toName : `${Math.round(pts[1].x)},${Math.round(pts[1].y)},${Math.round(pts[1].z)}`;
+      const toKey  = toName ? stKeyFor(cavePfx, toName, pts[1]) : `${Math.round(pts[1].x)},${Math.round(pts[1].y)},${Math.round(pts[1].z)}`;
       if (!stationMap.has(toKey)) {
         stationMap.set(toKey, { pos: pts[1].clone(), name: toName || '', surveyName: sv.name || 'Survey', cave: sv.cave || '', hexColor, shots: [], lrud: null, dist: null });
       }
@@ -6355,10 +6636,10 @@ function buildCaveLines() {
     (sv.stations || []).forEach(st => {
       const pos = new THREE.Vector3(st.xyz[0], st.xyz[1], st.xyz[2]);
       // Try to find by name first, then by coordinate proximity
-      let key = st.name ? cavePfx + st.name : null;
+      let key = st.name ? stKeyFor(cavePfx, st.name, pos) : null;
       if (!key || !stationMap.has(key)) {
         const ck = `${Math.round(pos.x)},${Math.round(pos.y)},${Math.round(pos.z)}`;
-        key = stationMap.has(ck) ? ck : (st.name ? cavePfx + st.name : ck);
+        key = stationMap.has(ck) ? ck : (st.name ? key : ck);
       }
       if (!stationMap.has(key)) {
         stationMap.set(key, { pos, name: st.name || '', surveyName: sv.name || 'Survey', cave: sv.cave || '', hexColor, shots: [], lrud: null, dist: null });
@@ -6375,7 +6656,7 @@ function buildCaveLines() {
     // cut its shots off), shown as an orange "?" above the station.
     (sv.leads || []).forEach((ld, i) => {
       if (!ld.xyz) return;
-      const key = ld.station ? cavePfx + ld.station : `${cavePfx}lead${i}`;
+      const key = ld.station ? stKeyFor(cavePfx, ld.station, new THREE.Vector3(ld.xyz[0], ld.xyz[1], ld.xyz[2])) : `${cavePfx}lead${i}`;
       if (!stationMap.has(key)) {
         stationMap.set(key, { pos: new THREE.Vector3(ld.xyz[0], ld.xyz[1], ld.xyz[2]), name: ld.station || '',
           surveyName: sv.name || 'Survey', cave: sv.cave || '', hexColor, shots: [], lrud: null, dist: null });
@@ -6391,7 +6672,7 @@ function buildCaveLines() {
       row.className = 'leg-row';
       row.innerHTML = `<div class="leg-dot" style="background:${hexColor}"></div>`
                     + `<div class="leg-info">`
-                    + `<div class="leg-nm">${sv.name || 'Survey'}</div>`
+                    + `<div class="leg-nm">${escHtml(svLabel.get(sv) || sv.name || 'Survey')}</div>`
                     + `<div class="leg-shots">${shotCount} shots</div>`
                     + `</div>`;
       legendEl.appendChild(row);
@@ -6543,7 +6824,7 @@ function isStationVisible(st) {
 // Station dots and names, made on first show. One material per dot, since
 // colour modes, reach and routes tint and fade each on its own.
 let _stGeo = null, _stR = 0.3, _lblH = 0.8;
-const STATION_HIT_R = 4;          // tap target, × the dot radius
+const STATION_HIT_PX = 24;        // tap target: a circle this many CSS pixels in radius round the dot
 const STATION_SHOW_CAP = 8000;    // dots shown at once; past it, those nearest the view
 const STATION_LABEL_CAP = 1500;   // names shown at once (each is its own texture), nearest first
 let _stationCapped = false, _stationCapTimer = null;
@@ -6571,24 +6852,79 @@ function ensureStationLabel(st) {
   return (st._sprite = sprite);
 }
 function stationShown(st) { return isStationVisible(st) && !st._capHidden; }
-function stationNamed(st) { return stationShown(st) && stationNamesOn && !st._labelHidden; }
+function stationNamed(st) { return stationShown(st) && stationNamesOn && !st._labelHidden && !st._crowded; }
+
+// Names thinned for the view: a name is drawn only if it would be at least
+// LABEL_MIN_PX tall on screen and does not sit on one already placed. The
+// selected station goes first, then end stations, then nearest the camera, so
+// zoomed out you get a few readable names and zooming in brings the rest.
+// Re-run when the camera settles (the 'end' handler below), not per frame.
+const LABEL_MIN_PX = 8, LABEL_PAD_PX = 3;
+function declutterLabels(cands) {
+  cands.forEach(st => { st._crowded = false; });
+  if (!stationNamesOn || !cands.length) return;
+  camera.updateMatrixWorld();
+  const W = renderer.domElement.clientWidth || window.innerWidth, H = renderer.domElement.clientHeight || window.innerHeight;
+  const tanH = 2 * Math.tan(camera.fov * Math.PI / 360), vInv = camera.matrixWorldInverse;
+  camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+  const factor = stationMode === 1 ? 2 : 1, wH = _lblH * factor, CELL = 64;
+  const sel = _selMesh && _selMesh._station;
+  const rank = [];
+  const v = new THREE.Vector3();
+  cands.forEach(st => {
+    v.copy(st.pos); v.z += _stR + _lblH * 0.6 * factor; v.applyMatrix4(vInv);
+    const depth = -v.z;
+    if (depth <= 0.01) return;                         // behind the camera: not drawn anyway
+    const ph = wH * H / (tanH * depth);
+    const sx = W / 2 + v.x / depth * (H / tanH), sy = H / 2 - v.y / depth * (H / tanH);
+    rank.push({ st, ph, sx, sy, depth, pri: st === sel ? 0 : st._isEnd ? 1 : 2 });
+  });
+  rank.sort((a, b) => a.pri - b.pri || a.depth - b.depth);
+  const grid = new Map();
+  for (const r of rank) {
+    const st = r.st;
+    if (r.pri && r.ph < LABEL_MIN_PX) { st._crowded = true; continue; }
+    if (r.sx < -200 || r.sx > W + 200 || r.sy < -100 || r.sy > H + 100) continue;   // off screen: leave to the pan
+    const w = ((st.name || '').length * 13 + 14) / 32 * r.ph, h = r.ph;
+    const x0 = r.sx - w / 2 - LABEL_PAD_PX, x1 = r.sx + w / 2 + LABEL_PAD_PX, y0 = r.sy - h / 2 - LABEL_PAD_PX, y1 = r.sy + h / 2 + LABEL_PAD_PX;
+    const cx0 = Math.floor(x0 / CELL), cx1 = Math.floor(x1 / CELL), cy0 = Math.floor(y0 / CELL), cy1 = Math.floor(y1 / CELL);
+    let hit = false;
+    if (r.pri) for (let cx = cx0; cx <= cx1 && !hit; cx++) for (let cy = cy0; cy <= cy1 && !hit; cy++) {
+      const L = grid.get(cx * 100003 + cy);
+      if (L) for (const q of L) if (x0 < q[2] && x1 > q[0] && y0 < q[3] && y1 > q[1]) { hit = true; break; }
+    }
+    if (hit) { st._crowded = true; continue; }
+    for (let cx = cx0; cx <= cx1; cx++) for (let cy = cy0; cy <= cy1; cy++) {
+      const k = cx * 100003 + cy; (grid.get(k) || grid.set(k, []).get(k)).push([x0, y0, x1, y1]);
+    }
+  }
+}
 
 // Stations under the tap ray, nearest first, shaped like Raycaster hits
-// ({ object: { _station }, distance, point }). Each station answers within
-// STATION_HIT_R dot radii, shown or not, as the old invisible hit spheres did.
+// ({ object: { _station }, distance, point }). Each station answers inside a
+// circle of STATION_HIT_PX screen pixels round it (never smaller than the dot
+// itself), shown or not, so a dot is as easy to hit zoomed out as in close.
+// The nearest to the finger comes first, not the nearest to the camera.
+function stationTapRadius(dist) {          // world metres that STATION_HIT_PX covers at this depth
+  const h = renderer.domElement.clientHeight || window.innerHeight || 1;
+  const tanH = 2 * Math.tan(camera.fov * Math.PI / 360);
+  return Math.max(_stR, STATION_HIT_PX * dist * tanH / h);
+}
 function stationRayHits() {
   const ray = _tapRay.ray, o = ray.origin, d = ray.direction;
-  const R = _stR * STATION_HIT_R, R2 = R * R, out = [];
+  const out = [];
   stationMap.forEach(st => {
     const p = st.pos, vx = p.x - o.x, vy = p.y - o.y, vz = p.z - o.z;
     const t = vx * d.x + vy * d.y + vz * d.z;
     if (t < 0) return;
+    const R = stationTapRadius(t);
     const m2 = vx * vx + vy * vy + vz * vz - t * t;
-    if (m2 > R2) return;
-    const dist = Math.max(0, t - Math.sqrt(R2 - m2));
-    out.push({ object: { _station: st }, distance: dist, point: ray.at(dist, new THREE.Vector3()) });
+    if (m2 > R * R) return;
+    const dist = Math.max(0, t - Math.sqrt(R * R - m2));
+    out.push({ object: { _station: st }, distance: dist, miss: Math.sqrt(Math.max(0, m2)) / Math.max(t, 1e-6),
+      point: ray.at(dist, new THREE.Vector3()) });
   });
-  return out.sort((a, b) => a.distance - b.distance);
+  return out.sort((a, b) => a.miss - b.miss || a.distance - b.distance);
 }
 
 function applyStationMode() {
@@ -6597,7 +6933,7 @@ function applyStationMode() {
   // Names have a tighter cap: each is a texture of its own, and thousands
   // at once are unreadable anyway.
   const want = [];
-  stationMap.forEach(st => { st._capHidden = false; st._labelHidden = false; if (isStationVisible(st)) want.push(st); });
+  stationMap.forEach(st => { st._capHidden = false; st._labelHidden = false; st._crowded = false; if (isStationVisible(st)) want.push(st); });
   _stationCapped = want.length > STATION_LABEL_CAP;
   if (_stationCapped) {
     const t = controls.target, dd = new Float64Array(want.length);
@@ -6611,6 +6947,7 @@ function applyStationMode() {
       showToast(`${want.length.toLocaleString()} stations: showing the ${STATION_SHOW_CAP.toLocaleString()} nearest the view`);
     }
   }
+  declutterLabels(want.filter(st => !st._capHidden && !st._labelHidden));
   stationMap.forEach(st => {
     const show = stationShown(st), named = stationNamed(st);
     if (show) ensureStationMesh(st);
@@ -6698,11 +7035,12 @@ function selectStation(st) {
     const n = v => v == null ? '?' : U.num(v, 1);
     chips.push(['', `${n(_wh.W)} × ${n(_wh.H)} ${U.u}`]);
     let kind = '';
-    if (_wh.W != null && _wh.H != null && _wh.W < 2 * FT && _wh.H < 2 * FT) kind = 'tube';
+    const D = rtDims();
+    if (_wh.W != null && _wh.H != null && _wh.W < D.Nt && _wh.H < D.Fl) kind = 'tube';
     else {
       const k = [];
-      if (_wh.H != null) k.push(_wh.H < 2 * FT ? 'flat-out' : _wh.H < 4 * FT ? 'crawl' : _wh.H < 6 * FT ? 'stooping' : '');
-      if (_wh.W != null && _wh.W < 3 * FT) k.push(_wh.W < 1 * FT ? 'squeeze' : 'narrow');
+      if (_wh.H != null) k.push(_wh.H < D.Fl ? 'flat-out' : _wh.H < D.C ? 'crawl' : _wh.H < D.S ? 'stooping' : '');
+      if (_wh.W != null && _wh.W < D.N) k.push(_wh.W < D.Nsq ? 'squeeze' : 'narrow');
       kind = k.filter(Boolean).join(', ');
     }
     if (kind) chips.push([kind === 'tube' ? 'mg' : 'kd', kind]);
@@ -7517,7 +7855,7 @@ function requestRender() { _needsRender = true; }
 // damping tail, so the view still eases to a stop after the finger lifts.
 controls.addEventListener('change', () => wakeRender());
 controls.addEventListener('end', () => {
-  if (!_stationCapped) return;
+  if (!stationNamesOn && !_stationCapped) return;
   clearTimeout(_stationCapTimer);
   _stationCapTimer = setTimeout(() => { applyStationMode(); requestRender(); wakeRender(); }, 400);
 });

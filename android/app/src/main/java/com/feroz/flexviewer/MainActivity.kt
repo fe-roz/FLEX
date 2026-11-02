@@ -447,7 +447,7 @@ class MainActivity : AppCompatActivity() {
                     rest == listOf("viewer.html") -> html(viewerFor(id))
                     rest.size == 2 && rest[0] == "libs" && MapStore.safeName(rest[1]) ->
                         WebResourceResponse("application/javascript", "utf-8", assets.open("libs/" + rest[1]))
-                    rest.size == 1 && rest[0] in MapStore.DATA_FILES -> file(File(dir, "export/" + rest[0]))
+                    rest.size == 1 && MapStore.isDataFile(rest[0]) -> file(File(dir, "export/" + rest[0]))
                     else -> notFound()
                 }
             } catch (_: Exception) { notFound() }

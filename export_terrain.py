@@ -30,6 +30,7 @@ VIEWER_LIBS = {
 }
 
 from viewer_inline import build_inline_viewer   # stdlib only (tools/rebuild_viewer.py)
+from tex_tiles import plan_tiles, make_tiles, meta_entry   # texture tiles for areas over ~5 km
 
 import numpy as np
 from scipy.interpolate import NearestNDInterpolator
@@ -2158,6 +2159,24 @@ def main():
             hs_b64 = _hs_b64m.b64encode(hs_bytes).decode('ascii')
             print(f"[4b/7] Hillshade: {len(hs_bytes)//1024} KB "
                   f"({len(hs_b64)//1024} KB as base64)")
+        # 4c. Past ~5 km one texture caps the detail: every tile of the area gets
+        # its own satellite + hillshade at full size (tex_tiles.py). The single
+        # textures above stay as the overview.
+        tile_files, tile_hs = {}, False
+        tcols, trows = plan_tiles(grid.width, grid.height)
+        if tcols * trows > 1:
+            print(f"[4c/7] Texture tiles: {tcols} x {trows}")
+            tile_files, tile_hs = make_tiles(
+                grid, tcols, trows, lambda e0, n0, e1, n1: UtmGrid(e0, n0, e1, n1, zone, south),
+                lambda g: fetch_satellite_texture(g, tex_size=args.tex_size, source=args.satellite_source,
+                                                  progress=lambda m: print(f"[4c/7] {m}")),
+                (lambda g, frac: build_lidar_hillshade(x, y, z, g, covered_m2 * frac, mode=ground_mode,
+                                                       max_px=args.hillshade_max_px)[0]) if hs_bytes and hs_mode == 'lidar'
+                else (lambda g, frac: fetch_imagery(g, args.tex_size, source='xyz', url_template=args.hillshade_url))
+                if hs_bytes and hs_mode == 'url' else None,
+                (lambda im, g: blank_outside(im, g, poly_utm)) if poly_utm is not None else None,
+                hs_overview=Image.open(_hs_io.BytesIO(hs_bytes)) if hs_bytes else None,
+                progress=lambda m: print(f"[4c/7] {m}"))
         del x, y, z
 
         # 5. UVs + GLB (geometry only) + separate texture encoding
@@ -2192,6 +2211,8 @@ def main():
             if hs_bytes:
                 zf.writestr(zipfile.ZipInfo('tex_hs.jpg'), hs_bytes,
                             compress_type=zipfile.ZIP_STORED)
+            for tname, tbytes in tile_files.items():
+                zf.writestr(zipfile.ZipInfo(tname), tbytes, compress_type=zipfile.ZIP_STORED)
 
             # The Three.js libs, so an export is self-sufficient for an app build
             # without needing the FLEX checkout alongside it.
@@ -2228,6 +2249,8 @@ def main():
                 "terrain":      ('map' if map_terrain else 'lidar'),
                 "terrain_cell_m": float(args.resolution),
             }
+            if tile_files:
+                caves_out["meta"]["texture_tiles"] = meta_entry(tcols, trows, True, tile_hs)
             if caves_out.get("_project"):
                 caves_out["meta"]["project"] = caves_out.pop("_project")
             if caves_out.get("_caves"):
