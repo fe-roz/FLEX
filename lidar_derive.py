@@ -27,6 +27,7 @@ wrappers at the bottom.
 """
 
 import math
+import sys
 import numpy as np
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -500,7 +501,8 @@ def write_geotiff(values, grid, path, epsg=None, nodata=np.nan):
 # working export path that cannot be tested from here. Once both have run
 # against real data they should be merged behind one bounds/CRS helper.
 
-def read_ept_all_classes(ept_path, utm_bbox, bbox_latlon=None, progress=print):
+def read_ept_all_classes(ept_path, utm_bbox, bbox_latlon=None, progress=print,
+                         zone=None, south=False):
     """Every point in the bbox, with classification, reprojected to UTM.
 
     Unlike the export's reader this applies NO classification filter. Class 7
@@ -540,7 +542,9 @@ def read_ept_all_classes(ept_path, utm_bbox, bbox_latlon=None, progress=print):
         progress(f"  Warning: could not read ept.json ({e}); assuming native CRS == UTM")
 
     utm_epsg = None
-    if bbox_latlon:
+    if zone is not None:
+        utm_epsg = (32700 if south else 32600) + int(zone)
+    elif bbox_latlon:
         lon0 = (bbox_latlon[0] + bbox_latlon[2]) / 2
         lat0 = (bbox_latlon[1] + bbox_latlon[3]) / 2
         zone = int((lon0 + 180) / 6) + 1
@@ -656,7 +660,7 @@ def derive(x, y, z, classification, cell=None, veg_band=(0.30, 1.50),
                 keep=keep, cell=cell, ground_per_cell=per_cell)
 
 
-def main():
+def main(argv=None):
     import argparse, os, json as _json
     ap = argparse.ArgumentParser(
         description="Derive vegetation-density and void rasters from LiDAR.")
@@ -676,31 +680,70 @@ def main():
                          "keep it generous, real voids live down here")
     ap.add_argument("--high-cut", type=float, default=120.0)
     ap.add_argument("--stat", choices=["median", "mean"], default="median")
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
 
     os.makedirs(a.out_dir, exist_ok=True)
-    minLon, minLat, maxLon, maxLat = a.bbox
+    log = open(os.path.join(a.out_dir, "log.txt"), "w", buffering=1)
 
-    # Reuse the export's projection helper so both agree on UTM.
+    def say(msg):
+        print(msg, flush=True)
+        log.write(msg + "\n")
+
+    try:
+        _run(a, say)
+    except SystemExit as e:
+        # read_ept_all_classes raises SystemExit("ERROR: ...") with the reason.
+        if e.code not in (None, 0):
+            _say_err(str(e.code), log)
+            sys.exit(1)
+    except Exception as e:
+        import traceback
+        log.write(traceback.format_exc())
+        _say_err(f"{type(e).__name__}: {e}", log)
+        sys.exit(1)
+    finally:
+        log.close()
+
+
+def _say_err(msg, log):
+    """The reason a run failed: last line on stderr (the server shows it in the
+    panel) and in log.txt."""
+    msg = msg.strip().splitlines()[-1] if msg.strip() else "failed"
+    if msg.startswith("ERROR: "):
+        msg = msg[7:]
+    log.write("ERROR: " + msg + "\n")
+    print("ERROR: " + msg, file=sys.stderr, flush=True)
+
+
+def _run(a, say):
+    import os, json as _json
+    minLon, minLat, maxLon, maxLat = a.bbox
+    if not (minLon < maxLon and minLat < maxLat):
+        raise ValueError("bbox must be minLon,minLat,maxLon,maxLat with min < max")
+
+    # Reuse the export's projection helpers so both agree on UTM, and cover the
+    # drawn lat/lon box properly (it is tilted in UTM off the central meridian).
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "export_terrain", os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                        "export_terrain.py"))
     et = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(et)
-    e0, n0 = et.latlon_to_utm(minLat, minLon)
-    e1, n1 = et.latlon_to_utm(maxLat, maxLon)
-    utm_bbox = (min(e0, e1), min(n0, n1), max(e0, e1), max(n0, n1))
-    print(f"[1/4] UTM bbox: {utm_bbox}")
+    clat, clon = (minLat + maxLat) / 2, (minLon + maxLon) / 2
+    zone = et.utm_zone_for(clon)
+    south = clat < 0
+    utm_bbox = et.utm_rect_covering((minLon, minLat, maxLon, maxLat), zone, 1.0)
+    cover = et.latlon_box_covering(utm_bbox, zone, south)
+    say(f"[1/4] UTM zone {zone}{'S' if south else 'N'} bbox: {utm_bbox}")
 
     x, y, z, cls, epsg = read_ept_all_classes(
-        a.ept, utm_bbox, (minLon, minLat, maxLon, maxLat),
-        progress=lambda m: print(f"[2/4] {m}"))
+        a.ept, utm_bbox, cover, zone=zone, south=south,
+        progress=lambda m: say(f"[2/4] {m}"))
 
     r = derive(x, y, z, cls, cell=a.cell, veg_band=tuple(a.veg_band),
                void_depth=a.void_depth, void_min_points=a.void_min_points,
                low_cut=a.low_cut, high_cut=a.high_cut, stat=a.stat,
-               progress=lambda m: print(f"[3/4] {m}"))
+               progress=lambda m: say(f"[3/4] {m}"))
 
     g = r["grid"]
     veg_rgba, vlo, vhi = colorize(r["veg"], VEG_RAMP, 0.0,
@@ -714,7 +757,16 @@ def main():
     write_geotiff(r["void_depth"], g, os.path.join(a.out_dir, "voids.tif"), epsg)
     write_geotiff(r["ground"], g, os.path.join(a.out_dir, "ground.tif"), epsg)
 
+    # The overlays sit on the grid's own footprint (whole cells), not the
+    # requested box: inverse-project all four UTM corners (the box is tilted in
+    # lon/lat) and take the envelope.
+    cx = [g.minx, g.maxx, g.maxx, g.minx]; cy = [g.miny, g.miny, g.maxy, g.maxy]
+    clats, clons = et.utm_to_latlon(np.array(cx), np.array(cy), zone, south)
+    raster_bounds = [float(clons.min()), float(clats.min()),
+                     float(clons.max()), float(clats.max())]
+
     meta = dict(
+        raster_bounds_lonlat=raster_bounds,
         bbox_lonlat=[minLon, minLat, maxLon, maxLat],
         utm_bbox=list(utm_bbox), epsg=epsg, cell=r["cell"],
         grid=[g.nx, g.ny], geotransform=list(g.geotransform()),
@@ -727,8 +779,9 @@ def main():
     )
     with open(os.path.join(a.out_dir, "derived.json"), "w") as f:
         _json.dump(meta, f, indent=2)
-    print(f"[4/4] Wrote {a.out_dir}/ "
+    say(f"[4/4] Wrote {a.out_dir}/ "
           f"(vegetation, voids, ground + derived.json)")
+
 
 
 if __name__ == "__main__":
