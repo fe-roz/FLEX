@@ -1282,15 +1282,19 @@
     return { own, below: all.filter(d => !d.tags[tgt] && Object.keys(d.tags).some(below)) };
   }
   function filesTab(box, c, f) {
-    if (!f.own.length && !f.below.length) box.appendChild(el('div', 'pj-note', 'No files here yet.'));
-    f.own.forEach(d => box.appendChild(docEl(d)));
-    if (f.below.length) {
-      const k = 'below:' + cardTarget(c);
-      const fold = btn(`${pj.fold === k ? '▾' : '▸'} ${f.below.length} more further down (${c.level === 'cave' ? 'its surveys and stations' : 'its stations'})`, () => { pj.fold = pj.fold === k ? null : k; renderCard(); }, 'link');
-      box.appendChild(fold);
-      if (pj.fold === k) f.below.forEach(d => box.appendChild(docEl(d)));
+    const sk = window._sketches && window._sketches.filesList(box, c, f);     // sketches.js: grouped, with thumbnails; drop a scan to attach
+    if (!sk) {
+      if (!f.own.length && !f.below.length) box.appendChild(el('div', 'pj-note', 'No files here yet.'));
+      f.own.forEach(d => box.appendChild(docEl(d)));
+      if (f.below.length) {
+        const k = 'below:' + cardTarget(c);
+        const fold = btn(`${pj.fold === k ? '▾' : '▸'} ${f.below.length} more further down (${c.level === 'cave' ? 'its surveys and stations' : 'its stations'})`, () => { pj.fold = pj.fold === k ? null : k; renderCard(); }, 'link');
+        box.appendChild(fold);
+        if (pj.fold === k) f.below.forEach(d => box.appendChild(docEl(d)));
+      }
     }
     const row = el('div', 'pj-row pj-card-btns');
+    if (sk) row.appendChild(sk);                                              // the Add sketch button
     row.appendChild(btn(['doc', 'Add pages'], () => addPages({ tags: [cardTarget(c)] })));
     row.appendChild(btn(['tag', 'From inbox'], () => tagFromInbox(cardTarget(c))));
     box.appendChild(row);
@@ -1560,7 +1564,8 @@
   window._pjApi = { pj, FL, el, btn, esc, when, toast, dialog, choose, record, render, refreshCard, openCard, flyTo,
     caveFor, caveName, partsOf, stationPos, stationsOf, docEl, docOpen, docByPage, describe, headsFor, targetLabel,
     editNote, noteEl, declAt, yearOf, imps, who, ensureAuthor, linkFile, editCave, newProject, refresh, editLead, renameProject, editDescription, setProject, importSync, acceptAbove, closeCard,
-    stopVideos, videoEl, fileOpen, galleryClose, addPages, editTags, leadEl, leadsAt, leadSummary, blobUrl, docSub };
+    stopVideos, videoEl, fileOpen, galleryClose, addPages, editTags, leadEl, leadsAt, leadSummary, blobUrl, docSub,
+    filesToPages, storeBytes, pickFiles, cardTarget };
 
   // ── What the export takes from the project (index.html _collectCavesInBbox) ─
   window._pjExport = () => pj.pid ? {

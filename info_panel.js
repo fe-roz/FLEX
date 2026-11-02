@@ -567,11 +567,13 @@
   }
 
   // ── Media lists ──────────────────────────────────────────────────────────
-  const groups = docs => ({ photos: docs.filter(d => FL.docMedia(d) === 'photo'), videos: docs.filter(d => FL.docMedia(d) === 'video'), docs: docs.filter(d => !FL.docMedia(d)) });
+  const isSk = d => !!(window._sketches && window._sketches.isSketch(d));
+  const groups = docs => ({ photos: docs.filter(d => FL.docMedia(d) === 'photo'), videos: docs.filter(d => FL.docMedia(d) === 'video'), sketches: docs.filter(isSk), docs: docs.filter(d => !FL.docMedia(d) && !isSk(d)) });
   function counts(s) {
     const g = groups(s.docs || []), out = [];
     if (g.photos.length) out.push(`🖼 ${g.photos.length} photo${g.photos.length === 1 ? '' : 's'}`);
     if (g.videos.length) out.push(`🎞 ${g.videos.length} video${g.videos.length === 1 ? '' : 's'}`);
+    if (g.sketches.length) out.push(`${g.sketches.length} sketch${g.sketches.length === 1 ? '' : 'es'}`);
     if (g.docs.length) out.push(`📄 ${g.docs.length} document${g.docs.length === 1 ? '' : 's'}`);
     if (s.notes && s.notes.length) out.push(`📝 ${s.notes.length}`);
     if (s.leads && s.leads.length) out.push(`❓ ${s.leads.length}`);
@@ -694,8 +696,9 @@
       });
       body.append(player, grid);
     }
+    if (g.sketches.length) { sec(body, 'Sketches', g.sketches.length); g.sketches.forEach(d => body.appendChild(A.docEl(d, s.target))); }
     if (g.docs.length) { sec(body, '📄 Documents', g.docs.length); g.docs.forEach(d => body.appendChild(A.docEl(d, s.target))); }
-    if (!s.docs.length && s.target && pj.pid) body.appendChild(el('div', 'inf-none', 'No photos, videos or documents tagged to it yet.'));
+    if (!s.docs.length && s.target && pj.pid) body.appendChild(el('div', 'inf-none', 'No photos, videos, sketches or documents tagged to it yet.'));
     const r = el('div', 'inf-acts');
     if (s.ref && !s.refIsHost && s.ref.editable && s.ref.kind === 'point' && FE()) r.appendChild(btn('Move on the map', () => { collapse(true); FE().drag(s.ref); }, 'small inf-drag'));
     if (paneOf(s)) r.appendChild(btn('Show in list', () => reveal(s, { open: true }), 'small inf-list'));
