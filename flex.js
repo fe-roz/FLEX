@@ -1674,30 +1674,22 @@ function initWorkflowPanel() {
   }
 }
 
-window.cesiumViewer = new Cesium.Viewer('cesiumContainer', {
-useDefaultRenderLoop: false,
-terrainProvider: await Cesium.createWorldTerrainAsync(),
-animation: false,
-baseLayerPicker: false,
-timeline: false,
-navigationHelpButton: false,
-terrainShadows: Cesium.ShadowMode.DISABLED,
-// clampToGround : true,
-
-});
-cesiumViewer.camera.frustum.fov = (90*Cesium.Math.PI)/180;
+// Moved to client/src/modules/cesium-viewer.js: creates window.cesiumViewer (options, 90 degree FOV). The world
+// terrain call stays here as text: the browser tests rewrite it to a flat terrain.
+setupCesiumViewer({ Cesium, terrainProvider: await Cesium.createWorldTerrainAsync() });
 
 // Restore camera from last session immediately (before anything else moves the camera)
 const _savedSession = loadSession();
 if (_savedSession) restoreCamera(_savedSession, cesiumViewer);
 
-// Cesium's InfoBox uses a sandboxed iframe that blocks scripts by default.
-// Remove the sandbox entirely so entity description HTML renders correctly.
-const infoBoxFrame = cesiumViewer.infoBox?.frame;
-if (infoBoxFrame) {
-  infoBoxFrame.removeAttribute("sandbox");
-}
+setupInfoBox({ cesiumViewer });   // cesium-viewer.js: drops the InfoBox iframe sandbox
 
+import { setupCesiumViewer, setupInfoBox, setupCesiumScene, setupCameraController, addPhotorealisticTileset,
+         setupLayerActivation } from "./client/src/modules/cesium-viewer.js";
+import { setupPotreeViewer, createApplyPcMatrix } from "./client/src/modules/potree-viewer.js";
+import { setupRenderLoop } from "./client/src/modules/render-loop.js";
+import { setupSessionRestore } from "./client/src/modules/session-restore.js";
+import { setupSceneControls } from "./client/src/modules/scene-controls.js";
 import { setupSearchPins } from "./client/src/modules/search-pins.js";
 import { setupSelectionMonitor } from "./client/src/modules/selection-monitor.js";
 import { setupUpdateChecker } from "./client/src/modules/update-checker.js";
@@ -1722,13 +1714,7 @@ setupSelectionMonitor({
 // Add fog at the distance so we don't see the other side of the world?
 // Make a way to toggle this map.
 
-try {
-  const tileset = await Cesium.createGooglePhotorealistic3DTileset();
-  cesiumViewer.scene.primitives.add(tileset);
-  cesiumViewer.scene.primitives._primitives[0].show = false;
-} catch (error) {
-  console.log(`Error creating tileset: ${error}`);
-}
+await addPhotorealisticTileset({ Cesium, cesiumViewer });   // cesium-viewer.js (hidden until the Google Maps switch)
 
 
 // CODE THAT WILL HELP ADD WAYPOINTS
@@ -1794,61 +1780,11 @@ displayPC: false,
 
 };
 
-var pointCounter = 0;
-var creatingRoute = "";
-var routePoints = [];
-var currentEntity = new Cesium.Entity();
+// pointCounter / creatingRoute / routePoints / currentEntity moved into cesium-interactions.js (its only user).
 
-var ClassificationScheme = {
-  0:       { visible: flags.toggleOther, name: 'never classified'  , color: [0.5,  0.5,  0.5,  1.0] },
-  1:       { visible: flags.toggleOther, name: 'unclassified'      , color: [0.5,  0.5,  0.5,  1.0] },
-  2:       { visible: flags.toggleGround, name: 'ground'            , color: [0.63, 0.32, 0.18, 1.0] },
-  3:       { visible: flags.toggleVegetation, name: 'low vegetation'    , color: [0.0,  1.0,  0.0,  1.0] },
-  4:       { visible: flags.toggleVegetation, name: 'medium vegetation' , color: [0.0,  0.8,  0.0,  1.0] },
-  5:       { visible: flags.toggleVegetation, name: 'high vegetation'   , color: [0.0,  0.6,  0.0,  1.0] },
-  6:       { visible: flags.toggleVegetation, name: 'building'          , color: [1.0,  0.66, 0.0,  1.0] },
-  7:       { visible: flags.toggleLowNoise, name: 'low point(noise)'  , color: [1.0,  1.0,  1.0,  1.0] },
-  8:       { visible: flags.toggleOther, name: 'key-point'         , color: [1.0,  0.0,  0.0,  1.0] },
-  9:       { visible: flags.toggleOther, name: 'water'             , color: [0.0,  0.0,  1.0,  1.0] },
-  12:      { visible: flags.toggleOther, name: 'overlap'           , color: [1.0,  1.0,  0.0,  1.0] },
-  DEFAULT: { visible: flags.toggleOther, name: 'default'           , color: [0.4,  0.4,  0.4,  0.5] },
-};
-// console.log(ClassificationScheme);
-
-window.potreeViewer = new Potree.Viewer(document.getElementById("potree_render_area"), {
-  useDefaultRenderLoop: false
-});
-potreeViewer.setEDLEnabled(true);
-potreeViewer.setEDLRadius(3.5); //2.0
-potreeViewer.setEDLStrength(0.4);
-potreeViewer.setFOV(60);
-potreeViewer.setPointBudget(10_000_000);
-potreeViewer.classifications = ClassificationScheme;
-
-// Potree starts its own animation loop in its constructor
-// (viewer.js:320, setAnimationLoop) regardless of useDefaultRenderLoop - the
-// check that was supposed to gate it is commented out upstream. That loop ran
-// update() and render() every frame while FLEX's own loop rendered a second
-// time, so the cloud was drawn twice, and worse, updateVisibility picked LOD
-// nodes BEFORE the Cesium camera had been synced to Potree. LOD was being
-// decided against a camera one frame stale. FLEX drives both itself now, in
-// the right order, at the end of loop().
-potreeViewer.renderer.setAnimationLoop(null);
-
-// Four requests in flight starves the near field when the falloff below makes
-// it the only thing worth loading.
-Potree.maxNodesLoading = 8;
-
-// A node smaller than this on screen is not refined. Potree's own default
-// is 30, which is permissive enough that an oblique view spends the budget
-// on the horizon. 90 was picked in the field. The Detail slider overrides
-// this once the UI wires up; this is the value if it never does.
-potreeViewer.setMinNodeSize(90);
-potreeViewer.loadSettingsFromURL();
-potreeViewer.setBackground(null);
-potreeViewer.useHQ = false;
-// potreeViewer.setLengthUnit('m');
-potreeViewer.setDescription("");
+// Moved to client/src/modules/potree-viewer.js: ClassificationScheme, new Potree.Viewer and its settings;
+// it sets window.potreeViewer (the bare name `potreeViewer` below and in earlier functions is that global).
+setupPotreeViewer({ Potree, flags });
 
 
 // Cave survey loaded on demand via #lp-cave-toggle in the Layers panel
@@ -1865,13 +1801,8 @@ const { setLidarFootprintsVisible, setOtFootprintsVisible, loadBackendCatalog, _
 
 
 
-const scene = cesiumViewer.scene;
-scene.screenSpaceCameraController.enableCollisionDetection = false;
-const canvas = cesiumViewer.canvas;
-canvas.setAttribute("tabindex", "0"); // needed to put focus on the canvas
-canvas.onclick = function () {
-canvas.focus();
-};
+// cesium-viewer.js: collision off, canvas focus, globe translucency.
+const { scene, canvas, ellipsoid } = setupCesiumScene({ Cesium, cesiumViewer });
 
 // Cave survey globe-pick: intercept LEFT_CLICK when pick mode is active
 {
@@ -1911,16 +1842,6 @@ canvas.focus();
 import { setupCompass } from "./client/src/modules/navigation-aids/compass.js";
 import { setupMinimap } from "./client/src/modules/navigation-aids/minimap.js";
 import { setupMinimapSync } from "./client/src/modules/navigation-aids/minimap-sync.js";
-const ellipsoid = scene.globe.ellipsoid;
-scene.globe.translucency.enabled = true 
-scene.globe.translucency.frontFaceAlphaByDistance = new Cesium.NearFarScalar(
-400.0,
-0.0,
-1000.0,
-1.0
-);
-scene.globe.translucency.frontFaceAlphaByDistance.nearValue = 0.7;
-scene.globe.translucency.frontFaceAlphaByDistance.farValue = 1;
 
 // The 3D north compass, the minimap and its per-frame sync live in
 // client/src/modules/navigation-aids/ (compass.js, minimap.js, minimap-sync.js).
@@ -1951,147 +1872,27 @@ initializeContextMenu({ Cesium, cesiumViewer });
 // Init session system (wires auto-save triggers, exposes window._sessionSave)
 initSession(cesiumViewer, viewModel);
 
-// Shared helper: apply the correct Z matrix to a loaded point cloud based on
-// current toggle state.  Called at load time and on every toggle change.
-//   egm96 ON  → precise EGM96 geoid lookup (pcZscale + meanSeaLevel offset; credits: THIRD_PARTY.md)
-//   usgsRef ON → fixed -32 m geoid lift (original USGS correction)
-//   both OFF   → original default: scale=1, fixed -32*0.766 offset
-function applyPcMatrix(pc) {
-  const z = pc._pcZscale || 1;
-  if (viewModel.egm96) {
-    const h = meanSeaLevel(pc._pcLat || 0, pc._pcLon || 0);
-    pc.matrix.set(1,0,0,0, 0,1,0,0, 0,0,z, h*z, 0,0,0,1);
-  } else if (viewModel.usgsRef) {
-    pc.matrix.set(1,0,0,0, 0,1,0,0, 0,0,z, -32*z, 0,0,0,1);
-  } else {
-    pc.matrix.set(1,0,0,0, 0,1,0,0, 0,0,1, -32*0.766, 0,0,0,1);
-  }
-}
+// Moved to client/src/modules/potree-viewer.js (the Z matrix for the egm96 / usgsRef toggles).
+const applyPcMatrix = createApplyPcMatrix({ viewModel, meanSeaLevel });
 
-// Activate layers — either from saved session or first-run defaults.
-// loadLayers() now only strips Cesium's built-in layer and builds the catalog;
-// it adds nothing to the scene.  We add layers here so the session controls
-// exactly which catalog entries are in the active stack.
-_layersReady.then(async () => {
-  const savedLayers = _savedSession?.layers?.layers;
-
-  if (savedLayers?.length) {
-    // Session exists: re-add saved layers.  They're stored top→bottom in
-    // viewModel order, so add in reverse so index-0 ends up on top.
-    for (let i = savedLayers.length - 1; i >= 0; i--) {
-      const { name, show, alpha } = savedLayers[i];
-      const layer = await addCatalogLayer(name, show, alpha);
-      if (layer) subscribeLayerToSession(layer);
-    }
-    if (_savedSession.layers.usgsRef !== undefined) {
-      viewModel.usgsRef = _savedSession.layers.usgsRef;
-    }
-  } else {
-    // No session: add the four default active layers (bottom → top order).
-    // Only OSM is visible; the others are in the list but toggled off.
-    const defaults = [
-      { name: 'Bing Maps Aerial', show: false, alpha: 1.0 },
-      { name: 'NGMDB Mosaic',     show: false, alpha: 1.0 },
-      { name: 'Slope Angle',      show: false, alpha: 1.0 },
-      { name: 'OpenStreetMaps',   show: true,  alpha: 1.0 },
-    ];
-    for (const d of defaults) {
-      const layer = await addCatalogLayer(d.name, d.show, d.alpha);
-      if (layer) subscribeLayerToSession(layer);
-    }
-  }
-
-  // Subscribe viewModel-level settings that should persist + live-update loaded clouds
-  ['usgsRef', 'egm96'].forEach(key => {
-    Cesium.knockout.getObservable(viewModel, key).subscribe(() => {
-      saveSession();
-      potreeViewer.scene.pointclouds.forEach(applyPcMatrix);
-      // Caves follow the point clouds' datum shift (_pcDatumDz).
-      _caveImports.forEach((imp, i) => { if (imp.georef) window._rerenderCave(i); });
-      _caveColourChanged();
-    });
-  });
-
-  renderLayerList();
+// Moved to client/src/modules/cesium-viewer.js: activate layers from the saved session or the first-run defaults.
+// subscribeLayerToSession / renderLayerList are set up later (layer-list.js); the callback runs after layers load.
+setupLayerActivation({
+  Cesium, viewModel, layersReady: _layersReady, savedSession: _savedSession, addCatalogLayer,
+  subscribeLayerToSession: (...a) => subscribeLayerToSession(...a), renderLayerList: (...a) => renderLayerList(...a),
+  saveSession, potreeViewer, applyPcMatrix, getCaveImports: () => _caveImports, caveColourChanged: (...a) => _caveColourChanged(...a),
 });
 
-// Restore saved state after full init (addPC interceptor and CalTopo fns are defined below this point)
-const _projectAtStart = (() => { try { return localStorage.getItem('flex.project') || ''; } catch (_) { return ''; } })();
-setTimeout(() => {
-  // With a project open, project_workspace.js loads its point clouds, CalTopo
-  // maps and data files; the prompts below are for FLEX without a project.
-  if (_savedSession?.pointClouds?.length && !_projectAtStart) {
-    showPcRestorePrompt(_savedSession.pointClouds);
-  }
-  // Check if server still has an active CalTopo session
-  fetch('/caltopo/status').then(r => r.json()).then(data => {
-    if (data.loggedIn) _showCaltopoLoggedIn();
-  }).catch(() => {});
-
-  // Poll for bookmarklet login (updates UI within 3s of clicking bookmark)
-  setInterval(() => {
-    const loginSection = document.getElementById('caltopo_login_section');
-    if (!loginSection || loginSection.style.display === 'none') return;
-    fetch('/caltopo/status').then(r => r.json()).then(data => {
-      if (data.loggedIn) {
-        _showCaltopoLoggedIn();
-        if (caltopoState.url) _fetchCaltopoKml();
-      }
-    }).catch(() => {});
-  }, 3000);
-
-  // Auto-restore CalTopo KML (no prompt — it's a live feed, should just resume)
-  if (_savedSession?.caltopoUrl && !_projectAtStart) {
-    const input = document.getElementById('caltopo_url_input');
-    const sel   = document.getElementById('caltopo_interval_select');
-    if (input) input.value = _savedSession.caltopoUrl;
-    if (sel && _savedSession.caltopoInterval != null) {
-      sel.value = String(_savedSession.caltopoInterval);
-    }
-    loadCaltopoKml(_savedSession.caltopoUrl, _savedSession.caltopoInterval ?? 60);
-  }
-
-  // Data files: My data's (it takes in URL files the old saved view still lists)
-  if (!_projectAtStart && window._myData) {
-    window._myData.filesToRestore(_savedSession?.dataFiles || []).then(list => list.forEach(f =>
-      addDataFile(f.url, f.label, { myId: f.id }).catch(e => console.warn('[my data] data file restore failed:', e))))
-      .catch(e => console.warn('[my data] data files:', e));
-  } else if (_savedSession?.dataFiles?.length && !_projectAtStart) {
-    for (const f of _savedSession.dataFiles) {
-      addDataFile(f.url, f.label).catch(e => console.warn('[session] data file restore failed:', e));
-    }
-  }
-  // Points of interest kept in My data
-  if (window._myData) window._myData.points().then(ps => {
-    ps.forEach(p => cesiumViewer.entities.add({ name: p.name, label: { scale: p.scale, text: p.name, show: p.label !== false }, position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.h),
-      properties: { isUserLabel: true, myFeature: p.id }, point: p.color ? { color: Cesium.Color.fromCssColorString(p.color) } : {} }));
-    if (ps.length) renderPoiList();
-  }).catch(e => console.warn('[my data] points:', e));
-
-  // Restore cave visibility
-  if (_savedSession?.caveVisible) {
-    const caveToggle = document.getElementById('lp-cave-toggle');
-    if (caveToggle) caveToggle.checked = true;
-    setCaveSurveyVisible(true);
-  }
-
-  // Restore POI visibility
-  if (_savedSession?.poiVisible === false) {
-    const poiToggle = document.getElementById('html_labels_toggle');
-    if (poiToggle) { poiToggle.checked = false; poiToggle.dispatchEvent(new Event('change')); }
-  }
-
-  // Restore panel section open/closed state
-  if (_savedSession?.panelSections) {
-    for (const [id, open] of Object.entries(_savedSession.panelSections)) {
-      const body = document.getElementById(id);
-      if (!body) continue;
-      body.classList.toggle('open', open);
-      const arrow = body.previousElementSibling?.querySelector('.lp-section-arrow');
-      if (arrow) arrow.style.transform = open ? '' : 'rotate(-90deg)';
-    }
-  }
-}, 0);
+// Moved to client/src/modules/session-restore.js: the setTimeout(0) restore of point clouds, CalTopo, data files,
+// My data points, cave / POI visibility and panel sections. It stays at this position so the timer is queued at the
+// same point; the functions it calls are defined further down, hence the lazy wrappers.
+setupSessionRestore({
+  Cesium, cesiumViewer, savedSession: _savedSession,
+  showPcRestorePrompt: (...a) => showPcRestorePrompt(...a), showCaltopoLoggedIn: (...a) => _showCaltopoLoggedIn(...a),
+  getCaltopoState: () => caltopoState, fetchCaltopoKml: (...a) => _fetchCaltopoKml(...a),
+  loadCaltopoKml: (...a) => loadCaltopoKml(...a), addDataFile: (...a) => addDataFile(...a),
+  renderPoiList: (...a) => renderPoiList(...a), setCaveSurveyVisible: (...a) => setCaveSurveyVisible(...a),
+});
 window.addEventListener("beforeunload", () => {
   saveSession();
   saveAttentionGrid(true);
@@ -2285,148 +2086,20 @@ renderDataFileList();
 renderCaltopoStatus();
 renderPoiList();
 
-// Cave survey toggle
-{
-  const caveToggle = document.getElementById('lp-cave-toggle');
-  if (caveToggle) {
-    if (flags.displayCave) {
-      caveToggle.checked = true;
-      setCaveSurveyVisible(true);
-    }
-    caveToggle.addEventListener('change', () => setCaveSurveyVisible(caveToggle.checked));
-  }
-}
-
-// Scene section checkboxes + Point Budget slider — wire directly
-{
-  const lidarChk = document.getElementById('lp-showlidar-chk');
-  const mapsChk  = document.getElementById('lp-googlemaps-chk');
-  if (lidarChk) {
-    lidarChk.checked = !!viewModel.showlidar;
-    lidarChk.addEventListener('change', () => { viewModel.showlidar = lidarChk.checked; });
-    // Keep in sync when [L] key toggles it
-    Cesium.knockout.getObservable(viewModel, 'showlidar').subscribe(v => { lidarChk.checked = !!v; });
-  }
-  if (mapsChk) {
-    mapsChk.checked = !!viewModel.googleMapsOn;
-    mapsChk.addEventListener('change', () => { viewModel.googleMapsOn = mapsChk.checked; });
-    Cesium.knockout.getObservable(viewModel, 'googleMapsOn').subscribe(v => { mapsChk.checked = !!v; });
-  }
-  const otChk = document.getElementById('lp-showopentopo-chk');
-  if (otChk) {
-    otChk.checked = !!viewModel.showOpenTopo;
-    otChk.addEventListener('change', () => { viewModel.showOpenTopo = otChk.checked; });
-    Cesium.knockout.getObservable(viewModel, 'showOpenTopo').subscribe(v => { otChk.checked = !!v; });
-  }
-
-  // Point Budget slider
-  const budgetSlider = document.getElementById('lp-point-budget');
-  const budgetLabel  = document.getElementById('lp-point-budget-label');
-
-  function _applyPointBudget(v) {
-    potreeViewer.setPointBudget(v);
-    if (budgetSlider) budgetSlider.value = v;
-    if (budgetLabel)  budgetLabel.textContent =
-      v >= 1_000_000 ? (v / 1_000_000).toFixed(1).replace(/\.0$/, '') + ' M'
-                     : (v / 1_000).toFixed(0) + ' K';
-  }
-
-  // Detail: minimumNodePixelSize, the smallest a node may appear before Potree
-  // refuses to refine it. viewer.update() pushes this onto every point cloud
-  // each frame, so it has to be set on the viewer - writing
-  // pointcloud.minimumNodePixelSize directly is overwritten next frame.
-  const detailSlider = document.getElementById('lp-lod-detail');
-  const detailLabel  = document.getElementById('lp-lod-detail-label');
-  function _applyDetail(px) {
-    potreeViewer.setMinNodeSize(px);
-    if (detailSlider) detailSlider.value = px;
-    if (detailLabel)  detailLabel.textContent = px + ' px';
-  }
-  if (detailSlider) {
-    _applyDetail(parseInt(detailSlider.value, 10));
-    detailSlider.addEventListener('input',
-      () => _applyDetail(parseInt(detailSlider.value, 10)));
-  }
-
-  // Load priority range: the knee of the loading-order falloff. Inside it a
-  // node keeps its full weight; beyond it weight falls as 1/(1+(d/near)^2).
-  const nearSlider = document.getElementById('lp-lod-near');
-  const nearLabel  = document.getElementById('lp-lod-near-label');
-  function _applyNear(metres) {
-    Potree.lodNearDistance = metres;
-    if (nearLabel) nearLabel.textContent = metres > 0 ? metres + ' m' : 'off';
-  }
-  if (nearSlider) {
-    _applyNear(parseInt(nearSlider.value, 10));
-    nearSlider.addEventListener('input',
-      () => _applyNear(parseInt(nearSlider.value, 10)));
-  }
-
-  // Far cutoff: past this distance a node must be lodFarPenalty times larger
-  // on screen before it refines, so the horizon stops eating the budget.
-  const farSelect = document.getElementById('lp-lod-far');
-  const farLabel  = document.getElementById('lp-lod-far-label');
-  function _applyFar(metres) {
-    Potree.lodFarDistance = metres;
-    if (farLabel) farLabel.textContent = metres > 0
-      ? (metres / 1609.344).toFixed(2).replace(/0+$/, '').replace(/\.$/, '') + ' mi'
-      : 'off';
-  }
-  if (farSelect) {
-    _applyFar(parseFloat(farSelect.value));
-    farSelect.addEventListener('change',
-      () => _applyFar(parseFloat(farSelect.value)));
-  }
-
-  if (budgetSlider) {
-    // Restore saved value, or keep the hardcoded default
-    const savedBudget = _savedSession?.pointBudget;
-    if (savedBudget) _applyPointBudget(savedBudget);
-
-    budgetSlider.addEventListener('input', () => {
-      const v = parseInt(budgetSlider.value, 10);
-      _applyPointBudget(v);
-      notifyPointBudgetChanged(v);
-    });
-  }
-
-}
-
-// (selectedLayer subscriber removed — all layers are now managed uniformly
-//  via eye-toggle in renderLayerList; no separate base-layer dropdown.)
-
-Cesium.knockout.getObservable(viewModel, "showlidar").subscribe(
-function (newValue) {
-  setLidarFootprintsVisible(newValue);
-}
-);
-Cesium.knockout.getObservable(viewModel, "showOpenTopo").subscribe(
-function (newValue) {
-  setOtFootprintsVisible(newValue);
-}
-);
-Cesium.knockout.getObservable(viewModel, "googleMapsOn").subscribe(
-function (newValue) {
-  cesiumViewer.scene.primitives._primitives[0].show = newValue;
-  // cesiumViewer.scene.fog.enabled = newValue;
-}
-);
+// Moved to client/src/modules/scene-controls.js: cave toggle, Scene checkboxes, Point Budget / Detail / Load range / Far
+// cutoff, and the footprint / Google tiles visibility subscribers.
+setupSceneControls({
+  Cesium, cesiumViewer, viewModel, flags, Potree, potreeViewer, savedSession: _savedSession,
+  setCaveSurveyVisible, setLidarFootprintsVisible, setOtFootprintsVisible, notifyPointBudgetChanged,
+});
 
 // disable the default event handlers
-scene.screenSpaceCameraController.enableRotate = false;
-scene.screenSpaceCameraController.enableTranslate = true;
-scene.screenSpaceCameraController.enableZoom = true;
-scene.screenSpaceCameraController.enableTilt = true;
-scene.screenSpaceCameraController.enableLook = true;
+setupCameraController({ cesiumViewer });   // cesium-viewer.js: built-in rotate off, translate / zoom / tilt / look on
 
 import { setupCesiumInteractions, downloadBlob } from "./client/src/modules/cesium-interactions.js";
 // Moved to client/src/modules/cesium-interactions.js: camera mouse buttons, SpaceMouse init, input handler,
-// fly speed, key flags (keydown/keyup), touch fly and the fly tick. The variables below stay here.
+// fly speed, key flags (keydown/keyup), touch fly and the fly tick. The minimap variables stay here.
 const interactionState = {
-  get pointCounter() { return pointCounter; },       set pointCounter(v) { pointCounter = v; },
-  get creatingRoute() { return creatingRoute; },     set creatingRoute(v) { creatingRoute = v; },
-  get routePoints() { return routePoints; },         set routePoints(v) { routePoints = v; },
-  get currentEntity() { return currentEntity; },     set currentEntity(v) { currentEntity = v; },
   get miniMapUserHidden() { return miniMapUserHidden; }, set miniMapUserHidden(v) { miniMapUserHidden = v; },
   get miniMapMap() { return miniMapMap; },
 };
@@ -2452,124 +2125,13 @@ const { incidenceState, updateIncidenceLines } = setupPointcloudIncidence({ THRE
 // html-labels.js (screen-space label overlay); loop() calls the two update functions.
 const { toggleMeasureMode, updateMeasureDisplay } = setupMeasureMode({ Cesium, cesiumViewer, ic: _ic });
 const { updateHtmlLabels } = setupHtmlLabels({ Cesium, cesiumViewer, notifyPoiVisibilityChanged });
-function loop(timestamp){
-  requestAnimationFrame(loop);
-  if (_spaceMouse) _spaceMouse.update(timestamp);
-  onCameraFrame();
-
-  // console.log(timestamp);
-
-  // (LOD update + render happen at the end of this function, after the
-  //  camera sync - see potreeViewer.update below.)
-
-  cesiumViewer.resize();
-  // potreeViewer.resize();
-
-  if (viewModel.cesiumRender) {
-    cesiumViewer.render();
-  }
-
-  let cCamPosCart = ellipsoid.cartesianToCartographic(cesiumViewer.camera.position);
-
-  let cCamLong = cCamPosCart.longitude * (180 / Math.PI);
-  let cCamLat = cCamPosCart.latitude * (180 / Math.PI);
-  let cCamHeight = cCamPosCart.height;
-  let coords = cCamLat.toFixed(5) + ", " + cCamLong.toFixed(5);
-  document.getElementById("coord_display").innerText = coords;
-  document.getElementById("elev_display").innerText = "Height: " + cCamHeight.toFixed(0) + "m" +
-    (flags.Fly ? "  ·  fly ×" + +getFlyMultiplier().toPrecision(2) : "");
-  syncMiniMapFrame(timestamp, cCamPosCart);
-
-  if(window.toScene !== undefined){
-    // do fun proj4 stuff with camera settings
-    // cesiumViewer.camera.up = new Cesium.Cartesian3(0,0,1);
-    // cesiumViewer.camera.up = Cesium.Cartesian3.clone(Cesium.Cartesian3.UNIT_Y);
-
-    // let cCamPos = cesiumViewer.camera.positionCartographic;
-
-    let cCamCenterObject = new Cesium.Cartesian3;
-    let cCamDir = cesiumViewer.camera.direction;
-    Cesium.Cartesian3.multiplyByScalar(cCamDir, 1000, cCamDir);
-    Cesium.Cartesian3.add(cesiumViewer.camera.position, cCamDir, cCamCenterObject);
-    
-    let cCamCenterObjectPosCart = ellipsoid.cartesianToCartographic(cCamCenterObject);
-
-    let cCamCenterObjectLong = cCamCenterObjectPosCart.longitude * (180 / Math.PI);
-    let cCamCenterObjectLat = cCamCenterObjectPosCart.latitude * (180 / Math.PI);
-    let cCamCenterObjectHeight = cCamCenterObjectPosCart.height;
-
-    // console.log(cCamPosCart.height);
-    // console.log(cCamCenterObjectPosCart.height);
-    
-    // Camera Z correction mirrors the point cloud matrix: pcZscale is needed whenever
-    // the cloud matrix uses it (usgsRef or egm96 ON). Original OFF mode uses scale=1 on
-    // the cloud, so the camera height is also left uncorrected for consistency.
-    let cCamHeightCorrected = cCamHeight;
-    if (viewModel.usgsRef || viewModel.egm96) {
-      cCamHeightCorrected = cCamHeight / Math.cos(cCamPosCart.latitude);
-    }
-    let pCamPos = toScene.forward([cCamLong, cCamLat, cCamHeightCorrected]);
-
-    let pCamCenterObjectPos = toScene.forward([cCamCenterObjectLong, cCamCenterObjectLat, cCamCenterObjectHeight]);
-
-    potreeViewer.scene.view.setView(
-      [pCamPos[0],pCamPos[1],pCamPos[2]],
-      [pCamCenterObjectPos[0],pCamCenterObjectPos[1],pCamCenterObjectPos[2]],
-    );
-    potreeViewer.scene.view.pitch = cesiumViewer.camera.pitch;
-    // potreeViewer.scene.view.nearValue = 0.1;
-    // potreeViewer.scene.view.farValue = 100;
-    // console.log(potreeViewer.scene.view.position.z, cCamHeight);
-    // potreeViewer.scene.view.position.set(pCamPos[0],pCamPos[1],pCamPos[2]);
-    // potreeViewer.scene.view.lookAt(pCamCenterObjectPos[0],pCamCenterObjectPos[1],pCamCenterObjectPos[2]);
-
-    let fov = cesiumViewer.camera.frustum.fov;
-    let fovy = cesiumViewer.camera.frustum.fovy;
-    
-    let aspect = cesiumViewer.camera.frustum.aspectRatio;
-    // potreeViewer.camera.frustum.aspect = aspect;
-
-    // console.log(cesiumViewer.camera.up);
-    
-    if(aspect < 1){
-      let pfovy =  (180 * fov)/Math.PI;
-      potreeViewer.setFOV(pfovy);
-      // let fovyp = Math.PI * (potreeViewer.scene.getActiveCamera().fov / 180);
-      // cesiumViewer.camera.frustum.fov = fovyp;
-    }else{
-      let pfovy = (180 * fovy)/Math.PI;
-      potreeViewer.setFOV(pfovy);
-      // let fovyp = Math.PI * (potreeViewer.scene.getActiveCamera().fov / 180);
-      // let fovxp = Math.atan(Math.tan(0.5 * fovyp) * aspect) * 2
-      // cesiumViewer.camera.frustum.fov = fovxp;
-    }
-    // console.log(potreeViewer.scene.cameraP.fov);
-      // console.log("Cesium FOV: ", fov, "|Potree FOV: ", fovy);
-
-  }
-
-  // Now that the Cesium camera has been synced onto the Potree camera, decide
-  // LOD and draw. Order matters: update() is what runs updateVisibility, so it
-  // has to see the camera we are about to render from.
-  potreeViewer.update(potreeViewer.clock.getDelta(), timestamp);
-  potreeViewer.render();
-
-  // Update incidence angle lines when camera moves 50m+ (with 2s minimum interval)
-  if (incidenceState.enabled) {
-    const cam = potreeViewer.scene.getActiveCamera();
-    const dSq = cam.position.distanceToSquared(incidenceState.lastCamPos);
-    const elapsed = performance.now() - incidenceState.lastRefreshTime;
-    if (incidenceState.needsRefresh || (dSq > incidenceState.refreshDistSq && elapsed > incidenceState.minRefreshInterval)) {
-      incidenceState.needsRefresh = false;
-      incidenceState.lastCamPos.copy(cam.position);
-      updateIncidenceLines();
-    }
-  }
-
-  updateNorthCompass();
-  updateHtmlLabels();
-  updateMeasureDisplay();
-}
+// Moved to client/src/modules/render-loop.js: the per-frame loop (Cesium render, Cesium -> Potree camera sync,
+// Potree update + render, incidence / compass / labels / measure updates).
+const { loop } = setupRenderLoop({
+  Cesium, cesiumViewer, potreeViewer, viewModel, flags, ellipsoid, spaceMouse: _spaceMouse,
+  onCameraFrame, getFlyMultiplier, syncMiniMapFrame, incidenceState, updateIncidenceLines,
+  updateNorthCompass, updateHtmlLabels, updateMeasureDisplay,
+});
 initNorthCompass();
 
 // ── Local Entwine server integration ─────────────────────────────────────────
