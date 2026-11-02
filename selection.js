@@ -129,11 +129,11 @@
     outline(null);
     if (window._inspector) window._inspector.refresh();
   }
-  /** The path for the details panel: [{ label, level, on }]. */
+  /** The path for the details panel: [{ label, level, on }]; label is text or ['icon', 'text'] (icons.js iconLabel). */
   function crumbs() {
     if (!S) return [];
     const h = S.hit, out = [];
-    out.push({ level: 'cave', label: '🕳 ' + (S.cid && A ? A.caveName(S.cid) : h.imp.name.replace(/\.(plt|json)$/i, '')) });
+    out.push({ level: 'cave', label: ['cave', S.cid && A ? A.caveName(S.cid) : h.imp.name.replace(/\.(plt|json)$/i, '')] });
     if (S.level === 'cave') return out;
     out.push({ level: 'survey', label: 'Survey ' + (h.code || '(none)') });
     if (S.level === 'survey') return out;
@@ -160,11 +160,11 @@
     if (!h) return [];
     const items = [];
     const name = (h.cid = cidOf(h)) && A ? A.caveName(h.cid) : h.imp.name.replace(/\.(plt|json)$/i, '');
-    items.push({ label: '🕳 Cave ' + name, run: () => show(at('cave', h)) });
+    items.push({ label: 'Cave ' + name, run: () => show(at('cave', h)) });
     items.push({ label: 'Survey ' + (h.code || '(none)'), run: () => show(at('survey', h)) });
     segsOf(h).forEach(sid => items.push({ label: 'Segment ' + (window._pjSeg ? window._pjSeg.segName(sid) : sid), run: () => show(Object.assign(at('segment', h, sid), { sid })) }));
     const st = h.station ? [h.station] : (h.ends || []);
-    st.forEach(n => items.push({ label: '📍 Station ' + n, run: () => show(Object.assign(at('station', Object.assign({}, h, { near: n })), { station: n })) }));
+    st.forEach(n => items.push({ label: 'Station ' + n, run: () => show(Object.assign(at('station', Object.assign({}, h, { near: n })), { station: n })) }));
     return items;
   };
 

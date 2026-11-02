@@ -108,7 +108,7 @@
     statsOf(I).forEach(([v, l, to, tab]) => {
       const s = el('button', 'pjx-stat' + (to === 'review' ? ' pjx-stat-rev' : ''));
       s.type = 'button'; s.dataset.go = to; if (tab) s.dataset.tab = tab;
-      s.title = { caves: 'Open 🕳 Caves', leads: 'Open ❓ Leads', docs: 'Open 📄 Docs', surface: 'Open 📍 Surface', history: 'Show the History below', review: 'Open ✓ Review' }[to] || '';
+      s.title = { caves: 'Open Caves', leads: 'Open Leads', docs: 'Open Docs', surface: 'Open Surface', history: 'Show the History below', review: 'Open Review' }[to] || '';
       s.append(el('b', '', String(v)), el('span', '', l));
       s.addEventListener('click', () => go(to, tab));
       g.appendChild(s);
@@ -141,7 +141,7 @@
       const ring = fp.length >= 3 ? fp.concat([fp[0]]) : fp;
       const lon = fp.reduce((s, q) => s + q[0], 0) / fp.length, lat = Math.max(...fp.map(q => q[1]));
       d.entities.add({
-        id: 'pjx-fp-' + I.id, name: '📁 ' + I.name, description: descHtml(I),
+        id: 'pjx-fp-' + I.id, name: I.name, description: descHtml(I),
         position: Cesium.Cartesian3.fromDegrees(lon, lat),
         polyline: fp.length >= 2 ? { positions: Cesium.Cartesian3.fromDegreesArray(ring.flat()), width: 2.5, clampToGround: true,
           material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.fromCssColorString('#6fd39a'), dashLength: 14 }) } : undefined,
@@ -179,8 +179,8 @@
     loading = loadInfos().finally(() => { loading = null; if (!pj.pid) setTimeout(ensureInfos, 0); });   // any dropped meanwhile
   }
   function switchMenu() {
-    const opts = (pj.projects || []).filter(p => p.id !== pj.pid).map(p => ({ label: '📁 ' + (p.name || p.id), sub: X.info[p.id] ? short(X.info[p.id]) : '', value: p.id }));
-    opts.push({ label: 'No project', sub: 'close this one: its things are put away, 👤 My data stays', value: '__none' }, { label: '＋ New project…', value: '__new' });
+    const opts = (pj.projects || []).filter(p => p.id !== pj.pid).map(p => ({ label: ['folder', p.name || p.id], sub: X.info[p.id] ? short(X.info[p.id]) : '', value: p.id }));
+    opts.push({ label: 'No project', sub: 'close this one: its things are put away, My data stays', value: '__none' }, { label: ['plus', 'New project…'], value: '__new' });
     choose('Switch project', '', opts).then(v => { if (!v) return; if (v === '__new') A.newProject(); else A.setProject(v === '__none' ? null : v); });
   }
   function author(root) {
@@ -207,15 +207,15 @@
     if (!pj.pid) {
       section(root, 'Projects', true, b => {
         const bar = el('div', 'pj-row');
-        bar.appendChild(btn('＋ New project', () => A.newProject(), 'small primary'));
-        bar.appendChild(btn('⇩ From a sync file…', () => A.importSync(), 'small'));
+        bar.appendChild(btn(['plus', 'New project'], () => A.newProject(), 'small primary'));
+        bar.appendChild(btn(['download', 'From a sync file…'], () => A.importSync(), 'small'));
         b.appendChild(bar);
         const list = sorted(pj.projects || []);
         if (!list.length) b.appendChild(el('div', 'pj-note', 'No projects yet. A project is an area: its caves, surface points, documents, notes and leads, opened and saved together, shared with friends and FLEX Field by sync files.'));
         // Order (most recent first, or A–Z) and a search over names, descriptions and folders.
         if (list.length > 1) {
           const tools = el('div', 'pjx-tools');
-          const q = el('input', 'pj-input pjx-q'); q.type = 'search'; q.placeholder = '🔍 Search projects'; q.value = X.q || '';
+          const q = el('input', 'pj-input pjx-q'); q.type = 'search'; q.placeholder = 'Search projects'; q.value = X.q || '';
           q.addEventListener('input', () => { X.q = q.value; filter(); });
           q.addEventListener('focus', () => { X.qFocus = true; });
           q.addEventListener('blur', () => { setTimeout(() => { if (q.isConnected) X.qFocus = false; }, 0); });   // not when a redraw replaced it
@@ -242,7 +242,7 @@
           c.dataset.id = p.id;
           c.dataset.k = [p.name, p.id, I && I.desc, p.folder].filter(Boolean).join(' ').toLowerCase();
           const h = el('div', 'pjx-card-h');
-          h.appendChild(el('b', '', '📁 ' + (p.name || p.id)));
+          h.appendChild(el('b', '', ['folder', p.name || p.id]));
           h.appendChild(btn('Open', () => open(p.id), 'small primary'));
           c.appendChild(h);
           c.appendChild(el('div', 'pj-sub', I ? short(I) : 'counting…'));
@@ -270,12 +270,12 @@
     const head = el('div', 'pjx-head');
     head.appendChild(el('div', 'pjx-title', p.name || pj.P.name || 'Project'));
     const acts = el('span', 'pjx-acts');
-    const ren = btn('✏️', () => A.renameProject(), 'small'); ren.title = 'Rename the project';
+    const ren = btn(['pencil'], () => A.renameProject(), 'small'); ren.title = 'Rename the project';
     acts.append(ren, btn('Switch…', switchMenu, 'small'));
     head.appendChild(acts);
     pane.appendChild(head);
     const dr = el('div', 'pj-row pj-sub pjx-desc-row');
-    dr.append(pj.P.desc ? pj.P.desc + ' ' : '', btn(pj.P.desc ? 'edit' : '＋ description', () => A.editDescription(), 'link'));
+    dr.append(pj.P.desc ? pj.P.desc + ' ' : '', btn(pj.P.desc ? 'edit' : ['plus', 'description'], () => A.editDescription(), 'link'));
     pane.appendChild(dr);
     if (p.folder) {
       const fr = el('div', 'pjx-pathrow');
@@ -322,7 +322,8 @@
     else { const b = document.querySelector(`#flex-rail [data-target="${sel}"]`); if (b) b.click(); }
     if (tab) setTimeout(() => A.render(), 0);
   }
-  const goBtn = (to, label, title) => { const b = btn(label, () => go(to), 'small pjx-go'); b.title = title || ''; return b; };
+  // A small button that opens a panel: → and the panel's strip icon.
+  const goBtn = (to, ico, title) => { const b = btn('', () => go(to), 'small pjx-go'); b.innerHTML = '→ ' + window.icon(ico, '1.15em'); b.title = title || ''; return b; };
 
   // ── The parts that follow what is loaded (redrawn when they change) ──────
   const ws_ = () => window._ws;
@@ -367,7 +368,7 @@
     by.forEach((names, what) => ul.appendChild(el('div', 'pjx-u-i', `${what}${names.length > 1 ? ' (' + names.length + ')' : ''}: ${names.slice(0, 5).join(', ')}${names.length > 5 ? ' +' + (names.length - 5) : ''}`)));
     u.appendChild(ul);
     const r = el('div', 'pj-row');
-    r.append(btn('💾 Save into the project', async () => { await pw.save(); A.render(); }, 'small primary'), btn('Discard', () => pw.discardAsk(), 'small'));
+    r.append(btn(['save', 'Save into the project'], async () => { await pw.save(); A.render(); }, 'small primary'), btn('Discard', () => pw.discardAsk(), 'small'));
     u.appendChild(r);
     box.appendChild(u);
   }
@@ -388,59 +389,59 @@
     if (ct && ct.lay) {
       const r = row('pjx-ct');
       r.appendChild(ct.loaded ? sw(ct.shown, on => { const s = ctState(); if (s && s.src) { s.src.ds.show = on; if (window.cesiumViewer) cesiumViewer.scene.requestRender(); } paintLive(); }, ct.shown ? 'Hide the CalTopo map' : 'Show the CalTopo map') : gap());
-      r.appendChild(rowText('🗺 CalTopo map ' + (ct.id || ''), ct.loaded ? [ct.n + ' feature' + (ct.n === 1 ? '' : 's'), ct.when, ct.interval ? 'every ' + ct.interval + ' s' : 'manual refresh'].filter(Boolean).join(' · ') : (ct.warn || 'not loaded')));
+      r.appendChild(rowText(['map', 'CalTopo map ' + (ct.id || '')], ct.loaded ? [ct.n + ' feature' + (ct.n === 1 ? '' : 's'), ct.when, ct.interval ? 'every ' + ct.interval + ' s' : 'manual refresh'].filter(Boolean).join(' · ') : (ct.warn || 'not loaded')));
       const t = el('span', 'pjx-tools');
       if (ct.id) { const a = el('a', 'pjx-ext', 'Open in CalTopo ↗'); a.href = 'https://caltopo.com/m/' + ct.id; a.target = '_blank'; a.rel = 'noopener'; a.title = 'The map on caltopo.com, in a new tab'; t.appendChild(a); }
       if (!ct.loaded) t.appendChild(btn('Load', async () => { await w.setCaltopo(ct.lay.url, ct.interval ?? 30); paintLive(); }, 'small'));
-      t.appendChild(goBtn('surface', '→ 📍', 'Open 📍 Surface (the map’s folders, its link and key)'));
+      t.appendChild(goBtn('surface', 'pin', 'Open Surface (the map’s folders, its link and key)'));
       r.appendChild(t);
       box.appendChild(r);
       if (un && nFeat) {
         const r2 = row('pjx-sub pjx-unm');
         r2.appendChild(gap());
-        r2.appendChild(rowText(un.length ? `📍 ${un.length} of ${nFeat} surface feature${nFeat === 1 ? '' : 's'} not in CalTopo` : `📍 All ${nFeat} surface feature${nFeat === 1 ? ' is' : 's are'} in CalTopo ✓`,
+        r2.appendChild(rowText(['pin', un.length ? `${un.length} of ${nFeat} surface feature${nFeat === 1 ? '' : 's'} not in CalTopo` : `All ${nFeat} surface feature${nFeat === 1 ? ' is' : 's are'} in CalTopo ✓`],
           un.length ? 'by name and place' : ''));
         r2.title = 'A feature counts as in CalTopo when one there has the same kind and name (any case) and is within 15 m';
-        if (un.length) { const t2 = el('span', 'pjx-tools'); t2.appendChild(btn('⇩ Download them for CalTopo (KML)', () => downloadUnmatched(un), 'small')); r2.appendChild(t2); }
+        if (un.length) { const t2 = el('span', 'pjx-tools'); t2.appendChild(btn(['download', 'Download them for CalTopo (KML)'], () => downloadUnmatched(un), 'small')); r2.appendChild(t2); }
         box.appendChild(r2);
       }
     } else {
       const r = row('pjx-none');
       r.appendChild(gap());
-      r.appendChild(rowText('🗺 No CalTopo map', ct && ct.other ? `CalTopo map ${ct.other} is loaded in 👤 My data: ← it in 📍 Surface to make it this project’s.`
-        : 'Add one in 📍 Surface → CalTopo map: link and key, or ← a loaded map in Surface’s My data column.'));
-      const t = el('span', 'pjx-tools'); t.appendChild(goBtn('surface', '→ 📍', 'Open 📍 Surface')); r.appendChild(t);
+      r.appendChild(rowText(['map', 'No CalTopo map'], ct && ct.other ? `CalTopo map ${ct.other} is loaded in My data: ← it in Surface to make it this project’s.`
+        : 'Add one in Surface → CalTopo map: link and key, or ← a loaded map in Surface’s My data column.'));
+      const t = el('span', 'pjx-tools'); t.appendChild(goBtn('surface', 'pin', 'Open Surface')); r.appendChild(t);
       box.appendChild(r);
     }
     // Terrain and hillshade (map layers)
-    const icon = { terrain: '⛰', tiles: '🧩', imagery: '🖼' }, kname = { terrain: 'terrain patch', tiles: 'tile layer', imagery: 'map image' };
+    const icon = { terrain: 'mountain', tiles: 'layers', imagery: 'image' }, kname = { terrain: 'terrain patch', tiles: 'tile layer', imagery: 'map image' };
     if (!maps.length) {
       const r = row('pjx-none'); r.appendChild(gap());
-      r.appendChild(rowText('⛰ No terrain or hillshade', '🗺 Layers → Terrain → ⛰ Generate terrain + hillshade…, or add a GeoTIFF or a tile link.'));
-      const t = el('span', 'pjx-tools'); t.appendChild(goBtn('layers', '→ 🗺', 'Open 🗺 Layers')); r.appendChild(t);
+      r.appendChild(rowText(['mountain', 'No terrain or hillshade'], 'Layers → Terrain → Generate terrain + hillshade…, or add a GeoTIFF or a tile link.'));
+      const t = el('span', 'pjx-tools'); t.appendChild(goBtn('layers', 'map', 'Open Layers')); r.appendChild(t);
       box.appendChild(r);
     }
     maps.forEach(l => {
       const r = row(); const on = layerShown(l.id);
       r.appendChild(sw(on, v => { setLayerShown(l.id, v); setTimeout(paintLive, 50); }, on ? 'Hide it' : 'Show it'));
-      r.appendChild(rowText(`${icon[l.kind] || '•'} ${l.name || kname[l.kind]}`, kname[l.kind]));
-      const t = el('span', 'pjx-tools'); t.appendChild(goBtn('layers', '→ 🗺', 'Open 🗺 Layers')); r.appendChild(t);
+      r.appendChild(rowText([icon[l.kind] || 'map', l.name || kname[l.kind]], kname[l.kind]));
+      const t = el('span', 'pjx-tools'); t.appendChild(goBtn('layers', 'map', 'Open Layers')); r.appendChild(t);
       box.appendChild(r);
     });
     // Point clouds
     if (!pcs.length) {
       const r = row('pjx-none'); r.appendChild(gap());
-      r.appendChild(rowText('☁ No point clouds', 'Load one in ☁ LiDAR, then 📁 on its row puts it in the project.'));
-      const t = el('span', 'pjx-tools'); t.appendChild(goBtn('lidar', '→ ☁', 'Open ☁ LiDAR')); r.appendChild(t);
+      r.appendChild(rowText(['cloud', 'No point clouds'], 'Load one in LiDAR, then the folder button on its row puts it in the project.'));
+      const t = el('span', 'pjx-tools'); t.appendChild(goBtn('lidar', 'cloud', 'Open LiDAR')); r.appendChild(t);
       box.appendChild(r);
     }
     pcs.forEach(l => {
       const r = row(), isLoaded = loadedPcs.has(l.url), c = isLoaded ? pcOf(l.url) : null;
       r.appendChild(c ? sw(c.visible !== false, v => { const x = pcOf(l.url); if (x) x.visible = v; if (window._renderPcList) window._renderPcList(); paintLive(); }, 'Show / hide') : gap());
-      r.appendChild(rowText('☁ ' + (l.name || pcName(l.url)), isLoaded ? 'point cloud' : 'point cloud · not loaded'));
+      r.appendChild(rowText(['cloud', l.name || pcName(l.url)], isLoaded ? 'point cloud' : 'point cloud · not loaded'));
       const t = el('span', 'pjx-tools');
       if (!isLoaded) t.appendChild(btn('Load', () => { w.addPointCloud(l.url); setTimeout(paintLive, 500); }, 'small'));
-      t.appendChild(goBtn('lidar', '→ ☁', 'Open ☁ LiDAR')); r.appendChild(t);
+      t.appendChild(goBtn('lidar', 'cloud', 'Open LiDAR')); r.appendChild(t);
       box.appendChild(r);
     });
   }
@@ -482,17 +483,17 @@
     box.textContent = '';
     const r = row('pjx-tosort');
     r.appendChild(gap());
-    if (!sorting) r.appendChild(rowText('📥 To sort', T && !T.busy && !T.folder ? 'This project has no folder of its own yet.' : 'reading the folder…'));
-    else if (!sorting.length) r.appendChild(rowText('📥 To sort: nothing new', 'Files dropped in the project’s To sort folder show here until they are filed.'));
+    if (!sorting) r.appendChild(rowText(['download', 'To sort'], T && !T.busy && !T.folder ? 'This project has no folder of its own yet.' : 'reading the folder…'));
+    else if (!sorting.length) r.appendChild(rowText(['download', 'To sort: nothing new'], 'Files dropped in the project’s To sort folder show here until they are filed.'));
     else {
-      const t = rowText(`📥 To sort: ${sorting.length} new file${sorting.length === 1 ? '' : 's'}`);
+      const t = rowText(['download', `To sort: ${sorting.length} new file${sorting.length === 1 ? '' : 's'}`]);
       const ul = el('div', 'pjx-sort-list');
       sorting.slice(0, 6).forEach(f => ul.appendChild(el('div', '', f.p.replace(/^To sort\//, ''))));
       if (sorting.length > 6) ul.appendChild(el('div', 'pj-sub', `+ ${sorting.length - 6} more`));
       t.appendChild(ul);
       r.appendChild(t);
     }
-    const tl = el('span', 'pjx-tools'); tl.appendChild(goBtn('docs', '→ 📄', 'Open 📄 Docs (the folder, the documents)')); r.appendChild(tl);
+    const tl = el('span', 'pjx-tools'); tl.appendChild(goBtn('docs', 'doc', 'Open Docs (the folder, the documents)')); r.appendChild(tl);
     box.appendChild(r);
   }
   /** Redraw the live parts that changed (cheap when nothing did). */

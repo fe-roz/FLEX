@@ -13,7 +13,7 @@
 (function () {
   'use strict';
   const $ = id => document.getElementById(id);
-  const mk = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  const mk = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) window.iconLabel(e, txt); return e; };   // txt: text or ['icon', 'text']
 
   const box = mk('aside'); box.id = 'flex-inspector'; box.setAttribute('aria-label', 'Details');
   const grip = mk('div', 'ins-grip'); grip.title = 'Drag to resize';
