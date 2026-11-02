@@ -25,6 +25,10 @@
 // 📍 rail button): the list of what was added, changed or removed in CalTopo,
 // and the edits waiting for CalTopo, with their conflicts.
 //
+// Every item and folder row has a ⋯ menu (row_menu.js: info, edit, rename,
+// colour, label, move, fly to, delete; a folder's display, names, rename, new
+// subfolder, move, delete); a feature's ✏️ opens the shared editor
+// (feature_editor.js), as ⋯ → Edit and the info panel do.
 // Row attributes (for a row's ⋯ menu): an item row has data-rkey, a folder row
 // data-fkey, and each has a .cc-tools span to put buttons in.
 //   data-rkey   f:<project feature id> · my:<My data point id> · ct-<CalTopo feature id>
@@ -206,6 +210,8 @@
   }
   const fsSet = k => { try { return Object.keys(window._folderStyle.get(k) || {}).filter(f => !(f === 'color' && /^project:./.test(k))).length > 0; } catch (_) { return false; } };
   const fsBtn = k => (k && window._folderStyle ? `<button type="button" class="sc-fs${fsSet(k) ? ' sc-fs-on' : ''}" data-fstyle="${esc(k)}" title="Display: names, colour, line width, symbol, opacity for everything inside">${window.icon ? window.icon('palette', 13) : '🎨'}</button>` : '');
+  // A row's ⋯ menu (row_menu.js): the row's data-rkey / data-fkey says what for.
+  const moreBtn = () => `<button type="button" class="sc-more" data-rmenu aria-haspopup="menu" title="More: info, edit, rename, move, delete…">${window.icon ? window.icon('more', 13) : '⋯'}</button>`;
   // CalTopo: what changed since you last looked, and edits waiting.
   function ctNews() {
     const W = CW();
@@ -266,13 +272,13 @@
     let html = `<div class="cc-it${x.dir ? ' cc-moving' : ''}" data-kind="${x.kind}" data-id="${esc(x.id)}"${fk ? ` data-fkey="${esc(fk)}"` : ''} draggable="${canMove ? 'true' : 'false'}">
       <button type="button" class="cc-eye ui-eye${eyeOn ? ' on' : eyeHalf ? ' half' : ''}" data-eye title="${(x.kind === 'file' || x.kind === 'caltopo') && !x.loaded ? 'Load' : eyeOn ? 'Hide' : 'Show'}"></button>
       <span class="cc-nm" title="${esc(x.name)}"${k ? ` data-expand="${esc(k)}"` : ''}>${k ? arrowOf(k, exp) : '<span class="sc-arrow"></span>'}${icon[x.kind] || ''} ${esc(x.name)}${x.dir ? '<b class="cc-dot">•</b>' : ''}<small>${esc(sub)}${marks}</small></span>
-      <span class="cc-tools">${ftools}${fsBtn(fk)}${forget}${arrow}</span></div>`;
+      <span class="cc-tools">${ftools}${fsBtn(fk)}${forget}${arrow}${fk ? moreBtn() : ''}</span></div>`;
     if (exp) html += `<div class="sc-kids">${kids(x, isOpen)}</div>`;
     return html;
   }
   function kids(x, isOpen) {
     if (x.kind === 'pgroup') return x.points.map(f => `<div class="sc-pt" data-pt="${esc(f.id)}" data-rkey="my:${esc(f.id)}"><span title="${esc(f.name)}">${esc(f.name || 'Point')}</span>
-        <span class="cc-tools"><button type="button" data-ptfly title="Fly to">⌖</button>${isOpen ? '<button type="button" class="cc-mv" data-ptin title="Move this point into the project">←</button>' : ''}<button type="button" data-ptdel title="Delete the point">✕</button></span></div>`).join('');
+        <span class="cc-tools"><button type="button" data-ptfly title="Fly to">⌖</button>${isOpen ? '<button type="button" class="cc-mv" data-ptin title="Move this point into the project">←</button>' : ''}<button type="button" data-ptdel title="Delete the point">✕</button>${moreBtn()}</span></div>`).join('');
     if (x.kind === 'folder' || x.kind === 'loose') return projectTree(x.kind === 'loose' ? null : x.id, 0);
     if (x.src) return overlayTree(x.src);
     return '';
@@ -287,13 +293,13 @@
       const nict = NICT ? FL.liveFeatures(pj.P).filter(f => NICT.has(f.id) && FL.groupPath(pj.P, f.group).some(y => y.id === g.id)).length : 0;
       out += `<div class="sc-sub sc-fold" data-fkey="project:${esc(g.id)}" ${pad(depth)}><button type="button" class="cc-eye ui-eye ui-eye-sm${h[k] ? ' half' : ' on'}" data-geye="${esc(g.id)}" title="${h[k] ? 'Show' : 'Hide'}"></button>
         <span class="sc-nm" data-expand="${esc(k)}">${arrowOf(k, exp)}<span class="pjs-sw" style="background:${esc(P.groupColor(g.id))}"></span>📁 ${esc(g.name)} <small>${n}</small>${nict ? ` <b class="sc-st sc-nict" title="${NICT_TIP}">${nict} not in CalTopo</b>` : ''}</span>
-        <span class="cc-tools"><button type="button" data-gadd="${esc(g.id)}" title="Add to this folder">＋</button><button type="button" data-gdl="${esc(g.id)}" title="Download for CalTopo">⇩</button><button type="button" data-gedit="${esc(g.id)}" title="Rename, colour, move">✏️</button>${fsBtn('project:' + g.id)}</span></div>`;
+        <span class="cc-tools"><button type="button" data-gadd="${esc(g.id)}" title="Add to this folder">＋</button><button type="button" data-gdl="${esc(g.id)}" title="Download for CalTopo">⇩</button><button type="button" data-gedit="${esc(g.id)}" title="Rename, colour, move">✏️</button>${fsBtn('project:' + g.id)}${moreBtn()}</span></div>`;
       if (exp) out += projectTree(g.id, depth + 1);
     });
     FL.liveFeatures(pj.P).filter(f => (f.group || null) === (gid || null)).sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true })).forEach(f => {
       out += `<div class="sc-sub sc-feat${NICT && NICT.has(f.id) ? ' sc-is-nict' : ''}" data-feat="${esc(f.id)}" data-rkey="f:${esc(f.id)}" ${pad(depth)} title="Click: highlight · double-click: fly there"><span class="sc-ic" style="color:${esc(P.colorOf(f))}">${fIcon[f.kind] || '•'}</span>
         <span class="sc-nm">${esc(f.name || '(no name)')}${FL.flexTag(f.desc) ? ' <small>🕳</small>' : ''}${NICT && NICT.has(f.id) ? ' ' + nictMark() : ''}</span>
-        <span class="cc-tools"><button type="button" data-fedit="${esc(f.id)}" title="Edit">✏️</button></span></div>`;
+        <span class="cc-tools"><button type="button" data-fedit="${esc(f.id)}" title="Edit">✏️</button>${moreBtn()}</span></div>`;
     });
     return out || '<div class="sc-sub sc-none">empty</div>';
   }
@@ -320,7 +326,7 @@
         ov.set(hk, e);
         out += `<div class="sc-sub sc-fold${e._ctLoose ? ' sc-loose' : ''}" data-hk="${esc(hk)}" data-fkey="${esc(fk)}" style="padding-left:${4 + depth * 12}px"><button type="button" class="cc-eye ui-eye ui-eye-sm${h[hk] ? ' half' : ' on'}" data-oeye="${esc(hk)}" title="${h[hk] ? 'Show' : 'Hide'}"></button>
           <span class="sc-nm" data-expand="${esc(key)}"${e._ctLoose ? ' title="Not in a CalTopo folder (listed as CalTopo lists them)"' : ''}>${arrowOf(key, exp)}📁 ${esc(e.name || '(folder)')} <small>${(tree.get(e) || []).length}</small>${nst ? ` <b class="sc-st sc-st-in" title="${nst} inside waiting, in conflict, changed or not sent">${nst}</b>` : ''}</span>
-          <span class="cc-tools">${fsBtn(fk)}</span></div>`;
+          <span class="cc-tools">${fsBtn(fk)}${moreBtn()}</span></div>`;
         if (exp) visit(e, p, depth + 1);
       });
       const shown = leaves.length > 200 ? leaves.filter((e, i) => i < 200 || FORCE.has(e.id)) : leaves;
@@ -329,7 +335,7 @@
         ov.set(hk, e);
         const rk = isCt && /^ct-/.test(e.id) ? e.id : 'e:' + (src.url || src.name) + '#' + e.id;
         out += `<div class="sc-sub sc-feat" data-ov="${esc(hk)}" data-hk="${esc(hk)}" data-rkey="${esc(rk)}" style="padding-left:${4 + depth * 12}px" title="Click: highlight · double-click: fly there"><button type="button" class="cc-eye ui-eye ui-eye-sm${h[hk] ? ' half' : ' on'}" data-oeye="${esc(hk)}" title="${h[hk] ? 'Show' : 'Hide'}"></button>
-          <span class="sc-nm">${esc(e.name || '(no name)')}${isCt ? stMark(ctStatus(e.id)) : ''}</span><span class="cc-tools"></span></div>`;
+          <span class="sc-nm">${esc(e.name || '(no name)')}${isCt ? stMark(ctStatus(e.id)) : ''}</span><span class="cc-tools">${moreBtn()}</span></div>`;
       });
       if (leaves.length > shown.length) out += `<div class="sc-sub sc-none" style="padding-left:${4 + depth * 12}px">… and ${leaves.length - shown.length} more</div>`;
     };
@@ -609,6 +615,8 @@
   });
   host.addEventListener('click', async e => {
     const P = PF();
+    const rm = e.target.closest('[data-rmenu]');
+    if (rm) { const row = rm.closest('[data-rkey],[data-fkey]'); if (row && window._rowMenu) window._rowMenu.open(row.dataset.rkey ? { rkey: row.dataset.rkey } : { fkey: row.dataset.fkey }, rm); return; }
     if (e.target.closest('[data-master]')) { setMaster(MS.off); return; }
     if (e.target.closest('[data-labels]')) { setLabels(!LB); return; }
     const fsb = e.target.closest('[data-fstyle]'); if (fsb) { if (window._folderStyle) { await window._folderStyle.dialog(fsb.dataset.fstyle); last = ''; render(); } return; }
@@ -632,7 +640,7 @@
       const d = gb.dataset, A = window._pjApi;
       if (d.geye) { masterOnFirst(); const h = P.hidden(); P.setHidden('g:' + d.geye, !h['g:' + d.geye]); P.draw(); last = ''; render(); }
       else if (d.oeye) { masterOnFirst(); const h = P.hidden(); P.setHidden(d.oeye, !h[d.oeye]); P.applyOverlayHidden(); last = ''; render(); }
-      else if (d.fedit) P.editFeature(d.fedit);
+      else if (d.fedit) { if (window._featEdit) window._featEdit.open({ source: 'project', id: d.fedit }); else P.editFeature(d.fedit); }   // the shared editor, as from ⋯ and the info panel
       else if (d.gdl) P.downloadMenu(d.gdl);
       else if (d.gedit) P.editGroup(d.gedit);
       else if (d.gadd && A) {
@@ -752,7 +760,7 @@
   #surf-cols .sc-news { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.18); color: rgba(255,255,255,.75); border-radius: 8px; padding: 0 5px; font-size: 9px; line-height: 13px; cursor: pointer; vertical-align: 0; }
   #surf-cols .sc-news.sc-hot { color: #ffb020; border-color: rgba(255,176,32,.6); background: rgba(255,176,32,.12); }
   #surf-cols .sc-fs-on { color: #6fd39a !important; }
-  #surf-cols .cc-tools button.sc-fs { display: inline-flex; align-items: center; }
+  #surf-cols .cc-tools button.sc-fs, #surf-cols .cc-tools button.sc-more { display: inline-flex; align-items: center; }
   #flex-rail [data-target="#featuresCollapsible"] { position: relative; }
   #flex-rail .sc-rail-dot { position: absolute; top: 4px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: #ffb020; box-shadow: 0 0 0 2px rgba(20,22,30,.9); pointer-events: none; }
   .sc-news-pop { width: 330px; max-height: 70vh; overflow: auto; }
@@ -779,5 +787,6 @@
   window.addEventListener('flex-caltopo-changed', soonNews);
   window.addEventListener('flex-caltopo-queue', soonNews);
   window.addEventListener('flex-folder-style', () => { last = ''; soon(); });
+  window.addEventListener('flex-feature-edited', () => { last = ''; soon(true); });
   window._surfCols = { reveal, news: a => newsPop(a || host.querySelector('[data-ctnews]') || host), labels: on => (on === undefined ? LB : setLabels(on)), render: async () => { while (busy) await new Promise(r => setTimeout(r, 20)); last = ''; return render(); }, refresh: () => soon(true), master: on => (on === undefined ? !MS.off : setMaster(on)) };
 })();
