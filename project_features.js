@@ -431,7 +431,7 @@
     if (!pj.pid) return;
     const tags = scanTags();
     sec(root, `Cave entrances on the map (${tags.length})`, tags.some(t => !t.placedHere), b => {
-      b.appendChild(el('div', 'pj-note', 'A point whose description has a line “flex: cave=<cave name>; station=<entrance station>” — in CalTopo or in this project — marks where a cave’s entrance is. FLEX places the cave there when you say so. 📁 → What this project loads → “Copy CalTopo tag” gives you the line.'));
+      b.appendChild(el('div', 'pj-note', 'A point whose description has a line “flex: cave=<cave name>; station=<entrance station>” — in CalTopo or in this project — marks where a cave’s entrance is. FLEX places the cave there when you say so. 🕳 Caves → ⋯ on the cave → “Copy CalTopo tag” gives you the line.'));
       if (!tags.length) b.appendChild(el('div', 'pj-sub', 'None found.'));
       tags.forEach(t => {
         const r = el('div', 'pj-item');
@@ -598,6 +598,12 @@
     if (!v || !v.selectedEntityChanged) return;
     clearInterval(hook);
     v.scene.postRender.addEventListener(updateHtml);
+    // New terrain under the points: forget the ground heights the labels sat
+    // on (again once its tiles have arrived).
+    window.addEventListener('flex-terrain-changed', () => {
+      HL.heights.clear(); v.scene.requestRender && v.scene.requestRender();
+      setTimeout(() => { HL.heights.clear(); v.scene.requestRender && v.scene.requestRender(); }, 3000);
+    });
     changed(null);
   }, 300);
   ['#featuresCollapsible', '#caveCollapsible'].forEach(t => document.querySelector(`[data-target="${t}"]`)?.addEventListener('click', () => setTimeout(render, 0)));

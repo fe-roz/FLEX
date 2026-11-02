@@ -873,6 +873,8 @@
         : `New version of survey ${e.code} (${e.version || 'transcribed'})`,
       'segment.set': () => `Segment “${e.name || (pj.P.segments[e.seg] || {}).name || e.seg}” (${(e.shots || []).length} shots)`,
       'segment.del': () => `Removed ${[].concat(e.seg != null ? [e.seg] : [], e.segs || []).length} segment(s)`,
+      'feature.set': () => { const f = pj.P.features[e.feature] || {}, k = e.kind || f.kind, nm = e.name || f.name || ''; return e.removed ? `Removed ${k || 'feature'} “${nm}”` : `${{ point: 'Point', line: 'Line', area: 'Area' }[k] || 'Feature'} “${nm}”`; },
+      'group.set': () => e.removed ? `Removed folder “${(pj.P.groups[e.group] || {}).name || ''}”` : `Folder “${e.name || (pj.P.groups[e.group] || {}).name || ''}”`,
       accept: () => `Accepted ${n} suggestion(s)${e.note ? ': ' + e.note : ''}`,
       reject: () => `Turned down ${n} suggestion(s)${e.why ? ': ' + e.why : ''}`,
     };
@@ -1369,6 +1371,7 @@
     try { const v = localStorage.getItem(key); if (v != null) { const o = v === '1'; b.classList.toggle('open', o); h.querySelector('.lp-section-arrow').textContent = o ? '▾' : '▸'; } } catch (_) {}
     s.append(h, b); parent.appendChild(s);
     build(b);
+    return s;
   }
   function render() {
     const root = $('pj-panel');
@@ -1400,7 +1403,6 @@
       b.appendChild(r2);
       if (!pj.pid) b.appendChild(el('div', 'pj-note', 'A project is an area: its caves (survey files and where they are placed), point clouds, CalTopo map, documents, notes, leads and field survey — opened together, saved together, shared with friends and FLEX Field by sync files. Without one, FLEX works as usual.'));
     });
-    if (window._pjWs) window._pjWs.section(root, section);
     if (!pj.pid) { if (!window._pjx) section(root, 'Sync files', true, b => b.appendChild(btn('⇩ Import a sync file…', () => importSync()))); return; }
     const q = FL.reviewQueue(pj.P, pj.D);
     section(revRoot, `Suggestions (${q.length})`, true, b => {
@@ -1421,32 +1423,6 @@
       b.appendChild(row);
     });
     if (window._pjSeg) window._pjSeg.section(revRoot, section);
-    section(root, 'Caves', true, b => {
-      const caves = FL.liveCaves(pj.P);
-      if (!caves.length) b.appendChild(el('div', 'pj-note', 'No caves yet: link a loaded survey file below.'));
-      caves.forEach(c => {
-        const parts = partsOf(c.id);
-        const r = el('div', 'pj-item');
-        r.appendChild(el('div', 'pj-item-t', c.name));
-        r.appendChild(el('div', 'pj-sub', (c.sources || []).map(s => s.file + (s.surveys && s.surveys.length ? ` (survey${s.surveys.length > 1 ? 's' : ''} ${s.surveys.join(', ')})` : '')).join('; ') || 'no files'));
-        if (!parts.length) r.appendChild(el('div', 'pj-sub', 'not loaded'));
-        r.addEventListener('click', () => editCave(c.id));
-        b.appendChild(r);
-      });
-      const files = imps();
-      if (files.length) {
-        b.appendChild(el('div', 'pj-h', 'Loaded survey files'));
-        files.forEach(imp => {
-          const codes = [...new Set((imp.parsed.segments || []).map(s => s.survey || ''))];
-          const cids = [...new Set(codes.map(cd => caveFor(imp, cd)).filter(Boolean))];
-          const r = el('div', 'pj-item');
-          r.appendChild(el('div', 'pj-item-t', imp.name));
-          r.appendChild(el('div', 'pj-sub', cids.length ? '→ ' + cids.map(caveName).join(', ') + (codes.some(cd => !caveFor(imp, cd)) ? ' · some surveys in no cave' : '') : 'not in this project — click to link'));
-          r.addEventListener('click', () => linkFile(imp));
-          b.appendChild(r);
-        });
-      }
-    });
     section(leadsRoot, 'Leads', true, b => {
       const all = allLeads();
       const tabs = el('div', 'pj-tabs');
@@ -1508,17 +1484,21 @@
         b.appendChild(r);
       });
     });
-    section(root, 'Sync files', true, b => {
+    section(root, 'Sync files', false, b => {
       b.appendChild(el('div', 'pj-note', 'Share changes with FLEX Field and teammates: make a file, send it (email, cloud, cable); they import it. The first file has everything.'));
       const r = el('div', 'pj-row');
       r.append(btn('⇧ Make: changes since last', () => makeSync('since'), 'primary small'), btn('⇧ Everything', () => makeSync('all'), 'small'), btn('⇩ Import…', () => importSync(), 'small'));
       b.appendChild(r);
     });
-    section(root, 'History', false, b => {
-      const list = FL.sortEntries(pj.proj).slice(-8).reverse();
-      list.forEach(e => { const r = el('div', 'pj-item'); r.appendChild(el('div', 'pj-item-t', describe(e))); r.appendChild(el('div', 'pj-sub', `${e.who || '?'} · ${when(e.t)}`)); b.appendChild(r); });
-      b.appendChild(btn('Everything (with undo)…', () => history(null), 'small'));
+    // History: the last 5 changes right under its header; the rest (with undo) in its window.
+    const hs = section(root, 'History', true, b => {
+      const all = FL.sortEntries(pj.proj), list = all.slice(-5).reverse();
+      if (!list.length) b.appendChild(el('div', 'pj-note', 'No changes yet.'));
+      list.forEach(e => { const r = el('div', 'pj-item pj-hist'); r.appendChild(el('div', 'pj-item-t', describe(e))); r.appendChild(el('div', 'pj-sub', `${e.who || '?'} · ${when(e.t)}`)); r.addEventListener('click', () => history(null)); b.appendChild(r); });
+      b.appendChild(btn(all.length > 5 ? `All history (${all.length})…` : 'All history…', () => history(null), 'small'));
     });
+    hs.id = 'pj-history';
+    if (window._pjx && window._pjx.footer) window._pjx.footer(root);
   }
   async function newProject() {
     const r = await dialog({ title: 'New project', text: 'Usually the name of the area.', input: { value: '', placeholder: 'Project name' },
@@ -1533,7 +1513,7 @@
     if (loaded && window._pjWs) {
       const c = await choose(`New project “${name}”`, `${loaded} thing(s) are loaded now (caves, point clouds, CalTopo, files).`, [
         { label: 'Start it with what is loaded now', sub: 'they become the project’s', value: 'keep', primary: true },
-        { label: 'Start it empty', sub: 'what is loaded now stays loaded; add things to it later (📁 → What this project loads)', value: 'empty' }]);
+        { label: 'Start it empty', sub: 'what is loaded now stays loaded; add things later (← in 🕳 Caves and 📍 Surface, 📁 in ☁ LiDAR)', value: 'empty' }]);
       if (!c) return;
       keep = c === 'keep';
     }
@@ -1572,7 +1552,7 @@
   // ── For project_segments.js (segments and the review queue) ───────────────
   window._pjApi = { pj, FL, el, btn, esc, when, toast, dialog, choose, record, render, refreshCard, openCard, flyTo,
     caveFor, caveName, partsOf, stationPos, stationsOf, docEl, docOpen, docByPage, describe, headsFor, targetLabel,
-    editNote, noteEl, declAt, yearOf, imps, who, ensureAuthor, newProject, refresh, editLead, renameProject, editDescription, setProject, importSync, acceptAbove, closeCard,
+    editNote, noteEl, declAt, yearOf, imps, who, ensureAuthor, linkFile, editCave, newProject, refresh, editLead, renameProject, editDescription, setProject, importSync, acceptAbove, closeCard,
     stopVideos, videoEl, fileOpen, galleryClose, addPages, editTags, leadEl, leadsAt, leadSummary, blobUrl, docSub };
 
   // ── What the export takes from the project (index.html _collectCavesInBbox) ─
@@ -1629,6 +1609,7 @@
   .pj-item { padding: 5px 6px; margin: 3px 0; border-radius: 6px; background: rgba(255,255,255,.05); cursor: pointer; }
   .pj-item:hover { background: rgba(255,255,255,.1); }
   .pj-item.closed { opacity: .6; }
+  .pj-hist { padding: 3px 6px; margin: 2px 0; }
   .pj-item.conflict { border-left: 3px solid #ff9f1c; }
   .pj-item-t { color: #f0f0f4; white-space: pre-wrap; overflow-wrap: anywhere; }
   .pj-sub { font-size: 11px; color: rgba(255,255,255,.55); overflow-wrap: anywhere; }

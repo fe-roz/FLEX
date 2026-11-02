@@ -5,7 +5,9 @@
 //   - role="switch" on each of them (screen readers say "on/off", not
 //     "checked"), also on the ones panels build later (a MutationObserver),
 //   - Enter toggles a switch as Space does,
-//   - window.uiSwitch(checked, onChange, label) for code that builds one.
+//   - window.uiSwitch(checked, onChange, label) for code that builds one,
+//   - on the row eyes (button.ui-eye, drawn as the compact switch):
+//     role="switch" and aria-checked (on = shown), kept up as they change.
 // A checkbox with the class .keep-box stays a checkbox (tick now, act later).
 (function () {
   'use strict';
@@ -15,7 +17,15 @@
   function tag(root) {
     if (!root || root.nodeType !== 1) return;
     if (root.matches && root.matches('input[type=checkbox]')) { mark(root); return; }
-    root.querySelectorAll && root.querySelectorAll('input[type=checkbox]').forEach(mark);
+    if (root.matches && root.matches('.ui-eye')) { eye(root); return; }
+    if (!root.querySelectorAll) return;
+    root.querySelectorAll('input[type=checkbox]').forEach(mark);
+    root.querySelectorAll('.ui-eye').forEach(eye);
+  }
+  function eye(b) {
+    const on = String(b.classList.contains('on'));
+    if (b.getAttribute('role') !== 'switch') b.setAttribute('role', 'switch');
+    if (b.getAttribute('aria-checked') !== on) b.setAttribute('aria-checked', on);
   }
   function mark(x) {
     const sw = x.matches(SEL);
@@ -51,8 +61,12 @@
 
   const start = () => {
     tag(document.documentElement);
-    new MutationObserver(ms => { for (const m of ms) m.addedNodes.forEach(tag); })
-      .observe(document.documentElement, { childList: true, subtree: true });
+    new MutationObserver(ms => {
+      for (const m of ms) {
+        if (m.type === 'attributes') { if (m.target.classList && m.target.classList.contains('ui-eye')) eye(m.target); }
+        else m.addedNodes.forEach(tag);
+      }
+    }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();

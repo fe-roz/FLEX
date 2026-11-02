@@ -1,15 +1,17 @@
 // flex_rail.js — the icon strip down the left (#flex-rail in index.html).
+// The icons are line icons from icons.js (<svg class="ico"><use href="#i-…">),
+// drawn in currentColor, so the states below are colours on the button.
 //
 // Each icon with data-target opens that panel in #toolbar, one at a time (the
 // click handling is the accordion script in index.html, as for the old nav
 // row). This file adds what the strip shows on its own:
 //   - which panel is open (highlight),
-//   - the open project's name under 📁, in green,
+//   - the open project's name under the folder icon, in green,
 //   - the project-only icons (data-pj-only: Docs, Leads, Trips, Review)
 //     greyed with no project open, and their panels closed when it closes;
 //     Trips (data-rail-later) stays greyed until it is built,
 //   - a dot on Review when suggestions are waiting,
-//   - ⓘ Help: the guide over the map (no panel).
+//   - Help (info icon): the guide over the map (no panel).
 (function () {
   'use strict';
   const rail = document.getElementById('flex-rail');
@@ -102,7 +104,7 @@
     let ov = $('flex-guide');
     if (!ov) {
       ov = document.createElement('div'); ov.id = 'flex-guide';
-      ov.innerHTML = '<div class="fg-box" role="dialog" aria-label="FLEX guide"><div class="fg-bar"><b>📘 FLEX guide</b><span><a href="help.html" target="_blank" rel="noopener">open in a tab ↗</a><button type="button" class="fg-x" title="Close (Esc)">×</button></span></div><iframe title="FLEX guide"></iframe></div>';
+      ov.innerHTML = '<div class="fg-box" role="dialog" aria-label="FLEX guide"><div class="fg-bar"><b>' + (window.icon ? window.icon('info', 15) + ' ' : '') + 'FLEX guide</b><span><a href="help.html" target="_blank" rel="noopener">open in a tab ↗</a><button type="button" class="fg-x" title="Close (Esc)">×</button></span></div><iframe title="FLEX guide"></iframe></div>';
       document.body.appendChild(ov);
       ov.querySelector('.fg-x').addEventListener('click', guideClose);
       ov.addEventListener('mousedown', e => { if (e.target === ov) guideClose(); });

@@ -385,7 +385,7 @@
     cache = (await entries(force)).filter(l => l.kind === 'terrain');
     const pj = PJ(), pjName = (window._pjWs && window._pjWs.projName && window._pjWs.projName()) || (pj.P && pj.P.name) || 'the project';
     const rows = cache.map(l => `<div class="cl-row" data-id="${esc(l.id)}">
-        <button type="button" class="cl-eye ui-eye${viewOf(l.id).show ? ' on' : ''}" data-act="eye" title="${viewOf(l.id).show ? 'Hide' : 'Show'}"></button>
+        <button type="button" class="cl-eye ui-eye${viewOf(l.id).show ? ' on' : ' half'}" data-act="eye" title="${viewOf(l.id).show ? 'Hide' : 'Show'}"></button>
         <span class="cl-nm" title="${esc(l.name)}">${l.owner === 'p' ? '📁 ' : '👤 '}${esc(l.name || 'Terrain')}</span>
         <span class="cl-tools"><button type="button" data-act="fly" title="Fly there">⌖</button><button type="button" data-act="rm" title="${l.owner === 'p' ? 'Remove from the project' : 'Forget (out of My data)'}">✕</button></span></div>`).join('');
     const html = `<div class="cl-row cl-base"><span></span><span class="cl-nm">🌍 World terrain <small>everywhere</small></span><span></span></div>${rows}
@@ -580,7 +580,7 @@
   const st = document.createElement('style');
   st.textContent = `
   #cl-panel { margin: 0 0 8px; font-size: 11px; }
-  #cl-panel .cl-row { display: grid; grid-template-columns: 14px 1fr auto; gap: 5px; align-items: center; padding: 2px 3px; border-radius: 5px; font-size: 11px; }
+  #cl-panel .cl-row { display: grid; grid-template-columns: 24px 1fr auto; gap: 5px; align-items: center; padding: 2px 3px; border-radius: 5px; font-size: 11px; }
   #cl-panel .cl-row:hover { background: rgba(255,255,255,.07); }
   #cl-panel .cl-base small { color: rgba(255,255,255,.4); margin-left: 4px; }
   #cl-panel .cl-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(255,255,255,.88); }

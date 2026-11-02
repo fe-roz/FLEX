@@ -110,6 +110,7 @@
       acts.push(['⌖ Fly to', () => window._flyToCave(i)], ['🎯 Rectify', () => window._openRectifyPanel(i)], ['🎨 Style', () => window._openStylePanel(i)],
                 ['🏷 Labels', () => window._openLabelsPanel(i)], ['⟳ Replace survey file…', () => window._replaceCaveSurvey(i)], ['Unload', () => w.removeCave(name)]);
     }
+    if (pw && pw.caveMenu) acts.push(...pw.caveMenu(name, loaded));   // project: Copy CalTopo tag, Caves in this file…, Remove from project
     if (!inP) acts.push(['Forget', () => { if (loaded) w.removeCave(name); w.forgetRecent(name); }, 'Takes it out of My data (its file and history stay)']);
     const m = document.createElement('div'); m.className = 'cc-pop';
     m.innerHTML = `<div class="cc-pop-t">${esc(name)}</div>` + acts.map(([l, , t], k) => `<button type="button" data-k="${k}" ${t ? 'title="' + esc(t) + '"' : ''}>${esc(l)}</button>`).join('');
@@ -211,11 +212,11 @@
   #cave-cols .cc-invite { gap: 6px; background: rgba(255,255,255,.03); border: 1px dashed rgba(255,255,255,.15); }
   #cave-cols .cc-note, #cave-cols .cc-empty { color: rgba(255,255,255,.45); font-size: 10.5px; padding: 3px 5px; font-style: italic; }
   #cave-cols .cc-btn { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.15); color: #e8ece9; border-radius: 5px; padding: 3px 8px; text-align: left; font-size: 11px; cursor: pointer; }
-  #cave-cols .cc-it { display: grid; grid-template-columns: 14px 1fr auto; align-items: center; gap: 5px; padding: 2px 3px; border-radius: 5px; }
+  #cave-cols .cc-it { display: grid; grid-template-columns: 24px 1fr auto; align-items: center; gap: 5px; padding: 2px 3px; border-radius: 5px; }
   #cave-cols .cc-it:hover { background: rgba(255,255,255,.07); }
   #cave-cols .cc-it[draggable="true"] { cursor: grab; }
   #cave-cols .cc-moving { background: rgba(242,194,78,.08); }
-  /* the row eye (.cc-eye) looks like every other: .ui-eye in ui_kit.css */
+  /* the row eye (.cc-eye) is the compact switch of every row: .ui-eye in ui_kit.css (24 px, the first column) */
   #cave-cols .cc-nm { cursor: default; user-select: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(255,255,255,.88); }
   #cave-cols .cc-nm small { display: block; font-size: 9px; color: rgba(255,255,255,.4); overflow: hidden; text-overflow: ellipsis; }
   #cave-cols .cc-moving .cc-nm small { color: #f2c24e; }

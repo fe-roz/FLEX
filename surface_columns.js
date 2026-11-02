@@ -164,7 +164,7 @@
       ? (x.kind === 'pgroup' && x.dir !== 'in' ? '' : `<button type="button" class="cc-mv" data-mv="out" title="${x.dir === 'in' ? 'Back to My data (cancel the move)' : 'Move to My data'}">→</button>`)
       : `<button type="button" class="cc-mv" data-mv="in" title="${x.dir === 'out' ? 'Back into the project (cancel the move)' : 'Move into the project'}">←</button>`;
     const eyeOn = x.kind === 'file' || x.kind === 'caltopo' ? x.loaded && x.shown : x.shown;
-    const eyeHalf = (x.kind === 'file' || x.kind === 'caltopo') && x.loaded && !x.shown;
+    const eyeHalf = x.kind === 'file' || x.kind === 'caltopo' ? x.loaded && !x.shown : !x.shown;   // points and folders are always loaded
     const k = !x.dir && expKey(x), exp = k && isExp(k);
     const forget = side === 'm' && !x.dir && (x.kind === 'file') ? '<button type="button" data-forget title="Forget: out of My data (unloads it)">✕</button>' : '';
     const ftools = x.kind === 'folder' ? `<button type="button" data-gadd="${esc(x.id)}" title="Add to this folder">＋</button><button type="button" data-gdl="${esc(x.id)}" title="Download for CalTopo">⇩</button><button type="button" data-gedit="${esc(x.id)}" title="Rename, colour, move">✏️</button>` : '';
@@ -189,7 +189,7 @@
     if (gid) FL.liveGroups(pj.P).filter(g => (g.parent || '') === gid).sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true })).forEach(g => {
       const k = 'g:' + g.id, exp = !!fOpen()[k];
       const n = FL.liveFeatures(pj.P).filter(f => FL.groupPath(pj.P, f.group).some(y => y.id === g.id)).length;
-      out += `<div class="sc-sub sc-fold" ${pad(depth)}><button type="button" class="cc-eye ui-eye ui-eye-sm${h[k] ? '' : ' on'}" data-geye="${esc(g.id)}" title="${h[k] ? 'Show' : 'Hide'}"></button>
+      out += `<div class="sc-sub sc-fold" ${pad(depth)}><button type="button" class="cc-eye ui-eye ui-eye-sm${h[k] ? ' half' : ' on'}" data-geye="${esc(g.id)}" title="${h[k] ? 'Show' : 'Hide'}"></button>
         <span class="sc-nm" data-expand="${esc(k)}">${arrowOf(k, exp)}<span class="pjs-sw" style="background:${esc(P.groupColor(g.id))}"></span>📁 ${esc(g.name)} <small>${n}</small></span>
         <span class="cc-tools"><button type="button" data-gadd="${esc(g.id)}" title="Add to this folder">＋</button><button type="button" data-gdl="${esc(g.id)}" title="Download for CalTopo">⇩</button><button type="button" data-gedit="${esc(g.id)}" title="Rename, colour, move">✏️</button></span></div>`;
       if (exp) out += projectTree(g.id, depth + 1);
@@ -213,14 +213,14 @@
       folders.forEach(e => {
         const p = path + '/' + (e.name || e.id), key = base + '|' + p, hk = P.srcKey(src, p), exp = open.has(key);
         ov.set(hk, e);
-        out += `<div class="sc-sub sc-fold" style="padding-left:${4 + depth * 12}px"><button type="button" class="cc-eye ui-eye ui-eye-sm${h[hk] ? '' : ' on'}" data-oeye="${esc(hk)}" title="${h[hk] ? 'Show' : 'Hide'}"></button>
+        out += `<div class="sc-sub sc-fold" style="padding-left:${4 + depth * 12}px"><button type="button" class="cc-eye ui-eye ui-eye-sm${h[hk] ? ' half' : ' on'}" data-oeye="${esc(hk)}" title="${h[hk] ? 'Show' : 'Hide'}"></button>
           <span class="sc-nm" data-expand="${esc(key)}">${arrowOf(key, exp)}📁 ${esc(e.name || '(folder)')} <small>${(tree.get(e) || []).length}</small></span></div>`;
         if (exp) visit(e, p, depth + 1);
       });
       leaves.slice(0, 200).forEach(e => {
         const p = path + '/' + (e.name || e.id), hk = P.srcKey(src, p);
         ov.set(hk, e);
-        out += `<div class="sc-sub sc-feat" data-ov="${esc(hk)}" style="padding-left:${4 + depth * 12}px" title="Click: highlight · double-click: fly there"><button type="button" class="cc-eye ui-eye ui-eye-sm${h[hk] ? '' : ' on'}" data-oeye="${esc(hk)}" title="${h[hk] ? 'Show' : 'Hide'}"></button>
+        out += `<div class="sc-sub sc-feat" data-ov="${esc(hk)}" style="padding-left:${4 + depth * 12}px" title="Click: highlight · double-click: fly there"><button type="button" class="cc-eye ui-eye ui-eye-sm${h[hk] ? ' half' : ' on'}" data-oeye="${esc(hk)}" title="${h[hk] ? 'Show' : 'Hide'}"></button>
           <span class="sc-nm">${esc(e.name || '(no name)')}</span></div>`;
       });
       if (leaves.length > 200) out += `<div class="sc-sub sc-none" style="padding-left:${4 + depth * 12}px">… and ${leaves.length - 200} more</div>`;
@@ -229,10 +229,45 @@
     return out || '<div class="sc-sub sc-none">no folders</div>';
   }
 
+  // The CalTopo map loaded now (it is the source of truth when connected).
+  const ctSrc = () => { const w = ws(); return (w && w.vectorSources && w.vectorSources().find(s => s.kind === 'caltopo')) || null; };
+  // ⧉ Duplicates of CalTopo: the project's features that the loaded CalTopo
+  // map already has (caltopo_match.js: same kind and name, within 15 m), ticked
+  // to remove from the project. Removing is a feature.set with removed: true,
+  // so 📁 History can undo it.
+  async function dupsDialog() {
+    const A = window._pjApi, pj = PJ(), M = window._ctMatch, src = ctSrc();
+    if (!A || !pj.P || !M) return;
+    if (!src) { A.toast('Load the project’s CalTopo map first'); return; }
+    const list = M.duplicates(pj.P, src);
+    if (!list.length) { await A.dialog({ title: 'Duplicates of CalTopo', text: 'None of the project’s features is also in the CalTopo map.' }); return; }
+    const groups = pj.P.groups || {};
+    const kindName = { point: 'Point', line: 'Line', area: 'Area' };
+    const body = A.el('div', 'sc-dups');
+    body.innerHTML = '<label class="sc-dup sc-dup-all"><input type="checkbox" class="keep-box" data-all checked> All</label>' + list.map((d, i) => {
+      const f = d.feature, g = f.group && groups[f.group];
+      return `<label class="sc-dup"><input type="checkbox" class="keep-box" data-i="${i}" checked> <b>${esc(f.name || kindName[f.kind] || 'Feature')}</b> <span class="sc-dup-k">${kindName[f.kind] || f.kind}${g ? ' · ' + esc(g.name || '') : ''}</span> <button type="button" data-fly="${i}" title="Fly to it">⌖</button></label>`;
+    }).join('');
+    body.addEventListener('change', e => { if (e.target.matches('[data-all]')) body.querySelectorAll('[data-i]').forEach(c => { c.checked = e.target.checked; }); });
+    body.addEventListener('click', e => {
+      const b = e.target.closest('[data-fly]'); if (!b) return; e.preventDefault();
+      const d = list[+b.dataset.fly], P = PF(); if (d && P && P.highlight) P.highlight(d.feature, true);
+    });
+    const r = await A.dialog({ title: `Duplicates of CalTopo (${list.length})`, text: 'These project features are also in the CalTopo map (same name, within 15 m). CalTopo is the source of truth: remove the ticked ones from the project. Undo in 📁 History.',
+      body, wide: true, buttons: [{ label: 'Cancel', value: null }, { label: 'Remove ticked from the project', value: 'rm', danger: true }] });
+    if (!r || r.button !== 'rm') return;
+    const pick = [...body.querySelectorAll('[data-i]')].filter(c => c.checked).map(c => list[+c.dataset.i].feature);
+    let n = 0;
+    for (const f of pick) { if (await A.record('feature.set', { feature: f.id, removed: true }, undefined, { quiet: true })) n++; }
+    if (n && A.refresh) A.refresh('feature.set');          // quiet records skip the replay: once for all
+    A.toast(n ? `Removed ${n} duplicate${n > 1 ? 's' : ''} from the project (undo in 📁 History)` : 'Nothing removed');
+    last = ''; render();
+  }
+
   function bar(isOpen) {
     const on = !MS.off;
     const tools = isOpen
-      ? `<button type="button" data-draw="point" title="Draw a point in the project">＋ Point</button><button type="button" data-draw="line" title="Draw a line">＋ Line</button><button type="button" data-draw="area" title="Draw an area">＋ Area</button><button type="button" data-tool="folder" title="A new folder">＋ Folder</button><button type="button" data-tool="import" title="GPX / KML / KMZ / GeoJSON into the project's features">⇪ Import</button><button type="button" data-tool="download" title="All the project's features, for CalTopo">⇩ Download</button><button type="button" data-tool="file" title="Show a KMZ / GeoJSON / GPX file as it is (a data file)">📄 Add file</button>`
+      ? `<button type="button" data-draw="point" title="Draw a point in the project">＋ Point</button><button type="button" data-draw="line" title="Draw a line">＋ Line</button><button type="button" data-draw="area" title="Draw an area">＋ Area</button><button type="button" data-tool="folder" title="A new folder">＋ Folder</button><button type="button" data-tool="import" title="GPX / KML / KMZ / GeoJSON into the project's features">⇪ Import</button><button type="button" data-tool="download" title="All the project's features, for CalTopo">⇩ Download</button><button type="button" data-tool="file" title="Show a KMZ / GeoJSON / GPX file as it is (a data file)">📄 Add file</button>${ctSrc() && window._ctMatch ? '<button type="button" data-tool="dups" title="The project’s features that the loaded CalTopo map already has (same name, within 15 m)">⧉ Duplicates of CalTopo</button>' : ''}`
       : `<button type="button" data-tool="file" title="Show a KMZ / GeoJSON / GPX file">📄 Add KMZ / GeoJSON / GPX</button>`;
     const lab = labelsOn();
     return `<div class="sc-bar"><button type="button" class="sc-master${on ? ' on' : ''}" data-master role="switch" aria-checked="${!!on}" title="${on ? 'Hide every feature on the surface (each keeps its own setting)' : 'Show the features again, as each was set'}"><span class="ui-sw ui-sw-sm"></span>Show features</button><button type="button" class="sc-master sc-lab${lab ? ' on' : ''}" data-labels role="switch" aria-checked="${!!lab}" title="${lab ? 'Hide the names on the map' : 'Show the names on the map'}"><span class="ui-sw ui-sw-sm"></span>Labels</button><span class="sc-tools">${tools}</span></div>`;
@@ -324,6 +359,7 @@
       else if (t === 'folder' && P) P.editGroup(null, '');
       else if (t === 'import' && P) { masterOnFirst(); P.importFile(''); }
       else if (t === 'download' && P) P.downloadMenu('');
+      else if (t === 'dups') dupsDialog();
       return;
     }
     const ex = e.target.closest('[data-expand]');
@@ -398,7 +434,7 @@
   #surf-cols .cc-nm[data-expand] { cursor: pointer; }
   #surf-cols .sc-kids { padding: 0 0 3px 14px; }
   #surf-cols .sc-pt, #surf-cols .sc-sub { display: grid; grid-template-columns: 1fr auto; gap: 4px; align-items: center; font-size: 10.5px; color: rgba(255,255,255,.75); padding: 1px 2px; border-radius: 4px; }
-  #surf-cols .sc-sub { grid-template-columns: 14px 1fr auto; }
+  #surf-cols .sc-sub { grid-template-columns: 20px 1fr auto; }
   #surf-cols .sc-sub.sc-none { display: block; font-style: italic; color: rgba(255,255,255,.4); padding-left: 20px; }
   #surf-cols .sc-feat { cursor: pointer; user-select: none; }
   #surf-cols .sc-pt:hover, #surf-cols .sc-sub:hover { background: rgba(255,255,255,.06); }
@@ -418,11 +454,11 @@
   #surf-cols .cc-invite { gap: 6px; background: rgba(255,255,255,.03); border: 1px dashed rgba(255,255,255,.15); }
   #surf-cols .cc-note, #surf-cols .cc-empty { color: rgba(255,255,255,.45); font-size: 10.5px; padding: 3px 5px; font-style: italic; }
   #surf-cols .cc-btn { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.15); color: #e8ece9; border-radius: 5px; padding: 3px 8px; text-align: left; font-size: 11px; cursor: pointer; }
-  #surf-cols .cc-it { display: grid; grid-template-columns: 14px 1fr auto; align-items: center; gap: 5px; padding: 2px 3px; border-radius: 5px; }
+  #surf-cols .cc-it { display: grid; grid-template-columns: 24px 1fr auto; align-items: center; gap: 5px; padding: 2px 3px; border-radius: 5px; }
   #surf-cols .cc-it:hover { background: rgba(255,255,255,.07); }
   #surf-cols .cc-it[draggable="true"] { cursor: grab; }
   #surf-cols .cc-moving { background: rgba(242,194,78,.08); }
-  /* row eyes: .ui-eye (ui_kit.css) */
+  /* row eyes: the compact switch, .ui-eye (ui_kit.css); hidden folders/features are .half (loaded, hidden) */
   #surf-cols .cc-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(255,255,255,.88); }
   #surf-cols .cc-nm small { display: block; font-size: 9px; color: rgba(255,255,255,.4); overflow: hidden; text-overflow: ellipsis; padding-left: 12px; }
   #surf-cols .cc-moving .cc-nm small { color: #f2c24e; }
@@ -430,6 +466,11 @@
   #surf-cols .cc-tools { display: inline-flex; gap: 1px; opacity: .35; }
   #surf-cols .cc-it:hover .cc-tools, #surf-cols .cc-it:focus-within .cc-tools { opacity: 1; }
   #surf-cols .cc-tools button { background: none; border: none; color: rgba(255,255,255,.7); padding: 0 3px; font-size: 12px; line-height: 16px; border-radius: 3px; cursor: pointer; }
+  .sc-dups { max-height: 50vh; overflow: auto; margin: 6px 0; }
+  .sc-dup { display: flex; align-items: center; gap: 6px; padding: 3px 2px; font-size: 12px; }
+  .sc-dup-all { border-bottom: 1px solid rgba(255,255,255,.12); margin-bottom: 3px; }
+  .sc-dup-k { opacity: .65; font-size: 11px; }
+  .sc-dup button { margin-left: auto; background: none; border: none; color: inherit; cursor: pointer; }
   #surf-cols .cc-tools button:hover { color: #fff; background: rgba(255,255,255,.1); }
   #surf-cols .cc-tools .cc-mv { color: #ff9a62; font-weight: 700; }
   .sc-extra { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 10.5px; color: rgba(255,255,255,.65); margin: 0 0 8px; }

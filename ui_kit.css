@@ -24,9 +24,7 @@
   --ui-focus: #8ab4ec;                   /* keyboard focus ring */
   --ui-disabled-opacity: .4;
   --ui-text: rgba(255,255,255,.85);      /* label text on the dark panels */
-  --ui-eye: #e8ece9;                     /* row eye, filled = shown */
-  --ui-eye-off: rgba(255,255,255,.45);
-  --ui-eye-gap: #1d232e;                 /* the ring inside a filled eye */
+  --ui-eye-unloaded: rgba(255,255,255,.35); /* row switch, not loaded: ring and knob */
 }
 
 /* ── Switch: a checkbox in a panel, or .ui-sw on any checkbox ───────────── */
@@ -94,11 +92,30 @@ span.ui-sw::after { content: ""; position: absolute; top: calc((var(--sw-h) - va
 span.ui-sw.ui-sw-sm { --sw-w: 24px; --sw-h: 13px; --sw-k: 9px; }
 span.ui-sw.ui-sw-xs { --sw-w: 20px; --sw-h: 11px; --sw-k: 7px; }
 
-/* ── Row eye (Caves, Surface, map layers): tri-state show/hide/load ─────────
-   .on = shown (filled), .half = loaded but hidden (outline), neither = not
-   loaded (faint outline). .ui-eye-sm in folder/sub rows. */
-.ui-eye { width: 13px; height: 13px; flex: none; box-sizing: border-box; border: 1.5px solid var(--ui-eye-off); border-radius: 3px; background: none; padding: 0; cursor: pointer; }
-.ui-eye.on { background: var(--ui-eye); border-color: var(--ui-eye); box-shadow: inset 0 0 0 2px var(--ui-eye-gap); }
-.ui-eye.half { border-color: var(--ui-eye); }
-.ui-eye.ui-eye-sm { width: 11px; height: 11px; }
-.ui-eye:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 1px; }
+/* ── Row eye (Caves, Surface, map layers): the compact switch, three looks ─
+   It is a <button class="ui-eye"> (the modules' click handlers load, show or
+   hide), drawn as a switch:
+     .on    shown              switch on, green, knob right
+     .half  loaded but hidden  off: green ring, green knob
+     (none) not loaded         off: solid grey ring, grey knob; on = load + show
+   Rows that are always loaded (folders, features, map layers) use .on / .half.
+   .ui-eye-sm in folder/sub rows. ui_kit.js adds role="switch" and
+   aria-checked. Don't copy this into a module. */
+.ui-eye { --sw-w: 24px; --sw-h: 13px; --sw-k: 9px;
+  -webkit-appearance: none; appearance: none; box-sizing: border-box; flex: none; position: relative; display: inline-block;
+  width: var(--sw-w); height: var(--sw-h); margin: 0; padding: 0; border: none; border-radius: calc(var(--sw-h) / 2);
+  background: transparent; box-shadow: inset 0 0 0 1.5px var(--ui-eye-unloaded); cursor: pointer; vertical-align: middle;
+  transition: background-color .15s, box-shadow .15s; }
+.ui-eye::after { content: ""; position: absolute; top: calc((var(--sw-h) - var(--sw-k)) / 2); left: calc((var(--sw-h) - var(--sw-k)) / 2);
+  width: var(--sw-k); height: var(--sw-k); border-radius: 50%; background: var(--ui-eye-unloaded); transition: left .15s, background-color .15s; }
+.ui-eye.half { box-shadow: inset 0 0 0 1.5px var(--ui-on); }
+.ui-eye.half::after { background: var(--ui-on); }
+.ui-eye.on { background: var(--ui-on); box-shadow: none; }
+.ui-eye.on::after { background: var(--ui-knob); left: calc(var(--sw-w) - var(--sw-k) - (var(--sw-h) - var(--sw-k)) / 2); }
+.ui-eye:not(.on):not(.half):hover { box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.55); }
+.ui-eye:not(.on):not(.half):hover::after { background: rgba(255,255,255,.55); }
+.ui-eye.half:hover { box-shadow: inset 0 0 0 1.5px var(--ui-on-hover); }
+.ui-eye.on:hover { background: var(--ui-on-hover); }
+.ui-eye.ui-eye-sm { --sw-w: 20px; --sw-h: 11px; --sw-k: 7px; }
+.ui-eye:focus { outline: none; }
+.ui-eye:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }

@@ -2833,10 +2833,11 @@ const miniMapLayerDefs = [
     createSource: () =>
       proxifyOlSource(
         new ol.source.TileArcGISRest({
-          url: "https://ngmdb-tiles.usgs.gov/arcgis/rest/services/mapview/ngmdbMosaic/ImageServer",
+          url: "https://ngmdb.usgs.gov/imagery/rest/services/mapview/ngmdbMosaic/ImageServer",
           params: {
             FORMAT: "jpgpng",
-            F: "image"
+            F: "image",
+            mosaicRule: '{"ascending":true}'
           },
           crossOrigin: "anonymous"
         })
@@ -3166,7 +3167,8 @@ function initMiniMapHover() {
     return;
   }
   miniMapMap.on("pointermove", (event) => {
-    const feature = miniMapMap.forEachFeatureAtPixel(event.pixel, (hitFeature) => hitFeature);
+    // the first feature that has a label (the view footprint drawn over an outline has none)
+    const feature = miniMapMap.forEachFeatureAtPixel(event.pixel, (hitFeature) => (hitFeature.get("labelText") ? hitFeature : undefined));
     const foundText = feature ? feature.get("labelText") : "";
     if (foundText && typeof foundText === "string") {
       miniMapHoverLabelElement.style.display = "block";
@@ -3237,6 +3239,9 @@ function initMiniMap() {
       pinchRotate: false
     })
   });
+  // compass, view footprint, terrain / point-cloud outlines (minimap_view.js)
+  window._miniMapOl = miniMapMap;
+  if (window._minimapView) window._minimapView.attach(miniMapMap);
   initMiniMapLayerControls();
   initMiniMapHover();
   applyMiniMapLayer("Bing Maps Aerial");
@@ -3454,6 +3459,8 @@ function syncMiniMapFrame(timestampMs, cameraCartographic) {
     miniMapCenterFeature.getGeometry().setCoordinates(center);
     miniMapLastRenderAt = timestampMs;
   }
+  // throttled inside: returns at once unless ~120 ms passed and the camera moved
+  if (window._minimapView) window._minimapView.update(timestampMs, heightAboveGround, heading);
 
   saveAttentionGrid(false);
   miniMapLastCameraPosition = Cesium.Cartesian3.clone(cesiumViewer.camera.positionWC, miniMapLastCameraPosition || new Cesium.Cartesian3());
@@ -4181,7 +4188,7 @@ function renderPcList() {
     row.className = 'lp-row';
     const name = pc.name || pc.pcoGeometry?.url?.split('/').slice(-2, -1)[0] || `PC ${i + 1}`;
     row.innerHTML =
-      `<button class="lp-eye-btn" title="Toggle visibility">${pc.visible !== false ? '👁' : '🚫'}</button>` +
+      `<button class="lp-eye-btn ui-eye${pc.visible !== false ? ' on' : ' half'}" title="${pc.visible !== false ? 'Hide' : 'Show'}"></button>` +
       `<span class="lp-row-name" title="${name}">${name}</span>` +
       `<button class="lp-remove-btn" title="Remove">✕</button>`;
     row.querySelector('.lp-eye-btn').addEventListener('click', () => {
@@ -4189,9 +4196,11 @@ function renderPcList() {
       renderPcList();
     });
     row.querySelector('.lp-remove-btn').addEventListener('click', () => removePc(pc));
+    if (window._pjWs && window._pjWs.pcRow) window._pjWs.pcRow(row, _pcUrlByName[pc.name]);   // 📁 in / add to the open project
     container.appendChild(row);
   });
 }
+window._renderPcList = renderPcList;
 
 function removePc(pc) {
   if (window._pjWs && !window._ws.switching && _pcUrlByName[pc.name]) window._pjWs.removed('pointcloud', _pcUrlByName[pc.name]);
@@ -4223,7 +4232,7 @@ function renderDataFileList() {
     const row = document.createElement('div');
     row.className = 'lp-row';
     row.innerHTML =
-      `<button class="lp-eye-btn" title="Toggle visibility">${entry.show ? '👁' : '🚫'}</button>` +
+      `<button class="lp-eye-btn ui-eye${entry.show ? ' on' : ' half'}" title="${entry.show ? 'Hide' : 'Show'}"></button>` +
       `<span class="lp-row-name" title="${entry.label}">${entry.label}</span>` +
       `<span class="lp-badge">${entry.type}</span>` +
       `<button class="lp-remove-btn" title="Remove">✕</button>`;
@@ -7058,6 +7067,14 @@ window._setCaveColourMode = function(mode) {
   _caveImports.forEach((_, i) => window._rerenderCave(i));
   _renderCaveColourUI();
 };
+// The globe's terrain changed (a terrain patch on or off, 🗺 Layers): depth
+// grids sampled from the old terrain no longer count (_caveGroundValid checks
+// the provider), so let every cave ask again and redraw in Depth mode.
+window.addEventListener('flex-terrain-changed', () => {
+  _caveImports.forEach(imp => { imp._groundTriedFor = null; });
+  if (_caveColourMode === 'depth') _caveImports.forEach(imp => _caveColourChanged(imp));
+  _renderCaveColourUI();
+});
 // Starting state of the cave-list controls (index.html).
 _renderCaveColourUI();
 { const chk = document.getElementById('lp-cave-areas-toggle'); if (chk) chk.checked = _caveAreaLabelsVisible; }
@@ -8976,12 +8993,13 @@ const _flyNow = performance.now();
 const _flyDt = _flyLastTick === null ? 0 : Math.min(0.25, Math.max(0, (_flyNow - _flyLastTick) / 1000));
 _flyLastTick = _flyNow;
 if (flags.Fly) {
-    // Speed follows the distance to the ground (above or below it, so it is
-    // slow in a cave too), in metres per second so it doesn't depend on the
-    // frame rate; the scroll wheel scales it (FLY_MULT_MIN..FLY_MULT_MAX).
-    // It used to follow height above sea level, which made even the slowest
-    // setting fast over high ground.
-    const hag = Math.abs(_flyHeightAboveGround(camera.positionCartographic));
+    // Speed follows the height above the ground, in metres per second so it
+    // doesn't depend on the frame rate; the scroll wheel scales it
+    // (FLY_MULT_MIN..FLY_MULT_MAX). Below the ground (in a cave) it stays at
+    // the ground-level speed however deep you go. It used to follow height
+    // above sea level, which made even the slowest setting fast over high
+    // ground.
+    const hag = Math.max(0, _flyHeightAboveGround(camera.positionCartographic));
     const mps = Math.min(20000, Math.max(2, 0.5 * (hag + 20)));
     moverRateMultiplyer = _clampFlyMult(moverRateMultiplyer);
     moveRate = mps * moverRateMultiplyer * _flyDt;
@@ -10145,8 +10163,7 @@ window._openStylePanel = function(i) {
     const isMarkedSurface = !!(dopt.surfaceSurveys && dopt.surfaceSurveys[sv.code]);
     const rowStyle = isHidden ? 'opacity:0.4;' : '';
     return `<div data-survey-code="${sv.code}" style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.05);${rowStyle}">
-      <button onclick="window._styleSurveyToggle('${sv.code}')" title="${isHidden ? 'Show' : 'Hide'} this survey"
-        style="background:none;border:none;cursor:pointer;font-size:13px;padding:0;flex-shrink:0;line-height:1;">${isHidden ? '🙈' : '👁'}</button>
+      <button class="ui-eye ui-eye-sm${isHidden ? ' half' : ' on'}" onclick="window._styleSurveyToggle('${sv.code}')" title="${isHidden ? 'Show' : 'Hide'} this survey"></button>
       <button onclick="window._styleSurveyMarkSurface('${sv.code}')" title="${isMarkedSurface ? 'Unmark as surface' : 'Mark as surface (hides with surface toggle)'}"
         style="background:none;border:none;cursor:pointer;font-size:12px;padding:0;flex-shrink:0;line-height:1;opacity:${isMarkedSurface ? '1' : '0.3'};">☀</button>
       <input type="color" value="${col}" data-survey="${sv.code}"

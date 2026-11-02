@@ -18,6 +18,7 @@
     <!-- UI kit: switches, row eyes, their tokens (switch = takes effect now; .keep-box = tick to act later) -->
     <link rel="stylesheet" href="ui_kit.css">
     <script src="ui_kit.js"></script>
+    <script src="icons.js"></script>  <!-- line icons: inline sprite, window.icon() -->
     <script src="proxy-url-generator.js"></script>
 
 
@@ -81,11 +82,7 @@
       }
       .lp-drag-handle:active { cursor: grabbing; }
       .lp-drag-over { background: rgba(255,255,255,0.08); border-radius: 3px; }
-      .lp-eye-btn {
-        background: none; border: none; cursor: pointer; padding: 0 2px;
-        font-size: 13px; line-height: 1; opacity: 0.7; flex-shrink: 0;
-      }
-      .lp-eye-btn:hover { opacity: 1; }
+      .lp-eye-btn { margin-right: 4px; }   /* drawn as the row switch: .ui-eye (ui_kit.css) */
       .lp-remove-btn {
         background: none; border: none; cursor: pointer; padding: 0 2px;
         font-size: 12px; color: rgba(255,100,100,0.7); flex-shrink: 0;
@@ -123,9 +120,10 @@
       #flex-rail { position: absolute; top: 8px; bottom: 8px; left: 8px; width: 52px; z-index: 11; box-sizing: border-box;
         background: rgba(12,15,21,0.9); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;
         display: flex; flex-direction: column; align-items: center; padding: 6px 0; gap: 2px; overflow-y: auto; scrollbar-width: none; }
-      #flex-rail button { width: 44px; min-height: 40px; flex: none; border: none; background: none; border-radius: 7px; position: relative;
-        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
-        font-size: 17px; line-height: 1.1; color: #98a3a0; cursor: pointer; padding: 2px 0; }
+      #flex-rail button { width: 44px; height: 42px; flex: none; border: none; background: none; border-radius: 7px; position: relative;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+        line-height: 1.1; color: #98a3a0; cursor: pointer; padding: 2px 0; }
+      #flex-rail button > svg.ico { width: 20px; height: 20px; display: block; }   /* icons.js; colour = the button's state */
       #flex-rail button small { font-size: 8.5px; letter-spacing: .02em; max-width: 44px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       #flex-rail button:hover { background: rgba(255,255,255,0.07); color: #e8ece9; }
       #flex-rail button.on { background: rgba(255,154,98,0.16); color: #e8ece9; }
@@ -412,6 +410,29 @@
         border: 2px solid rgba(0, 0, 0, 0.75);
         box-shadow: 0 0 5px rgba(0, 0, 0, 0.6);
       }
+
+      /* compass (turns with the heading-up minimap) and the outline legend, shown on hover */
+      #mini_map_compass {
+        position: absolute; right: 8px; bottom: 10px; width: 30px; height: 30px;
+        z-index: 2; pointer-events: auto; cursor: default;
+      }
+      #mini_map_compass svg { display: block; }
+      #mini_map_legend {
+        position: absolute; left: 6px; top: 61px; z-index: 2;
+        font-size: 10px; line-height: 15px; color: rgba(255,255,255,0.85);
+        background: rgba(22,25,35,0.82); border: 1px solid rgba(255,255,255,0.15);
+        border-radius: 4px; padding: 3px 6px; pointer-events: none;
+        opacity: 0; transition: opacity 0.15s;
+      }
+      #mini_map_container:hover #mini_map_legend { opacity: 1; }
+      #mini_map_legend i {
+        display: inline-block; width: 12px; height: 0; margin: 0 5px 3px 0; vertical-align: middle;
+        border-top: 2px solid;
+      }
+      #mini_map_legend i.mm-fov   { height: 7px; border: 1.5px solid rgb(255,214,90); background: rgba(255,214,90,0.25); }
+      #mini_map_legend i.mm-patch { height: 7px; border: 1.5px solid rgb(80,200,255); }
+      #mini_map_legend i.mm-tiles { border-top: 1.5px dashed rgba(255,255,255,0.8); }
+      #mini_map_legend i.mm-cloud { border-top: 2px dashed rgb(230,120,255); }
 
       .mini_map_resize {
         position: absolute;
@@ -817,24 +838,24 @@
            opens one of the panels in #toolbar, one at a time; the project-only
            ones (Docs, Leads, Trips, Review) are greyed with no project open. -->
       <nav id="flex-rail" aria-label="Panels">
-        <button type="button" data-target="#projectCollapsible" id="rail-pj" title="Projects">📁<small id="rail-pj-name">Project</small></button>
+        <button type="button" data-target="#projectCollapsible" id="rail-pj" title="Projects"><svg class="ico"><use href="#i-folder"/></svg><small id="rail-pj-name">Project</small></button>
         <div class="rail-sep"></div>
-        <button type="button" data-target="#mapLayersCollapsible" title="Map layers">🗺<small>Layers</small></button>
-        <button type="button" data-target="#lidarCollapsible" title="LiDAR: point clouds, scene, ground and height, incidence">☁<small>LiDAR</small></button>
+        <button type="button" data-target="#mapLayersCollapsible" title="Map layers"><svg class="ico"><use href="#i-map"/></svg><small>Layers</small></button>
+        <button type="button" data-target="#lidarCollapsible" title="LiDAR: point clouds, scene, ground and height, incidence"><svg class="ico"><use href="#i-cloud"/></svg><small>LiDAR</small></button>
         <div class="rail-sep"></div>
-        <button type="button" data-target="#featuresCollapsible" title="Surface: points, CalTopo, data files">📍<small>Surface</small></button>
-        <button type="button" data-target="#caveCollapsible" title="Caves">🕳<small>Caves</small></button>
+        <button type="button" data-target="#featuresCollapsible" title="Surface: points, CalTopo, data files"><svg class="ico"><use href="#i-pin"/></svg><small>Surface</small></button>
+        <button type="button" data-target="#caveCollapsible" title="Caves"><svg class="ico"><use href="#i-cave"/></svg><small>Caves</small></button>
         <div class="rail-sep"></div>
-        <button type="button" data-target="#docsCollapsible" data-pj-only title="The project's folder and documents">📄<small>Docs</small></button>
-        <button type="button" data-target="#leadsCollapsible" data-pj-only title="The project's leads">❓<small>Leads</small></button>
-        <button type="button" data-pj-only data-rail-later title="Trips — not built yet">🧭<small>Trips</small></button>
-        <button type="button" data-target="#reviewCollapsible" data-pj-only title="Suggestions to review, segments">✓<small>Review</small><span class="rail-dot" id="rail-review-dot" hidden></span></button>
+        <button type="button" data-target="#docsCollapsible" data-pj-only title="The project's folder and documents"><svg class="ico"><use href="#i-doc"/></svg><small>Docs</small></button>
+        <button type="button" data-target="#leadsCollapsible" data-pj-only title="The project's leads"><svg class="ico"><use href="#i-help"/></svg><small>Leads</small></button>
+        <button type="button" data-pj-only data-rail-later title="Trips — not built yet"><svg class="ico"><use href="#i-compass"/></svg><small>Trips</small></button>
+        <button type="button" data-target="#reviewCollapsible" data-pj-only title="Suggestions to review, segments"><svg class="ico"><use href="#i-check"/></svg><small>Review</small><span class="rail-dot" id="rail-review-dot" hidden></span></button>
         <div class="rail-sep"></div>
-        <button type="button" data-target="#exportCollapsible" title="Export an offline map">📦<small>Export</small></button>
-        <button type="button" data-target="#lidarDeriveCollapsible" title="Analyze the point clouds">🌿<small>Analyze</small></button>
+        <button type="button" data-target="#exportCollapsible" title="Export an offline map"><svg class="ico"><use href="#i-pack"/></svg><small>Export</small></button>
+        <button type="button" data-target="#lidarDeriveCollapsible" title="Analyze the point clouds"><svg class="ico"><use href="#i-leaf"/></svg><small>Analyze</small></button>
         <div class="rail-grow"></div>
-        <button type="button" data-target="#settingsCollapsible" title="Settings">⚙<small>Settings</small></button>
-        <button type="button" id="rail-help" aria-pressed="false" title="Help: the FLEX guide">ⓘ<small>Help</small></button>
+        <button type="button" data-target="#settingsCollapsible" title="Settings"><svg class="ico"><use href="#i-sliders"/></svg><small>Settings</small></button>
+        <button type="button" id="rail-help" aria-pressed="false" title="Help: the FLEX guide"><svg class="ico"><use href="#i-info"/></svg><small>Help</small></button>
       </nav>
       <div id="toolbar" style="z-index: 10;">
 
@@ -846,13 +867,13 @@
           <button id="session_save_btn" class="btn btn-sm btn-secondary" type="button"
             onclick="window._saveAll ? window._saveAll() : (window._sessionSave && window._sessionSave())"
             title="Save your view — and, with a project open, the changes waiting for it"
-            style="font-size:11px; padding:2px 8px;">💾 Save</button>
+            style="font-size:11px; padding:2px 8px;"><svg class="ico" width="13" height="13"><use href="#i-save"/></svg> <span class="tb-l">Save</span></button>
           <span id="session_save_indicator"
             style="font-size:10px; color:#aaffaa; display:none;"></span>
           <button id="update_check_btn" class="btn btn-sm btn-secondary" type="button"
             onclick="window._checkForUpdates && window._checkForUpdates()"
             title="Check for FLEX updates"
-            style="font-size:11px; padding:2px 8px;">🔄 Updates</button>
+            style="font-size:11px; padding:2px 8px;"><svg class="ico" width="13" height="13"><use href="#i-refresh"/></svg> <span class="tb-l">Updates</span></button>
           <span id="update_status_indicator"
             style="font-size:10px; display:none;"></span>
         </div>
@@ -2005,6 +2026,7 @@
 <script src="project_segments.js"></script>
 <script src="project_workspace.js"></script>
 <!-- 📁 Project: the Projects list, the open project's overview -->
+<script src="caltopo_match.js"></script>  <!-- which project surface features are on the CalTopo map (📁 Project, 📍 Surface) -->
 <script src="projects_panel.js"></script>
 <!-- 📄 Docs: the project folder as on disk -->
 <script src="docs_panel.js"></script>
@@ -2021,6 +2043,7 @@
 <!-- 📍 Surface: project | My data -->
 <script src="surface_columns.js"></script>
 <script src="terrain_patch.js"></script>
+<script src="minimap_view.js"></script>
 <script src="custom_layers.js"></script>
 <!-- Brings the globe back if a map layer stalls at startup -->
 <script src="globe_watchdog.js"></script>
@@ -2029,7 +2052,7 @@
   <!-- ══ Entwine link dialog ══════════════════════════════════════════════════ -->
   <div id="entwine-link-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;">
     <div style="background:#1a1a1a;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:20px;width:340px;font-size:13px;color:#ddd;">
-      <div style="font-weight:600;margin-bottom:14px;font-size:14px;">🗄 Link Local Entwine Server</div>
+      <div style="font-weight:600;margin-bottom:14px;font-size:14px;"><svg class="ico" width="15" height="15"><use href="#i-server"/></svg> Link Local Entwine Server</div>
       <label style="display:block;margin-bottom:4px;font-size:11px;opacity:0.6;">Entwine output folder (where ept.json files live)</label>
       <input id="entwine-path-input" type="text" placeholder="~/entwine"
         style="width:100%;box-sizing:border-box;background:#111;border:1px solid rgba(255,255,255,0.2);border-radius:4px;padding:6px 8px;color:#ddd;font-size:12px;margin-bottom:10px;">
@@ -2052,7 +2075,7 @@
   <!-- ══ Entwine dataset picker ═══════════════════════════════════════════════ -->
   <div id="entwine-picker-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;">
     <div style="background:#1a1a1a;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:20px;width:360px;max-height:480px;display:flex;flex-direction:column;font-size:13px;color:#ddd;">
-      <div style="font-weight:600;margin-bottom:4px;font-size:14px;">📂 Local Entwine Datasets</div>
+      <div style="font-weight:600;margin-bottom:4px;font-size:14px;"><svg class="ico" width="15" height="15"><use href="#i-folder-open"/></svg> Local Entwine Datasets</div>
       <div id="entwine-picker-url" style="font-size:10px;opacity:0.4;margin-bottom:12px;word-break:break-all;"></div>
       <div id="entwine-picker-list" style="overflow-y:auto;flex:1;min-height:60px;"></div>
       <div style="margin-top:14px;display:flex;gap:8px;justify-content:space-between;align-items:center;">
@@ -2070,7 +2093,7 @@
   <template id="tmpl-style-panel">
     <div id="cave-inline-style" style="background:#1a1a2a;border:1px solid rgba(180,100,255,0.25);border-radius:6px;padding:12px;font-size:13px;color:#ddd;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-        <div style="font-weight:600;font-size:13px;">🎨 Survey Style</div>
+        <div style="font-weight:600;font-size:13px;"><svg class="ico" width="15" height="15"><use href="#i-palette"/></svg> Survey Style</div>
         <button onclick="window._styleClose()" style="background:none;border:none;color:#888;cursor:pointer;font-size:14px;padding:0 2px;">✕</button>
       </div>
       <div id="style-survey-name" style="font-size:11px;opacity:0.5;margin-bottom:10px;"></div>
@@ -2157,7 +2180,7 @@
   <template id="tmpl-rectify-panel">
     <div id="cave-inline-rectify" style="background:#1a1a1a;border:1px solid rgba(255,200,50,0.2);border-radius:6px;padding:12px;font-size:13px;color:#ddd;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-        <div style="font-weight:600;font-size:13px;">🎯 Georectify Survey</div>
+        <div style="font-weight:600;font-size:13px;"><svg class="ico" width="15" height="15"><use href="#i-target"/></svg> Georectify Survey</div>
         <button onclick="window._rectifyClose()" style="background:none;border:none;color:#888;cursor:pointer;font-size:14px;padding:0 2px;">✕</button>
       </div>
       <div id="rectify-survey-name" style="font-size:11px;opacity:0.5;margin-bottom:8px;"></div>
@@ -2191,7 +2214,7 @@
 
   <!-- ── Georectify adjust overlay (shown after globe click) ───────────────── -->
   <div id="rectify-adjust-overlay" style="display:none;position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:10000;background:#1a1a1a;border:1px solid rgba(80,180,120,0.4);border-radius:8px;padding:14px 18px;font-size:12px;color:#ddd;min-width:340px;">
-    <div style="font-weight:600;margin-bottom:10px;font-size:13px;">📍 <span id="rectify-adj-station"></span> → Place on globe</div>
+    <div style="font-weight:600;margin-bottom:10px;font-size:13px;"><svg class="ico" width="15" height="15"><use href="#i-pin"/></svg> <span id="rectify-adj-station"></span> → Place on globe</div>
     <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;align-items:center;margin-bottom:12px;">
       <span style="opacity:0.55;">Lat</span><span id="rectify-adj-lat" style="font-family:monospace;font-size:11px;"></span>
       <span style="opacity:0.55;">Lon</span><span id="rectify-adj-lon" style="font-family:monospace;font-size:11px;"></span>

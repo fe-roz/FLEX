@@ -8,9 +8,10 @@
 //   - a project cave moved or given a new survey file here, a CalTopo refresh
 //     interval changed… are waiting changes: 💾 Save puts them in (the Save
 //     button shows how many wait). Autosave keeps your view and My data only.
-//   - something loaded that isn't in the project is added with "＋ Add to
-//     project" (📁 → What this project loads), or by starting a new project
-//     with what is loaded.
+//   - something loaded that isn't in the project is added on its own row:
+//     ← in 🕳 Caves and 📍 Surface (the CalTopo map too), 📁 on a point cloud
+//     in ☁ LiDAR, ＋ in 🗺 Layers; or by starting a new project with what is
+//     loaded.
 //   - unloading a project's cave or layer only unloads it.
 //   - moving a cave between the project and 👤 My data (🕳 Caves, the two
 //     columns) is a waiting change too; until 💾 Save it shows where it is
@@ -291,11 +292,7 @@
     pending.forEach(p => m.appendChild(el('div', 'pj-save-menu-i', `• ${p.name} — ${p.what}`)));
     const row = el('div', 'pj-row');
     row.appendChild(btn('💾 Save into the project', async () => { m.remove(); await save(); A.render && A.render(); }, 'small primary'));
-    row.appendChild(btn('Discard', async () => {
-      m.remove();
-      const ok = await choose(`Discard ${pending.length} change${pending.length > 1 ? 's' : ''}?`, '“' + projName() + '” stays as it was saved; moved caves stay where they were.', [{ label: 'Discard them', value: 'yes', primary: true }, { label: 'Keep them', value: 'no' }]);
-      if (ok === 'yes') { await discard(); A.render && A.render(); }
-    }, 'small'));
+    row.appendChild(btn('Discard', async () => { m.remove(); await discardAsk(); }, 'small'));
     row.appendChild(btn('Cancel', () => m.remove(), 'small'));
     m.appendChild(row);
     document.body.appendChild(m);
@@ -310,7 +307,7 @@
     if (!b) return;
     W.pending = pj.pid && ws() && !W.entering ? (await scan()).pending : [];
     const n = W.pending.length;
-    b.textContent = n ? `💾 Save · ${n}` : '💾 Save';
+    (b.querySelector('.tb-l') || b).textContent = n ? `Save · ${n}` : 'Save';   // the label beside the icon (icons.js)
     b.classList.toggle('pj-save-waiting', !!n);
     if (window._caveCols) window._caveCols.render();
     if (window._surfCols) window._surfCols.refresh();
@@ -489,15 +486,17 @@
     b.textContent = '📁 ' + name;
     b.title = pj.pid ? `Project “${name}”: caves, layers, CalTopo, notes, leads, documents. 💾 Save puts changes into it.` : 'No project open: your own caves and points (My data). Open or create a project here.';
     b.classList.toggle('pj-top-on', !!pj.pid);
+    if (window._renderPcList) window._renderPcList();     // ☁ LiDAR rows: their 📁
+    placeCaltopo();
   }
 
-  // ── 📁 Project → What this project loads ────────────────────────────────
-  // The CalTopo map (key, map picker, link) is a project thing: its panel
-  // section lives in 📁 Project while a project is open. With no project it
-  // shows in 📍 Features only while a map is still loaded (so it can be
-  // cleared); otherwise it is put away.
+  // ── The CalTopo map's link-and-key section ──────────────────────────────
+  // It lives in 📍 Surface ("CalTopo map: link and key"). With no project it
+  // shows only while a map is still loaded (so it can be cleared); otherwise
+  // it is put away. With a project open it is always there (📁 Project's
+  // Connected block points to it to add a map).
   let ctNode = null, ctSlot = null, ctHold = null;
-  function placeCaltopo(root) {
+  function placeCaltopo() {
     if (!ctNode) {
       const body = document.getElementById('lp-caltopo-body');
       ctNode = body && body.closest('.lp-section');
@@ -506,55 +505,71 @@
       ctNode.parentNode.insertBefore(ctSlot, ctNode);
       ctHold = document.createElement('div'); ctHold.style.display = 'none'; document.body.appendChild(ctHold);
     }
-    if (pj.pid && root) { root.appendChild(ctNode); return; }
     const loaded = !!(window._ws && window._ws.caltopo());
-    if (loaded) ctSlot.parentNode.insertBefore(ctNode, ctSlot.nextSibling);
+    if (pj.pid || loaded) { if (ctNode.previousSibling !== ctSlot) ctSlot.parentNode.insertBefore(ctNode, ctSlot.nextSibling); }
     else ctHold.appendChild(ctNode);
   }
-  const icon = { pointcloud: '☁', caltopo: '🗺', file: '📄', imagery: '🖼', tiles: '🧩' };
-  const kindName = k => ({ caltopo: 'CalTopo map', pointcloud: 'point cloud', imagery: 'map image (🗺 Layers)', tiles: 'tile link (🗺 Layers)' }[k] || 'data file');
-  function section(root, mk) {
-    if (!pj.pid) { placeCaltopo(null); return; }
-    mk(root, 'What this project loads', true, b => {
-      b.appendChild(el('div', 'pj-note', 'Opening the project loads all of these. Changes to them wait for 💾 Save. Unloading one only unloads it; Remove from project takes it out. Caves are in 🕳 Caves (project | My data). Placement is shared; colours and styles are yours.'));
-      const files = [], layers = FL.liveLayers(pj.P);
-      if (!layers.length) b.appendChild(el('div', 'pj-note', 'No layers in the project yet: load point clouds, a CalTopo map, data files, then ＋ Add them below.'));
-      const loaded = new Set(ws() ? ws().caves().map(c => c.name) : []);
-      const wait = new Map(W.pending.filter(p => p.kind === 'cave').map(p => [p.name, p.what]));
-      files.forEach(f => {
-        const r = el('div', 'pj-item');
-        r.appendChild(el('div', 'pj-item-t', '🕳 ' + f.file + (wait.has(f.file) ? ' •' : '')));
-        r.appendChild(el('div', 'pj-sub', [f.place ? (f.place.mode === 'anchor' ? `placed at station ${f.place.station}` : `UTM zone ${f.place.zone || '?'}`) : 'not placed yet',
-          f.placed ? `by ${f.placed.who || '?'}` : '', loaded.has(f.file) ? 'loaded' : 'not loaded', wait.has(f.file) ? `${wait.get(f.file)} here — 💾 Save puts it in` : ''].filter(Boolean).join(' · ')));
-        const row = el('div', 'pj-row');
-        if (window._pjf) row.appendChild(btn('Copy CalTopo tag', () => window._pjf.copyTag(f.file), 'small'));
-        row.appendChild(btn('Remove from project', async () => { await record('cavefile.set', { file: f.file, removed: true }); await badge(); }, 'small'));
-        r.appendChild(row);
-        b.appendChild(r);
-      });
-      layers.forEach(l => {
-        const r = el('div', 'pj-item');
-        r.appendChild(el('div', 'pj-item-t', `${icon[l.kind] || '•'} ${l.name || l.url}`));
-        r.appendChild(el('div', 'pj-sub', `${kindName(l.kind)}${l.url ? ' · ' + l.url : ''}`));
-        const row = el('div', 'pj-row');
-        row.appendChild(btn('Remove from project', async () => { await record('layer.set', { layer: l.id, removed: true }); await badge(); }, 'small'));
-        r.appendChild(row);
-        b.appendChild(r);
-      });
-      if (W.pending.length) b.appendChild(btn(`💾 Save ${W.pending.length} change${W.pending.length > 1 ? 's' : ''} into the project`, () => save().then(() => A.render && A.render()), 'small primary'));
-      // Loaded, not in the project
-      const box = el('div'); b.appendChild(box);
-      scan().then(({ extra }) => {
-        extra.layers = extra.layers.filter(l => l.kind !== 'file');      // data files: 📍 Surface, ← into the project
-        if (!extra.layers.length) return;
-        box.appendChild(el('div', 'lp-group-label', 'Loaded, not in this project'));
-        const add = async (fn, x) => { await fn(x); await refreshAfter('cavefile.set'); A.render && A.render(); toast(`Added “${x.name}” to “${projName()}”`); };
-        extra.layers.forEach(l => { const r = el('div', 'pj-item'); r.appendChild(el('div', 'pj-item-t', `${icon[l.kind] || '•'} ${l.name || l.url}`)); r.appendChild(el('div', 'pj-sub', kindName(l.kind))); const row = el('div', 'pj-row'); row.appendChild(btn('＋ Add to project', () => add(addLayer, l), 'small')); r.appendChild(row); box.appendChild(r); });
-      });
+
+  // ── What used to be "What this project loads", now on each thing's row ───
+  /** Discard, asked first (📁 Project's Unsaved changes, the Save menu). */
+  async function discardAsk() {
+    const { pending } = pj.pid ? await scan() : { pending: [] };
+    if (!pending.length) return 0;
+    const ok = await choose(`Discard ${pending.length} change${pending.length > 1 ? 's' : ''}?`, '“' + projName() + '” stays as it was saved; moved caves stay where they were.', [{ label: 'Discard them', value: 'yes', primary: true }, { label: 'Keep them', value: 'no' }]);
+    if (ok !== 'yes') return 0;
+    const n = await discard(); A.render && A.render();
+    return n;
+  }
+  /** A project cave file out of the project (not to My data: → does that). */
+  async function removeCaveFile(name) {
+    const ok = await choose(`Remove “${name}” from “${projName()}”?`, 'It leaves the project (its history keeps it). To keep it as your own, use → (to My data) instead.', [{ label: 'Remove from project', value: 'yes', primary: true }]);
+    if (ok !== 'yes') return false;
+    await record('cavefile.set', { file: name, removed: true });
+    await badge();
+    return true;
+  }
+  /**
+   * 🕳 Caves → a row's ⋯ (cave_columns.js): the project's actions for a cave
+   * file. [[label, fn, title]].
+   */
+  function caveMenu(name, loaded) {
+    if (!pj.pid || !pj.P) return [];
+    const out = [], saved = inProject.cave(name) && !moving(name, 'out');
+    if (saved && window._pjf) out.push(['🏷 Copy CalTopo tag', () => window._pjf.copyTag(name), 'A line for the entrance marker’s description in CalTopo: FLEX places the cave there']);
+    const imp = loaded && (window._caveImports || []).find(i => i && i.parsed && i.name === name);
+    if (imp && owns(name) && A.linkFile) out.push(['✂ Caves in this file…', () => A.linkFile(imp), 'Which project cave this file is, or split it into the caves FLEX finds inside it']);
+    // The project caves made of this file (name, what they are made of, remove).
+    FL.liveCaves(pj.P).filter(c => (c.sources || []).some(s => s.file === name)).slice(0, 4)
+      .forEach(c => A.editCave && out.push([`🕳 Cave “${c.name}”…`, () => A.editCave(c.id), 'Rename it, see what it is made of']));
+    if (saved) out.push(['Remove from project', () => removeCaveFile(name), 'Out of the project (→ moves it to My data instead)']);
+    return out;
+  }
+  /**
+   * ☁ LiDAR's point cloud rows (flex.js renderPcList): 📁 on each, lit when
+   * the cloud is in the open project. Click: add it / remove it.
+   */
+  function pcRow(row, url) {
+    if (!pj.pid || !pj.P || !url || !row) return;
+    const id = layerId('pointcloud', url), cur = pj.P.layers[id], isIn = !!(cur && !cur.removed);
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'lp-pj-btn' + (isIn ? ' on' : ''); b.textContent = '📁';
+    b.title = isIn ? `In “${projName()}” (click to remove it from the project)` : `Add to “${projName()}”`;
+    b.addEventListener('click', async e => {
+      e.stopPropagation();
+      if (isIn) {
+        const ok = await choose(`Remove this point cloud from “${projName()}”?`, 'It stays loaded; opening the project won’t load it any more.', [{ label: 'Remove from project', value: 'yes', primary: true }]);
+        if (ok !== 'yes') return;
+        await record('layer.set', { layer: id, removed: true });
+      } else {
+        const name = url.replace(/\/ept\.json.*$/i, '').split('/').filter(Boolean).pop() || url;
+        await addLayer({ kind: 'pointcloud', url, name });
+        await refreshAfter('layer.set');
+        toast(`Added “${name}” to “${projName()}”`);
+      }
+      if (window._renderPcList) window._renderPcList();
     });
-    const head = document.createElement('div'); head.className = 'lp-group-label'; head.textContent = 'CalTopo map'; head.style.marginTop = '6px';
-    root.appendChild(head);
-    placeCaltopo(root);
+    const rm = row.querySelector('.lp-remove-btn');
+    row.insertBefore(b, rm || null);
   }
 
   const st = document.createElement('style');
@@ -570,11 +585,12 @@
     '#pj-loading .pjl-bar div { height: 100%; width: 0; border-radius: 3px; background: linear-gradient(90deg, #6fd39a, #9fe3bd); transition: width .25s ease; background-size: 200% 100%; animation: pjl-shine 1.2s linear infinite; }' +
     '@keyframes pjl-shine { from { background-position: 200% 0; } to { background-position: 0 0; } }' +
     '#pj-loading .pjl-s { margin-top: 8px; font-size: 11.5px; color: rgba(255,255,255,.6); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 1.2em; }' +
+    '.lp-pj-btn { background: none; border: none; padding: 0 3px; cursor: pointer; opacity: .3; filter: grayscale(1); font-size: 12px; } .lp-pj-btn:hover { opacity: .8; } .lp-pj-btn.on { opacity: 1; filter: none; }' +
     '#pj-save-menu .pj-save-menu-t { font-weight: 700; margin-bottom: 4px; } #pj-save-menu .pj-save-menu-i { opacity: .85; padding: 1px 0; } #pj-save-menu .pj-row { margin-top: 8px; }';
   document.head.appendChild(st);
   setInterval(() => { if (pj.pid && !W.busy && !W.entering) badge(); }, 5000);
 
   window._saveAll = saveClick;
-  window._pjWs = { opening, placeCaltopo, autosave, save, saveClick, discard, badge, scan, removed, leave, enter, adopt, label, section, unloadProject,
-                   owns, moveCave, moving, loadProjectCave, projName, moveItem, movingItem, layerId };
+  window._pjWs = { opening, placeCaltopo, autosave, save, saveClick, discard, discardAsk, badge, scan, removed, leave, enter, adopt, label, unloadProject,
+                   owns, moveCave, moving, loadProjectCave, projName, moveItem, movingItem, layerId, addLayer, caveMenu, pcRow, removeCaveFile };
 })();

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>FLEX Guide</title>
 <!-- The FLEX guide: setting up, how FLEX is organised, and the diagrams.
-     Opened from ⓘ Help (in a frame over the map; the contents row below the
+     Opened from Help in the icon strip (in a frame over the map; the contents row below the
      title replaces the old Help pane's section buttons) or on its own at /help.html.
      Self-contained and offline: no fonts or scripts from the network.
      Example names only — no real places, caves or people. -->
@@ -64,19 +64,26 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
 .uisw.on { background: #3fae6e; } .uisw.on::after { left: 15px; }
 .uibox { display: inline-block; width: 13px; height: 13px; border: 1.5px solid var(--muted); border-radius: 3px; vertical-align: -2px; margin: 0 3px; }
 .uibox.tick { background: var(--blue); border-color: var(--blue); }
-.uieye { display: inline-block; width: 13px; height: 13px; border: 1.5px solid rgba(255,255,255,.45); border-radius: 3px; vertical-align: -2px; margin: 0 3px; }
-.uieye.on { background: #e8ece9; border-color: #e8ece9; box-shadow: inset 0 0 0 2px var(--panel); }
-.uieye.half { border-color: #e8ece9; }
+/* the row switch (show/hide on a row): the compact switch, three looks */
+.uieye { display: inline-block; position: relative; width: 24px; height: 13px; border-radius: 7px; box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.35); vertical-align: -2px; margin: 0 3px; }
+.uieye::after { content: ""; position: absolute; top: 2px; left: 2px; width: 9px; height: 9px; border-radius: 50%; background: rgba(255,255,255,.35); }
+.uieye.half { box-shadow: inset 0 0 0 1.5px #3fae6e; } .uieye.half::after { background: #3fae6e; }
+.uieye.on { background: #3fae6e; box-shadow: none; } .uieye.on::after { background: #fff; left: 13px; }
 
 /* ── The screen (layout diagram) ── */
 .screen { position: relative; min-width: 620px; height: 330px; border: 1.5px solid var(--line); border-radius: 8px; background: linear-gradient(160deg, #1d2a2a, #121a20 60%, #0e1316); overflow: hidden; font-size: 11.5px; }
 .screen .topbar { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; }
 .screen .chip { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18); border-radius: 5px; padding: 2px 8px; white-space: nowrap; }
-.screen .rail { position: absolute; left: 0; top: 0; bottom: 0; width: 46px; background: rgba(0,0,0,.45); border-right: 1px solid rgba(255,255,255,.12); display: flex; flex-direction: column; align-items: center; gap: 5px; padding-top: 8px; font-size: 15px; }
-.screen .rail span { width: 32px; height: 26px; display: grid; place-items: center; border-radius: 5px; }
-.screen .rail span.on { background: var(--green-soft); outline: 1px solid var(--green); }
-.screen .rail span.pj { opacity: .45; }
+.screen .rail { position: absolute; left: 0; top: 0; bottom: 0; width: 46px; background: rgba(12,15,21,.9); border-right: 1px solid rgba(255,255,255,.12); display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 0; color: #98a3a0; }
+.screen .rail span { width: 32px; height: 22px; display: grid; place-items: center; border-radius: 5px; position: relative; }
+.screen .rail span.on { background: rgba(255,154,98,.16); color: #e8ece9; }
+.screen .rail span.on::before { content: ""; position: absolute; left: -6px; top: 4px; bottom: 4px; width: 3px; border-radius: 2px; background: #ff9a62; }
+.screen .rail span.pjopen { color: var(--green); }
+.screen .rail span.pj { opacity: .28; }
+.screen .rail i { width: 22px; height: 1px; background: rgba(255,255,255,.12); flex: none; }
 .screen .rail .gap { flex: 1; }
+/* line icons in the text (icons.js) */
+svg.ico { vertical-align: -2px; }
 .screen .panel { position: absolute; left: 52px; top: 8px; bottom: 8px; width: 210px; background: rgba(20,24,30,.92); border: 1px solid rgba(255,255,255,.15); border-radius: 7px; padding: 8px; }
 .screen .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
 .screen .col { border: 1px solid rgba(255,255,255,.12); border-radius: 5px; padding: 4px; min-height: 160px; }
@@ -157,6 +164,7 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
   main { padding: 18px 16px 60px; }
 }
 </style>
+<script src="icons.js"></script>  <!-- the app's line icons (inline sprite, offline) -->
 </head>
 <body>
 <div class="page">
@@ -210,22 +218,22 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
     Each is set up when you first need it: a <a href="#caltopo">CalTopo key</a> for private maps, a <a href="#lidar">local Entwine server</a> for your own point clouds, and a <a href="#export">Python environment</a> for offline viewers.</li>
 </ol>
 
-<div class="note ok"><b>Updating:</b> 🔄 <b>Updates</b> in the top bar shows when a newer version of FLEX is available and fetches it (FLEX must be a git checkout). Restart the server after an update.</div>
+<div class="note ok"><b>Updating:</b> <svg class="ico" width="14" height="14"><use href="#i-refresh"/></svg> <b>Updates</b> in the top bar shows when a newer version of FLEX is available and fetches it (FLEX must be a git checkout). Restart the server after an update.</div>
 <div class="note"><b>Keep FLEX's folder private bits private.</b> <code>user_files/</code> (your projects, My data, keys), <code>Tokens.js</code> and <code>FLEX.bat</code> are never part of FLEX on GitHub. Survey data and cave locations are sensitive: share them with sync files, on purpose, with the people you choose.</div>
 
 <!-- ═════════════════════════════════════════════════════════════════════ -->
 <h2 id="first">Your first area</h2>
 <ol class="steps">
   <li><b>Make a project</b>
-    📁 <b>Project</b> → <b>＋ New project</b>. Give it the area's name. Your name (asked once) is written on every change, so friends can see who did what.</li>
+    <svg class="ico" width="14" height="14"><use href="#i-folder"/></svg> <b>Project</b> → <b>＋ New project</b>. Give it the area's name. Your name (asked once) is written on every change, so friends can see who did what.</li>
   <li><b>Bring in a cave</b>
-    🕳 <b>Caves</b> → <b>+ Import PLT / Breakout / Walls</b>. Then place it: select a station, <b>Anchor a station to the globe</b> at the entrance, and check the magnetic declination. More stations pinned as control points warp the survey to fit.</li>
+    <svg class="ico" width="14" height="14"><use href="#i-cave"/></svg> <b>Caves</b> → <b>+ Import PLT / Breakout / Walls</b>. Then place it: select a station, <b>Anchor a station to the globe</b> at the entrance, and check the magnetic declination. More stations pinned as control points warp the survey to fit.</li>
   <li><b>Add the surface</b>
-    📍 <b>Surface</b>: draw points, lines and areas, import KML / GPX / GeoJSON, or link a CalTopo map so the group's markers and tracks appear.</li>
+    <svg class="ico" width="14" height="14"><use href="#i-pin"/></svg> <b>Surface</b>: draw points, lines and areas, import KML / GPX / GeoJSON, or link a CalTopo map so the group's markers and tracks appear.</li>
   <li><b>Add layers</b>
-    🗺 <b>Layers</b> for imagery and hillshade — and <b>Your map layers</b> for your own: a GeoTIFF or a tile link (see <a href="#maplayers">below</a>). ☁ <b>LiDAR</b> for point clouds.</li>
+    <svg class="ico" width="14" height="14"><use href="#i-map"/></svg> <b>Layers</b> for imagery and hillshade — and <b>Your map layers</b> for your own: a GeoTIFF or a tile link (see <a href="#maplayers">below</a>). <svg class="ico" width="14" height="14"><use href="#i-cloud"/></svg> <b>LiDAR</b> for point clouds.</li>
   <li><b>Save</b>
-    💾 <b>Save</b> puts the changes into the project (the count shows how many are waiting). See <a href="#saving">Saving</a>.</li>
+    <svg class="ico" width="14" height="14"><use href="#i-save"/></svg> <b>Save</b> puts the changes into the project (the count shows how many are waiting). See <a href="#saving">Saving</a>.</li>
 </ol>
 
 <!-- ═════════════════════════════════════════════════════════════════════ -->
@@ -233,37 +241,39 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
 <div class="fig">
   <div class="screen" role="img" aria-label="FLEX screen: icon strip on the left, a panel beside it with two columns, the details panel on the right, Save and Updates on top">
     <div class="rail">
-      <span class="on">📁</span><span>🗺</span><span>☁</span><span>📍</span><span>🕳</span><span class="pj">📄</span><span class="pj">❓</span><span class="pj">✓</span><span>📦</span><span>🌿</span><span class="gap"></span><span>⚙</span><span>ⓘ</span>
+      <span class="pjopen" title="Project (open: Ridge Area)"><svg class="ico" width="16" height="16"><use href="#i-folder"/></svg></span><i></i><span><svg class="ico" width="16" height="16"><use href="#i-map"/></svg></span><span><svg class="ico" width="16" height="16"><use href="#i-cloud"/></svg></span><i></i><span><svg class="ico" width="16" height="16"><use href="#i-pin"/></svg></span><span class="on"><svg class="ico" width="16" height="16"><use href="#i-cave"/></svg></span><i></i><span><svg class="ico" width="16" height="16"><use href="#i-doc"/></svg></span><span><svg class="ico" width="16" height="16"><use href="#i-help"/></svg></span><span class="pj"><svg class="ico" width="16" height="16"><use href="#i-compass"/></svg></span><span><svg class="ico" width="16" height="16"><use href="#i-check"/></svg></span><i></i><span><svg class="ico" width="16" height="16"><use href="#i-pack"/></svg></span><span><svg class="ico" width="16" height="16"><use href="#i-leaf"/></svg></span><span class="gap"></span><span><svg class="ico" width="16" height="16"><use href="#i-sliders"/></svg></span><span><svg class="ico" width="16" height="16"><use href="#i-info"/></svg></span>
     </div>
-    <div class="panel"><b>🕳 Caves</b>
+    <div class="panel"><b><svg class="ico" width="14" height="14"><use href="#i-cave"/></svg> Caves</b>
       <div class="cols"><div class="col"><b>📁 Ridge Area</b><div class="row"></div><div class="row"></div><div class="row"></div></div><div class="col"><b>👤 My data</b><div class="row"></div><div class="row"></div></div></div>
     </div>
-    <div class="topbar"><span class="chip">💾 Save · 2</span><span class="chip">🔄 Updates</span></div>
+    <div class="topbar"><span class="chip"><svg class="ico" width="12" height="12"><use href="#i-save"/></svg> Save · 2</span><span class="chip"><svg class="ico" width="12" height="12"><use href="#i-refresh"/></svg> Updates</span></div>
     <svg class="cave" viewBox="0 0 150 90" aria-hidden="true"><path d="M5 20 L40 30 L62 55 L95 50 L120 75 L145 70 M62 55 L70 85 M40 30 L55 8" stroke="#ee8a5e" stroke-width="2.4" fill="none"/><circle cx="95" cy="50" r="5" fill="none" stroke="#fff" stroke-width="1.5"/></svg>
     <div class="insp"><b>Ridge Cave › Survey A</b><div class="tabs"><span class="on">Details</span><span>Files</span><span>History</span></div><div class="row" style="height:40px;background:rgba(255,255,255,.05)"></div><div class="row"></div><div class="row"></div></div>
     <span class="callout" style="left:40px;top:66px">1</span>
     <span class="callout" style="left:150px;top:300px">2</span>
-    <span class="callout" style="left:318px;top:4px">3</span>
+    <span class="callout" style="left:244px;top:4px">3</span>
     <span class="callout" style="left:390px;top:120px">4</span>
     <span class="callout" style="right:150px;top:290px">5</span>
   </div>
   <div class="keylist">
-    <div><span class="n">1</span><span><b>Icon strip.</b> One panel per kind of data. 📁 Project · 🗺 Layers · ☁ LiDAR · 📍 Surface · 🕳 Caves, then the project-only ones (📄 Docs, ❓ Leads, ✓ Review; grey with no project), 📦 Export, 🌿 Analyze, ⚙ Settings, ⓘ Help (this guide; ⓘ again or <kbd>Esc</kbd> closes it).</span></div>
+    <div><span class="n">1</span><span><b>Icon strip.</b> One panel per kind of data. <svg class="ico" width="14" height="14"><use href="#i-folder"/></svg> Project · <svg class="ico" width="14" height="14"><use href="#i-map"/></svg> Layers · <svg class="ico" width="14" height="14"><use href="#i-cloud"/></svg> LiDAR · <svg class="ico" width="14" height="14"><use href="#i-pin"/></svg> Surface · <svg class="ico" width="14" height="14"><use href="#i-cave"/></svg> Caves, then the project-only ones (<svg class="ico" width="14" height="14"><use href="#i-doc"/></svg> Docs, <svg class="ico" width="14" height="14"><use href="#i-help"/></svg> Leads, <svg class="ico" width="14" height="14"><use href="#i-compass"/></svg> Trips (not built yet), <svg class="ico" width="14" height="14"><use href="#i-check"/></svg> Review; grey with no project), <svg class="ico" width="14" height="14"><use href="#i-pack"/></svg> Export, <svg class="ico" width="14" height="14"><use href="#i-leaf"/></svg> Analyze, <svg class="ico" width="14" height="14"><use href="#i-sliders"/></svg> Settings, <svg class="ico" width="14" height="14"><use href="#i-info"/></svg> Help (this guide; Help again or <kbd>Esc</kbd> closes it). The open panel has an orange bar; the open project's name shows under the folder, in green; a yellow dot on Review means suggestions wait.</span></div>
     <div><span class="n">2</span><span><b>Panel.</b> Caves and Surface have two columns: the open project on the left, 👤 My data on the right. ← / → moves an item between them. A plain click on the map closes the panel (Export and Analyze stay open).</span></div>
-    <div><span class="n">3</span><span><b>Top bar.</b> 💾 Save (with how many project changes wait) and 🔄 Updates.</span></div>
+    <div><span class="n">3</span><span><b>Top bar.</b> <svg class="ico" width="14" height="14"><use href="#i-save"/></svg> Save (with how many project changes wait) and <svg class="ico" width="14" height="14"><use href="#i-refresh"/></svg> Updates.</span></div>
     <div><span class="n">4</span><span><b>The map.</b> Click a cave to select it; click again to go deeper. Right-click for a menu.</span></div>
     <div><span class="n">5</span><span><b>Details panel.</b> What is selected: the path (each part clickable) and Details / Files / History. × or Esc closes it.</span></div>
   </div>
-  <div class="cap">With a project open, clicking 📁 again switches project.</div>
+  <div class="cap">With a project open, clicking <svg class="ico" width="14" height="14"><use href="#i-folder"/></svg> Project again switches project.</div>
 </div>
-<h3>Switches, ticks and eyes</h3>
+<h3>Switches and tick boxes</h3>
 <ul>
-  <li><span class="uisw on"></span> <b>Switch</b> — on (green) or off <span class="uisw"></span>. It takes effect at once: Leads, Area names, Show LiDAR Datasets, the Ground and height filters, Show features and Labels in 📍 Surface. Click it or its words; with the keyboard, <kbd>Tab</kbd> to it and press <kbd>Space</kbd> or <kbd>Enter</kbd>.</li>
-  <li><span class="uibox tick"></span> <b>Tick box</b> — only in lists where you pick several things and then press a button, like 🕳 Caves → <b>Recent PLT</b> (tick some, then Load), and in forms saved with their own button.</li>
-  <li><span class="uieye on"></span><span class="uieye half"></span><span class="uieye"></span> <b>Row box</b> in 🕳 Caves and 📍 Surface: filled = shown, outline = loaded but hidden, faint = not loaded yet (click to load).</li>
+  <li><span class="uisw on"></span> <b>Switch</b> — on (green) or off <span class="uisw"></span>. It takes effect at once: Leads, Area names, Show LiDAR Datasets, the Ground and height filters, Show features and Labels in <svg class="ico" width="14" height="14"><use href="#i-pin"/></svg> Surface. Click it or its words; with the keyboard, <kbd>Tab</kbd> to it and press <kbd>Space</kbd> or <kbd>Enter</kbd>.</li>
+  <li><span class="uibox tick"></span> <b>Tick box</b> — only in lists where you pick several things and then press a button, like <svg class="ico" width="14" height="14"><use href="#i-cave"/></svg> Caves → <b>Recent PLT</b> (tick some, then Load), and in forms saved with their own button.</li>
+  <li><b>Row switch</b> (the small switch at the start of a row in Caves, Surface, the point clouds and Terrain lists): <span class="uieye on"></span> on = shown · <span class="uieye half"></span> green ring = loaded but hidden · <span class="uieye"></span> grey ring = not loaded yet. Switching a not-loaded row on loads it and shows it. Folders and features inside a file are always loaded, so they are on or green-ringed.</li>
 </ul>
 
 <!-- ═════════════════════════════════════════════════════════════════════ -->
+<h3>Minimap</h3>
+<p><kbd>M</kbd> shows or hides the minimap. It turns with the camera, so up is the way you look; the small compass shows where north is. The yellow shape is the ground the camera sees: a wedge from your position when you look ahead, a box when you look down. Outlines show where detail is drawn: blue for terrain patches, white dashed for the finest terrain tiles loaded now, purple dashed for point clouds. Hover over the minimap for the legend, and over an outline for its name.</p>
 <h2 id="tree">Projects and My data</h2>
 <p>A <b>project</b> is everything about one piece of ground, kept in one folder: its caves and where they are placed, surface points and tracks, documents, leads and notes, the CalTopo map and point clouds it uses, and the history of every change. One project is open at a time. Friends get a project by sync file.</p>
 <p><b>👤 My data</b> is your own collection, outside any project: anything you load or draw with no project to put it in lands there, and stays across sessions. It is never synced. Built-in maps belong to neither.</p>
@@ -315,15 +325,21 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
       </div>
     </div>
   </div>
-  <div class="cap">Example names. With no project open, 📁 Project lists the projects as cards — most recent first (or A–Z), with a search box — and their footprints (outlines) show on the map; click a footprint, then <b>Open</b>.</div>
+  <div class="cap">Example names. With no project open, <svg class="ico" width="14" height="14"><use href="#i-folder"/></svg> Project lists the projects as cards — most recent first (or A–Z), with a search box — and their footprints (outlines) show on the map; click a footprint, then <b>Open</b>.</div>
 </div>
 
 <!-- ═════════════════════════════════════════════════════════════════════ -->
+<h3>The project pane</h3>
+<p><svg class="ico" width="14" height="14"><use href="#i-folder"/></svg> Project, with a project open, is the project at a glance. At the top: its name (✏️ to rename, <b>Switch…</b> for another project), its description and its folder (⧉ copies the path). When changes wait for Save, a yellow <b>Unsaved changes</b> box lists them, with Save and Discard.</p>
+<p>The numbers are buttons: caves, length, stations and depth open Caves; open leads open Leads; documents, photos and videos open Docs on that tab; points open Surface; people and last change jump to History below.</p>
+<p><b>Connected</b> shows what the project brings in. Its CalTopo map comes with <b>Open in CalTopo ↗</b>, and with how many of the project's surface features CalTopo doesn't have yet (the same name within 15 m counts as there); <b>⇩ Download them</b> gives those as a KML to Import… in CalTopo. Its terrain, hillshade and point clouds each have a switch and → to their panel. <b>Folder</b> lists what waits in the project's To sort folder. Below: Field survey, Sync files and History (the last 5 changes; All history… for the rest, with undo).</p>
+<p>Adding things to the project happens where they are: ← in Caves and Surface, <svg class="ico" width="14" height="14"><use href="#i-folder"/></svg> on a point cloud in LiDAR. A cave's ⋯ in Caves has Copy CalTopo tag, Caves in this file… (link it to a cave, or split it into the caves FLEX finds) and Remove from project.</p>
+
 <h2 id="saving">Saving</h2>
 <div class="fig">
   <div class="save">
-    <div class="box p"><h4>📁 Project changes</h4>
-      Wait for <b>💾 Save</b>.
+    <div class="box p"><h4><svg class="ico" width="14" height="14"><use href="#i-folder"/></svg> Project changes</h4>
+      Wait for <b><svg class="ico" width="14" height="14"><use href="#i-save"/></svg> Save</b>.
       <ul><li>a cave placed, moved or added</li><li>points, lines, areas, descriptions</li><li>items moved in or out (← / →)</li></ul>
       The button shows how many wait; its menu can <b>Discard</b> them. Switching project with changes waiting asks first.</div>
     <div class="box m"><h4>👤 My data</h4>
@@ -347,13 +363,13 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
   <li>A click elsewhere selects the same level there: with a survey selected, the next click selects another survey.</li>
   <li>Clicking the selected station again goes back to the cave. Empty space or <kbd>Esc</kbd> clears it.</li>
   <li>Right-click a cave for a <b>Select</b> menu with every level, to jump straight to one.</li>
-  <li>Double-click a cave's name in 🕳 Caves to fly there.</li>
+  <li>Double-click a cave's name in <svg class="ico" width="14" height="14"><use href="#i-cave"/></svg> Caves to fly there.</li>
 </ul>
 <h3>Points, lines and areas: info first, editing second</h3>
 <ul>
   <li>A click shows brief info in the details panel on the right: what it is, a few lines of its description, and how many photos, videos, documents, notes and leads go with it. A click never edits: use <b>✏️ Edit</b> for that.</li>
   <li><b>More:</b> rest the pointer on the details panel for a moment (or press <b>⤢ More</b>) to open a larger panel beside it with everything: position and height, the whole description, notes, leads, photos, videos and documents. It goes away when the pointer leaves, unless you drag it by its header, pin it with 📌 or click inside it. × or <kbd>Esc</kbd> closes it.</li>
-  <li><b>Photos and videos</b> are listed apart from other documents (📄 Docs → 🖼 Photos and 🎞 Videos). A video plays in the larger panel or in the document viewer and stops as soon as you close it. If your browser can't play one (often HEVC from phones), <b>⇩ Original</b> saves it for your own player.</li>
+  <li><b>Photos and videos</b> are listed apart from other documents (<svg class="ico" width="14" height="14"><use href="#i-doc"/></svg> Docs → 🖼 Photos and 🎞 Videos). A video plays in the larger panel or in the document viewer and stops as soon as you close it. If your browser can't play one (often HEVC from phones), <b>⇩ Original</b> saves it for your own player.</li>
   <li>Documents can be tagged to a surface point, line or area too (🏷 Tags → find it by name).</li>
 </ul>
 
@@ -368,12 +384,12 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
     <div class="arrow"><svg viewBox="0 0 70 16" aria-hidden="true"><path d="M2 8 H58"/><path class="h" d="M70 8 L56 2 V14 Z"/></svg>⇩ KML / GPX, uploaded when you choose</div>
     <div class="lane ct"><h4>CalTopo map</h4><div class="role">Shared surface data</div><ul><li>Group's markers, tracks, areas</li><li>A marker per cave entrance</li><li>FLEX reads it; never writes</li></ul></div>
   </div>
-  <div class="cap">Friends with FLEX get a project the same way: a sync file, made in 📁 Project and imported on their computer. Each computer only adds to its own log, so nobody overwrites anybody; edits made in two places to the same thing are kept side by side for you to choose.</div>
+  <div class="cap">Friends with FLEX get a project the same way: a sync file, made in <svg class="ico" width="14" height="14"><use href="#i-folder"/></svg> Project and imported on their computer. Each computer only adds to its own log, so nobody overwrites anybody; edits made in two places to the same thing are kept side by side for you to choose.</div>
 </div>
 
 <!-- ═════════════════════════════════════════════════════════════════════ -->
 <h2 id="folder">The project folder</h2>
-<p>Each project is a folder, by default in <code>user_files/projects/&lt;name&gt;/</code>; it can be anywhere, a shared drive folder included. Put scans, reports and maps in it however you like; 📄 <b>Docs</b> shows it as it is on disk. FLEX keeps its own information in a hidden <code>.flex</code> folder inside it.</p>
+<p>Each project is a folder, by default in <code>user_files/projects/&lt;name&gt;/</code>; it can be anywhere, a shared drive folder included. Put scans, reports and maps in it however you like; <svg class="ico" width="14" height="14"><use href="#i-doc"/></svg> <b>Docs</b> shows it as it is on disk. FLEX keeps its own information in a hidden <code>.flex</code> folder inside it.</p>
 <pre>Ridge Area/
   <span style="color:var(--muted)">your files: scans, reports, maps, photos … in any folders</span>
   To sort/             <span style="color:var(--muted)">new files waiting to be sorted</span>
@@ -386,7 +402,7 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
 <!-- ═════════════════════════════════════════════════════════════════════ -->
 <h2 id="caves">Caves</h2>
 <ul>
-  <li><b>Import:</b> 🕳 Caves → <b>+ Import PLT / Breakout / Walls</b> (Compass <code>.plt</code>, Breakout exports, Walls shapefile exports).</li>
+  <li><b>Import:</b> <svg class="ico" width="14" height="14"><use href="#i-cave"/></svg> Caves → <b>+ Import PLT / Breakout / Walls</b> (Compass <code>.plt</code>, Breakout exports, Walls shapefile exports).</li>
   <li><b>Place:</b> select a station → <b>Anchor a station to the globe</b>. Add control points (more stations pinned to known spots) to rubber-sheet the survey into place. Check the <b>magnetic declination</b>; the wizard can look it up from the World Magnetic Model.</li>
   <li><b>Style:</b> each cave's ⋯ menu, or <b>🎨 All caves</b> at the top of the panel for every cave at once: dots, names, colour, walls (blocky / smooth), opacity, area names.</li>
   <li><b>Colour by</b> survey, elevation, depth below ground, or difficulty.</li>
@@ -394,44 +410,45 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
 </ul>
 
 <h2 id="surface">Surface features</h2>
-<p>📍 Surface lists the project's things on the left (its CalTopo map, folders of points, lines and areas, data files) and 👤 My data on the right. ▸ opens a row in place: a folder shows its folders and features (click one to highlight it, double-click to fly there, ✏️ to edit); the CalTopo map and data files show their own folders, each with its box.</p>
+<p><svg class="ico" width="14" height="14"><use href="#i-pin"/></svg> Surface lists the project's things on the left (its CalTopo map, folders of points, lines and areas, data files) and 👤 My data on the right. ▸ opens a row in place: a folder shows its folders and features (click one to highlight it, double-click to fly there, ✏️ to edit); the CalTopo map and data files show their own folders, each with its box.</p>
 <ul>
   <li><b>Show features</b> (the switch at the top) hides or shows everything on the surface at once — project features, CalTopo, data files and your points — without changing what each one is set to. The 📍 icon is struck through while it's hidden.</li>
   <li><b>Labels</b> (next to it) turns all names on the map on or off: project points, CalTopo and data-file features, and your own points.</li>
-  <li>📍 Surface → <b>＋ Point / Line / Area</b> to draw, or import KML / KMZ / GPX / GeoJSON. Points can carry lead details (status, needs, priority).</li>
+  <li><svg class="ico" width="14" height="14"><use href="#i-pin"/></svg> Surface → <b>＋ Point / Line / Area</b> to draw, or import KML / KMZ / GPX / GeoJSON. Points can carry lead details (status, needs, priority).</li>
   <li>Folders work like CalTopo's; ⇩ downloads a folder as KML / GPX / GeoJSON to upload to CalTopo.</li>
-  <li>Cave entrances marked on points (<code>flex: cave=…; station=…</code>) are listed in 🕳 Caves → <b>Cave entrances on the map</b>, with <b>Place the cave here</b>.</li>
+  <li>Cave entrances marked on points (<code>flex: cave=…; station=…</code>) are listed in <svg class="ico" width="14" height="14"><use href="#i-cave"/></svg> Caves → <b>Cave entrances on the map</b>, with <b>Place the cave here</b>.</li>
+  <li>With the project's CalTopo map loaded, <b>⧉ Duplicates of CalTopo</b> lists the project's features that CalTopo already has (same kind and name, within 15 m), ticked; <b>Remove ticked from the project</b> drops them, so CalTopo's copy is the one shown. Undo in <svg class="ico" width="14" height="14"><use href="#i-folder"/></svg> Project → History.</li>
   <li>Very long GPS tracks are drawn simplified (to about 2 m), so they don't slow the map; the full track is kept.</li>
 </ul>
 
 <h2 id="maplayers">Your own map layers</h2>
-<p>🗺 Layers → <b>Your map layers</b>:</p>
+<p><svg class="ico" width="14" height="14"><use href="#i-map"/></svg> Layers → <b>Your map layers</b>:</p>
 <ul>
   <li><b>＋ GeoTIFF…</b> — a hillshade, an orthophoto or a georeferenced scan, in lon/lat (EPSG:4326), UTM (WGS84 or NAD83) or Web Mercator. A <b>DEM</b> (one band of heights) is turned into a hillshade. FLEX keeps one picture of it (at most 4096 pixels a side) with where it goes. Other projections: save the file as lon/lat or UTM first (e.g. QGIS → Export → Save As, or <code>gdalwarp -t_srs EPSG:4326</code>).</li>
   <li><b>＋ Tile link…</b> — any map served as tiles, with <code>{z}</code>, <code>{x}</code> and <code>{y}</code> in the link. A key in the link travels with the layer, so don't add private keys to a shared project.</li>
 </ul>
 <p>With a project open, a new layer goes into the project (📁) and travels with it; with none, into 👤 My data. They're listed in the one Layers list (📁 or 👤 in front), added from its <b>＋ Add layer</b> menu; the switch and the slider (how see-through) are yours alone.</p>
 <h3>Terrain and hillshade from the LiDAR</h3>
-<p>With a project open and a point cloud loaded, 🗺 Layers → Terrain → <b>⛰ Generate terrain + hillshade…</b> makes the project's own terrain and hillshade from the LiDAR, once, with the same code as the FLEX Field export. The area starts as the project's footprint plus 200 m (change the margin, or drag the dots on the map: it is the Export panel's area, so you can also draw a box or polygon there). Pick the LiDAR, the cell size and a name, then <b>Generate</b>; it takes a few minutes. Then the terrain replaces the world terrain inside the area, and "&lt;name&gt; hillshade" appears in the Layers list. Both are kept in the project: the terrain in its library (it travels in sync files), the hillshade as map tiles in the project folder (<code>FLEX maps/&lt;name&gt;/</code>, which doesn't). <b>＋ Terrain patch…</b> does the same from a DEM GeoTIFF you already have.</p>
+<p>With a project open and a point cloud loaded, <svg class="ico" width="14" height="14"><use href="#i-map"/></svg> Layers → Terrain → <b>⛰ Generate terrain + hillshade…</b> makes the project's own terrain and hillshade from the LiDAR, once, with the same code as the FLEX Field export. The area starts as the project's footprint plus 200 m (change the margin, or drag the dots on the map: it is the Export panel's area, so you can also draw a box or polygon there). Pick the LiDAR, the cell size and a name, then <b>Generate</b>; it takes a few minutes. Then the terrain replaces the world terrain inside the area, and "&lt;name&gt; hillshade" appears in the Layers list. Both are kept in the project: the terrain in its library (it travels in sync files), the hillshade as map tiles in the project folder (<code>FLEX maps/&lt;name&gt;/</code>, which doesn't). <b>＋ Terrain patch…</b> does the same from a DEM GeoTIFF you already have.</p>
 
 <h2 id="caltopo">CalTopo</h2>
-<p>Paste a CalTopo map link in 📍 Surface → <b>CalTopo map: link and key</b>. Public maps work as they are. <b>Private maps need a key</b>, kept only on this computer (never in a project, sync file or git):</p>
+<p>Paste a CalTopo map link in <svg class="ico" width="14" height="14"><use href="#i-pin"/></svg> Surface → <b>CalTopo map: link and key</b>. Public maps work as they are. <b>Private maps need a key</b>, kept only on this computer (never in a project, sync file or git):</p>
 <ul>
   <li><b>Team account:</b> Team Admin → Details → add a <b>service account</b> with READ. Enter its credential ID, secret, and the team ID.</li>
   <li><b>Personal account:</b> the credential from <code>caltopo.com/api/v1/activate</code> (unofficial; it may stop working if CalTopo changes it).</li>
 </ul>
-<p>With an account or team ID, <b>Pick a map…</b> lists your maps. FLEX re-reads the map every so often, so the group's changes appear; only what changed is redrawn, and long tracks are drawn simplified (within about 2 m). A map the open project doesn't have shows in 📍 Surface under 👤 My data, with its folders; ← makes it the project's map. To link a cave to its entrance marker, put a line like <code>flex: cave=Ridge Cave; station=E1</code> in the marker's description.</p>
+<p>With an account or team ID, <b>Pick a map…</b> lists your maps. FLEX re-reads the map every so often, so the group's changes appear; only what changed is redrawn, and long tracks are drawn simplified (within about 2 m). A map the open project doesn't have shows in <svg class="ico" width="14" height="14"><use href="#i-pin"/></svg> Surface under 👤 My data, with its folders; ← makes it the project's map. To link a cave to its entrance marker, put a line like <code>flex: cave=Ridge Cave; station=E1</code> in the marker's description.</p>
 
 <h2 id="lidar">LiDAR</h2>
 <ul>
-  <li>☁ <b>LiDAR</b> loads point clouds in EPT format: public datasets (<b>Show OpenTopo Datasets</b> shows what's available where you are), or a link to an <code>ept.json</code>.</li>
+  <li><svg class="ico" width="14" height="14"><use href="#i-cloud"/></svg> <b>LiDAR</b> loads point clouds in EPT format: public datasets (<b>Show OpenTopo Datasets</b> shows what's available where you are), or a link to an <code>ept.json</code>.</li>
   <li><b>Your own scans:</b> convert them with <a href="https://entwine.io" target="_blank" rel="noopener">Entwine</a> into a folder, then <b>🗄 Link Entwine</b> with that folder and the address FLEX should serve it on (e.g. <code>http://localhost:8083</code>). FLEX starts and stops that server for you.</li>
   <li><b>Ground and height</b> (in the LiDAR panel) colours by height above ground and can hide everything but bare earth.</li>
-  <li>🌿 <b>Analyze</b> works out, for an area, how dense the vegetation is (how bad the bushwhack) and where returns reach below the local ground — often where entrances are.</li>
+  <li><svg class="ico" width="14" height="14"><use href="#i-leaf"/></svg> <b>Analyze</b> works out, for an area, how dense the vegetation is (how bad the bushwhack) and where returns reach below the local ground — often where entrances are.</li>
 </ul>
 
 <h2 id="export">Offline viewer and FLEX Field</h2>
-<p>📦 <b>Export</b> bakes an area into a viewer that needs no network: draw a box or polygon (or load a KML), choose the terrain source (LiDAR for the finest, or the map's terrain for any size), imagery, and how caves are drawn. The result is a zip:</p>
+<p><svg class="ico" width="14" height="14"><use href="#i-pack"/></svg> <b>Export</b> bakes an area into a viewer that needs no network: draw a box or polygon (or load a KML), choose the terrain source (LiDAR for the finest, or the map's terrain for any size), imagery, and how caves are drawn. The result is a zip:</p>
 <ul>
   <li><code>viewer.html</code> opens in any browser on its own;</li>
   <li>the same zip opens in the <b>FLEX Field</b> Android app (Import map, or Open with / Share from Files or Drive), where GPS and compass work underground.</li>
@@ -445,9 +462,9 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
 
 <h2 id="sync">Sync files</h2>
 <ol class="steps">
-  <li><b>Make one</b> 📁 Project → Sync files → <b>⇧ Make: changes since last</b> (or <b>Everything</b> for someone new). It is a zip: send it by any means.</li>
-  <li><b>Import it</b> on the other computer (📁 Project → <b>⇩ Import…</b>, or ⇩ <b>From a sync file…</b> with no project open) or in FLEX Field.</li>
-  <li><b>Review</b> what came in: suggestions (from the phone, a helper, or the archive processor) wait in ✓ <b>Review</b> and change nothing until accepted.</li>
+  <li><b>Make one</b> <svg class="ico" width="14" height="14"><use href="#i-folder"/></svg> Project → Sync files → <b>⇧ Make: changes since last</b> (or <b>Everything</b> for someone new). It is a zip: send it by any means.</li>
+  <li><b>Import it</b> on the other computer (<svg class="ico" width="14" height="14"><use href="#i-folder"/></svg> Project → <b>⇩ Import…</b>, or ⇩ <b>From a sync file…</b> with no project open) or in FLEX Field.</li>
+  <li><b>Review</b> what came in: suggestions (from the phone, a helper, or the archive processor) wait in <svg class="ico" width="14" height="14"><use href="#i-check"/></svg> <b>Review</b> and change nothing until accepted.</li>
 </ol>
 <div class="note">A sync file carries survey data and cave positions. Send it only to people who should have them.</div>
 
@@ -466,11 +483,11 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
 
 <h2 id="trouble">When something's wrong</h2>
 <ul>
-  <li><b>Black screen with stars, no globe:</b> FLEX tries to recover by itself after a few seconds. If it stays black, toggle any map layer off and on in 🗺 Layers. If it happens again, open the browser's console (<kbd>F12</kbd>) and copy the line starting with <code>[globe]</code> — it says what was missing.</li>
+  <li><b>Black screen with stars, no globe:</b> FLEX tries to recover by itself after a few seconds. If it stays black, toggle any map layer off and on in <svg class="ico" width="14" height="14"><use href="#i-map"/></svg> Layers. If it happens again, open the browser's console (<kbd>F12</kbd>) and copy the line starting with <code>[globe]</code> — it says what was missing.</li>
   <li><b>No terrain or imagery at all:</b> check the Cesium ion token in <code>Tokens.js</code>.</li>
-  <li><b>A private CalTopo map won't load:</b> check the key in 📍 Surface → CalTopo map: link and key (🔑).</li>
+  <li><b>A private CalTopo map won't load:</b> check the key in <svg class="ico" width="14" height="14"><use href="#i-pin"/></svg> Surface → CalTopo map: link and key (🔑).</li>
   <li><b>"Survey file not on this computer yet":</b> a project names a survey file this computer doesn't have; import the sync file that carries it.</li>
-  <li><b>Slow with a big project:</b> hide point clouds you don't need, and lower the <b>Point Budget</b> in ☁ LiDAR.</li>
+  <li><b>Slow with a big project:</b> hide point clouds you don't need, and lower the <b>Point Budget</b> in <svg class="ico" width="14" height="14"><use href="#i-cloud"/></svg> LiDAR.</li>
   <li><b>Something else:</b> restart the server (<code>node server.js</code>) and reload the page; your work is saved in <code>user_files/</code>.</li>
 </ul>
 <p style="color:var(--muted);font-size:12px;margin-top:40px">FLEX is open source. Example names only in this guide.</p>

@@ -3,8 +3,14 @@
 // No project open: Projects, a card per project (its numbers, its folder, an
 // Open button), ＋ New, and the projects' footprints on the map (click one,
 // or a card, for its numbers in the details panel).
-// A project open: its overview (name, description, folder, numbers, what is
-// in it) with Switch…. The rest of the 📁 panel (project.js) follows below.
+// A project open: name (✏️, Switch…), description, folder path; Unsaved
+// changes (Save / Discard) when any wait; the numbers as tiles that open
+// where they come from (🕳 Caves, ❓ Leads, 📄 Docs, 📍 Surface, ✓ Review,
+// History); Connected: the CalTopo map (Open in CalTopo ↗, the surface
+// features it lacks as a KML; matching in caltopo_match.js), terrain and
+// hillshade layers, point clouds, each with a switch and a link to its panel;
+// Folder: what waits in To sort. Field survey, Sync files and History follow
+// (project.js); "Entering as" at the bottom.
 //
 // Numbers that need the survey files (length surveyed, depth, the footprint
 // around the cave lines and the project's points) are worked out once per
@@ -81,7 +87,7 @@
       length: cs.reduce((s, c) => s + (c.length || 0), 0), deepest: cs.reduce((m, c) => Math.max(m, c.depth || 0), 0),
       stations: cs.reduce((s, c) => s + (c.stations || 0), 0), measured: cs.length, pending: files.length - cs.length,
       open: leads.filter(L => FL.leadActive(L)).length, closed: leads.filter(L => !FL.leadActive(L)).length,
-      docs: FL.docsOf(D, P).length, points: FL.liveFeatures(P).length, folders: FL.liveGroups(P).length,
+      docs: FL.docsOf(D, P).length, photos: FL.docsOf(D, P).filter(d => FL.docMedia(d) === 'photo').length, videos: FL.docsOf(D, P).filter(d => FL.docMedia(d) === 'video').length, points: FL.liveFeatures(P).length, folders: FL.liveGroups(P).length,
       layers: FL.liveLayers(P).length, review: FL.reviewQueue(P, D).length,
       people: people.size, last, footprint: st.footprint || [],
     };
@@ -91,11 +97,22 @@
 
   const km = m => (m >= 1000 ? (m / 1000).toFixed(m >= 10000 ? 0 : 1) + ' km' : m + ' m');
   const when = iso => { if (!iso) return '—'; const d = new Date(iso), days = (Date.now() - d) / 864e5; return days < 1 ? 'today' : days < 2 ? 'yesterday' : days < 30 ? Math.floor(days) + ' days ago' : d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' }); };
-  const statsOf = I => [[I.caves, 'caves'], [I.length ? km(I.length) : (I.pending ? '…' : '—'), 'surveyed'], [I.stations || '—', 'stations'],
-    [I.deepest ? I.deepest + ' m' : '—', 'deepest'], [I.open, 'open leads'], [I.docs, 'documents'], [I.points, 'points'], [I.people, I.people === 1 ? 'person' : 'people'], [when(I.last), 'last change']];
+  // [value, label, where a click goes (the pane's go()), 📄 Docs tab]
+  const statsOf = I => [[I.caves, 'caves', 'caves'], [I.length ? km(I.length) : (I.pending ? '…' : '—'), 'surveyed', 'caves'], [I.stations || '—', 'stations', 'caves'],
+    [I.deepest ? I.deepest + ' m' : '—', 'deepest', 'caves'], [I.open, 'open leads', 'leads'], [I.docs, 'documents', 'docs', 'all'],
+    [I.photos || 0, 'photos', 'docs', 'photos'], [I.videos || 0, 'videos', 'docs', 'videos'], [I.points, 'points', 'surface'],
+    [I.people, I.people === 1 ? 'person' : 'people', 'history'], [when(I.last), 'last change', 'history']].concat(I.review ? [[I.review, 'to review', 'review']] : []);
+  /** The numbers as tiles; each opens where they come from. */
   function statGrid(I) {
     const g = el('div', 'pjx-stats');
-    statsOf(I).forEach(([v, l]) => { const s = el('div', 'pjx-stat'); s.append(el('b', '', String(v)), el('span', '', l)); g.appendChild(s); });
+    statsOf(I).forEach(([v, l, to, tab]) => {
+      const s = el('button', 'pjx-stat' + (to === 'review' ? ' pjx-stat-rev' : ''));
+      s.type = 'button'; s.dataset.go = to; if (tab) s.dataset.tab = tab;
+      s.title = { caves: 'Open 🕳 Caves', leads: 'Open ❓ Leads', docs: 'Open 📄 Docs', surface: 'Open 📍 Surface', history: 'Show the History below', review: 'Open ✓ Review' }[to] || '';
+      s.append(el('b', '', String(v)), el('span', '', l));
+      s.addEventListener('click', () => go(to, tab));
+      g.appendChild(s);
+    });
     return g;
   }
   const short = I => [I.caves + ' cave' + (I.caves === 1 ? '' : 's'), I.length ? km(I.length) + ' surveyed' : null, I.open + ' open lead' + (I.open === 1 ? '' : 's')].filter(Boolean).join(' · ');
@@ -167,7 +184,7 @@
     choose('Switch project', '', opts).then(v => { if (!v) return; if (v === '__new') A.newProject(); else A.setProject(v === '__none' ? null : v); });
   }
   function author(root) {
-    const r = el('div', 'pj-row pj-sub');
+    const r = el('div', 'pj-row pj-sub pjx-author');
     r.append(`Entering as: ${A.who() || '(not set)'} `, btn('change', async () => { try { localStorage.removeItem('flex.author'); } catch (_) {} await A.ensureAuthor(); A.render(); }, 'link'));
     root.appendChild(r);
   }
@@ -246,44 +263,247 @@
       ensureInfos();
       return;
     }
-    // A project open: the overview.
-    section(root, 'Project', true, b => {
-      const p = (pj.projects || []).find(x => x.id === pj.pid) || { id: pj.pid, name: pj.P.name };
-      const head = el('div', 'pjx-head');
-      const t = el('div', 'pjx-title', p.name || pj.P.name || 'Project');
-      head.appendChild(t);
-      const acts = el('span', 'pjx-acts');
-      acts.append(btn('✏️', () => A.renameProject(), 'small'), btn('Switch…', switchMenu, 'small'));
-      head.appendChild(acts);
-      b.appendChild(head);
-      const dr = el('div', 'pj-row pj-sub');
-      dr.append(pj.P.desc ? pj.P.desc + ' ' : '', btn(pj.P.desc ? 'edit' : '＋ description', () => A.editDescription(), 'link'));
-      b.appendChild(dr);
-      if (p.folder) b.appendChild(el('div', 'pjx-path', p.folder));
-      const I = X.info[pj.pid];
-      if (I) b.appendChild(statGrid(I)); else b.appendChild(el('div', 'pj-sub', 'counting…'));
-      if (I) {
-        const go = (label, n, fn) => { const r = el('button', 'pjx-kind'); r.type = 'button'; r.append(el('span', '', label), el('span', 'pj-sub', n)); r.addEventListener('click', fn); return r; };
-        const rail = sel => () => { const x = document.querySelector('#flex-rail ' + sel); if (x) x.click(); };
-        const box = el('div', 'pjx-contents');
-        box.appendChild(el('div', 'lp-group-label', 'In this project'));
-        box.append(
-          go('🕳 Caves', `${I.caves} · ${I.length ? km(I.length) : '—'}`, rail('[data-target="#caveCollapsible"]')),
-          go('📍 Surface', `${I.points} point${I.points === 1 ? '' : 's'}, lines, areas · ${I.folders} folder${I.folders === 1 ? '' : 's'}`, rail('[data-target="#featuresCollapsible"]')),
-          go('❓ Leads', `${I.open} open · ${I.closed} closed`, rail('[data-target="#leadsCollapsible"]')),
-          go('📄 Documents', String(I.docs), rail('[data-target="#docsCollapsible"]')),
-          go('🗺 Layers', String(I.layers), () => { const h = [...document.querySelectorAll('#pj-panel .lp-section-header')].find(x => /What this project loads/.test(x.textContent)); if (h) { if (!h.nextElementSibling.classList.contains('open')) h.click(); h.scrollIntoView({ block: 'start', behavior: 'smooth' }); } }));
-        if (I.review) box.appendChild(go('✓ To review', String(I.review), rail('[data-target="#reviewCollapsible"]')));
-        b.appendChild(box);
-      }
-      author(b);
-    });
+    // A project open: header, unsaved changes, numbers, what is connected,
+    // the folder. Field survey, Sync files and History follow (project.js).
+    const p = (pj.projects || []).find(x => x.id === pj.pid) || { id: pj.pid, name: pj.P.name };
+    const pane = el('div', 'pjx-pane');
+    const head = el('div', 'pjx-head');
+    head.appendChild(el('div', 'pjx-title', p.name || pj.P.name || 'Project'));
+    const acts = el('span', 'pjx-acts');
+    const ren = btn('✏️', () => A.renameProject(), 'small'); ren.title = 'Rename the project';
+    acts.append(ren, btn('Switch…', switchMenu, 'small'));
+    head.appendChild(acts);
+    pane.appendChild(head);
+    const dr = el('div', 'pj-row pj-sub pjx-desc-row');
+    dr.append(pj.P.desc ? pj.P.desc + ' ' : '', btn(pj.P.desc ? 'edit' : '＋ description', () => A.editDescription(), 'link'));
+    pane.appendChild(dr);
+    if (p.folder) {
+      const fr = el('div', 'pjx-pathrow');
+      const path = el('span', 'pjx-path', p.folder); path.title = p.folder;
+      const cp = btn('⧉', () => copy(p.folder, 'Folder path copied'), 'small pjx-copy'); cp.title = 'Copy the folder path';
+      fr.append(path, cp);
+      pane.appendChild(fr);
+    }
+    const live = { unsaved: el('div', 'pjx-live'), conn: el('div', 'pjx-live'), folder: el('div', 'pjx-live'), sig: {} };
+    pane.appendChild(live.unsaved);
+    const I = X.info[pj.pid];
+    pane.appendChild(I ? statGrid(I) : el('div', 'pj-sub', 'counting…'));
+    pane.append(block('Connected', live.conn), block('Folder', live.folder));
+    root.appendChild(pane);
+    X.live = live;
+    paintLive();
     if (!X.info[pj.pid] && !X.busy.has(pj.pid)) {
-      const p = (pj.projects || []).find(x => x.id === pj.pid) || { id: pj.pid };
       X.busy.add(pj.pid);
       info(p).catch(e => console.warn('[projects]', e)).finally(() => { X.busy.delete(p.id); A.render(); });
     }
   }
+  function block(title, body) { const b = el('div', 'pjx-block'); b.append(el('div', 'pjx-block-t', title), body); return b; }
+  function copy(text, msg) {
+    const done = () => A.toast(msg);
+    try { (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(done, () => A.dialog({ title: 'Copy', input: { value: text } })); } catch (_) { A.dialog({ title: 'Copy', input: { value: text } }); }
+  }
+  /** The bottom of the pane: who is entering changes. */
+  function footer(root) { if (pj.pid) author(root); }
+
+  // ── Where a number or a row leads ────────────────────────────────────────
+  const PANEL = { caves: '#caveCollapsible', leads: '#leadsCollapsible', docs: '#docsCollapsible', surface: '#featuresCollapsible', review: '#reviewCollapsible', layers: '#mapLayersCollapsible', lidar: '#lidarCollapsible' };
+  function go(to, tab) {
+    if (to === 'history') {
+      const h = document.getElementById('pj-history'); if (!h) return;
+      const hd = h.querySelector('.lp-section-header'), bd = h.querySelector('.lp-section-body');
+      if (bd && !bd.classList.contains('open')) hd.click();
+      h.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      h.classList.add('pjx-flash'); setTimeout(() => h.classList.remove('pjx-flash'), 900);
+      return;
+    }
+    if (tab) pj.docTab = tab;                            // 📄 Docs: the matching tab
+    const sel = PANEL[to]; if (!sel) return;
+    if (window._rail) window._rail.open(sel);
+    else { const b = document.querySelector(`#flex-rail [data-target="${sel}"]`); if (b) b.click(); }
+    if (tab) setTimeout(() => A.render(), 0);
+  }
+  const goBtn = (to, label, title) => { const b = btn(label, () => go(to), 'small pjx-go'); b.title = title || ''; return b; };
+
+  // ── The parts that follow what is loaded (redrawn when they change) ──────
+  const ws_ = () => window._ws;
+  const mapId = u => (String(u || '').match(/\/m\/([A-Za-z0-9]+)/) || [])[1] || null;
+  const VK = 'flex.cl.view';                             // custom_layers.js keeps each map layer's shown / hidden here
+  const layerShown = id => { try { const v = JSON.parse(localStorage.getItem(VK) || '{}')[id]; return !v || v.show !== false; } catch (_) { return true; } };
+  function setLayerShown(id, on) {
+    try { const all = JSON.parse(localStorage.getItem(VK) || '{}'); all[id] = Object.assign({ show: true, alpha: 1 }, all[id] || {}, { show: !!on }); localStorage.setItem(VK, JSON.stringify(all)); } catch (_) {}
+    const CL = window._customLayers;
+    if (CL) { CL.sync().then(() => CL.render(true)); }
+  }
+  const pcName = url => url.replace(/\/ept\.json.*$/i, '').split('/').filter(Boolean).pop() || url;
+  const pcOf = url => ((window.potreeViewer && potreeViewer.scene && potreeViewer.scene.pointclouds) || []).find(c => c.name === pcName(url));
+  function ctState() {
+    const w = ws_(); if (!w || !pj.P) return null;
+    const lay = FL.liveLayers(pj.P).find(l => l.kind === 'caltopo') || null;
+    const now = w.caltopo(), src = w.vectorSources().find(s => s.kind === 'caltopo') || null;
+    const loaded = !!(lay && now && src && now.url === lay.url);
+    const st = document.getElementById('caltopo_status'), tm = st && (st.textContent.match(/\d{1,2}:\d{2}(?::\d{2})?(?:\s?[AP]M)?/i) || [])[0];
+    const ok = st && /✓/.test(st.textContent);
+    return { lay, now, src: loaded ? src : null, loaded, id: lay && mapId(lay.url), other: !lay && now ? mapId(now.url) || 'a map' : null,
+      n: loaded && window._ctMatch ? window._ctMatch.countShapes(src) : 0, shown: loaded ? src.ds.show !== false : false,
+      when: loaded && tm ? (ok ? 'refreshed ' : 'tried ') + tm : '', interval: lay ? (lay.interval ?? 30) : null, warn: st && /⚠/.test(st.textContent) ? st.textContent : '' };
+  }
+  function row(cls) { return el('div', 'pjx-row' + (cls ? ' ' + cls : '')); }
+  function rowText(main, sub) { const t = el('span', 'pjx-rt'); t.appendChild(el('span', 'pjx-rn', main)); if (sub) t.appendChild(el('small', '', sub)); return t; }
+  function sw(on, fn, title) { const x = window.uiSwitch(on, fn, null, { small: true }); x.title = title || ''; return x; }
+  const gap = () => el('span', 'pjx-sw-gap');
+
+  function paintUnsaved(box) {
+    const W = window._pjWsState || {}, pw = window._pjWs, pend = (W.pending || []);
+    const sig = pend.map(x => x.name + '|' + x.what).join(';');
+    if (X.live.sig.unsaved === sig) return;
+    X.live.sig.unsaved = sig;
+    box.textContent = '';
+    if (!pend.length || !pw) return;
+    const u = el('div', 'pjx-unsaved');
+    u.appendChild(el('div', 'pjx-u-t', `Unsaved changes · ${pend.length}`));
+    // Grouped by what: “moved (2): Ridge, Upper”.
+    const by = new Map(); pend.forEach(x => { const k = x.what || 'changed'; if (!by.has(k)) by.set(k, []); by.get(k).push(x.name); });
+    const ul = el('div', 'pjx-u-list');
+    by.forEach((names, what) => ul.appendChild(el('div', 'pjx-u-i', `${what}${names.length > 1 ? ' (' + names.length + ')' : ''}: ${names.slice(0, 5).join(', ')}${names.length > 5 ? ' +' + (names.length - 5) : ''}`)));
+    u.appendChild(ul);
+    const r = el('div', 'pj-row');
+    r.append(btn('💾 Save into the project', async () => { await pw.save(); A.render(); }, 'small primary'), btn('Discard', () => pw.discardAsk(), 'small'));
+    u.appendChild(r);
+    box.appendChild(u);
+  }
+  function paintConn(box) {
+    const w = ws_(); if (!w) return;
+    const ct = ctState();
+    const un = ct && ct.loaded && window._ctMatch ? window._ctMatch.unmatched(pj.P, ct.src) : null;
+    const nFeat = FL.liveFeatures(pj.P).length;
+    const lays = FL.liveLayers(pj.P);
+    const maps = lays.filter(l => l.kind === 'terrain' || l.kind === 'tiles' || l.kind === 'imagery');
+    const pcs = lays.filter(l => l.kind === 'pointcloud'), loadedPcs = new Set(w.pointClouds());
+    const sig = JSON.stringify([ct && [ct.id, ct.loaded, ct.n, ct.shown, ct.when, ct.other, ct.warn, ct.interval], un && un.map(f => f.id), nFeat,
+      maps.map(l => [l.id, l.name, layerShown(l.id)]), pcs.map(l => { const c = pcOf(l.url); return [l.id, loadedPcs.has(l.url), c ? c.visible !== false : null]; })]);
+    if (X.live.sig.conn === sig) return;
+    X.live.sig.conn = sig;
+    box.textContent = '';
+    // CalTopo map
+    if (ct && ct.lay) {
+      const r = row('pjx-ct');
+      r.appendChild(ct.loaded ? sw(ct.shown, on => { const s = ctState(); if (s && s.src) { s.src.ds.show = on; if (window.cesiumViewer) cesiumViewer.scene.requestRender(); } paintLive(); }, ct.shown ? 'Hide the CalTopo map' : 'Show the CalTopo map') : gap());
+      r.appendChild(rowText('🗺 CalTopo map ' + (ct.id || ''), ct.loaded ? [ct.n + ' feature' + (ct.n === 1 ? '' : 's'), ct.when, ct.interval ? 'every ' + ct.interval + ' s' : 'manual refresh'].filter(Boolean).join(' · ') : (ct.warn || 'not loaded')));
+      const t = el('span', 'pjx-tools');
+      if (ct.id) { const a = el('a', 'pjx-ext', 'Open in CalTopo ↗'); a.href = 'https://caltopo.com/m/' + ct.id; a.target = '_blank'; a.rel = 'noopener'; a.title = 'The map on caltopo.com, in a new tab'; t.appendChild(a); }
+      if (!ct.loaded) t.appendChild(btn('Load', async () => { await w.setCaltopo(ct.lay.url, ct.interval ?? 30); paintLive(); }, 'small'));
+      t.appendChild(goBtn('surface', '→ 📍', 'Open 📍 Surface (the map’s folders, its link and key)'));
+      r.appendChild(t);
+      box.appendChild(r);
+      if (un && nFeat) {
+        const r2 = row('pjx-sub pjx-unm');
+        r2.appendChild(gap());
+        r2.appendChild(rowText(un.length ? `📍 ${un.length} of ${nFeat} surface feature${nFeat === 1 ? '' : 's'} not in CalTopo` : `📍 All ${nFeat} surface feature${nFeat === 1 ? ' is' : 's are'} in CalTopo ✓`,
+          un.length ? 'by name and place' : ''));
+        r2.title = 'A feature counts as in CalTopo when one there has the same kind and name (any case) and is within 15 m';
+        if (un.length) { const t2 = el('span', 'pjx-tools'); t2.appendChild(btn('⇩ Download them for CalTopo (KML)', () => downloadUnmatched(un), 'small')); r2.appendChild(t2); }
+        box.appendChild(r2);
+      }
+    } else {
+      const r = row('pjx-none');
+      r.appendChild(gap());
+      r.appendChild(rowText('🗺 No CalTopo map', ct && ct.other ? `CalTopo map ${ct.other} is loaded in 👤 My data: ← it in 📍 Surface to make it this project’s.`
+        : 'Add one in 📍 Surface → CalTopo map: link and key, or ← a loaded map in Surface’s My data column.'));
+      const t = el('span', 'pjx-tools'); t.appendChild(goBtn('surface', '→ 📍', 'Open 📍 Surface')); r.appendChild(t);
+      box.appendChild(r);
+    }
+    // Terrain and hillshade (map layers)
+    const icon = { terrain: '⛰', tiles: '🧩', imagery: '🖼' }, kname = { terrain: 'terrain patch', tiles: 'tile layer', imagery: 'map image' };
+    if (!maps.length) {
+      const r = row('pjx-none'); r.appendChild(gap());
+      r.appendChild(rowText('⛰ No terrain or hillshade', '🗺 Layers → Terrain → ⛰ Generate terrain + hillshade…, or add a GeoTIFF or a tile link.'));
+      const t = el('span', 'pjx-tools'); t.appendChild(goBtn('layers', '→ 🗺', 'Open 🗺 Layers')); r.appendChild(t);
+      box.appendChild(r);
+    }
+    maps.forEach(l => {
+      const r = row(); const on = layerShown(l.id);
+      r.appendChild(sw(on, v => { setLayerShown(l.id, v); setTimeout(paintLive, 50); }, on ? 'Hide it' : 'Show it'));
+      r.appendChild(rowText(`${icon[l.kind] || '•'} ${l.name || kname[l.kind]}`, kname[l.kind]));
+      const t = el('span', 'pjx-tools'); t.appendChild(goBtn('layers', '→ 🗺', 'Open 🗺 Layers')); r.appendChild(t);
+      box.appendChild(r);
+    });
+    // Point clouds
+    if (!pcs.length) {
+      const r = row('pjx-none'); r.appendChild(gap());
+      r.appendChild(rowText('☁ No point clouds', 'Load one in ☁ LiDAR, then 📁 on its row puts it in the project.'));
+      const t = el('span', 'pjx-tools'); t.appendChild(goBtn('lidar', '→ ☁', 'Open ☁ LiDAR')); r.appendChild(t);
+      box.appendChild(r);
+    }
+    pcs.forEach(l => {
+      const r = row(), isLoaded = loadedPcs.has(l.url), c = isLoaded ? pcOf(l.url) : null;
+      r.appendChild(c ? sw(c.visible !== false, v => { const x = pcOf(l.url); if (x) x.visible = v; if (window._renderPcList) window._renderPcList(); paintLive(); }, 'Show / hide') : gap());
+      r.appendChild(rowText('☁ ' + (l.name || pcName(l.url)), isLoaded ? 'point cloud' : 'point cloud · not loaded'));
+      const t = el('span', 'pjx-tools');
+      if (!isLoaded) t.appendChild(btn('Load', () => { w.addPointCloud(l.url); setTimeout(paintLive, 500); }, 'small'));
+      t.appendChild(goBtn('lidar', '→ ☁', 'Open ☁ LiDAR')); r.appendChild(t);
+      box.appendChild(r);
+    });
+  }
+  /** The project's features CalTopo doesn't have, as a KML with their folders (for CalTopo's Import). */
+  function unmatchedKML(list) {
+    const groups = {};
+    list.forEach(f => { let g = f.group; while (g && pj.P.groups[g] && !groups[g]) { groups[g] = pj.P.groups[g]; g = pj.P.groups[g].parent; } });
+    const S = { features: Object.fromEntries(list.map(f => [f.id, f])), groups };
+    return FL.featuresKML(S, '', (pj.P.name || 'FLEX') + ' — not in CalTopo');
+  }
+  function downloadUnmatched(list) {
+    const text = unmatchedKML(list);
+    X.lastKml = { n: list.length, text };                // tests
+    const a = el('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'application/vnd.google-earth.kml+xml' }));
+    a.download = ((pj.P.name || 'project') + ' not in CalTopo').replace(/[^\w.-]+/g, '-') + '.kml';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    A.toast(`${list.length} feature${list.length === 1 ? '' : 's'} as KML: in CalTopo, Import… it into the map`);
+  }
+  // The project folder's To sort/ (what came in and wasn't filed yet).
+  async function loadTree() {
+    const pid = pj.pid; if (!pid) return;
+    const T = X.tree;
+    if (T && T.busy) return;
+    if (T && T.pid === pid && Date.now() - T.at < 30000) return;
+    X.tree = { pid, at: Date.now(), busy: true, folder: T && T.pid === pid ? T.folder : null, files: T && T.pid === pid ? T.files : null };
+    try { const r = await fetch('/api/lib/tree?project=' + encodeURIComponent(pid)); const o = r.ok ? await r.json() : {}; if (pj.pid === pid) Object.assign(X.tree, { folder: o.folder || null, files: o.files || [] }); }
+    catch (e) { console.warn('[projects] tree', e); }
+    finally { if (X.tree) { X.tree.busy = false; X.tree.at = Date.now(); } }
+    paintLive();
+  }
+  function paintFolder(box) {
+    const T = X.tree && X.tree.pid === pj.pid ? X.tree : null;
+    if (!T || !T.files) loadTree();
+    const sorting = T && T.files ? T.files.filter(f => /^To sort\//.test(f.p)) : null;
+    const sig = JSON.stringify([!!T, T && T.folder, sorting && sorting.map(f => f.p)]);
+    if (X.live.sig.folder === sig) return;
+    X.live.sig.folder = sig;
+    box.textContent = '';
+    const r = row('pjx-tosort');
+    r.appendChild(gap());
+    if (!sorting) r.appendChild(rowText('📥 To sort', T && !T.busy && !T.folder ? 'This project has no folder of its own yet.' : 'reading the folder…'));
+    else if (!sorting.length) r.appendChild(rowText('📥 To sort: nothing new', 'Files dropped in the project’s To sort folder show here until they are filed.'));
+    else {
+      const t = rowText(`📥 To sort: ${sorting.length} new file${sorting.length === 1 ? '' : 's'}`);
+      const ul = el('div', 'pjx-sort-list');
+      sorting.slice(0, 6).forEach(f => ul.appendChild(el('div', '', f.p.replace(/^To sort\//, ''))));
+      if (sorting.length > 6) ul.appendChild(el('div', 'pj-sub', `+ ${sorting.length - 6} more`));
+      t.appendChild(ul);
+      r.appendChild(t);
+    }
+    const tl = el('span', 'pjx-tools'); tl.appendChild(goBtn('docs', '→ 📄', 'Open 📄 Docs (the folder, the documents)')); r.appendChild(tl);
+    box.appendChild(r);
+  }
+  /** Redraw the live parts that changed (cheap when nothing did). */
+  function paintLive() {
+    const L = X.live;
+    if (!L || !pj.pid || !L.conn.isConnected) return;
+    try { paintUnsaved(L.unsaved); } catch (e) { console.warn('[projects] unsaved', e); }
+    try { paintConn(L.conn); } catch (e) { console.warn('[projects] connected', e); }
+    try { paintFolder(L.folder); } catch (e) { console.warn('[projects] folder', e); }
+  }
+  setInterval(() => { const c = document.getElementById('projectCollapsible'); if (pj.pid && (!c || c.classList.contains('show'))) { paintLive(); if (X.tree && Date.now() - X.tree.at > 30000) loadTree(); } }, 2000);
 
   // Clicking a footprint on the map: its card is marked, its numbers show in the details panel.
   const hook = setInterval(() => {
@@ -303,7 +523,13 @@
     }
     if (!pj.pid) { ensureInfos(); return; }            // any not counted yet (a load that was skipped while busy)
     const n = (pj.proj || []).length;
-    if (pj.pid && n !== lastLen && !X.busy.has(pj.pid)) { lastLen = n; delete X.info[pj.pid]; A.render(); }
+    if (pj.pid && n !== lastLen && !X.busy.has(pj.pid)) {
+      // Counted again in the background: the old numbers stay until the new ones are ready.
+      lastLen = n;
+      const pid = pj.pid, p = (pj.projects || []).find(x => x.id === pid) || { id: pid };
+      X.busy.add(pid);
+      info(p).catch(e => console.warn('[projects]', e)).finally(() => { X.busy.delete(pid); if (pj.pid === pid) A.render(); });
+    }
   }, 1500);
 
   const st = document.createElement('style');
@@ -324,12 +550,42 @@
   .pjx-title { font-size: 17px; font-weight: 700; color: #f2f4f3; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pjx-acts { display: inline-flex; gap: 4px; }
   .pjx-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin: 8px 0 4px; }
-  .pjx-stat { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); border-radius: 6px; padding: 4px 7px; display: flex; flex-direction: column; min-width: 0; }
+  .pjx-pane .pjx-stats { grid-template-columns: repeat(4, 1fr); gap: 4px; }
+  .pjx-pane .pjx-stat { padding: 3px 6px; }
+  .pjx-pane .pjx-stat b { font-size: 13px; }
+  .pjx-stat { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); border-radius: 6px; padding: 4px 7px; display: flex; flex-direction: column; min-width: 0; text-align: left; font: inherit; color: inherit; }
+  button.pjx-stat { cursor: pointer; } button.pjx-stat:hover { border-color: #6fd39a; background: rgba(111,211,154,.08); }
+  .pjx-stat-rev { border-color: rgba(242,194,78,.5); }
   .pjx-stat b { font-size: 14px; font-variant-numeric: tabular-nums; color: #f2f4f3; opacity: 1; }
   .pjx-stat span { font-size: 10px; color: rgba(255,255,255,.55); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .pjx-contents { display: flex; flex-direction: column; margin: 4px 0; }
-  .pjx-kind { display: flex; justify-content: space-between; gap: 8px; background: none; border: none; color: #e8ece9; padding: 4px 6px; border-radius: 5px; text-align: left; font-size: 12px; cursor: pointer; }
-  .pjx-kind:hover { background: rgba(255,255,255,.07); }`;
+  .pjx-pane { padding: 2px 2px 6px; }
+  .pjx-desc-row { margin: 2px 0; }
+  .pjx-pathrow { display: flex; align-items: center; gap: 4px; }
+  .pjx-pathrow .pjx-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; word-break: normal; line-height: 1.6; }
+  .pjx-copy { padding: 0 5px !important; margin: 0 !important; }
+  .pjx-unsaved { margin: 8px 0 4px; padding: 6px 8px; border: 1px solid #f2c24e; border-radius: 7px; background: rgba(242,194,78,.08); }
+  .pjx-u-t { font-weight: 700; color: #f2c24e; font-size: 12px; }
+  .pjx-u-i { font-size: 11px; color: rgba(255,255,255,.75); padding: 1px 0; overflow-wrap: anywhere; }
+  .pjx-unsaved .pj-row { margin: 4px 0 0; }
+  .pjx-block { margin-top: 8px; }
+  .pjx-block-t { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: rgba(255,255,255,.45); padding: 0 2px 3px; border-bottom: 1px solid rgba(255,255,255,.08); margin-bottom: 2px; }
+  .pjx-row { display: grid; grid-template-columns: 24px 1fr auto; align-items: center; gap: 6px; padding: 3px 2px; border-radius: 5px; font-size: 12px; }
+  .pjx-row:hover { background: rgba(255,255,255,.04); }
+  .pjx-row.pjx-sub { padding-top: 0; }
+  .pjx-sw-gap { display: inline-block; width: 24px; }
+  .pjx-rt { min-width: 0; display: flex; flex-direction: column; }
+  .pjx-rn { color: #e8ece9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pjx-none .pjx-rn { color: rgba(255,255,255,.55); }
+  .pjx-rt small { font-size: 10.5px; color: rgba(255,255,255,.45); overflow-wrap: anywhere; line-height: 1.3; }
+  .pjx-tools { display: inline-flex; align-items: center; gap: 2px; flex-wrap: wrap; justify-content: flex-end; }
+  .pjx-tools .pj-btn { margin: 0; }
+  .pjx-go { background: none !important; border-color: transparent !important; color: #8ab4ec !important; padding: 1px 4px !important; }
+  .pjx-go:hover { border-color: rgba(138,180,236,.5) !important; }
+  .pjx-ext { color: #ff9a62; font-size: 11px; text-decoration: none; white-space: nowrap; padding: 0 3px; }
+  .pjx-ext:hover { text-decoration: underline; }
+  .pjx-sort-list { font-size: 11px; color: #f2c24e; margin-top: 2px; } .pjx-sort-list div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pjx-author { margin-top: 10px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,.08); font-size: 10.5px; }
+  .pjx-flash > .lp-section-header { background: rgba(111,211,154,.25); transition: background .3s; }`;
   document.head.appendChild(st);
 
   /** Fly smoothly over a project's area (its footprint); false if it has none yet. */
@@ -344,5 +600,5 @@
   }
   /** Open a project (its card's Open, or the Open in its popup on the map). */
   function open(id) { const v = V(); if (v) v.selectedEntity = undefined; return A.setProject(id); }
-  window._pjx = { top, info, hull, drawFootprints, select, ensureInfos, open, flyToProject };
+  window._pjx = { top, info, hull, drawFootprints, select, ensureInfos, open, flyToProject, footer, go, paintLive, unmatchedKML };
 })();
