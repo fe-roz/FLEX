@@ -419,6 +419,10 @@ svg.ico { vertical-align: -2px; }
   <li>Cave entrances marked on points (<code>flex: cave=…; station=…</code>) are listed in <svg class="ico" width="14" height="14"><use href="#i-cave"/></svg> Caves → <b>Cave entrances on the map</b>, with <b>Place the cave here</b>.</li>
   <li>With the project's CalTopo map loaded, <b>⧉ Duplicates of CalTopo</b> lists the project's features that CalTopo already has (same kind and name, within 15 m), ticked; <b>Remove ticked from the project</b> drops them, so CalTopo's copy is the one shown. Undo in <svg class="ico" width="14" height="14"><use href="#i-folder"/></svg> Project → History.</li>
   <li>Very long GPS tracks are drawn simplified (to about 2 m), so they don't slow the map; the full track is kept.</li>
+  <li><b>Display of a folder</b>: the <svg class="ico" width="14" height="14"><use href="#i-palette"/></svg> button on a folder's row (project folders, a My data sitting, the CalTopo map and its folders, a data file and its folders) sets names on or off, one colour, the line width, a symbol for points and how see-through, for everything inside. A folder inside another wins over it. Only how FLEX draws them changes: a project folder's colour is the folder's colour in the project (everyone on the project sees it); the rest is kept on this computer. Nothing is written to CalTopo, and data files stay as they are. <b>Reset</b> puts each item back as it was. The button turns green while a folder has settings.</li>
+  <li>CalTopo features in no folder are listed under <b>Markers</b>, <b>Lines</b> and <b>Polygons</b>, as CalTopo lists them (only in FLEX).</li>
+  <li>With a CalTopo map loaded, project points, lines and areas the map doesn't have (same kind and name, within 15 m) are marked <b>not in CalTopo</b>; a folder says how many it holds.</li>
+  <li><b>Show in list</b> in the details panel opens Surface (or Caves) at the item: its folders open, the row scrolls into view and flashes.</li>
 </ul>
 
 <h2 id="maplayers">Your own map layers</h2>
@@ -445,6 +449,8 @@ svg.ico { vertical-align: -2px; }
   <li><b>Offline:</b> FLEX keeps a copy of the map on this computer and shows it when CalTopo can't be reached (the status line says so). Edits made then wait and are sent when CalTopo answers again; FLEX says when they've gone.</li>
   <li><b>Changed in CalTopo meanwhile:</b> if someone changed the same feature in CalTopo while your edit waited (or since FLEX last read the map), FLEX shows both versions side by side; <b>Keep mine</b> sends yours, <b>Keep CalTopo's</b> drops yours. <b>Decide later</b> leaves it waiting.</li>
   <li>Changes others make in CalTopo appear by themselves. FLEX keeps a list of what was added, changed or removed between reads, and a log of every read and every edit sent (<code>user_files/caltopo_log.jsonl</code>).</li>
+  <li><b>What changed since you last looked:</b> an orange dot on <svg class="ico" width="14" height="14"><use href="#i-pin"/></svg> Surface in the icon strip, and a <svg class="ico" width="14" height="14"><use href="#i-refresh"/></svg> button on the CalTopo map's row ("3 new · 1 waiting"). It opens the list: added, changed, removed, with the name and when; click one to see it in the list and on the map. Below it, your edits waiting for CalTopo: <b>Open</b> on a conflict shows both versions, <b>Send now</b> tries again. Opening the list counts as looked at.</li>
+  <li>Rows in the CalTopo map's folders say <b>waiting</b> (your edit hasn't reached CalTopo yet), <b>conflict</b>, <b>changed</b> (in CalTopo since you last looked) or <b>failed</b>; a closed folder shows how many inside have one.</li>
 </ul>
 
 <h2 id="lidar">LiDAR</h2>

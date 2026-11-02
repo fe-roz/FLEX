@@ -101,6 +101,7 @@
       drawn.set(f.id, { sig, ents });
     });
     for (const [id, d] of drawn) if (!want.has(id)) { d.ents.forEach(e => F.src.entities.remove(e)); drawn.delete(id); }
+    if (window._folderStyle) window._folderStyle.apply();           // folders' display settings (folder_style.js)
     v.scene.requestRender && v.scene.requestRender();
   }
 
@@ -538,11 +539,11 @@
       HL.mode = 'off';
       return;
     }
-    if (HL.mode === 'off') { ents.forEach(e => { if (e._pjfLab) { e._pjfLab = false; if (!e._pjfHid) e.label.show = true; } }); HL.mode = null; }
+    if (HL.mode === 'off') { ents.forEach(e => { if (e._pjfLab) { e._pjfLab = false; if (!e._pjfHid) e.label.show = !e._fsNoLabel; } }); HL.mode = null; }
     if (!on) {
       if (HL.mode !== false) {
         HL.divs.forEach(d => d.remove()); HL.divs.clear();
-        ents.forEach(e => { if (e._pjfHid) { e.label.show = true; if (e.point) e.point.show = true; if (e.billboard) e.billboard.show = true; e._pjfHid = false; } });
+        ents.forEach(e => { if (e._pjfHid) { e.label.show = !e._fsNoLabel; if (e.point) e.point.show = !e._fsNoPoint; if (e.billboard) e.billboard.show = true; e._pjfHid = false; } });
         HL.mode = false;
       }
       return;
@@ -578,6 +579,7 @@
         d.append(lab, dot);
         HL.box.appendChild(d); HL.divs.set(e.id, d);
       }
+      d.firstChild.style.display = e._fsNoLabel ? 'none' : '';       // names off for its folder (folder_style.js)
       d.style.display = 'block'; d.style.left = Math.round(sp.x) + 'px'; d.style.top = Math.round(sp.y) + 'px';
     }
     for (const [id, d] of HL.divs) if (!live.has(id)) { d.remove(); HL.divs.delete(id); }
@@ -590,7 +592,8 @@
     clearTimeout(t);
     t = setTimeout(() => { draw(); render(); }, 120);
   }
-  window._onVectorSourcesChanged = () => { applyOverlayHidden(); clearTimeout(t); t = setTimeout(() => render(), 150); };
+  let tv = null;                                       // its own timer: sharing t cancelled a pending draw()
+  window._onVectorSourcesChanged = () => { applyOverlayHidden(); clearTimeout(tv); tv = setTimeout(() => render(), 150); };
   // A click on a project feature shows it in the details panel (info_panel.js);
   // editing is a second step there (✏️ Edit), not the click itself.
   const hook = setInterval(() => {

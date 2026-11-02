@@ -13,6 +13,38 @@
 // (project_workspace.js). ▸ opens a row in place: a project folder shows its
 // folders and features (click: highlight, double-click: fly there, ✏️ edit),
 // the CalTopo map and data files show their own folders.
+//
+// CalTopo features in no folder are listed under Markers / Lines / Polygons,
+// as CalTopo lists them (flex.js hangs them under 'ctf-_markers' …; nothing is
+// written to CalTopo). Every folder row has a display button (names, colour,
+// line width, symbol, opacity for everything inside: folder_style.js).
+// Marks: CalTopo rows show their edit state (waiting, conflict, changed,
+// failed: _ctWrite.status); project points, lines and areas the loaded
+// CalTopo map doesn't have say "not in CalTopo" (caltopo_match.js). The CalTopo
+// map row has the "changed since you last looked" button (also a dot on the
+// 📍 rail button): the list of what was added, changed or removed in CalTopo,
+// and the edits waiting for CalTopo, with their conflicts.
+//
+// Row attributes (for a row's ⋯ menu): an item row has data-rkey, a folder row
+// data-fkey, and each has a .cc-tools span to put buttons in.
+//   data-rkey   f:<project feature id> · my:<My data point id> · ct-<CalTopo feature id>
+//               · e:<data file url>#<entity id>
+//   data-fkey   a folder_style.js key: project:<group id> · project: (not in a folder)
+//               · mydata:<group id> · caltopo:<folder id> · caltopo: (the map)
+//               · file:<url>|<path> · file:<url>| (the file)
+//
+// window._surfCols.reveal(key, { open }) → true when the row is shown: opens
+// the pane first with open: true, opens the folders above the item (and the
+// folder itself when the key is a folder), scrolls the row into view and
+// flashes it (class row-flash, 1.8 s). key is any of:
+//   'ct-<fid>'  'ctf-<fid>'                 a CalTopo feature / folder (also _markers, _lines, _polygons)
+//   'f:<id>'  'g:<group id>'  'my:<id>'     a project feature / project folder / My data point
+//   '<project feature id>' '<My data point id>'   bare ids also work
+//   'e:<data file url>#<entity id>'         a data file's feature or folder
+//   'project:…' 'mydata:…' 'caltopo:…' 'file:…'   a folder key, as above
+//   a Cesium entity (drawn by any of these)
+//   { source: 'project'|'mydata'|'caltopo'|'file', id, folder, entityId, url }   (the info
+//     panel's form: id null with a folder reveals the folder; file folders by entity id)
 (function () {
   'use strict';
   const host = document.getElementById('surf-cols');
@@ -83,6 +115,7 @@
 
   // A CalTopo map's id (…/m/<id>), so two spellings of the same link match.
   const mapId = u => (String(u || '').match(/\/m\/([A-Za-z0-9]+)/) || [])[1] || null;
+  const nItems = ds => (ds._ctCount != null ? ds._ctCount : ds.entities.values.length);
   const sameMap = (a, b) => { const x = mapId(a), y = mapId(b); return x && y ? x === y : String(a || '') === String(b || ''); };
   async function model() {
     const w = ws(), pj = PJ(), pw = PW();
@@ -111,23 +144,26 @@
       const x = { kind: 'file', id: l.id, name: l.name || url, url, loaded: !!f, shown: !!(f && f.show), items: f ? f.items : 0, dir: moving('file', l.id) };
       (x.dir === 'in' ? L : R).push(x);
     });
+    NICT = null;
     if (isOpen) {
       const FL = window.FlexLib;
       const ct = (FL.liveLayers(pj.P) || []).filter(l => l.kind === 'caltopo');
       const now = w.caltopo(), src = w.vectorSources().find(s => s.kind === 'caltopo');
       const isNow = l => !!(now && sameMap(now.url, l.url));        // the same map, however its link is written
       ct.forEach(l => L.unshift({ kind: 'caltopo', id: l.id, name: 'CalTopo map', url: l.url, interval: l.interval, loaded: isNow(l),
-        shown: !!(src && own(src.ds) && isNow(l)), items: src ? src.ds.entities.values.length : 0, src: src && isNow(l) ? src : null }));
+        shown: !!(src && own(src.ds) && isNow(l)), items: src ? nItems(src.ds) : 0, src: src && isNow(l) ? src : null }));
       // A CalTopo map loaded that the project doesn't have: yours (My data), ← puts it in the project.
-      if (src && now && !ct.some(isNow)) R.unshift({ kind: 'caltopo', id: 'ct', name: 'CalTopo map', url: now.url, interval: now.interval, loaded: true, shown: own(src.ds), items: src.ds.entities.values.length, src, mine: true });
+      if (src && now && !ct.some(isNow)) R.unshift({ kind: 'caltopo', id: 'ct', name: 'CalTopo map', url: now.url, interval: now.interval, loaded: true, shown: own(src.ds), items: nItems(src.ds), src, mine: true });
       const h = PF() ? PF().hidden() : {};
       const feats = FL.liveFeatures(pj.P), groups = FL.liveGroups(pj.P);
+      NICT = notInCt(pj.P);
       groups.filter(g => !g.parent).sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true })).forEach(g => {
         const n = feats.filter(f => FL.groupPath(pj.P, f.group).some(x => x.id === g.id)).length;
-        L.push({ kind: 'folder', id: g.id, name: g.name || 'Folder', n, shown: !h['root'] && !h['g:' + g.id] });
+        const nict = NICT ? feats.filter(f => NICT.has(f.id) && FL.groupPath(pj.P, f.group).some(x => x.id === g.id)).length : 0;
+        L.push({ kind: 'folder', id: g.id, name: g.name || 'Folder', n, nict, shown: !h['root'] && !h['g:' + g.id] });
       });
       const loose = feats.filter(f => !f.group).length;
-      if (loose) L.push({ kind: 'loose', id: '', name: 'Not in a folder', n: loose, shown: !h['root'] });
+      if (loose) L.push({ kind: 'loose', id: '', name: 'Not in a folder', n: loose, nict: NICT ? feats.filter(f => !f.group && NICT.has(f.id)).length : 0, shown: !h['root'] });
       (FL.liveLayers(pj.P) || []).filter(l => l.kind === 'file').forEach(l => {
         const f = loaded.get(l.url);
         const x = { kind: 'file', id: l.id, name: l.name || l.url, url: l.url, loaded: !!f, shown: !!(f && f.show), items: f ? f.items : 0, inProject: true, dir: moving('file', l.id) };
@@ -136,10 +172,67 @@
     } else {
       // No project: a CalTopo map loaded on its own is still listed (in My data).
       const src = w.vectorSources().find(s => s.kind === 'caltopo');
-      if (src) R.unshift({ kind: 'caltopo', id: 'ct', name: 'CalTopo map', url: src.url, loaded: true, shown: own(src.ds), items: src.ds.entities.values.length, src });
+      if (src) R.unshift({ kind: 'caltopo', id: 'ct', name: 'CalTopo map', url: src.url, loaded: true, shown: own(src.ds), items: nItems(src.ds), src });
     }
     [...L, ...R].forEach(x => { if (x.kind === 'file' && x.loaded) x.src = srcOf(x.url); });
     return { isOpen, L, R };
+  }
+
+  // ── Marks ────────────────────────────────────────────────────────────────
+  // Project features with no match in the loaded CalTopo map (ids), or null
+  // with no CalTopo map loaded.
+  let NICT = null;
+  function notInCt(P) {
+    const src = ctSrc(), M = window._ctMatch;
+    if (!src || !M || !P) return null;
+    try { return new Set(M.unmatched(P, src).map(f => f.id)); } catch (e) { console.warn('[surface] match', e); return null; }
+  }
+  const NICT_TIP = 'Not in the CalTopo map: it has no point, line or area of the same kind and name within 15 m';
+  const nictMark = () => `<b class="sc-st sc-nict" title="${NICT_TIP}">not in CalTopo</b>`;
+  // A CalTopo feature's edit state (caltopo_write.js).
+  const CW = () => window._ctWrite;
+  const ctStatus = id => { const W = CW(); if (!W || !W.status || !/^ct-/.test(String(id || ''))) return null; try { return W.status(id); } catch (_) { return null; } };
+  const ST = { waiting: ['waiting', 'Your edit is waiting to go to CalTopo'], conflict: ['conflict', 'Changed in CalTopo while your edit waited: open the list (CalTopo map row) to choose'],
+    changed: ['changed', 'Changed in CalTopo since you last looked'], failed: ['failed', 'Your edit could not be sent to CalTopo'] };
+  const stMark = st => (st && ST[st] ? `<b class="sc-st sc-st-${st}" title="${ST[st][1]}">${ST[st][0]}</b>` : '');
+  /** The folder_style.js key of a top row. */
+  function fkeyOf(x) {
+    if (x.kind === 'folder') return 'project:' + x.id;
+    if (x.kind === 'loose') return 'project:';
+    if (x.kind === 'pgroup') return 'mydata:' + x.id;
+    if (x.kind === 'caltopo' && x.src) return 'caltopo:';
+    if (x.kind === 'file' && x.src) return 'file:' + x.url + '|';
+    return null;
+  }
+  const fsSet = k => { try { return Object.keys(window._folderStyle.get(k) || {}).filter(f => !(f === 'color' && /^project:./.test(k))).length > 0; } catch (_) { return false; } };
+  const fsBtn = k => (k && window._folderStyle ? `<button type="button" class="sc-fs${fsSet(k) ? ' sc-fs-on' : ''}" data-fstyle="${esc(k)}" title="Display: names, colour, line width, symbol, opacity for everything inside">${window.icon ? window.icon('palette', 13) : '🎨'}</button>` : '');
+  // CalTopo: what changed since you last looked, and edits waiting.
+  function ctNews() {
+    const W = CW();
+    if (!W || !W.available || !W.available()) return null;
+    let ch = [], pend = [], seen = 0;
+    try { ch = W.changes() || []; pend = W.pending() || []; seen = W.seen() || 0; } catch (_) {}
+    const fresh = ch.filter(c => (c.at || 0) > seen).length;
+    const conflicts = pend.filter(p => p.state === 'conflict').length;
+    return { ch, pend, seen, fresh, conflicts };
+  }
+  function ctNewsBtn() {
+    const N = ctNews();
+    if (!N || (!N.ch.length && !N.pend.length)) return '';
+    const bits = [];
+    if (N.fresh) bits.push(N.fresh + ' new');
+    if (N.pend.length) bits.push(N.pend.length + ' waiting');
+    const hot = N.fresh || N.conflicts;
+    return `<button type="button" class="sc-news${hot ? ' sc-hot' : ''}" data-ctnews title="What changed in CalTopo since you last looked, and your edits waiting for CalTopo">${window.icon ? window.icon('refresh', 13) : '⟳'}${bits.length ? '<span>' + esc(bits.join(' · ')) + '</span>' : ''}</button>`;
+  }
+  function railMark() {
+    const b = document.querySelector('#flex-rail [data-target="#featuresCollapsible"]'); if (!b) return;
+    const N = ctNews(), hot = !!(N && (N.fresh || N.conflicts));
+    let d = b.querySelector('.sc-rail-dot');
+    if (hot && !d) { d = document.createElement('b'); d.className = 'sc-rail-dot'; b.appendChild(d); }
+    if (!hot && d) d.remove();
+    if (d) d.title = N.fresh ? `${N.fresh} change${N.fresh === 1 ? '' : 's'} in CalTopo since you last looked` : `${N.conflicts} edit${N.conflicts === 1 ? '' : 's'} in conflict with CalTopo`;
+    b.classList.toggle('sc-has-news', hot);
   }
 
   // ── Rows ─────────────────────────────────────────────────────────────────
@@ -168,15 +261,17 @@
     const k = !x.dir && expKey(x), exp = k && isExp(k);
     const forget = side === 'm' && !x.dir && (x.kind === 'file') ? '<button type="button" data-forget title="Forget: out of My data (unloads it)">✕</button>' : '';
     const ftools = x.kind === 'folder' ? `<button type="button" data-gadd="${esc(x.id)}" title="Add to this folder">＋</button><button type="button" data-gdl="${esc(x.id)}" title="Download for CalTopo">⇩</button><button type="button" data-gedit="${esc(x.id)}" title="Rename, colour, move">✏️</button>` : '';
-    let html = `<div class="cc-it${x.dir ? ' cc-moving' : ''}" data-kind="${x.kind}" data-id="${esc(x.id)}" draggable="${canMove ? 'true' : 'false'}">
+    const fk = !x.dir && fkeyOf(x);
+    const marks = (x.nict ? `<b class="sc-st sc-nict" title="${NICT_TIP}">${x.nict} not in CalTopo</b>` : '') + (x.kind === 'caltopo' && x.src ? ctNewsBtn() : '');
+    let html = `<div class="cc-it${x.dir ? ' cc-moving' : ''}" data-kind="${x.kind}" data-id="${esc(x.id)}"${fk ? ` data-fkey="${esc(fk)}"` : ''} draggable="${canMove ? 'true' : 'false'}">
       <button type="button" class="cc-eye ui-eye${eyeOn ? ' on' : eyeHalf ? ' half' : ''}" data-eye title="${(x.kind === 'file' || x.kind === 'caltopo') && !x.loaded ? 'Load' : eyeOn ? 'Hide' : 'Show'}"></button>
-      <span class="cc-nm" title="${esc(x.name)}"${k ? ` data-expand="${esc(k)}"` : ''}>${k ? arrowOf(k, exp) : '<span class="sc-arrow"></span>'}${icon[x.kind] || ''} ${esc(x.name)}${x.dir ? '<b class="cc-dot">•</b>' : ''}<small>${esc(sub)}</small></span>
-      <span class="cc-tools">${ftools}${forget}${arrow}</span></div>`;
+      <span class="cc-nm" title="${esc(x.name)}"${k ? ` data-expand="${esc(k)}"` : ''}>${k ? arrowOf(k, exp) : '<span class="sc-arrow"></span>'}${icon[x.kind] || ''} ${esc(x.name)}${x.dir ? '<b class="cc-dot">•</b>' : ''}<small>${esc(sub)}${marks}</small></span>
+      <span class="cc-tools">${ftools}${fsBtn(fk)}${forget}${arrow}</span></div>`;
     if (exp) html += `<div class="sc-kids">${kids(x, isOpen)}</div>`;
     return html;
   }
   function kids(x, isOpen) {
-    if (x.kind === 'pgroup') return x.points.map(f => `<div class="sc-pt" data-pt="${esc(f.id)}"><span title="${esc(f.name)}">${esc(f.name || 'Point')}</span>
+    if (x.kind === 'pgroup') return x.points.map(f => `<div class="sc-pt" data-pt="${esc(f.id)}" data-rkey="my:${esc(f.id)}"><span title="${esc(f.name)}">${esc(f.name || 'Point')}</span>
         <span class="cc-tools"><button type="button" data-ptfly title="Fly to">⌖</button>${isOpen ? '<button type="button" class="cc-mv" data-ptin title="Move this point into the project">←</button>' : ''}<button type="button" data-ptdel title="Delete the point">✕</button></span></div>`).join('');
     if (x.kind === 'folder' || x.kind === 'loose') return projectTree(x.kind === 'loose' ? null : x.id, 0);
     if (x.src) return overlayTree(x.src);
@@ -189,41 +284,54 @@
     if (gid) FL.liveGroups(pj.P).filter(g => (g.parent || '') === gid).sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true })).forEach(g => {
       const k = 'g:' + g.id, exp = !!fOpen()[k];
       const n = FL.liveFeatures(pj.P).filter(f => FL.groupPath(pj.P, f.group).some(y => y.id === g.id)).length;
-      out += `<div class="sc-sub sc-fold" ${pad(depth)}><button type="button" class="cc-eye ui-eye ui-eye-sm${h[k] ? ' half' : ' on'}" data-geye="${esc(g.id)}" title="${h[k] ? 'Show' : 'Hide'}"></button>
-        <span class="sc-nm" data-expand="${esc(k)}">${arrowOf(k, exp)}<span class="pjs-sw" style="background:${esc(P.groupColor(g.id))}"></span>📁 ${esc(g.name)} <small>${n}</small></span>
-        <span class="cc-tools"><button type="button" data-gadd="${esc(g.id)}" title="Add to this folder">＋</button><button type="button" data-gdl="${esc(g.id)}" title="Download for CalTopo">⇩</button><button type="button" data-gedit="${esc(g.id)}" title="Rename, colour, move">✏️</button></span></div>`;
+      const nict = NICT ? FL.liveFeatures(pj.P).filter(f => NICT.has(f.id) && FL.groupPath(pj.P, f.group).some(y => y.id === g.id)).length : 0;
+      out += `<div class="sc-sub sc-fold" data-fkey="project:${esc(g.id)}" ${pad(depth)}><button type="button" class="cc-eye ui-eye ui-eye-sm${h[k] ? ' half' : ' on'}" data-geye="${esc(g.id)}" title="${h[k] ? 'Show' : 'Hide'}"></button>
+        <span class="sc-nm" data-expand="${esc(k)}">${arrowOf(k, exp)}<span class="pjs-sw" style="background:${esc(P.groupColor(g.id))}"></span>📁 ${esc(g.name)} <small>${n}</small>${nict ? ` <b class="sc-st sc-nict" title="${NICT_TIP}">${nict} not in CalTopo</b>` : ''}</span>
+        <span class="cc-tools"><button type="button" data-gadd="${esc(g.id)}" title="Add to this folder">＋</button><button type="button" data-gdl="${esc(g.id)}" title="Download for CalTopo">⇩</button><button type="button" data-gedit="${esc(g.id)}" title="Rename, colour, move">✏️</button>${fsBtn('project:' + g.id)}</span></div>`;
       if (exp) out += projectTree(g.id, depth + 1);
     });
     FL.liveFeatures(pj.P).filter(f => (f.group || null) === (gid || null)).sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true })).forEach(f => {
-      out += `<div class="sc-sub sc-feat" data-feat="${esc(f.id)}" ${pad(depth)} title="Click: highlight · double-click: fly there"><span class="sc-ic" style="color:${esc(P.colorOf(f))}">${fIcon[f.kind] || '•'}</span>
-        <span class="sc-nm">${esc(f.name || '(no name)')}${FL.flexTag(f.desc) ? ' <small>🕳</small>' : ''}</span>
+      out += `<div class="sc-sub sc-feat${NICT && NICT.has(f.id) ? ' sc-is-nict' : ''}" data-feat="${esc(f.id)}" data-rkey="f:${esc(f.id)}" ${pad(depth)} title="Click: highlight · double-click: fly there"><span class="sc-ic" style="color:${esc(P.colorOf(f))}">${fIcon[f.kind] || '•'}</span>
+        <span class="sc-nm">${esc(f.name || '(no name)')}${FL.flexTag(f.desc) ? ' <small>🕳</small>' : ''}${NICT && NICT.has(f.id) ? ' ' + nictMark() : ''}</span>
         <span class="cc-tools"><button type="button" data-fedit="${esc(f.id)}" title="Edit">✏️</button></span></div>`;
     });
     return out || '<div class="sc-sub sc-none">empty</div>';
   }
   /** A CalTopo map's or a data file's own folders and items. */
+  const FORCE = new Set();                     // entity ids revealed: listed even past the first 200
   function overlayTree(src) {
     const P = PF(); if (!P) return '';
     const tree = P.overlayTree(src), h = P.hidden();
-    const base = 'o:' + (src.url || src.name);
+    const base = 'o:' + (src.url || src.name), isCt = src.kind === 'caltopo';
+    // CalTopo states inside each folder (a closed folder still shows there is something).
+    const stIn = new Map();
+    if (isCt && CW()) src.ds.entities.values.forEach(e => {
+      const st = ctStatus(e.id); if (!st) return;
+      for (let a = e.parent, n = 0; a && n < 50; a = a.parent, n++) stIn.set(a, (stIn.get(a) || 0) + 1);
+    });
     let out = '';
     const visit = (parent, path, depth) => {
       const list = tree.get(parent) || [];
       const folders = list.filter(e => tree.has(e)), leaves = list.filter(e => !tree.has(e));
       folders.forEach(e => {
         const p = path + '/' + (e.name || e.id), key = base + '|' + p, hk = P.srcKey(src, p), exp = open.has(key);
+        const fk = isCt ? 'caltopo:' + (/^ctf-/.test(e.id) ? e.id.slice(4) : e.id) : 'file:' + src.url + '|' + p;
+        const nst = stIn.get(e) || 0;
         ov.set(hk, e);
-        out += `<div class="sc-sub sc-fold" style="padding-left:${4 + depth * 12}px"><button type="button" class="cc-eye ui-eye ui-eye-sm${h[hk] ? ' half' : ' on'}" data-oeye="${esc(hk)}" title="${h[hk] ? 'Show' : 'Hide'}"></button>
-          <span class="sc-nm" data-expand="${esc(key)}">${arrowOf(key, exp)}📁 ${esc(e.name || '(folder)')} <small>${(tree.get(e) || []).length}</small></span></div>`;
+        out += `<div class="sc-sub sc-fold${e._ctLoose ? ' sc-loose' : ''}" data-hk="${esc(hk)}" data-fkey="${esc(fk)}" style="padding-left:${4 + depth * 12}px"><button type="button" class="cc-eye ui-eye ui-eye-sm${h[hk] ? ' half' : ' on'}" data-oeye="${esc(hk)}" title="${h[hk] ? 'Show' : 'Hide'}"></button>
+          <span class="sc-nm" data-expand="${esc(key)}"${e._ctLoose ? ' title="Not in a CalTopo folder (listed as CalTopo lists them)"' : ''}>${arrowOf(key, exp)}📁 ${esc(e.name || '(folder)')} <small>${(tree.get(e) || []).length}</small>${nst ? ` <b class="sc-st sc-st-in" title="${nst} inside waiting, in conflict, changed or not sent">${nst}</b>` : ''}</span>
+          <span class="cc-tools">${fsBtn(fk)}</span></div>`;
         if (exp) visit(e, p, depth + 1);
       });
-      leaves.slice(0, 200).forEach(e => {
+      const shown = leaves.length > 200 ? leaves.filter((e, i) => i < 200 || FORCE.has(e.id)) : leaves;
+      shown.forEach(e => {
         const p = path + '/' + (e.name || e.id), hk = P.srcKey(src, p);
         ov.set(hk, e);
-        out += `<div class="sc-sub sc-feat" data-ov="${esc(hk)}" style="padding-left:${4 + depth * 12}px" title="Click: highlight · double-click: fly there"><button type="button" class="cc-eye ui-eye ui-eye-sm${h[hk] ? ' half' : ' on'}" data-oeye="${esc(hk)}" title="${h[hk] ? 'Show' : 'Hide'}"></button>
-          <span class="sc-nm">${esc(e.name || '(no name)')}</span></div>`;
+        const rk = isCt && /^ct-/.test(e.id) ? e.id : 'e:' + (src.url || src.name) + '#' + e.id;
+        out += `<div class="sc-sub sc-feat" data-ov="${esc(hk)}" data-hk="${esc(hk)}" data-rkey="${esc(rk)}" style="padding-left:${4 + depth * 12}px" title="Click: highlight · double-click: fly there"><button type="button" class="cc-eye ui-eye ui-eye-sm${h[hk] ? ' half' : ' on'}" data-oeye="${esc(hk)}" title="${h[hk] ? 'Show' : 'Hide'}"></button>
+          <span class="sc-nm">${esc(e.name || '(no name)')}${isCt ? stMark(ctStatus(e.id)) : ''}</span><span class="cc-tools"></span></div>`;
       });
-      if (leaves.length > 200) out += `<div class="sc-sub sc-none" style="padding-left:${4 + depth * 12}px">… and ${leaves.length - 200} more</div>`;
+      if (leaves.length > shown.length) out += `<div class="sc-sub sc-none" style="padding-left:${4 + depth * 12}px">… and ${leaves.length - shown.length} more</div>`;
     };
     visit(null, '', 0);
     return out || '<div class="sc-sub sc-none">no folders</div>';
@@ -294,10 +402,163 @@
       const sc = host.querySelector('.cc-cols') ? host.querySelector('.cc-cols').scrollTop : 0;
       host.innerHTML = html;
       host.querySelector('.cc-cols').scrollTop = sc;
+      flashNow();
+      railMark();
     } catch (e) { console.warn('[surface] render', e); }
     finally { busy = false; if (again) { again = false; setTimeout(render, 0); } }
   }
   const soon = (force) => { if (force) my = null; setTimeout(render, 30); };
+
+  // ── CalTopo: changed since you last looked, edits waiting ────────────────
+  const WHAT = { added: 'added', changed: 'changed', removed: 'removed' };
+  const ago = t => { if (!t) return ''; const d = (Date.now() - t) / 1000; return d < 60 ? 'just now' : d < 3600 ? Math.round(d / 60) + ' min ago' : d < 86400 ? Math.round(d / 3600) + ' h ago' : new Date(t).toLocaleString(); };
+  async function newsPop(anchor) {
+    const old = document.getElementById('sc-news-pop'); if (old) { old.remove(); return; }
+    const W = CW(), N = ctNews(); if (!W || !N) return;
+    const seenAt = N.seen;
+    const m = document.createElement('div'); m.id = 'sc-news-pop'; m.className = 'cc-pop sc-news-pop';
+    const list = N.ch.slice(0, 200);
+    const chHtml = list.length ? list.map((c, i) => `<button type="button" class="sc-ch${(c.at || 0) > seenAt ? ' sc-ch-new' : ''}" data-chg="${i}" ${c.what === 'removed' ? 'disabled title="Removed from CalTopo"' : 'title="Show it in the list and on the map"'}>
+        <b class="sc-ch-w sc-ch-${esc(c.what)}">${esc(WHAT[c.what] || c.what)}</b><span class="sc-ch-t">${esc(c.title || c.fid)}</span><small>${esc(ago(c.at))}</small></button>`).join('')
+      : '<div class="sc-ch-none">Nothing changed in CalTopo yet.</div>';
+    const ST_WORD = { waiting: 'waiting', conflict: 'conflict', failed: 'not sent' };
+    const pHtml = N.pend.map((q, i) => `<div class="sc-pq sc-pq-${esc(q.state)}"><b>${esc(ST_WORD[q.state] || q.state)}</b><span class="sc-ch-t" title="${esc(q.error || '')}">${esc(q.title || q.fid)}${q.what ? ' <small>' + esc(q.what) + '</small>' : ''}</span>
+        ${q.state === 'conflict' ? `<button type="button" data-pconf="${i}" title="See both versions and choose">Open</button>` : `<button type="button" data-pretry title="Send the waiting edits now">Send now</button>`}</div>`).join('');
+    m.innerHTML = `<div class="cc-pop-t">CalTopo map: changes${N.fresh ? ` (${N.fresh} new)` : ''}</div><div class="sc-ch-list">${chHtml}</div>`
+      + (N.pend.length ? `<div class="cc-pop-t sc-pq-h">Your edits waiting for CalTopo</div>${pHtml}` : '');
+    document.body.appendChild(m);
+    const r = anchor.getBoundingClientRect();
+    m.style.left = Math.max(8, Math.min(r.left, window.innerWidth - m.offsetWidth - 10)) + 'px';
+    m.style.top = Math.max(8, Math.min(r.bottom + 4, window.innerHeight - m.offsetHeight - 10)) + 'px';
+    const close = () => { m.remove(); document.removeEventListener('mousedown', off, true); };
+    const off = e => { if (!m.isConnected) { document.removeEventListener('mousedown', off, true); return; } if (!m.contains(e.target) && !e.target.closest('[data-ctnews]')) close(); };
+    setTimeout(() => document.addEventListener('mousedown', off, true), 0);
+    m.addEventListener('click', async e => {
+      const c = e.target.closest('[data-chg]');
+      if (c) { const x = list[+c.dataset.chg]; if (x && x.what !== 'removed') { await reveal('ct-' + x.fid); const ent = entityOfKey('ct-' + x.fid); const P = PF(); if (ent && P) { const g = P.entCoords(ent.e); if (g) P.highlight(Object.assign(g, { key: 'e:' + ent.e.id }), true); } } return; }
+      const pc = e.target.closest('[data-pconf]'); if (pc) { const q = N.pend[+pc.dataset.pconf]; close(); if (q) await W.showConflict(q.fid); soonNews(); return; }
+      if (e.target.closest('[data-pretry]')) { close(); if (W.retry) await W.retry(); soonNews(); }
+    });
+    // Looked at: the new marks go (the list keeps them highlighted while open).
+    if (N.fresh) { try { await W.markSeen(); } catch (_) {} }
+    soonNews();
+  }
+  const soonNews = () => { railMark(); last = ''; soon(); };
+
+  // ── Reveal: open the folders above an item, scroll to it, flash it ───────
+  const cssq = x => (window.CSS && CSS.escape ? CSS.escape(String(x)) : String(x).replace(/["\\]/g, '\\$&'));
+  /** An overlay entity by a key: { e, src } or null. */
+  function entityOfKey(key) {
+    const w = ws(); if (!w) return null;
+    const srcs = w.vectorSources();
+    if (window.Cesium && key instanceof Cesium.Entity) { const src = srcs.find(s => s.ds.entities.getById(key.id) === key); return src ? { e: key, src } : null; }
+    key = String(key);
+    let m = key.match(/^e:(.*)#([^#]*)$/);
+    if (m) { const src = srcs.find(s => (s.url || s.name) === m[1]); const e = src && src.ds.entities.getById(m[2]); return e ? { e, src } : null; }
+    if (/^ctf?-/.test(key)) { const src = srcs.find(s => s.kind === 'caltopo'); const e = src && src.ds.entities.getById(key); return e ? { e, src } : null; }
+    return null;
+  }
+  /** What to open and which row to look for. */
+  function target(key) {
+    const pj = PJ(), FL = window.FlexLib, P = pj.P, w = ws();
+    if (key == null) return null;
+    if (window.Cesium && key instanceof Cesium.Entity) {
+      const p = n => { const v = key.properties && key.properties[n]; return v && v.getValue ? v.getValue() : v; };
+      if (p('isProjectFeature')) return target('f:' + p('featureId'));
+      if (p('myFeature')) return target('my:' + p('myFeature'));
+      const o = entityOfKey(key); return o ? ovTarget(o) : null;
+    }
+    if (typeof key === 'object') {
+      const k = key, id = k.id != null && k.id !== '' ? String(k.id) : null;
+      if (k.source === 'project') return id ? target('f:' + id) : k.folder ? target('g:' + k.folder) : null;
+      if (k.source === 'mydata') return id ? target('my:' + id) : k.folder ? target('mydata:' + k.folder) : null;
+      if (k.source === 'caltopo') {
+        if (k.entityId && entityOfKey(k.entityId)) return target(k.entityId);
+        if (id) return target(/^ct-/.test(id) ? id : 'ct-' + id);
+        if (k.folder != null) return target(k.folder ? 'ctf-' + String(k.folder).replace(/^ctf-/, '') : 'caltopo:');
+        return null;
+      }
+      if (k.source === 'file') {
+        const url = k.url || ((w && w.vectorSources().find(s => s.kind === 'file' && (k.entityId || id) && s.ds.entities.getById(k.entityId || id))) || {}).url;
+        const eid = k.entityId || id || k.folder;
+        return url && eid ? target('e:' + url + '#' + eid) : url ? target('file:' + url + '|') : null;
+      }
+      return null;
+    }
+    key = String(key);
+    if (/^ctf?-|^e:/.test(key)) { const o = entityOfKey(key); return o ? ovTarget(o) : null; }
+    if (/^caltopo:$/.test(key)) { const src = ctSrc(); return src ? { exp: [], sel: '[data-fkey="caltopo:"]' } : null; }
+    if (/^caltopo:/.test(key)) return target('ctf-' + key.slice(8));
+    if (/^file:/.test(key)) {
+      const i = key.lastIndexOf('|'), url = key.slice(5, i), path = key.slice(i + 1);
+      if (!path) return { exp: [], sel: `[data-fkey="${cssq(key)}"]` };
+      const src = w && w.vectorSources().find(s => s.url === url);
+      if (!src) return null;
+      const T = PF().overlayTree(src); let found = null;
+      const walk = (par, p) => (T.get(par) || []).forEach(e => { const q = p + '/' + (e.name || e.id); if (q === path && T.has(e)) found = e; else if (T.has(e) && !found) walk(e, q); });
+      walk(null, '');
+      return found ? ovTarget({ e: found, src }) : null;
+    }
+    if (/^project:/.test(key)) { const g = key.slice(8); return g ? target('g:' + g) : { exp: [], sel: '.cc-it[data-kind="loose"]' }; }
+    if (/^mydata:/.test(key)) return { exp: [], sel: `[data-fkey="${cssq(key)}"]` };
+    let m;
+    if ((m = key.match(/^g:(.+)$/)) && P) {
+      const g = P.groups[m[1]]; if (!g || g.removed) return null;
+      const path = FL.groupPath(P, g.id);
+      return { exp: path.map(x => 'g:' + x.id), sel: `[data-fkey="project:${cssq(g.id)}"]` };
+    }
+    if ((m = key.match(/^f:(.+)$/)) || (P && P.features && P.features[key] && (m = [0, key]))) {
+      const f = P && P.features[m[1]]; if (!f || f.removed) return null;
+      const exp = f.group ? FL.groupPath(P, f.group).map(x => 'g:' + x.id) : ['loose'];
+      return { exp, sel: `[data-rkey="f:${cssq(f.id)}"]` };
+    }
+    if ((m = key.match(/^my:(.+)$/)) || (m = [0, key])) {
+      const S = my, f = S && S.features && S.features[m[1]];
+      if (f && !f.removed) return { exp: ['p:' + (f.group || '')], sel: `[data-rkey="my:${cssq(f.id)}"]` };
+    }
+    return null;
+  }
+  function ovTarget({ e, src }) {
+    const base = 'o:' + (src.url || src.name), anc = [];
+    for (let a = e.parent, n = 0; a && n < 50; a = a.parent, n++) anc.unshift(a);
+    const T = PF() ? PF().overlayTree(src) : new Map(), isFolder = T.has(e);
+    let p = ''; const exp = [base];
+    anc.forEach(a => { p += '/' + (a.name || a.id); exp.push(base + '|' + p); });
+    if (isFolder) exp.push(base + '|' + p + '/' + (e.name || e.id));
+    FORCE.add(e.id);
+    const fk = src.kind === 'caltopo' ? 'caltopo:' + (/^ctf-/.test(e.id) ? e.id.slice(4) : e.id) : 'file:' + src.url + '|' + p + '/' + (e.name || e.id);
+    return { exp, sel: isFolder ? `[data-fkey="${cssq(fk)}"]` : `[data-rkey="${cssq(src.kind === 'caltopo' && /^ct-/.test(e.id) ? e.id : 'e:' + (src.url || src.name) + '#' + e.id)}"]` };
+  }
+  let FLASH = null;                            // { sel, until }: survives a re-render
+  function flashNow() {
+    if (!FLASH || Date.now() > FLASH.until) { FLASH = null; return null; }
+    const row = host.querySelector(FLASH.sel);
+    if (row && !row.classList.contains('row-flash')) row.classList.add('row-flash');
+    return row;
+  }
+  async function reveal(key, opts) {
+    opts = opts || {};
+    const pane = document.getElementById('featuresCollapsible');
+    if (opts.open && pane && !pane.classList.contains('show')) {
+      if (window._rail && window._rail.open) window._rail.open('#featuresCollapsible');
+      else { const b = document.querySelector('#flex-rail [data-target="#featuresCollapsible"]'); if (b) b.click(); }
+      for (let i = 0; i < 20 && !pane.classList.contains('show'); i++) await new Promise(r => setTimeout(r, 50));
+    }
+    await myState();
+    const T = target(key);
+    if (!T) return false;
+    T.exp.forEach(k => { if (k.startsWith('g:') || k === 'loose') fOpen()[k] = true; else open.add(k); });
+    while (busy) await new Promise(r => setTimeout(r, 20));
+    last = ''; await render();
+    const row = host.querySelector(T.sel);
+    if (!row) return false;
+    host.querySelectorAll('.row-flash').forEach(r => r.classList.remove('row-flash'));
+    FLASH = { sel: T.sel, until: Date.now() + 1800 };
+    void row.offsetWidth; row.classList.add('row-flash');
+    try { row.scrollIntoView({ block: 'nearest' }); } catch (_) {}
+    setTimeout(() => { const r = host.querySelector(T.sel); if (r) r.classList.remove('row-flash'); }, 1850);
+    return !!(pane && pane.classList.contains('show'));
+  }
 
   // ── Actions ──────────────────────────────────────────────────────────────
   async function find(kind, id) { const M = await model(); return M && M.L.concat(M.R).find(x => x.kind === kind && x.id === id); }
@@ -350,6 +611,8 @@
     const P = PF();
     if (e.target.closest('[data-master]')) { setMaster(MS.off); return; }
     if (e.target.closest('[data-labels]')) { setLabels(!LB); return; }
+    const fsb = e.target.closest('[data-fstyle]'); if (fsb) { if (window._folderStyle) { await window._folderStyle.dialog(fsb.dataset.fstyle); last = ''; render(); } return; }
+    const nb = e.target.closest('[data-ctnews]'); if (nb) { newsPop(nb); return; }
     if (e.target.closest('[data-openpj]')) { const b = document.getElementById('rail-pj') || document.getElementById('pj-top-btn'); if (b) b.click(); return; }
     const dr = e.target.closest('[data-draw]'); if (dr && P) { masterOnFirst(); P.startDraw(dr.dataset.draw, ''); return; }
     const tl = e.target.closest('[data-tool]');
@@ -478,9 +741,43 @@
   .sc-extra input { margin: 0; }
   .sc-extra a { color: #8ab4ec; }
   .sc-extra .sc-sep { opacity: .4; }
+  /* marks: not in CalTopo, CalTopo edit states, the changes button */
+  #surf-cols .sc-st { display: inline-block; font-weight: 600; font-size: 8.5px; line-height: 12px; padding: 0 4px; margin-left: 5px; border-radius: 6px; vertical-align: 1px; letter-spacing: .02em; }
+  #surf-cols .cc-nm small .sc-st { margin-left: 6px; }
+  #surf-cols .sc-nict { color: #f2c24e; background: rgba(242,194,78,.12); border: 1px solid rgba(242,194,78,.35); }
+  #surf-cols .sc-st-waiting { color: #8ab4ec; background: rgba(138,180,236,.12); border: 1px solid rgba(138,180,236,.4); }
+  #surf-cols .sc-st-conflict, #surf-cols .sc-st-failed { color: #ff8a7a; background: rgba(255,120,100,.12); border: 1px solid rgba(255,120,100,.45); }
+  #surf-cols .sc-st-changed { color: #6fd39a; background: rgba(111,211,154,.12); border: 1px solid rgba(111,211,154,.4); }
+  #surf-cols .sc-st-in { color: #8ab4ec; border: 1px solid rgba(138,180,236,.4); }
+  #surf-cols .sc-news { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.18); color: rgba(255,255,255,.75); border-radius: 8px; padding: 0 5px; font-size: 9px; line-height: 13px; cursor: pointer; vertical-align: 0; }
+  #surf-cols .sc-news.sc-hot { color: #ffb020; border-color: rgba(255,176,32,.6); background: rgba(255,176,32,.12); }
+  #surf-cols .sc-fs-on { color: #6fd39a !important; }
+  #surf-cols .cc-tools button.sc-fs { display: inline-flex; align-items: center; }
+  #flex-rail [data-target="#featuresCollapsible"] { position: relative; }
+  #flex-rail .sc-rail-dot { position: absolute; top: 4px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: #ffb020; box-shadow: 0 0 0 2px rgba(20,22,30,.9); pointer-events: none; }
+  .sc-news-pop { width: 330px; max-height: 70vh; overflow: auto; }
+  .sc-news-pop .sc-ch-list { display: flex; flex-direction: column; }
+  .sc-news-pop .sc-ch { display: grid !important; grid-template-columns: 58px 1fr auto; gap: 6px; align-items: center; }
+  .sc-news-pop .sc-ch:disabled { opacity: .55; cursor: default; }
+  .sc-news-pop .sc-ch-new { background: rgba(255,176,32,.08); }
+  .sc-news-pop .sc-ch-w { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+  .sc-news-pop .sc-ch-added { color: #6fd39a; } .sc-news-pop .sc-ch-changed { color: #8ab4ec; } .sc-news-pop .sc-ch-removed { color: #ff8a7a; }
+  .sc-news-pop .sc-ch-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .sc-news-pop small { opacity: .55; font-size: 10.5px; }
+  .sc-news-pop .sc-ch-none { opacity: .55; padding: 4px 8px; font-style: italic; }
+  .sc-news-pop .sc-pq-h { margin-top: 6px; border-top: 1px solid rgba(255,255,255,.1); padding-top: 6px; }
+  .sc-news-pop .sc-pq { display: grid; grid-template-columns: 58px 1fr auto; gap: 6px; align-items: center; padding: 3px 8px; font-size: 12px; color: #e8ece9; }
+  .sc-news-pop .sc-pq b { font-size: 10px; text-transform: uppercase; color: #8ab4ec; } .sc-news-pop .sc-pq-conflict b, .sc-news-pop .sc-pq-failed b { color: #ff8a7a; }
+  .sc-news-pop .sc-pq button { border: 1px solid rgba(255,255,255,.2); padding: 1px 8px; }
+  /* reveal: the row flashes */
+  @keyframes row-flash { 0%, 40% { background: rgba(255,230,0,.35); box-shadow: inset 0 0 0 1px #ffe600; } 100% { background: transparent; box-shadow: none; } }
+  #surf-cols .row-flash { animation: row-flash 1.8s ease-out; }
   /* The old lists: the columns show these now. */
   #lp-poi-list, #lp-data-list { display: none !important; }`;
   document.head.appendChild(style);
 
-  window._surfCols = { labels: on => (on === undefined ? LB : setLabels(on)), render: async () => { while (busy) await new Promise(r => setTimeout(r, 20)); last = ''; return render(); }, refresh: () => soon(true), master: on => (on === undefined ? !MS.off : setMaster(on)) };
+  window.addEventListener('flex-caltopo-changed', soonNews);
+  window.addEventListener('flex-caltopo-queue', soonNews);
+  window.addEventListener('flex-folder-style', () => { last = ''; soon(); });
+  window._surfCols = { reveal, news: a => newsPop(a || host.querySelector('[data-ctnews]') || host), labels: on => (on === undefined ? LB : setLabels(on)), render: async () => { while (busy) await new Promise(r => setTimeout(r, 20)); last = ''; return render(); }, refresh: () => soon(true), master: on => (on === undefined ? !MS.off : setMaster(on)) };
 })();
