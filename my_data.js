@@ -122,5 +122,67 @@
       .map(l => ({ id: l.id, url: l.blob ? '/api/lib/blob/' + l.blob : l.url, label: l.name || '' }));
   }
 
-  window._myData = { keepPoint, forgetPoint, update, cached: () => _state, points, keepFile, forgetFile, filesToRestore, state, record: rec };
+
+  // ── Features that came back from a project ─────────────────────────────────
+  // Points, lines and areas moved out of a project (project_workspace.js, "back to My data"). Ids come from the
+  // project feature's, so moving the same one again finds it already here. Points are listed in 📍 Surface like any
+  // other; lines and areas are drawn here (own layer) and kept; folders become My data groups named by their path.
+  const hash = t => { let h = 0x811c9dc5; for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16).padStart(8, '0'); };
+  let shapeDs = null;
+  function shapes() {
+    return Object.values((_state && _state.features) || {}).filter(f => !f.removed && (f.kind === 'line' || f.kind === 'area') && f.coords && f.coords.length >= 2);
+  }
+  function drawShape(f, S) {
+    const V = window.cesiumViewer; if (!V || typeof Cesium === 'undefined') return;
+    if (!shapeDs) { shapeDs = new Cesium.CustomDataSource('my-shapes'); V.dataSources.add(shapeDs); }
+    const old = shapeDs.entities.getById('my-' + f.id); if (old) shapeDs.entities.remove(old);
+    if (f.removed || !f.coords || f.coords.length < 2) return;
+    const col = Cesium.Color.fromCssColorString((f.style && f.style.color) || (S.groups[f.group] || {}).color || '#ffb020');
+    const flat = f.coords.map(c => [c[0], c[1]]).flat();
+    const grp = (S.groups[f.group] || {}).name || '';
+    shapeDs.entities.add({ id: 'my-' + f.id, name: f.name || (f.kind === 'area' ? 'Area' : 'Line'), description: (f.desc || '') + (grp ? '<p>My data · ' + grp.replace(/[<>&]/g, '') + '</p>' : ''),
+      properties: { myShape: f.id },
+      polyline: { positions: Cesium.Cartesian3.fromDegreesArray(f.kind === 'area' ? flat.concat(flat.slice(0, 2)) : flat), width: 3, clampToGround: true, material: col },
+      polygon: f.kind === 'area' && f.coords.length >= 3 ? { hierarchy: Cesium.Cartesian3.fromDegreesArray(flat), material: col.withAlpha(0.2), classificationType: Cesium.ClassificationType.TERRAIN } : undefined });
+    V.scene.requestRender && V.scene.requestRender();
+  }
+  function drawPoint(f) {
+    const V = window.cesiumViewer; if (!V) return;
+    if (V.entities.values.some(e => e.properties && e.properties.myFeature && e.properties.myFeature.getValue() === f.id)) return;
+    V.entities.add({ name: f.name || 'Point', label: { scale: SIZE[(f.style && f.style.size) || 'M'] || 1, text: f.name || 'Point', show: !(f.style && f.style.label === false) },
+      position: Cesium.Cartesian3.fromDegrees(f.coords[0][0], f.coords[0][1], f.coords[0][2] || 0), properties: { isUserLabel: true, myFeature: f.id },
+      point: f.style && f.style.color ? { color: Cesium.Color.fromCssColorString(f.style.color) } : {} });
+  }
+  /**
+   * Take features in. items: [{ id (the project's), kind, coords, name, desc, group (a name), color }].
+   * → the My data ids ('pf-<id>'). Ones already here are left as they are.
+   */
+  async function adopt(items) {
+    let S = await state(true);
+    const out = [], gid = {};
+    for (const it of items) {
+      const g = it.group || 'Points';
+      if (!gid[g]) {
+        gid[g] = 'pg-' + hash(g);
+        const cur = S.groups[gid[g]];
+        if (!cur || cur.removed) await rec('group.set', Object.assign({ group: gid[g], name: g, kind: 'points', removed: false }, it.color ? { color: it.color } : {}));
+      }
+      const id = 'pf-' + it.id, cur = S.features[id];
+      out.push(id);
+      if (cur && !cur.removed) continue;
+      const style = Object.assign({}, it.style || {}, it.color ? { color: it.color } : {});
+      await rec('feature.set', { feature: id, kind: it.kind, coords: it.coords, name: String(it.name || '').slice(0, 120) || (it.kind === 'point' ? 'Point' : it.kind === 'area' ? 'Area' : 'Line'), desc: String(it.desc || '').slice(0, 4000), group: gid[g], style, removed: false });
+    }
+    S = await state(true);
+    out.forEach(id => { const f = S.features[id]; if (!f || f.removed) return; if (f.kind === 'point') drawPoint(f); else drawShape(f, S); });
+    return out;
+  }
+  // At start: the lines and areas kept here are drawn once the map is up (points are drawn by flex.js).
+  const upTimer = setInterval(() => {
+    if (!window.cesiumViewer || typeof Cesium === 'undefined') return;
+    clearInterval(upTimer);
+    state(true).then(S => shapes().forEach(f => drawShape(f, S))).catch(e => console.warn('[my data] shapes:', e));
+  }, 500);
+
+  window._myData = { adopt, shapes, keepPoint, forgetPoint, update, cached: () => _state, points, keepFile, forgetFile, filesToRestore, state, record: rec };
 })();

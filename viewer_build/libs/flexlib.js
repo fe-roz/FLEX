@@ -312,7 +312,7 @@
   const TRIP_LISTS = ['people', 'caves', 'links'];
   function emptyProject(pid) {
     return { id: pid, name: '', desc: '', lists: {}, caves: {}, aliases: {}, notes: {}, leads: {},
-             surveys: {}, order: [], caveUpdates: {}, surveyVersions: {}, segments: {}, cavefiles: {}, layers: {}, features: {}, groups: {}, arealabels: {}, trips: {}, proposals: {}, log: [], byId: new Map() };
+             surveys: {}, order: [], caveUpdates: {}, surveyVersions: {}, segments: {}, cavefiles: {}, layers: {}, features: {}, groups: {}, arealabels: {}, trips: {}, proposals: {}, archived: null, footprint: null, moves: {}, log: [], byId: new Map() };
   }
   function applyFieldSurvey(e, S) {
     const sv = e.sid != null ? S.surveys[e.sid] : null;
@@ -368,6 +368,25 @@
           if (e.desc != null) c.desc = String(e.desc);
           if (e.removed != null) c.removed = !!e.removed;
           c.updated = { t: e.t, who: e.who };
+          break;
+        }
+        // Lifecycle (doc 14, rule 9). Older readers fall through to `default` and ignore all three.
+        //   project.archive    { archived: true|false, note? }   archived = hidden from the list, read-only; last writer wins
+        //   project.footprint  { ring: [[lon, lat], …] | null }  a hand-drawn outline replacing the computed one; null clears it
+        //   cave.moved         { move, dir: 'out'|'in', cave, name, files, peer: { id, name } }   a cave moved to / from another
+        //                      project: the record both projects keep (`move` is one id per move, so a repeat is one record)
+        case 'project.archive': S.archived = e.archived === false ? null : { t: e.t, who: e.who, note: e.note ? String(e.note) : '' }; break;
+        case 'project.footprint': {
+          const ring = Array.isArray(e.ring) ? e.ring.filter(c => Array.isArray(c) && Number.isFinite(+c[0]) && Number.isFinite(+c[1])).map(c => [+c[0], +c[1]]) : [];
+          S.footprint = ring.length >= 3 ? { ring, t: e.t, who: e.who } : null;
+          break;
+        }
+        case 'cave.moved': {
+          if (e.move == null || e.move === '') break;
+          const peer = { id: String((e.peer && e.peer.id) || ''), name: String((e.peer && e.peer.name) || '') };
+          const dir = e.dir === 'in' ? 'in' : 'out';
+          S.moves[e.move] = { id: String(e.move), dir, cave: e.cave, name: String(e.name || ''), files: clone(e.files || []), peer, t: e.t, who: e.who };
+          if (S.caves[e.cave]) { if (dir === 'out') S.caves[e.cave].movedTo = peer; else { S.caves[e.cave].movedTo = null; S.caves[e.cave].movedFrom = peer; } }
           break;
         }
         case 'cave.alias': if (e.alias != null) S.aliases[String(e.alias)] = e.cave; break;
@@ -602,7 +621,7 @@
     return d.tagList.some(t => {
       const p = parseTarget(t);
       if (p.kind === 'project') return p.pid === S.id;
-      if (p.cave) return !!S.caves[p.cave];
+      if (p.cave) return !!S.caves[p.cave] && !S.caves[p.cave].movedTo;      // a cave moved to another project takes its documents along
       if (p.kind === 'lead') return !!S.leads[p.lead];
       if (p.kind === 'feature') return !!(S.features && S.features[p.feature]);
       return false;
@@ -632,6 +651,118 @@
     const i = (d && d.pages || []).findIndex(p => Array.isArray(p.targets) && p.targets.includes(target));
     return i < 0 ? 0 : i;
   }
+
+
+  // ── Lifecycle: snapshots, moving a cave between projects ──────────────────
+  // A snapshot is the log as it was: the entries up to a moment, replayed. `at`
+  // is an ISO time, or a day ("2026-03-12" = the end of that day, local time).
+  function snapshotTime(at) {
+    const s = String(at || '');
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    if (m) return new Date(+m[1], +m[2] - 1, +m[3], 23, 59, 59, 999).toISOString();
+    const d = new Date(s);
+    return isNaN(d) ? null : d.toISOString();
+  }
+  const entriesAt = (entries, at) => { const t = snapshotTime(at); return t ? (entries || []).filter(e => e && (!e.t || e.t <= t)) : (entries || []).slice(); };
+  const replayProjectAt = (entries, pid, at) => replayProject(entriesAt(entries, at), pid);
+  const replayDocsAt = (entries, at) => replayDocs(entriesAt(entries, at));
+  // The days (local) something was recorded on, newest first, for choosing a snapshot.
+  function changeDays(entries) {
+    const days = new Set();
+    (entries || []).forEach(e => { const d = new Date(e.t); if (!isNaN(d)) days.add(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')); });
+    return [...days].sort().reverse();
+  }
+  const targetCave = t => { const p = parseTarget(t); return p.cave || null; };
+  // Everything that goes with a project cave when it moves: its survey files (stored by fingerprint), aliases,
+  // segments, area labels, notes and leads on it, and the documents tagged to it (sketches included — they follow
+  // by the cave's id, so they need no copy of their entries; their files are copied by the host).
+  // `shared`: survey files other live caves also use — the host refuses to move those.
+  function caveBundle(S, D, cid) {
+    const c = S && S.caves[cid];
+    if (!c || c.removed) return null;
+    const aliases = Object.keys(S.aliases).filter(a => S.aliases[a] === cid);
+    const names = [];
+    (c.sources || []).map(s => s.file).concat(aliases).forEach(n => { if (n && !names.includes(n) && S.cavefiles[n] && !S.cavefiles[n].removed && S.cavefiles[n].h) names.push(n); });
+    const others = liveCaves(S).filter(x => x.id !== cid);
+    const shared = names.filter(n => others.some(x => (x.sources || []).some(s => s.file === n) || S.aliases[n] === x.id));
+    const segments = Object.values(S.segments).filter(g => g.cave === cid && !g.removed);
+    const leads = Object.values(S.leads).filter(L => !L.deleted && targetCave(L.target) === cid);
+    const leadIds = new Set(leads.map(L => L.id));
+    const notes = Object.values(S.notes).filter(n => !n.deleted && !n.conflict && (targetCave(n.target) === cid || (parseTarget(n.target).kind === 'lead' && leadIds.has(parseTarget(n.target).lead))));
+    const labels = Object.values(S.arealabels).filter(a => !a.removed && a.text && names.includes(a.file));
+    const docs = D ? Object.values(D.docs).filter(d => !d.deleted && d.tagList.some(t => targetCave(t) === cid)) : [];
+    const blobs = new Map();
+    names.forEach(n => { const f = S.cavefiles[n]; blobs.set(f.h + '.' + (f.ext || 'plt'), { h: f.h, ext: f.ext || 'plt' }); });
+    const readable = [];
+    docs.forEach(d => {
+      d.pages.forEach(p => { if (p.h) blobs.set(p.h + '.' + (p.ext || 'jpg'), { h: p.h, ext: p.ext || 'jpg' }); });
+      if (d.file && d.file.h) { blobs.set(d.file.h + '.' + d.file.ext, { h: d.file.h, ext: d.file.ext }); if (d.file.path) readable.push({ h: d.file.h, ext: d.file.ext, path: d.file.path }); }
+    });
+    return { cave: clone(c), id: cid, aliases, files: names.map(n => clone(S.cavefiles[n])), shared, segments: clone(segments), leads: clone(leads), notes: clone(notes),
+             labels: clone(labels), docs: docs.map(d => d.id), blobs: [...blobs.values()], readable,
+             counts: { files: names.length, segments: segments.length, leads: leads.length, notes: notes.length, labels: labels.length, docs: docs.length } };
+  }
+  // A survey file name free in the destination (a different file already uses it): "name (2).plt".
+  function moveRenames(B, destS) {
+    const rename = {};
+    B.files.forEach(f => {
+      const cur = destS && destS.cavefiles[f.file];
+      if (!cur || cur.removed || cur.h === f.h) return;
+      const m = /^(.*?)(\.[A-Za-z0-9]+)?$/.exec(f.file);
+      for (let k = 2; k < 100; k++) { const n = `${m[1]} (${k})${m[2] || ''}`; if (!destS.cavefiles[n] || destS.cavefiles[n].removed) { rename[f.file] = n; break; } }
+    });
+    return rename;
+  }
+  // The entries the destination needs (without id / dev / seq / t / who, which the host adds). What the destination
+  // already has the same is left out, so moving again — or finishing a move that stopped halfway — adds nothing twice.
+  function caveMoveEntries(B, destS, rename) {
+    const out = [], rn = n => (rename && rename[n]) || n, live = (o, k) => o && !o[k || 'removed'];
+    const c = B.cave, sources = (c.sources || []).map(s => Object.assign({}, clone(s), { file: rn(s.file) }));
+    const dc = destS && destS.caves[B.id];
+    if (!dc || dc.removed || dc.name !== c.name || (dc.desc || '') !== (c.desc || '') || !same(dc.sources, sources)) out.push({ op: 'cave.set', cave: B.id, name: c.name, sources, desc: c.desc || '', removed: false });
+    B.aliases.forEach(a => { if (!destS || destS.aliases[rn(a)] !== B.id) out.push({ op: 'cave.alias', cave: B.id, alias: rn(a) }); });
+    B.files.forEach(f => {
+      const d = destS && destS.cavefiles[rn(f.file)];
+      if (!(live(d) && d.h === f.h && same(d.place || null, f.place || null))) out.push({ op: 'cavefile.set', file: rn(f.file), h: f.h, ext: f.ext || 'plt', place: f.place || null, removed: false });
+    });
+    B.segments.forEach(g => {
+      const d = destS && destS.segments[g.id];
+      const mine = { name: g.name, date: g.date || '', team: g.team || '', desc: g.desc || '', source: g.source || '', shots: g.shots || [] };
+      if (!(live(d) && same({ name: d.name, date: d.date || '', team: d.team || '', desc: d.desc || '', source: d.source || '', shots: d.shots || [] }, mine)))
+        out.push(Object.assign({ op: 'segment.set', seg: g.id, cave: B.id }, mine, g.check != null ? { check: g.check } : {}));
+    });
+    B.labels.forEach(a => {
+      const d = destS && destS.arealabels[a.id];
+      if (!(live(d) && d.text === a.text && d.file === rn(a.file) && d.n === a.n && d.e === a.e && d.v === a.v)) out.push({ op: 'arealabel.set', label: a.id, file: rn(a.file), text: a.text, n: a.n, e: a.e, v: a.v, removed: false });
+    });
+    B.leads.forEach(L => {
+      const d = destS && destS.leads[L.id];
+      if (d && !d.deleted && same(d.fields, L.fields) && d.target === L.target) return;
+      if (d && d.deleted) out.push({ op: 'lead.restore', lead: L.id });
+      out.push(Object.assign({ op: 'lead.set', lead: L.id, target: L.target, fields: clone(L.fields) }, d ? { base: d.heads } : {}, L.source ? { source: L.source } : {}));
+      if (!d || d.deleted) (L.sightings || []).forEach(s => { const x = clone(s); delete x.who; delete x.t; delete x.entry; out.push({ op: 'lead.set', lead: L.id, target: L.target, sighting: x }); });
+    });
+    B.notes.forEach(n => {
+      const d = destS && destS.notes[n.id];
+      if (d && !d.deleted && !d.conflict && d.text === n.text && d.target === n.target) return;
+      out.push(Object.assign({ op: 'note.set', note: n.id, target: n.target, text: n.text }, d ? { base: d.heads } : {}, n.kind ? { kind: n.kind } : {}, n.page ? { page: n.page } : {}));
+    });
+    return out;
+  }
+  // What the source records to let the cave go: it is removed (its history stays; History can undo each step).
+  function caveMoveClear(B, S) {
+    const out = [];
+    B.leads.forEach(L => { if (S.leads[L.id] && !S.leads[L.id].deleted) out.push({ op: 'lead.del', lead: L.id }); });
+    B.notes.forEach(n => { if (S.notes[n.id] && !S.notes[n.id].deleted) out.push({ op: 'note.set', note: n.id, target: n.target, text: '', prev: n.text, base: S.notes[n.id].heads }); });
+    if (B.segments.length) out.push({ op: 'segment.del', segs: B.segments.map(g => g.id) });
+    B.labels.forEach(a => out.push({ op: 'arealabel.set', label: a.id, file: a.file, removed: true }));
+    B.files.forEach(f => out.push({ op: 'cavefile.set', file: f.file, removed: true }));
+    out.push({ op: 'cave.set', cave: B.id, removed: true });
+    return out;
+  }
+  const moveRecord = (move, dir, B, peer) => ({ op: 'cave.moved', move, dir, cave: B.id, name: B.cave.name, files: B.files.map(f => f.file), peer: { id: peer.id, name: peer.name || '' } });
+  // A project's moves, newest first (both directions), for History and the record on a project card.
+  const movesOf = S => Object.values((S && S.moves) || {}).sort((a, b) => (a.t < b.t ? 1 : a.t > b.t ? -1 : 0));
 
   // ── Workspace: what a project loads ───────────────────────────────────────
   const liveCavefiles = S => Object.values((S && S.cavefiles) || {}).filter(f => !f.removed && f.h).sort((a, b) => a.file.localeCompare(b.file));
@@ -874,6 +1005,7 @@
     const blobs = new Set();
     out[DOCS].forEach(e => (e.pages || e.add || []).forEach(p => p && p.h && blobs.add(p.h + '.' + (p.ext || 'jpg'))));
     out[pScope].forEach(e => { if (e.op === 'cavefile.set' && e.h) blobs.add(e.h + '.' + (e.ext || 'plt')); });   // survey files travel too
+    out[pScope].forEach(e => { if (e.op === 'layer.set' && e.blob) blobs.add(e.blob); });
     const next = clone(sent || {});
     Object.keys(out).forEach(sc => out[sc].forEach(e => {
       const m = next[sc] || (next[sc] = {});
@@ -1077,6 +1209,7 @@
     docInProject, docInbox, docsOf, docsForStation, docsForTarget, pageFor,
     segmentsOf, segmentIndex, segmentsAt, proposalTarget, segmentStates, liveCavefiles, liveLayers, areaLabelsOf, areaLabelId, areaLabelState, areaLabelUndo,
     tripState, tripEdit, tripUndo, tripsOf, tripsFor, tripSuggest, tripDays, fullDay,
+    snapshotTime, entriesAt, replayProjectAt, replayDocsAt, changeDays, caveBundle, moveRenames, caveMoveEntries, caveMoveClear, moveRecord, movesOf,
     liveFeatures, liveGroups, groupPath, featuresGeoJSON, featuresKML, featuresGPX, flexTag, makeFlexTag,
     selectForSync, syncManifest, newEntries,
     parseNum, shotFlags, shotReading, computeSurvey, stationLruds, suggestCaves,
