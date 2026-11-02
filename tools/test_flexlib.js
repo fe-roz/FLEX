@@ -368,10 +368,10 @@ const pid = 'proj1', cid = 'cave1', cid2 = 'cave2';
 // Map layers: a picture with its bounds; bad bounds ignored.
 {
   const PL = (op, d, t) => Object.assign({ id: 'ml' + Math.random().toString(36).slice(2, 8), t: t || '2026-11-01T00:00:00Z', who: 'T', dev: 'pc', op }, d);
-  const S = L.replayProject([PL('layer.set', { layer: 'img1', kind: 'imagery', blob: 'ab.webp', bounds: [-123.2, 41.5, -123.1, 41.6], name: 'Hillshade' }),
+  const S = L.replayProject([PL('layer.set', { layer: 'img1', kind: 'imagery', blob: 'ab.webp', bounds: [-100.6, 45.1, -100.5, 45.2], name: 'Hillshade' }),
     PL('layer.set', { layer: 'img2', kind: 'imagery', blob: 'cd.webp', bounds: [1, 2, 'x', 4], name: 'Bad' }),
     PL('layer.set', { layer: 't1', kind: 'tiles', url: 'https://t/{z}/{x}/{y}.png', name: 'Tiles' })], 'p-ml');
-  ok('map image keeps its bounds', JSON.stringify(S.layers.img1.bounds) === '[-123.2,41.5,-123.1,41.6]' && S.layers.img1.kind === 'imagery', S.layers.img1);
+  ok('map image keeps its bounds', JSON.stringify(S.layers.img1.bounds) === '[-100.6,45.1,-100.5,45.2]' && S.layers.img1.kind === 'imagery', S.layers.img1);
   ok('bad bounds are not kept', S.layers.img2.bounds === undefined);
   ok('tile link kept as a layer', S.layers.t1.url === 'https://t/{z}/{x}/{y}.png' && L.liveLayers(S).length === 3);
 }

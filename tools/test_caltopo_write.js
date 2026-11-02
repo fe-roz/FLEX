@@ -30,7 +30,7 @@ ok('DELETE query has json= (empty), id, expires', d.has('json') && d.get('json')
 ok('DELETE signature = HMAC("DELETE <path>\\n<expires>\\n")', d.get('signature') === hmac('DELETE ' + p + '\n' + (NOW + 120000) + '\n'));
 
 // Diff between two pulls.
-const F = (id, title, extra) => ({ type: 'Feature', id, geometry: { type: 'Point', coordinates: [-123.2, 41.5] }, properties: Object.assign({ class: 'Marker', title }, extra) });
+const F = (id, title, extra) => ({ type: 'Feature', id, geometry: { type: 'Point', coordinates: [-100.5678, 45.1234] }, properties: Object.assign({ class: 'Marker', title }, extra) });
 const r1 = { state: { features: [F('a', 'Test pit'), F('b', 'Other'), F('c', 'Gone soon')] } };
 const r2 = { state: { features: [F('a', 'Test pit'), F('b', 'Other renamed'), F('d', 'New one')] } };
 const dd = diff(r1, r2), by = w => dd.filter(x => x.what === w).map(x => x.fid).join();
@@ -41,13 +41,13 @@ ok('diff: first pull vs nothing → all added', diff(null, r1).length === 3);
 
 // A patch applied to a feature: properties set, null removes, geometry replaced, class/updated kept.
 const base = F('a', 'Test pit', { 'marker-color': 'FF0000', description: 'x', updated: 5, folderId: 'f1' });
-const m = compose(base, { title: 'Test pit 2', 'marker-color': '00FF00', description: null, folderId: 'f2', geometry: { type: 'Point', coordinates: [-123.21, 41.51] }, class: 'Shape', updated: 9 });
+const m = compose(base, { title: 'Test pit 2', 'marker-color': '00FF00', description: null, folderId: 'f2', geometry: { type: 'Point', coordinates: [-100.5778, 45.1334] }, class: 'Shape', updated: 9 });
 ok('compose: title, colour, folder set', m.properties.title === 'Test pit 2' && m.properties['marker-color'] === '00FF00' && m.properties.folderId === 'f2');
 ok('compose: null removes a property', !('description' in m.properties));
-ok('compose: geometry replaced', m.geometry.coordinates[0] === -123.21);
+ok('compose: geometry replaced', m.geometry.coordinates[0] === -100.5778);
 ok('compose: class and updated not changed by a patch', m.properties.class === 'Marker' && m.properties.updated === 5);
-ok('compose: the base is not modified', base.properties.title === 'Test pit' && base.geometry.coordinates[0] === -123.2);
-ok('compose: a patch without geometry keeps it', compose(base, { title: 'y' }).geometry.coordinates[1] === 41.5);
+ok('compose: the base is not modified', base.properties.title === 'Test pit' && base.geometry.coordinates[0] === -100.5678);
+ok('compose: a patch without geometry keeps it', compose(base, { title: 'y' }).geometry.coordinates[1] === 45.1234);
 
 ok('class: from the feature, else Marker for points, Shape for lines', classOf(base) === 'Marker' && classOf({ geometry: { type: 'LineString' } }) === 'Shape'
   && classOf({ geometry: { type: 'Point' } }) === 'Marker' && classOf(base, 'Folder') === 'Folder');

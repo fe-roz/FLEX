@@ -9,7 +9,7 @@
 //   node tools/migrate_to_project_folders.js --go            do it
 //   node tools/migrate_to_project_folders.js --go --originals "<archive folder>"
 //        also copy each document's original file (named in its description as
-//        "From the KMCTF archive: <path>") into the project folder at the same
+//        "From the <name> archive: <path>") into the project folder at the same
 //        path, and record it on the document (op doc.file)
 //   --only <project id>    just that project
 //
@@ -97,7 +97,7 @@ function freePath(dir, rel, want) {
     const live = Object.values(S.cavefiles || {}).filter(c => c && !c.removed && c.h);
     const originals = [];
     if (ARCHIVE) for (const d of myDocs) {
-      const m = /^From the KMCTF archive: (.+)$/.exec(d.desc || '');
+      const m = /^From the .+? archive: (.+)$/.exec(d.desc || '');   // any archive's name
       if (!m) continue;
       const rel = m[1].replace(/\\/g, '/');
       if (rel.split('/').includes('..')) { fail(`${d.id}: odd path ${rel}`); continue; }

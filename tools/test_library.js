@@ -159,12 +159,12 @@ const lines = t => t.split('\n').filter(Boolean).map(JSON.parse);
   fs.mkdirSync(path.join(AR, 'Caves', 'Big Cave', 'Big Cave - A Entrance'), { recursive: true });
   fs.writeFileSync(path.join(AR, 'Caves', 'Big Cave', 'Big Cave - A Entrance', 'A notes.pdf'), og);
   const E = (dev, seq, op, x) => JSON.stringify(Object.assign({ id: dev + '.' + seq, dev, seq, t: '2026-10-2' + seq + 'T00:00:00Z', who: 't', op }, x));
-  fs.writeFileSync(path.join(ML, 'projects.json'), JSON.stringify([{ id: 'mm', name: 'Marble Mountains (KMCTF)' }, { id: 'vv', name: 'Volcano' }]));
+  fs.writeFileSync(path.join(ML, 'projects.json'), JSON.stringify([{ id: 'mm', name: 'Cave Ridge area (Test club)' }, { id: 'vv', name: 'Other area' }]));
   fs.writeFileSync(path.join(ML, 'device.json'), JSON.stringify({ id: 'pcTEST' }));
-  fs.writeFileSync(path.join(ML, 'p-mm', 'log-ai.jsonl'), [E('ai', 1, 'project.set', { name: 'Marble Mountains (KMCTF)' }), E('ai', 2, 'cave.set', { cave: 'big', name: 'Big Cave' }), E('ai', 3, 'note.set', { note: 'n1', target: 'station:big:A1', text: 'x' })].join('\n') + '\n');
+  fs.writeFileSync(path.join(ML, 'p-mm', 'log-ai.jsonl'), [E('ai', 1, 'project.set', { name: 'Cave Ridge area (Test club)' }), E('ai', 2, 'cave.set', { cave: 'big', name: 'Big Cave' }), E('ai', 3, 'note.set', { note: 'n1', target: 'station:big:A1', text: 'x' })].join('\n') + '\n');
   fs.writeFileSync(path.join(ML, 'p-mm', 'log-pcTEST.jsonl'), E('pcTEST', 2, 'cavefile.set', { file: 'VALLEY', h: H(plt), ext: 'plt', removed: false }) + '\n');
   fs.writeFileSync(path.join(ML, 'p-vv', 'log-pcTEST.jsonl'), E('pcTEST', 1, 'layer.set', { layer: 'L', kind: 'caltopo', url: 'x' }) + '\n');
-  fs.writeFileSync(path.join(ML, 'docs', 'log-ai.jsonl'), [E('ai', 1, 'doc.add', { doc: 'D1', title: 'A notes', desc: 'From the KMCTF archive: Caves/Big Cave/Big Cave - A Entrance/A notes.pdf', pages: [{ h: H(pg1), ext: 'jpg' }, { h: H(pg2), ext: 'jpg' }], tags: ['cave:big'] }),
+  fs.writeFileSync(path.join(ML, 'docs', 'log-ai.jsonl'), [E('ai', 1, 'doc.add', { doc: 'D1', title: 'A notes', desc: 'From the Test club archive: Caves/Big Cave/Big Cave - A Entrance/A notes.pdf', pages: [{ h: H(pg1), ext: 'jpg' }, { h: H(pg2), ext: 'jpg' }], tags: ['cave:big'] }),
     E('ai', 2, 'doc.add', { doc: 'D2', title: 'loose', pages: [], tags: ['cave:nowhere'] })].join('\n') + '\n');
   fs.writeFileSync(path.join(ML, 'docs', 'log-pcTEST.jsonl'), E('pcTEST', 5, 'doc.rotate', { doc: 'D1', h: H(pg1), rot: 90, prev: 0 }) + '\n');
   const snap = d => fs.readdirSync(d, { recursive: true }).sort().map(n => { const f = path.join(d, n); return fs.statSync(f).isFile() ? n + ':' + H(fs.readFileSync(f)) : n; }).join('|');
@@ -174,7 +174,7 @@ const lines = t => t.split('\n').filter(Boolean).map(JSON.parse);
   const dry = run([]);
   ok('migration dry run: writes nothing', dry.code === 0 && !fs.existsSync(MP) && snap(ML) === before, dry.out);
   const go = run(['--go', '--originals', AR]);
-  const mmDir = path.join(MP, 'Marble Mountains (KMCTF)');
+  const mmDir = path.join(MP, 'Cave Ridge area (Test club)');
   const reg = JSON.parse(fs.readFileSync(path.join(ML, 'projects.json'), 'utf8'));
   ok('migration: both projects switched to folders', go.code === 0 && reg.every(p => p.dir), go.out);
   const MIG = JSON.parse(fs.readFileSync(path.join(mmDir, '.flex', fs.readdirSync(path.join(mmDir, '.flex')).find(n => n.startsWith('migration-'))), 'utf8'));

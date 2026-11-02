@@ -5401,7 +5401,7 @@ function parsePLT(text) {
     } else if (cmd === 'S' && lastPt && !lastPt.name) {
       // Standalone S line: only use if point doesn't already have an inline name
       const sname = rest.trim();
-      if (sname && !/^[A-Z]\s/.test(sname)) {  // skip survey-header S lines like "SBIGFOOT-MF"
+      if (sname && !/^[A-Z]\s/.test(sname)) {  // skip survey-header S lines like "STEST-MF"
         lastPt.name = sname;
         result.stations.push({ ...lastPt, name: sname, survey: currentSurvey?.code || '', surveyDesc: currentSurvey?.desc || '' });
       }

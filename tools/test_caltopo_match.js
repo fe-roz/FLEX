@@ -10,7 +10,7 @@ let pass = 0, fail = 0;
 const ok = (label, cond, info) => { if (cond) pass++; else { fail++; console.error('FAIL ' + label + (info !== undefined ? '\n  ' + JSON.stringify(info) : '')); } };
 
 // Metres → degrees around a made-up spot.
-const LAT = 41.5, LON = -123.2, mLat = 1 / 111195, mLon = 1 / (111195 * Math.cos(LAT * Math.PI / 180));
+const LAT = 45.1234, LON = -100.5678, mLat = 1 / 111195, mLon = 1 / (111195 * Math.cos(LAT * Math.PI / 180));
 const at = (e, n) => [LON + e * mLon, LAT + n * mLat];
 const line = (e0, n0, len, step = 10) => { const o = []; for (let d = 0; d <= len; d += step) o.push(at(e0 + d, n0)); return o; };
 
