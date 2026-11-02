@@ -14,8 +14,9 @@
 //     workflowState, state, initSpaceMouse, sampleHeightAboveGround, otHandleClick, globeGroundNow,
 //     stopAoiDrawMode, renderPcList, renderPoiList, cycleCompassStyle, toggleMeasureMode })
 //     -> { handler, spaceMouse, getFlyMultiplier, setCameraButtons }
-//   state (accessor object, variables stay in flex.js): pointCounter, creatingRoute, routePoints,
-//     currentEntity, miniMapUserHidden (get/set); miniMapMap (get).
+//   state (accessor object, variables stay in flex.js): miniMapUserHidden (get/set); miniMapMap (get).
+//   pointCounter, creatingRoute, routePoints and currentEntity are only used here, so they live in
+//   this module (the `route` object below) since flex.js split wave 3.
 
 export function getFlagForKeyCode(keyCode) {
 switch (keyCode) {
@@ -112,6 +113,7 @@ export function setupCesiumInteractions({
   initSpaceMouse, sampleHeightAboveGround, otHandleClick, globeGroundNow,
   stopAoiDrawMode, renderPcList, renderPoiList, cycleCompassStyle, toggleMeasureMode,
 }) {
+const route = { pointCounter: 0, creatingRoute: "", routePoints: [], currentEntity: new Cesium.Entity() };
 const _clampFlyMult = clampFlyMult;
 const _otHandleClick = otHandleClick;
 const _globeGroundNow = globeGroundNow;
@@ -480,10 +482,10 @@ function (e) {
       potreeViewer.setClassificationVisibility(6,flags[flagName]);
       potreeViewer.setClassificationVisibility(7,flags[flagName]);
     }else if (flagName == "pointS"){ // add entity point where camera is currently located
-      state.pointCounter +=1;
-      let preview = "Point of Small interest ".concat(state.pointCounter.toString());
+      route.pointCounter +=1;
+      let preview = "Point of Small interest ".concat(route.pointCounter.toString());
       let labelName = preview;
-      console.log("Added point of Small interest: S".concat(state.pointCounter.toString()));
+      console.log("Added point of Small interest: S".concat(route.pointCounter.toString()));
       const _poi = cesiumViewer.entities.add({
         label: { scale: 0.75, text: "S: ".concat(labelName) },
         position: cesiumViewer.camera.position.clone(),
@@ -493,10 +495,10 @@ function (e) {
       if (window._myData) window._myData.keepPoint(_poi, 'S');    // kept in My data (this sitting's "Points …" group)
       renderPoiList();
     }else if (flagName == "pointM"){ // add entity point where camera is currently located
-      state.pointCounter +=1;
-      let preview = "Point of Medium interest ".concat(state.pointCounter.toString());
+      route.pointCounter +=1;
+      let preview = "Point of Medium interest ".concat(route.pointCounter.toString());
       let labelName = prompt("Name", preview);
-      console.log("Added point of Medium interest: M".concat(state.pointCounter.toString()));
+      console.log("Added point of Medium interest: M".concat(route.pointCounter.toString()));
       const _poi = cesiumViewer.entities.add({
         label: { scale: 1, text: "M: ".concat(labelName) },
         position: cesiumViewer.camera.position.clone(),
@@ -506,10 +508,10 @@ function (e) {
       if (window._myData) window._myData.keepPoint(_poi, 'M');    // kept in My data (this sitting's "Points …" group)
       renderPoiList();
     }else if (flagName == "pointL"){ // add entity point where camera is currently located
-      state.pointCounter +=1;
-      let preview = "Point of Large interest ".concat(state.pointCounter.toString());
+      route.pointCounter +=1;
+      let preview = "Point of Large interest ".concat(route.pointCounter.toString());
       let labelName = prompt("Name", preview);
-      console.log("Added point of Large interest: L".concat(state.pointCounter.toString()));
+      console.log("Added point of Large interest: L".concat(route.pointCounter.toString()));
       const _poi = cesiumViewer.entities.add({
         label: { scale: 1.5, text: "L: ".concat(labelName) },
         position: cesiumViewer.camera.position.clone(),
@@ -519,34 +521,34 @@ function (e) {
       if (window._myData) window._myData.keepPoint(_poi, 'L');    // kept in My data (this sitting's "Points …" group)
       renderPoiList();
     }else if (flagName == "route"){ // startor stop recording route. If starting, add route point where camera is currently located.
-      if (state.creatingRoute == ""){
+      if (route.creatingRoute == ""){
         let preview = "Route ";
         let labelName = prompt("Press B to add route points, press V again to finish route. Name:", preview);
         console.log("Started creating Route");
-        state.routePoints.push(cesiumViewer.camera.position.clone());
-        state.creatingRoute = labelName;
+        route.routePoints.push(cesiumViewer.camera.position.clone());
+        route.creatingRoute = labelName;
       }else{
-        state.routePoints = [];
+        route.routePoints = [];
         console.log("Finished creating route");
-        state.creatingRoute = "";
+        route.creatingRoute = "";
       }
       
     }else if (flagName == "routePoint"){ // Adds point to route
-      if (state.creatingRoute == ""){
+      if (route.creatingRoute == ""){
         console.log("Start route to add points");
       }else{
-        state.routePoints.push(cesiumViewer.camera.position.clone());
+        route.routePoints.push(cesiumViewer.camera.position.clone());
         console.log("Added point to route");
-        cesiumViewer.entities.remove(state.currentEntity);
-        state.currentEntity = cesiumViewer.entities.add({
+        cesiumViewer.entities.remove(route.currentEntity);
+        route.currentEntity = cesiumViewer.entities.add({
           label: {
             scale: 1.5,
-            text: state.creatingRoute,
+            text: route.creatingRoute,
             show: true,
           },
-          name: state.creatingRoute,
+          name: route.creatingRoute,
           polyline: {
-            positions: state.routePoints,
+            positions: route.routePoints,
             width: 2,
             arcType: Cesium.ArcType.NONE,
             material: Cesium.Color.RED,
