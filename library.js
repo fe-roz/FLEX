@@ -422,7 +422,27 @@ async function handle(req, res, rest, query) {
       const pd = projDir(pidOf(q)); if (!pd) return json(res, { error: 'no folder' }, 404);
       const rel = String(q.path || '').replace(/\\/g, '/').split('/').filter(x => x && x !== '.' && x !== '..').map(safeName).join('/');
       if (!rel || rel.split('/')[0].toLowerCase() === '.flex') return json(res, { error: 'bad path' }, 400);
-      const dest = path.join(pd, rel);
+      let dest = path.join(pd, rel);
+      // A scan filed for a document (sketches.js): h=<sha256>&ext=<ext>. The bytes are checked, a different file is never
+      // replaced (a free "name (2).ext" is used), and the file is reachable as /api/lib/blob/<h>.<ext> (files.json), one copy.
+      if (q.h) {
+        const h = String(q.h), x = String(q.ext || '');
+        if (!HASH_RE.test(h) || !EXTS.has(x)) return json(res, { error: 'bad file' }, 400);
+        const buf = await body(req, MAX_BLOB + 1);
+        if (sha256(buf) !== h) return json(res, { error: 'hash mismatch' }, 400);
+        let up = path.dirname(dest);                         // the deepest folder that exists must resolve inside the project
+        while (!fs.existsSync(up) && up !== pd) up = path.dirname(up);
+        const rb = fs.realpathSync(pd), ru = fs.realpathSync(up), rr = path.relative(rb, ru);
+        if (rr.startsWith('..') || path.isAbsolute(rr) || rr.split(path.sep)[0] === '.flex') return json(res, { error: 'bad path' }, 400);
+        const ex = path.extname(rel), stem = rel.slice(0, rel.length - ex.length);
+        let out = rel;
+        for (let k = 2; fs.existsSync(dest) && (fs.lstatSync(dest).isSymbolicLink() || sha256(fs.readFileSync(dest)) !== h) && k < 200; k++) { out = `${stem} (${k})${ex}`; dest = path.join(pd, out); }
+        if (fs.existsSync(dest) && fs.lstatSync(dest).isSymbolicLink()) return json(res, { error: 'bad path' }, 400);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        if (!fs.existsSync(dest)) { fs.writeFileSync(dest + '.part', buf); fs.renameSync(dest + '.part', dest); }
+        indexFile(pidOf(q), h + '.' + x, out);
+        return json(res, { ok: true, path: out });
+      }
       if (fs.existsSync(dest) && String(q.overwrite || '') !== '1') return json(res, { ok: true, path: rel, existed: true });
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.writeFileSync(dest, await body(req, 256 << 20));

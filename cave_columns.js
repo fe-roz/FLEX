@@ -167,6 +167,7 @@
                 ['🏷 Labels', () => window._openLabelsPanel(i)], ['⟳ Replace survey file…', () => window._replaceCaveSurvey(i)], ['Unload', () => w.removeCave(name)]);
     }
     acts.push(['⇩ Export survey…', () => exportSurvey(name), inP ? 'Survex, CSV and PLT files into the cave’s Survey folder in the project' : 'Survex, CSV and PLT files, downloaded']);
+    acts.push(['Add sketch…', () => window._sketches && window._sketches.addForFile(name), 'A scan of a sketch (image or PDF), kept in the project with this cave']);
     if (pw && pw.caveMenu) acts.push(...pw.caveMenu(name, loaded));   // project: Copy CalTopo tag, Caves in this file…, Remove from project
     if (!inP) acts.push(['Forget', () => { if (loaded) w.removeCave(name); w.forgetRecent(name); }, 'Takes it out of My data (its file and history stay)']);
     const m = document.createElement('div'); m.className = 'cc-pop';
