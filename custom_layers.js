@@ -55,6 +55,12 @@
   const drawn = new Map();                       // 'p:<id>' / 'm:<id>' → { layer, sig, id } (the same file can be in the project and in My data)
   const keyOf = l => l.owner + ':' + l.id;
   let chain = Promise.resolve();
+  // What the globe was last synced to: the open project and its layers. Every
+  // sync sets it, not only the 1.5 s check below. Before, a project opened, given
+  // a layer (drawn by that add's own sync) and closed within one check looked
+  // unchanged to the check, so the project's layer stayed on the globe.
+  let lastKey = '';
+  const projKey = () => { const pj = PJ(); return (pj.pid || '') + '|' + ((pj.P && FL()) ? FL().liveLayers(pj.P).filter(l => KINDS.has(l.kind)).map(sigOf).join(';') : ''); };
   // Terrain patches (layer kind 'terrain'): put over the globe's terrain in list order, shown ones only.
   let terrainSig = '';
   async function syncTerrain(want) {
@@ -72,6 +78,7 @@
   async function doSync(force) {
     const v = V(); if (!v || !window.Cesium) return;
     {
+      lastKey = projKey();
       const want = await entries(force), ids = new Set(want.map(keyOf));
       await syncTerrain(want);
       let listChanged = false;
@@ -569,9 +576,8 @@
   })();
 
   // ── Wiring: project switches, project and My data changes ────────────────
-  let lastKey = '';
   setInterval(async () => {
-    const pj = PJ(), key = (pj.pid || '') + '|' + ((pj.P && FL()) ? FL().liveLayers(pj.P).filter(l => KINDS.has(l.kind)).map(sigOf).join(';') : '');
+    const key = projKey();
     if (key !== lastKey) { lastKey = key; await sync(true); render(true); }
     // the order the person gave them in the list is kept (this computer)
     const v = V(); if (v) drawn.forEach(d => { const id = d.id, z = v.imageryLayers.indexOf(d.layer); if (z >= 0 && views()[id] && views()[id].z !== z) setView(id, { z }); });

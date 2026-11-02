@@ -516,11 +516,26 @@
     drawFootprints();
   }, 300);
   // Saved changes, a project opened or closed: numbers again; footprints only with no project.
-  let lastPid, lastLen = -1;
+  // A project opened or closed is noticed within 250 ms (it was 1.5 s: the
+  // footprints were missing for up to that long after closing a project); the
+  // recounting below stays on its 1.5 s beat.
+  let lastPid, lastLen = -1, beat = 0;
   setInterval(() => {
     if (pj.pid !== lastPid) {
-      lastPid = pj.pid; lastLen = (pj.proj || []).length; drawFootprints(); if (!pj.pid) ensureInfos(); return;
+      // The project just closed may have changed since its last count (a cave
+      // added, then closed before the next beat): count it again in the
+      // background, or its card and footprint stay as they were. The old
+      // numbers show until the new ones are in.
+      const prev = lastPid;
+      if (prev && X.info[prev] && !X.busy.has(prev)) {
+        const p = (pj.projects || []).find(x => x.id === prev) || { id: prev };
+        X.busy.add(prev);
+        info(p).catch(e => console.warn('[projects]', e)).finally(() => { X.busy.delete(prev); drawFootprints(); if (!pj.pid) A.render(); });
+      }
+      lastPid = pj.pid; lastLen = (pj.proj || []).length; beat = 0; drawFootprints(); if (!pj.pid) ensureInfos(); return;
     }
+    if (++beat < 6) return;
+    beat = 0;
     if (!pj.pid) { ensureInfos(); return; }            // any not counted yet (a load that was skipped while busy)
     const n = (pj.proj || []).length;
     if (pj.pid && n !== lastLen && !X.busy.has(pj.pid)) {
@@ -530,7 +545,7 @@
       X.busy.add(pid);
       info(p).catch(e => console.warn('[projects]', e)).finally(() => { X.busy.delete(pid); if (pj.pid === pid) A.render(); });
     }
-  }, 1500);
+  }, 250);
 
   const st = document.createElement('style');
   st.textContent = `

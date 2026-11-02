@@ -3699,7 +3699,7 @@ const _pcName = (function() {
   } catch(_) { return url; }
 })();
 
-Potree.loadPointCloud(url, _pcName, function(e){
+const _loadPC = () => Potree.loadPointCloud(url, _pcName, function(e){
   let potreeScene = potreeViewer.scene;
   let pointcloudProjection = proj4.defs("EPSG:3857");
   potreeScene.addPointCloud(e.pointcloud);
@@ -3862,10 +3862,24 @@ Potree.loadPointCloud(url, _pcName, function(e){
     //     "last", false, false);
     //   tree.jstree(shapeNode.visible ? "check_node" : "uncheck_node", nodeID);
     // });
-    
+
   }
   }
 );
+
+// Potree's EptLoader fetches ept.json inside a promise nobody can catch, so an
+// unreachable cloud was an uncaught page error and nothing on screen. Fetch it
+// here first (the browser caches it for Potree) and say so if it fails.
+if (/ept\.json/i.test(url)) {
+  fetch(url)
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(() => _loadPC(), err => {
+      console.warn(`[pointcloud] couldn't load "${_pcName}" (${url}): ${err && err.message || err}`);
+      if (window._pjApi && window._pjApi.toast) window._pjApi.toast(`Couldn't load the point cloud "${_pcName}" — its server didn't answer`);
+    });
+} else {
+  _loadPC();
+}
 
 }
 
@@ -8440,7 +8454,35 @@ moverRateMultiplyer = _clampFlyMult(moverRateMultiplyer/1.15);
 // Height above (or below) the ground for fly speed. With the globe hidden or
 // its tiles not in yet, the last ground height seen nearby stands in.
 let _flyGround = null;   // { lon, lat, h }
+// globe.getHeight samples whatever tile is loaded. A coarse tile is a few big
+// flat triangles that sag below the real surface (136 m on the plain ellipsoid
+// at the level loaded a few seconds after a jump), and that passed as ground:
+// flying at 20 m felt like 156 m, about 4x too fast. So while flying, the
+// terrain's most detailed height under the camera is fetched in the background
+// (at most once a second, and only after moving 30 m) and used while it is
+// fresh and close; getHeight is the stand-in until it arrives. It works with
+// the globe hidden too (H), since it asks the terrain, not the drawn tiles.
+let _flyGroundFine = null, _flyGroundBusy = false;   // { lon, lat, h, t }
+const _flyGroundDist = (a, carto) => Math.hypot(a.lat - carto.latitude, (a.lon - carto.longitude) * Math.cos(carto.latitude)) * 6371000;
+function _flyRefineGround(carto) {
+  const f = _flyGroundFine, now = performance.now();
+  if (_flyGroundBusy || (f && (now - f.t < 1000 || _flyGroundDist(f, carto) < 30))) return;
+  const tp = scene.terrainProvider;
+  if (!tp) return;
+  _flyGroundBusy = true;
+  const at = new Cesium.Cartographic(carto.longitude, carto.latitude);
+  (tp.availability ? Cesium.sampleTerrainMostDetailed(tp, [at]) : Cesium.sampleTerrain(tp, 14, [at]))
+    .then(r => { const h = r && r[0] && r[0].height; if (Number.isFinite(h)) _flyGroundFine = { lon: at.longitude, lat: at.latitude, h, t: performance.now() }; })
+    .catch(() => {})
+    .finally(() => { _flyGroundBusy = false; });
+}
 function _flyHeightAboveGround(carto) {
+  _flyRefineGround(carto);
+  const f = _flyGroundFine;
+  if (f && _flyGroundDist(f, carto) < 200) {
+    _flyGround = { lon: f.lon, lat: f.lat, h: f.h };
+    return carto.height - f.h;
+  }
   const g = scene.globe.show ? _globeGroundNow(carto) : undefined;
   if (g !== undefined) {
     _flyGround = { lon: carto.longitude, lat: carto.latitude, h: g };
