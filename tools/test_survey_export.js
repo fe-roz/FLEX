@@ -1,7 +1,7 @@
 // Tests of survey_export.js — a cave's survey as Survex, CSV and Compass plot
 // files — and the server route that writes them into the project folder
 // (library.js surveyExport). Made-up survey: stations A1…, made-up numbers.
-// The PLT goes back through FLEX's own parsePLT (pulled out of flex.js).
+// The PLT goes back through FLEX's own parsePLT (client/src/modules/compass-plt.js).
 //
 //   node tools/test_survey_export.js
 'use strict';
@@ -9,8 +9,7 @@ const fs = require('fs'), os = require('os'), path = require('path');
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flexsx-'));
 process.env.FLEX_LIBRARY_DIR = path.join(dir, 'library');
 process.env.FLEX_PROJECTS_DIR = path.join(dir, 'projects');
-const src = fs.readFileSync(path.join(__dirname, '..', 'flex.js'), 'utf8');
-const parsePLT = new Function(src.match(/function parsePLT\([\s\S]*?\n\}\n/)[0] + 'return parsePLT;')();
+const { parsePLT } = require(path.join(__dirname, '..', 'client', 'src', 'modules', 'compass-plt.js'));
 const SE = require(path.join(__dirname, '..', 'survey_export.js'));
 const lib = require(path.join(__dirname, '..', 'library.js'));
 

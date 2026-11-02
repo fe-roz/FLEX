@@ -1,4 +1,4 @@
-// Walls import (walls.js): synthetic shapefile exports → PLT → flex.js's own
+// Walls import (walls.js): synthetic shapefile exports → PLT → FLEX's own
 // parsePLT. Builds the .dbf tables in memory (made-up cave, neutral
 // coordinates), so it needs no files and no Walls.
 //   node tools/test_walls_import.mjs
@@ -7,14 +7,12 @@ import path from 'path';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { readWallsShapefileSets, wallsToPlt, parsePrj, isWallsSelection } from '../walls.js';
+import { parsePLT } from '../client/src/modules/compass-plt.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 // proj4's UMD build: under require() it wants the 'wkt-parser' package (not installed); run its
 // browser branch instead, as the page does (no exports/module/define → it sets the global).
 const proj4 = (() => { const g = {}; new Function('exports', 'module', 'define', fs.readFileSync(path.join(root, 'PotreeCopied/libs/proj4/proj4.js'), 'utf8')).call(g); return g.proj4; })();
-const src = fs.readFileSync(path.join(root, 'flex.js'), 'utf8');
-const a = src.indexOf('function parsePLT('), b = src.indexOf('\nfunction ', a + 10);
-const parsePLT = new Function(src.slice(a, b) + '\nreturn parsePLT;')();
 const FT = 0.3048;
 let ok = 0, bad = 0;
 const t = (c, m) => { if (c) ok++; else { bad++; console.log('FAIL', m); } };
