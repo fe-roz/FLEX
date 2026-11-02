@@ -388,5 +388,53 @@ const pid = 'proj1', cid = 'cave1', cid2 = 'cave2';
   ok('renaming keeps the zoom levels', S2.layers.hs1.maxZoom === 19 && S2.layers.hs1.name === 'Renamed');
 }
 
+// Area labels on a project survey file (arealabel.set): add, rename, move,
+// remove; two devices; undo; stable ids for labels moved in from a cave's look.
+{
+  const D1 = device('pcA', 'Ana'), D2 = device('pcB', 'Bo');
+  const a1 = D1('arealabel.set', { label: 'l1', file: 'Ridge.plt', text: 'Big Room', n: 9, e: 0, v: -2, prev: null });
+  const a2 = D1('arealabel.set', { label: 'l2', file: 'Ridge.plt', text: 'Test hall', n: 20, e: 5, v: 0, prev: null });
+  const a3 = D1('arealabel.set', { label: 'l3', file: 'Other.plt', text: 'Elsewhere', n: 1, e: 1, v: 1, prev: null });
+  let S = L.replayProject([a1, a2, a3], pid);
+  ok('area labels: two on the file, in the order made', L.areaLabelsOf(S, 'Ridge.plt').map(a => a.text).join() === 'Big Room,Test hall');
+  ok('area labels: every file', L.areaLabelsOf(S).length === 3);
+  ok('area labels: position kept', S.arealabels.l1.n === 9 && S.arealabels.l1.v === -2);
+  // Device 2 renames l1 while device 1 moves it: both edits count (different fields).
+  const b1 = D2('arealabel.set', { label: 'l1', text: 'Big Room (upper)', prev: L.areaLabelState(S.arealabels.l1), base: [a1.id] });
+  const a4 = D1('arealabel.set', { label: 'l1', n: 12, e: 1, v: -1, prev: L.areaLabelState(S.arealabels.l1), base: [a1.id] });
+  const merged = L.replayProject([a1, a2, a3, a4], pid), both = L.replayProject([b1, a1, a2, a3, a4], pid);
+  ok('area labels: one device’s move', merged.arealabels.l1.n === 12 && merged.arealabels.l1.text === 'Big Room');
+  ok('area labels: rename on one device, move on the other: both kept', both.arealabels.l1.text === 'Big Room (upper)' && both.arealabels.l1.n === 12, both.arealabels.l1);
+  ok('area labels: same result whichever log is read first', JSON.stringify(L.areaLabelsOf(L.replayProject([a4, a3, b1, a2, a1], pid))) === JSON.stringify(L.areaLabelsOf(both)));
+  // Both rename it: the later one wins on every device.
+  const a5 = D1('arealabel.set', { label: 'l2', text: 'Hall A' }, Date.parse('2026-10-25T12:00:00Z'));
+  const b2 = D2('arealabel.set', { label: 'l2', text: 'Hall B' }, Date.parse('2026-10-25T12:00:05Z'));
+  ok('area labels: two renames, the later wins', L.replayProject([b2, a5, a2], pid).arealabels.l2.text === 'Hall B' && L.replayProject([a2, a5, b2], pid).arealabels.l2.text === 'Hall B');
+  // Removal, and undo of it.
+  S = L.replayProject([a1, a2, a3, a4], pid);
+  const rm = D1('arealabel.set', { label: 'l2', removed: true, prev: L.areaLabelState(S.arealabels.l2), base: [a2.id] });
+  S = L.replayProject([a1, a2, a3, a4, rm], pid);
+  ok('area labels: removed is not listed', L.areaLabelsOf(S, 'Ridge.plt').map(a => a.id).join() === 'l1' && S.arealabels.l2.removed);
+  const un = Object.assign(D1('x', {}), L.areaLabelUndo(rm));
+  S = L.replayProject([a1, a2, a3, a4, rm, un], pid);
+  ok('area labels: undo of a removal brings it back as it was', S.arealabels.l2 && !S.arealabels.l2.removed && S.arealabels.l2.text === 'Test hall' && S.arealabels.l2.n === 20, S.arealabels.l2);
+  const un2 = Object.assign(D1('x', {}), L.areaLabelUndo(a4));
+  S = L.replayProject([a1, a2, a3, a4, rm, un, un2], pid);
+  ok('area labels: undo of a move puts it back', S.arealabels.l1.n === 9 && S.arealabels.l1.e === 0 && S.arealabels.l1.v === -2, S.arealabels.l1);
+  const un3 = Object.assign(D1('x', {}), L.areaLabelUndo(a3));
+  ok('area labels: undo of adding one removes it', L.areaLabelsOf(L.replayProject([a1, a2, a3, un3], pid), 'Other.plt').length === 0);
+  ok('area labels: an entry without prev has no undo', L.areaLabelUndo(a5) === null);
+  ok('area labels: history per label', S.arealabels.l1.history.length === 3 && S.arealabels.l1.history[0] === a1.id);
+  // Labels kept in a cave's look before: the same id on every device.
+  const lb = { text: 'Big Room', n: 9, e: 0, v: 0 };
+  const id1 = L.areaLabelId('Ridge.plt', lb), id2 = L.areaLabelId('Ridge.plt', { text: 'Big Room', n: 9.0001, e: 0, v: 0 });
+  ok('area labels: moved-in label ids are stable', id1 === id2 && /^al[0-9a-f]{16}$/.test(id1) && id1 !== L.areaLabelId('Other.plt', lb) && id1 !== L.areaLabelId('Ridge.plt', { text: 'Big room', n: 9, e: 0, v: 0 }));
+  const m1 = D1('arealabel.set', Object.assign({ label: id1, file: 'Ridge.plt', prev: null }, lb)), m2 = D2('arealabel.set', Object.assign({ label: id1, file: 'Ridge.plt', prev: null }, lb));
+  ok('area labels: two devices moving the same label in: one label', L.areaLabelsOf(L.replayProject([m1, m2], pid), 'Ridge.plt').length === 1);
+  // Older readers: no arealabels, and logs without the op replay as before.
+  ok('area labels: bad ones ignored', Object.keys(L.replayProject([D1('arealabel.set', { file: 'Ridge.plt', text: 'No id' })], pid).arealabels).length === 0);
+  ok('area labels: an op a reader does not know changes nothing else', JSON.stringify(Object.keys(L.replayProject([a1, D1('arealabel.frobnicate', { label: 'l1' })], pid).arealabels)) === '["l1"]');
+}
+
 console.log((fail ? 'FAILED ' : 'ok ') + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

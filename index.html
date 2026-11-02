@@ -2879,8 +2879,9 @@
             if (s.comment) st.comment = s.comment;
             entryFor(code).stations.push(st);
           }
-          // Area labels (🏷 Labels): named spots, same conversion as stations.
-          for (const lb of dopt.areaLabels || []) {
+          // Area labels (🏷 Labels): named spots, same conversion as stations
+          // (a project cave's from the project, flex.js _caveAreaLabels).
+          for (const lb of (window._caveAreaLabels ? window._caveAreaLabels(imp) : dopt.areaLabels) || []) {
             if (!lb || !lb.text) continue;
             const p = ll(lb);
             if (!p || !inBox(p[0], p[1])) continue;

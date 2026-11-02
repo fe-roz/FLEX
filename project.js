@@ -141,6 +141,10 @@
   function replay() {
     pj.P = FL.replayProject(pj.proj, pj.pid || '');
     pj.D = FL.replayDocs(pj.docs);
+    // The project's area labels changed (an edit, undo, a sync file, another
+    // project): the caves draw them again (flex.js).
+    const al = JSON.stringify(FL.areaLabelsOf(pj.P).map(a => [a.id, a.file, a.text, a.n, a.e, a.v]));
+    if (al !== pj._al) { pj._al = al; setTimeout(() => window._refreshAllAreaLabels && window._refreshAllAreaLabels(), 0); }
   }
   /** A change: numbered by the server, then replayed here. */
   // quiet: many in a row (an import) — saved and kept, the screen refreshed once
@@ -875,6 +879,7 @@
       'segment.set': () => `Segment “${e.name || (pj.P.segments[e.seg] || {}).name || e.seg}” (${(e.shots || []).length} shots)`,
       'segment.del': () => `Removed ${[].concat(e.seg != null ? [e.seg] : [], e.segs || []).length} segment(s)`,
       'feature.set': () => { const f = pj.P.features[e.feature] || {}, k = e.kind || f.kind, nm = e.name || f.name || ''; return e.removed ? `Removed ${k || 'feature'} “${nm}”` : `${{ point: 'Point', line: 'Line', area: 'Area' }[k] || 'Feature'} “${nm}”`; },
+      'arealabel.set': () => { const a = pj.P.arealabels[e.label] || {}, nm = e.text || a.text || '', f = e.file || a.file || ''; return (e.removed ? `Removed area label “${nm}”` : e.removed === false ? `Area label “${nm}” back` : e.prev === null ? `Area label “${nm}”` : e.text != null ? `Renamed area label to “${nm}”` : `Moved area label “${nm}”`) + (f ? ' in ' + f : ''); },
       'group.set': () => e.removed ? `Removed folder “${(pj.P.groups[e.group] || {}).name || ''}”` : `Folder “${e.name || (pj.P.groups[e.group] || {}).name || ''}”`,
       accept: () => `Accepted ${n} suggestion(s)${e.note ? ': ' + e.note : ''}`,
       reject: () => `Turned down ${n} suggestion(s)${e.why ? ': ' + e.why : ''}`,
@@ -899,6 +904,7 @@
       case 'cave.alias': return { op: 'cave.unalias', cave: e.cave, alias: e.alias };
       case 'cavefile.set': return e.removed ? { op: 'cavefile.set', file: e.file, removed: false } : null;
       case 'layer.set': return e.removed ? { op: 'layer.set', layer: e.layer, removed: false } : null;
+      case 'arealabel.set': return FL.areaLabelUndo(e);
       default: return null;
     }
   }
@@ -1296,7 +1302,7 @@
     const about = e => {
       const ts = [e.target, e.cave ? FL.T.cave(e.cave) : null].concat(Array.isArray(e.tags) ? e.tags : []).filter(Boolean);   // doc.add carries its tags
       if (ts.some(t => t === tgt || below(t))) return true;
-      if (files && e.op === 'cavefile.set' && files.has(e.file)) return true;
+      if (files && (e.op === 'cavefile.set' || e.op === 'arealabel.set') && files.has(e.file || (pj.P.arealabels[e.label] || {}).file)) return true;
       if (c.level === 'cave' && e.op === 'segment.set' && e.cave === c.cid) return true;
       return false;
     };
