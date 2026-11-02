@@ -109,5 +109,30 @@ const near = (a, b, t = 1e-9) => Math.abs(a - b) <= t;
   ok('cover string', H.hagCover({ dim: 10, groundCells: 50, filled: 75 }) === '50% ground, 25% est');
 }
 
+// ── point cloud look (pointcloud-options.js) ─────────────────────────────────
+{
+  const O = M('pointcloud-options.js');
+  const D = O.PC_OPTION_DEFAULTS;
+  ok('options: defaults match addPC', D.colour === 'composite' && D.size === 0.29 && D.sizeType === 2 && D.shape === 1 && D.gamma === 3.02 && D.iMin === 0 && D.iMax === 65536);
+  const src = require('fs').readFileSync(path.join(__dirname, '..', 'client', 'src', 'modules', 'potree-pointcloud.js'), 'utf8');
+  ok('options: addPC still sets those defaults', /material\.size = 0\.29;/.test(src) && /intensityGamma = 3\.02;/.test(src) && /ADAPTIVE;/.test(src) && /PointShape\.CIRCLE;/.test(src));
+  ok('options: sanitize drops junk', JSON.stringify(O.sanitizeOptions({ colour: 'x', size: 'a', shape: 7, hidden: [2, 2, 'q', 300, 7] })) === '{"hidden":[2,7]}');
+  ok('options: sanitize clamps', O.sanitizeOptions({ size: 99, gamma: -1 }).size === 10 && O.sanitizeOptions({ gamma: -1 }).gamma === 0.2);
+  ok('options: bad intensity range dropped', O.sanitizeOptions({ iMin: 500, iMax: 100 }).iMin === undefined);
+  const m = { activeAttributeName: 'composite', size: 0.29, pointSizeType: 2, shape: 1, intensityRange: [0, 65536], intensityGamma: 3.02,
+    classification: { 2: { visible: true, color: [1, 1, 1, 1] }, 7: { visible: true, color: [1, 0, 1, 1] }, DEFAULT: { visible: true, color: [0, 0, 0, 1] } }, recomputed: 0, recomputeClassification() { this.recomputed++; } };
+  const shared = m.classification;
+  O.applyMaterialOptions(m, {});
+  ok('options: nothing set = nothing touched', m.size === 0.29 && m.activeAttributeName === 'composite' && m.classification === shared && !m.recomputed);
+  O.applyMaterialOptions(m, { colour: 'returns', size: 1.5, sizeType: 0, shape: 2, iMin: 100, gamma: 1.2, hidden: [18, 2] });
+  ok('options: values applied', m.activeAttributeName === 'return number' && m.size === 1.5 && m.pointSizeType === 0 && m.shape === 2 && m.intensityRange[0] === 100 && m.intensityRange[1] === 65536 && m.intensityGamma === 1.2);
+  ok('options: classes hidden on a copy, 18 gets its own entry', m.classification[2].visible === false && m.classification[18].visible === false && m.classification[7].visible === true && shared[2].visible === true && !shared[18] && m.recomputed === 1);
+  O.applyMaterialOptions(m, { hidden: [] });
+  ok('options: all classes back', m.classification[2].visible && m.classification[18].visible);
+  const v = { e: null, setEDLEnabled(x) { this.e = x; }, setEDLStrength(x) { this.s = x; }, setEDLRadius(x) { this.r = x; } };
+  O.applyViewerOptions(v, { edlOn: false, edlStrength: 1 });
+  ok('options: EDL applied only for keys given', v.e === false && v.s === 1 && v.r === undefined);
+}
+
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

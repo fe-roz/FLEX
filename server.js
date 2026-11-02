@@ -922,7 +922,7 @@ function handleLidarDerive(req, res) {
         const outDir = path.join(LIDAR_OUT_DIR, jobId);
         fs.mkdirSync(outDir, { recursive: true });
 
-        _lidarJobs[jobId] = { status: 'running', progress: [], outDir, error: null };
+        _lidarJobs[jobId] = { status: 'running', progress: [], outDir, error: null, errLines: [] };
         jsonResponse(res, { ok: true, jobId });
 
         const args = [
@@ -954,12 +954,22 @@ function handleLidarDerive(req, res) {
                 if (!line) return;
                 console.warn('[lidar-err]', line);
                 _lidarJobs[jobId].progress.push('! ' + line);
+                _lidarJobs[jobId].errLines.push(line);
             });
         });
+        // Python could not even start (wrong FLEX_PYTHON): say so, not "code null".
+        proc.on('error', e => { _lidarJobs[jobId].errLines.push(`Could not start Python (${e.code || e.message})`); });
         proc.on('close', code => {
             const ok = code === 0 && fs.existsSync(path.join(outDir, 'derived.json'));
             _lidarJobs[jobId].status = ok ? 'done' : 'error';
-            if (!ok) _lidarJobs[jobId].error = `Process exited with code ${code}`;
+            if (!ok) {
+                // The reason, for the panel: the last lines the script wrote on stderr
+                // (its own "ERROR: ..." line comes last), kept in log.txt too.
+                const lines = _lidarJobs[jobId].errLines.filter(l => !/^\s*File "|^\s+\S/.test(l));
+                const why = (lines.length ? lines : _lidarJobs[jobId].errLines).slice(-3).join(' | ');
+                _lidarJobs[jobId].error = (why || 'Nothing was written') + ` (exit ${code})`;
+                try { fs.appendFileSync(path.join(outDir, 'log.txt'), 'FAILED: ' + _lidarJobs[jobId].error + '\n'); } catch (_) {}
+            }
             console.log('[lidar]', ok ? 'done: ' + jobId : 'failed: ' + jobId + ' (' + code + ')');
         });
     });

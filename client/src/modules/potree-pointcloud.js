@@ -29,11 +29,17 @@ export function pcUrlKey(url) {
   return url.replace(/\/ept\.json.*$/i, '').split('/').filter(Boolean).pop() || url;
 }
 
+import { setupPointcloudOptions } from "./pointcloud-options.js";
+
 export function setupPotreePointcloud({
   THREE, Potree, proj4, potreeViewer, viewModel,
   applyPcMatrix,                 // stays in flex.js
   notifyPcLoaded, saveSession,   // session.js
 } = {}) {
+  // The LiDAR panel's "Point cloud look" controls: what the person changed is
+  // applied to each cloud right after the defaults below.
+  const pcOptions = setupPointcloudOptions({ potreeViewer });
+
   window.addPC = function(url){
 
   // Derive a readable name from the URL: use the path segment before /ept.json
@@ -84,6 +90,7 @@ export function setupPotreePointcloud({
 
     material.shape = Potree.PointShape.CIRCLE;
     material.activeAttributeName = "composite"; // composite
+    pcOptions.apply(e.pointcloud);   // remembered look (pointcloud-options.js); nothing changed = the defaults above
     // console.dir(e.pointcloud.material.classification);
   
     // let pointcloudProjection = "+proj=utm +zone=33 +ellps=WGS84 +datum=WGS84 +units=m +no_defs";

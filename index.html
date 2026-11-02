@@ -1141,6 +1141,78 @@
               </div>
             </div>
 
+            <!-- Point cloud look: Potree's colour / size / shape / class / intensity / EDL options
+                 (pointcloud-options.js). Applied to every loaded cloud, remembered per computer.
+                 Collapsed to start with; long text lives in title attributes. -->
+            <div class="lp-section" style="width:0; min-width:100%; box-sizing:border-box;">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▸</span> Point cloud look
+              </div>
+              <div class="lp-section-body">
+                <label style="display:block; font-size:11px;">Colour by
+                  <select id="lp-opt-colour" style="width:100%; margin-top:2px; box-sizing:border-box;"
+                          title="Composite is the default mix of intensity and class colour. Return number needs a cloud that carries it.">
+                    <option value="composite">Composite (default)</option>
+                    <option value="rgb">RGB</option>
+                    <option value="intensity">Intensity</option>
+                    <option value="elevation">Elevation</option>
+                    <option value="classification">Classification</option>
+                    <option value="returns">Return number</option>
+                  </select>
+                </label>
+                <label style="display:block; font-size:11px; margin-top:8px;">Point size <span id="lp-opt-size-label" style="color:#00e5ff;">0.29</span>
+                  <input id="lp-opt-size" type="range" min="0.05" max="3" step="0.01" value="0.29" style="width:100%; box-sizing:border-box;">
+                </label>
+                <label style="display:block; font-size:11px; margin-top:6px;">Sizing
+                  <select id="lp-opt-sizetype" style="width:100%; margin-top:2px; box-sizing:border-box;"
+                          title="Fixed: the same on screen at any distance. Attenuated: shrinks with distance. Adaptive: follows how dense the cloud is where you are looking.">
+                    <option value="2">Adaptive (default)</option>
+                    <option value="1">Attenuated</option>
+                    <option value="0">Fixed</option>
+                  </select>
+                </label>
+                <label style="display:block; font-size:11px; margin-top:6px;">Shape
+                  <select id="lp-opt-shape" style="width:100%; margin-top:2px; box-sizing:border-box;">
+                    <option value="1">Circle (default)</option>
+                    <option value="0">Square</option>
+                    <option value="2">Paraboloid</option>
+                  </select>
+                </label>
+
+                <div id="lp-opt-intensity-rows" style="border-top:1px solid rgba(255,255,255,0.12); margin-top:8px; padding-top:6px;">
+                  <div style="font-size:11px; color:rgba(255,255,255,0.7);" title="Intensity values below Low show as dark, above High as bright. Gamma bends the middle: higher is darker midtones.">Intensity</div>
+                  <div style="display:flex; gap:6px; align-items:center; font-size:11px; margin-top:3px;">
+                    Low <input id="lp-opt-imin" type="number" min="0" max="65536" step="256" value="0" style="width:64px;">
+                    High <input id="lp-opt-imax" type="number" min="0" max="65536" step="256" value="65536" style="width:64px;">
+                  </div>
+                  <label style="display:block; font-size:11px; margin-top:4px;">Gamma <span id="lp-opt-gamma-label" style="color:#00e5ff;">3.02</span>
+                    <input id="lp-opt-gamma" type="range" min="0.5" max="5" step="0.01" value="3.02" style="width:100%; box-sizing:border-box;">
+                  </label>
+                </div>
+
+                <div style="border-top:1px solid rgba(255,255,255,0.12); margin-top:8px; padding-top:6px;">
+                  <label style="display:block; font-size:11px;" title="Eye-dome lighting: shades points by depth so shapes read without colour.">
+                    <input type="checkbox" id="lp-opt-edl"> Eye-dome lighting
+                  </label>
+                  <label style="display:block; font-size:11px; margin-top:4px;">Strength <span id="lp-opt-edl-strength-label" style="color:#00e5ff;">0.40</span>
+                    <input id="lp-opt-edl-strength" type="range" min="0" max="2" step="0.05" value="0.4" style="width:100%; box-sizing:border-box;">
+                  </label>
+                  <label style="display:block; font-size:11px;">Radius <span id="lp-opt-edl-radius-label" style="color:#00e5ff;">3.5</span>
+                    <input id="lp-opt-edl-radius" type="range" min="0.5" max="6" step="0.1" value="3.5" style="width:100%; box-sizing:border-box;">
+                  </label>
+                </div>
+
+                <div style="border-top:1px solid rgba(255,255,255,0.12); margin-top:8px; padding-top:6px;">
+                  <div style="font-size:11px; color:rgba(255,255,255,0.7);"
+                       title="Only hides points on screen. Nothing is removed from the cloud, and the noise classes (7, 18) stay in the data and in the height filter.">Show classes</div>
+                  <div id="lp-opt-classes" style="margin-top:3px;"></div>
+                </div>
+
+                <button type="button" id="lp-opt-reset" class="btn btn-sm btn-secondary" style="margin-top:8px; font-size:11px;"
+                        title="Back to FLEX's usual look">Reset</button>
+              </div>
+            </div>
+
             <!-- Ground and height. No job and no bbox: it works on whatever is
                  streamed in right now, so it belongs with the live tools rather
                  than next to the batch Analyze run. Starts collapsed - it is
