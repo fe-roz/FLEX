@@ -93,6 +93,88 @@
     await badge();
   }
 
+  // ── Area labels of the project's caves (flexlib arealabel.set) ───────────
+  // A cave saved in the project keeps its area labels there, like its points:
+  // adding, moving, renaming and deleting one goes straight into the project
+  // (undo in History) and travels with it (sync files, other computers). A
+  // cave in My data keeps them in its look (displayOptions.areaLabels), as
+  // before. Labels a project cave still has in its look (My data's, or an
+  // older view) move in once, under ids made from what they are: no
+  // duplicates, and one deleted in the project doesn't come back from an old
+  // copy. Moving a cave in or out takes its labels along (commit below).
+  const impOf = name => (window._caveImports || []).find(i => i && i.parsed && i.name === name) || null;
+  const lbState = a => FL.areaLabelState(a);
+  const round = x => +(+x).toFixed(3);
+  const LBL = {
+    /** Are this cave's labels the project's? (saved in it; a move waiting for 💾 Save changes it then) */
+    owns: name => !!(pj.pid && pj.P && inProject.cave(name)),
+    /** The project's labels of a cave, then any still in its look and not moved in yet. [{ id, text, n, e, v }] */
+    list(name) {
+      const out = FL.areaLabelsOf(pj.P, name).map(a => ({ id: a.id, text: a.text, n: a.n, e: a.e, v: a.v }));
+      const imp = impOf(name);
+      ((imp && imp.displayOptions && imp.displayOptions.areaLabels) || []).forEach(lb => {
+        if (lb && lb.text && !pj.P.arealabels[lb.id || FL.areaLabelId(name, lb)] && !match(name, lb, true)) out.push({ id: lb.id || FL.areaLabelId(name, lb), text: String(lb.text), n: +lb.n, e: +lb.e, v: +lb.v, local: true });
+      });
+      return out;
+    },
+    async add(name, lb) {
+      if (!(await LBL.migrate(name))) return null;
+      const label = FL.uid(12);
+      return record('arealabel.set', { label, file: name, text: lb.text, n: round(lb.n), e: round(lb.e), v: round(lb.v), prev: null });
+    },
+    /** patch: { text } or { n, e, v } */
+    async set(name, id, patch) {
+      if (!(await LBL.migrate(name))) return null;
+      const a = pj.P.arealabels[id];
+      if (!a) return null;
+      const d = {};
+      if (patch.text != null) d.text = String(patch.text);
+      ['n', 'e', 'v'].forEach(k => { if (patch[k] != null) d[k] = round(patch[k]); });
+      return record('arealabel.set', Object.assign({ label: id, file: name, prev: lbState(a), base: a.history.slice(-1) }, d));
+    },
+    async remove(name, id) {
+      if (!(await LBL.migrate(name))) return null;
+      const a = pj.P.arealabels[id];
+      if (!a || a.removed) return null;
+      return record('arealabel.set', { label: id, file: name, removed: true, prev: lbState(a), base: a.history.slice(-1) });
+    },
+    /**
+     * Labels in a project cave's look into the project (once). given: labels
+     * from elsewhere (My data's copy of a cave moving in); revive: those the
+     * project had removed come back (a cave moved out and in again). Returns
+     * false only when it couldn't (no author given).
+     */
+    async migrate(name, given, { revive = false, ask = true } = {}) {
+      if (!LBL.owns(name)) return true;
+      const imp = impOf(name);
+      const own = (imp && imp.displayOptions && imp.displayOptions.areaLabels) || [];
+      const src = (given || []).concat(own).filter(lb => lb && lb.text);
+      if (!src.length) return true;
+      if (!(A.who && A.who()) && !(ask && (await A.ensureAuthor()))) return false;
+      let n = 0;
+      for (const lb of src) {
+        const id = lb.id || FL.areaLabelId(name, lb), cur = pj.P.arealabels[id] || match(name, lb, true);
+        if (cur && !(revive && cur.removed)) continue;
+        const e = await record('arealabel.set', { label: cur ? cur.id : id, file: name, text: String(lb.text), n: round(lb.n), e: round(lb.e), v: round(lb.v),
+          removed: false, prev: cur ? lbState(cur) : null, base: cur ? cur.history.slice(-1) : undefined }, null, { quiet: true });
+        if (!e) return false;
+        A.refresh && A.refresh('arealabel.set');       // the next label sees this one (no duplicates in one go)
+        n++;
+      }
+      if (imp && imp.displayOptions) { delete imp.displayOptions.areaLabels; if (window._sessionSave && !W.entering) window._sessionSave(); }
+      if (n) console.log(`[workspace] ${n} area label(s) of “${name}” moved into the project`);
+      return true;
+    },
+    /** A cave just loaded (flex.js): a project cave's old labels move in, if its author is known. */
+    loaded(name) { if (LBL.owns(name)) setTimeout(() => LBL.migrate(name, null, { ask: false }).catch(e => console.warn('[workspace] area labels', e)), 0); },
+  };
+  // A project label of this cave with the same name at the same spot (within 0.5 m); any: removed ones too.
+  function match(name, lb, any) {
+    return Object.values(pj.P.arealabels || {}).find(a => a.file === name && (any || !a.removed) && a.text === String(lb.text) &&
+      Math.hypot(a.n - lb.n, a.e - lb.e, a.v - lb.v) < 0.5) || null;
+  }
+  window._pjLabels = LBL;
+
   // ── Changes waiting for 💾 Save, and what is loaded but not in the project ─
   async function scan() {
     const w = ws(), out = { pending: [], extra: { caves: [], layers: [] } };
@@ -130,6 +212,8 @@
         const text = c ? c.text : await w.recentText(p.name);
         if (!text) throw new Error(`the survey file of “${p.name}” isn’t in My data`);
         await addCave({ name: p.name, text, georef: c ? c.georef : (r && r.georef) });
+        A.refresh && A.refresh('cavefile.set');
+        await LBL.migrate(p.name, (!c && r && r.displayOptions && r.displayOptions.areaLabels) || [], { revive: true });   // its area labels come along
         w.forgetRecent(p.name);
       } else {
         // To My data first, then out of the project: never in neither.
@@ -137,8 +221,13 @@
         let text = c && c.text;
         if (!text && f && f.h) { const r = await fetch('/api/lib/blob/' + f.h + '.' + (f.ext || 'plt')); if (r.ok) text = await r.text(); }
         if (!text) throw new Error(`the survey file of “${p.name}” isn’t on this computer`);
-        w.keepRecent(p.name, text, c ? c.georef : (f && f.place), c ? c.displayOptions : null);
+        // Its area labels go along (into its look in My data), then leave the project.
+        const labels = FL.areaLabelsOf(pj.P, p.name);
+        const imp = impOf(p.name), look = imp && imp.displayOptions ? imp.displayOptions : (c && c.displayOptions ? JSON.parse(JSON.stringify(c.displayOptions)) : null);
+        if (labels.length && look) look.areaLabels = labels.map(a => ({ id: a.id, text: a.text, n: a.n, e: a.e, v: a.v })).concat((look.areaLabels || []).filter(lb => !labels.some(a => a.id === lb.id)));
+        w.keepRecent(p.name, text, c ? c.georef : (f && f.place), look || (labels.length ? { areaLabels: labels.map(a => ({ id: a.id, text: a.text, n: a.n, e: a.e, v: a.v })) } : null));
         await record('cavefile.set', { file: p.name, removed: true }, null, { quiet: true });
+        for (const a of labels) await record('arealabel.set', { label: a.id, file: p.name, removed: true, prev: lbState(a), base: a.history.slice(-1) }, null, { quiet: true });
       }
       W.moves = W.moves.filter(m => !(m.kind === 'cave' && m.name === p.name));
       saveMoves();
@@ -475,6 +564,7 @@
     for (const c of extra.caves) await addCave(c);
     for (const l of extra.layers) await addLayer(l);
     await refreshAfter('cavefile.set');
+    for (const c of extra.caves) await LBL.migrate(c.name);            // their area labels come along
     window._sessionSave && window._sessionSave(); label();
   }
 

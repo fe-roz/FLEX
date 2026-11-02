@@ -5112,6 +5112,7 @@ window._loadPltRecent = async function(i) {
 // Place a parsed survey with a saved georef (anchor or UTM) and display options.
 function _placeCave(name, parsed, georef, displayOptions) {
   let entry;
+  if (displayOptions && !displayOptions.surveyColors) displayOptions = Object.assign(_defaultDisplayOptions(parsed), displayOptions);   // a look with only area labels
   if (georef.mode === 'anchor') {
     entry = renderCaveSurveyAnchored(name, parsed, georef.station, georef.lat, georef.lon, georef.elev, georef.survey || '', georef.declination ?? null);
     // Restore saved control points and re-warp
@@ -5525,7 +5526,7 @@ function _renderCaveList() {
                 🎨 Style
               </button>
               <button onclick="window._openLabelsPanel(${i})" style="font-size:11px;padding:4px 10px;background:rgba(80,220,255,0.12);border:1px solid rgba(80,220,255,0.4);color:#8ee8ff;border-radius:4px;cursor:pointer;flex:1;" title="Name areas of the cave, placed where the camera is">
-                🏷 Labels${(imp.displayOptions && imp.displayOptions.areaLabels && imp.displayOptions.areaLabels.length) ? ' (' + imp.displayOptions.areaLabels.length + ')' : ''}
+                🏷 Labels${_caveAreaLabelList(imp).length ? ' (' + _caveAreaLabelList(imp).length + ')' : ''}
               </button>
             </div>
             <button onclick="window._replaceCaveSurvey(${i})" style="margin-top:5px;width:100%;font-size:11px;padding:4px 10px;background:rgba(120,220,120,0.10);border:1px solid rgba(120,220,120,0.35);color:#b8f0b8;border-radius:4px;cursor:pointer;" title="Load a newer survey file (PLT, Breakout or Walls) in place of this one, keeping where it is placed, its control points and its style">
@@ -5548,7 +5549,7 @@ function _renderCaveList() {
                 🎨 Style
               </button>
               <button onclick="window._openLabelsPanel(${i})" style="font-size:11px;padding:4px 10px;background:rgba(80,220,255,0.12);border:1px solid rgba(80,220,255,0.4);color:#8ee8ff;border-radius:4px;cursor:pointer;flex:1;" title="Name areas of the cave, placed where the camera is">
-                🏷 Labels${(imp.displayOptions && imp.displayOptions.areaLabels && imp.displayOptions.areaLabels.length) ? ' (' + imp.displayOptions.areaLabels.length + ')' : ''}
+                🏷 Labels${_caveAreaLabelList(imp).length ? ' (' + _caveAreaLabelList(imp).length + ')' : ''}
               </button>
             </div>
             <button onclick="window._replaceCaveSurvey(${i})" style="margin-top:5px;width:100%;font-size:11px;padding:4px 10px;background:rgba(120,220,120,0.10);border:1px solid rgba(120,220,120,0.35);color:#b8f0b8;border-radius:4px;cursor:pointer;" title="Load a newer survey file (PLT, Breakout or Walls) in place of this one, keeping where it is placed, its control points and its style">
@@ -6384,17 +6385,31 @@ function _addCaveLeads(imp, convertFn) {
 }
 
 // ── Area labels ──────────────────────────────────────────────────────────────
-// Names for parts of a cave ("Big Room", "North Crawl"), placed by flying the
+// Names for parts of a cave ("Big Room", "Test hall"), placed by flying the
 // camera to the spot and pressing Add. Each is stored in the cave's own survey
 // coordinates (n/e/v metres, like its stations), so it follows rectify and
-// restyles, and lives in displayOptions so recents keep it. The terrain export
-// carries them to the portable viewer.
+// restyles. A cave of the open project keeps them in the project
+// (project_workspace.js `window._pjLabels`: straight in, undo in History,
+// they travel with it); any other cave in its displayOptions, so My data keeps
+// them. The terrain export carries them to the portable viewer.
 const AREA_LABEL_COLOR = '#7fe7ff';
 let _labelsIdx = null;
+const _labelsStore = imp => (imp && window._pjLabels && window._pjLabels.owns(imp.name) ? window._pjLabels : null);
+/** A cave's area labels, wherever they are kept: [{ text, n, e, v, id? }]. */
+function _caveAreaLabelList(imp) {
+  const st = _labelsStore(imp);
+  return st ? st.list(imp.name) : (imp && imp.displayOptions && imp.displayOptions.areaLabels) || [];
+}
+window._caveAreaLabels = _caveAreaLabelList;      // the terrain export (index.html), tests
+window._refreshAllAreaLabels = () => {
+  _caveImports.forEach(imp => { if (imp && imp.parsed) _refreshCaveAreaLabels(imp); });
+  if (_labelsIdx != null) _labelsRenderList();
+  _renderCaveList();
+};
 
 function _addCaveAreaLabels(imp, convertFn) {
   imp._areaLabelIds = [];
-  const labels = (imp.displayOptions && imp.displayOptions.areaLabels) || [];
+  const labels = _caveAreaLabelList(imp);
   for (const lb of labels) {
     const pos = convertFn(lb.n, lb.e, lb.v);
     if (!pos) continue;
@@ -6469,7 +6484,8 @@ function _labelsPanelEl() {
       <div style="font-weight:600;font-size:13px;">🏷 Area Labels</div>
       <button onclick="window._labelsClose()" style="background:none;border:none;color:#888;cursor:pointer;font-size:14px;padding:0 2px;">✕</button>
     </div>
-    <div id="labels-cave-name" style="font-size:11px;opacity:0.5;margin-bottom:6px;"></div>
+    <div id="labels-cave-name" style="font-size:11px;opacity:0.5;margin-bottom:2px;"></div>
+    <div id="labels-where" style="font-size:10px;color:#9fd8a8;margin-bottom:6px;"></div>
     <label class="sw-row" style="margin-bottom:8px;" title="The switch in the cave list hides every cave's area names">
       <input type="checkbox" class="ui-sw" role="switch" id="labels-show-cave" onchange="window._labelsShowCave(this.checked)"> Show this cave's area names
     </label>
@@ -6490,7 +6506,8 @@ function _labelsRenderList() {
   const imp = _caveImports[_labelsIdx];
   const list = document.getElementById('labels-list');
   if (!imp || !list) return;
-  const labels = (imp.displayOptions && imp.displayOptions.areaLabels) || [];
+  const labels = _caveAreaLabelList(imp);
+  { const w = document.getElementById('labels-where'); if (w) w.textContent = _labelsStore(imp) ? 'Kept in the project: changes go straight in (undo in History).' : ''; }
   list.innerHTML = labels.length ? labels.map((lb, li) => `
     <div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
       <input type="text" value="${_escapeHtml(lb.text)}" maxlength="60" onchange="window._labelsRename(${li}, this.value)"
@@ -6504,7 +6521,7 @@ function _labelsRenderList() {
 
 function _labelsChanged(imp) {
   _refreshCaveAreaLabels(imp);
-  _displayUpdateRecent(imp);
+  if (!_labelsStore(imp)) _displayUpdateRecent(imp);
   _labelsRenderList();
   _renderCaveList();
 }
@@ -6568,34 +6585,42 @@ window._labelsAddAtCamera = function() {
   if (!text) { _labelsMsg('Type a name first.'); inp.focus(); return; }
   const c = _labelsCameraCoords(imp);
   if (!c) return;
+  const st = _labelsStore(imp);
+  inp.value = '';
+  if (st) { st.add(imp.name, { text, n: c.n, e: c.e, v: c.v }).then(() => _labelsChanged(imp)); return; }
   const dopt = imp.displayOptions;
   (dopt.areaLabels || (dopt.areaLabels = [])).push({ text, n: +c.n.toFixed(3), e: +c.e.toFixed(3), v: +c.v.toFixed(3) });
-  inp.value = '';
   _labelsChanged(imp);
 };
 
 window._labelsMoveHere = function(li) {
   const imp = _caveImports[_labelsIdx];
-  const lb = imp && imp.displayOptions.areaLabels && imp.displayOptions.areaLabels[li];
+  const lb = imp && _caveAreaLabelList(imp)[li];
   if (!lb) return;
   const c = _labelsCameraCoords(imp);
   if (!c) return;
+  const st = _labelsStore(imp);
+  if (st) { st.set(imp.name, lb.id, { n: c.n, e: c.e, v: c.v }).then(() => _labelsChanged(imp)); return; }
   lb.n = +c.n.toFixed(3); lb.e = +c.e.toFixed(3); lb.v = +c.v.toFixed(3);
   _labelsChanged(imp);
 };
 
 window._labelsRename = function(li, text) {
   const imp = _caveImports[_labelsIdx];
-  const lb = imp && imp.displayOptions.areaLabels && imp.displayOptions.areaLabels[li];
+  const lb = imp && _caveAreaLabelList(imp)[li];
   if (!lb) return;
   text = String(text || '').trim().slice(0, 60);
-  if (!text) { _labelsRenderList(); return; }
+  if (!text || text === lb.text) { _labelsRenderList(); return; }
+  const st = _labelsStore(imp);
+  if (st) { st.set(imp.name, lb.id, { text }).then(() => _labelsChanged(imp)); return; }
   lb.text = text;
   _labelsChanged(imp);
 };
 
 window._labelsDelete = function(li) {
   const imp = _caveImports[_labelsIdx];
+  const st = _labelsStore(imp), lb = imp && _caveAreaLabelList(imp)[li];
+  if (st && lb) { st.remove(imp.name, lb.id).then(() => _labelsChanged(imp)); return; }
   if (!imp || !imp.displayOptions.areaLabels) return;
   imp.displayOptions.areaLabels.splice(li, 1);
   _labelsChanged(imp);
@@ -6603,7 +6628,7 @@ window._labelsDelete = function(li) {
 
 window._labelsFlyTo = function(li) {
   const imp = _caveImports[_labelsIdx];
-  const lb = imp && imp.displayOptions.areaLabels && imp.displayOptions.areaLabels[li];
+  const lb = imp && _caveAreaLabelList(imp)[li];
   if (!lb || typeof imp._convertFn !== 'function') return;
   const pos = imp._convertFn(lb.n, lb.e, lb.v);
   if (pos) cesiumViewer.camera.flyToBoundingSphere(new Cesium.BoundingSphere(pos, 25), { duration: 1.2 });
@@ -7846,6 +7871,7 @@ async function _loadWallsFiles(files) {
 
 function _finishCaveLoad(entry, { recent = true } = {}) {
   if (!entry) return;
+  if (window._pjLabels) window._pjLabels.loaded(entry.name);    // a project cave's older area labels move into the project
   _caveColourChanged();
   const chk = document.getElementById('lp-cave-toggle');
   if (chk && !chk.checked) { chk.checked = true; notifyCaveVisibilityChanged(true); }

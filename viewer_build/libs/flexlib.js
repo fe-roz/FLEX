@@ -311,7 +311,7 @@
   // ── Project replay ────────────────────────────────────────────────────────
   function emptyProject(pid) {
     return { id: pid, name: '', desc: '', lists: {}, caves: {}, aliases: {}, notes: {}, leads: {},
-             surveys: {}, order: [], caveUpdates: {}, surveyVersions: {}, segments: {}, cavefiles: {}, layers: {}, features: {}, groups: {}, proposals: {}, log: [], byId: new Map() };
+             surveys: {}, order: [], caveUpdates: {}, surveyVersions: {}, segments: {}, cavefiles: {}, layers: {}, features: {}, groups: {}, arealabels: {}, proposals: {}, log: [], byId: new Map() };
   }
   function applyFieldSurvey(e, S) {
     const sv = e.sid != null ? S.surveys[e.sid] : null;
@@ -435,6 +435,23 @@
           if (e.order != null) l.order = Number(e.order);
           if (e.removed != null) l.removed = !!e.removed;
           l.updated = { t: e.t, who: e.who };
+          break;
+        }
+        // Area labels: names for parts of a cave ("Big Room"), on a survey
+        // file of the project (`file`, as in cavefile.set), placed in that
+        // file's own survey coordinates (n, e, v metres, like its stations), so
+        // they follow the cave wherever it is placed. Each field: the last
+        // writer in replay order (two devices editing different fields both
+        // count); `removed` deletes, removed: false brings it back.
+        case 'arealabel.set': {
+          if (e.label == null || e.label === '') break;
+          const a = S.arealabels[e.label] || (S.arealabels[e.label] = { id: String(e.label), file: '', text: '', n: 0, e: 0, v: 0, created: { t: e.t, who: e.who }, history: [] });
+          if (e.file != null) a.file = String(e.file);
+          if (e.text != null) a.text = String(e.text);
+          ['n', 'e', 'v'].forEach(k => { if (e[k] != null && Number.isFinite(Number(e[k]))) a[k] = Number(e[k]); });
+          if (e.removed != null) a.removed = !!e.removed;
+          a.history.push(e.id);
+          a.updated = { t: e.t, who: e.who };
           break;
         }
         case 'note.set': (recs.note[e.note] || (recs.note[e.note] = { id: e.note, entries: [] })).entries.push(e); break;
@@ -599,6 +616,27 @@
   // ── Workspace: what a project loads ───────────────────────────────────────
   const liveCavefiles = S => Object.values((S && S.cavefiles) || {}).filter(f => !f.removed && f.h).sort((a, b) => a.file.localeCompare(b.file));
   const liveLayers = S => Object.values((S && S.layers) || {}).filter(l => !l.removed).sort((a, b) => (a.order || 0) - (b.order || 0) || String(a.name).localeCompare(String(b.name)));
+
+  // ── Area labels of a survey file (arealabel.set) ─────────────────────────
+  // { id, file, text, n, e, v } in the order they were made.
+  const areaLabelsOf = (S, file) => Object.values((S && S.arealabels) || {})
+    .filter(a => !a.removed && a.text && (file == null || a.file === file))
+    .sort((a, b) => (a.created.t < b.created.t ? -1 : a.created.t > b.created.t ? 1 : a.id < b.id ? -1 : 1));
+  // The id of a label that had none (kept in a cave's look before projects
+  // kept them): made from the file and the label, so two devices moving the
+  // same label into the project make one record, not two.
+  const areaLabelId = (file, lb) => 'al' + sha256(new TextEncoder().encode([file, lb.text, (+lb.n).toFixed(2), (+lb.e).toFixed(2), (+lb.v).toFixed(2)].join('|'))).slice(0, 16);
+
+  // What a label is now, kept in an edit as `prev` so History can undo it.
+  const areaLabelState = a => (a ? { text: a.text, n: a.n, e: a.e, v: a.v, removed: !!a.removed } : null);
+  // The entry that undoes an arealabel.set: back to `prev`, or gone again
+  // when it made the label (prev: null). Old entries without prev: none.
+  function areaLabelUndo(e) {
+    if (!e || e.op !== 'arealabel.set' || e.prev === undefined) return null;
+    const out = { op: 'arealabel.set', label: e.label, file: e.file, base: [e.id] };
+    if (e.prev === null) return Object.assign(out, { removed: true, prev: { text: e.text, n: e.n, e: e.e, v: e.v, removed: !!e.removed } });
+    return Object.assign(out, clone(e.prev), { prev: { text: e.text, n: e.n, e: e.e, v: e.v, removed: !!e.removed } });
+  }
 
   // ── Surface features (the project's own; FLEX only — not in CalTopo) ──────
   // { id, kind: point | line | area, coords: [[lon, lat, h?]…], name, desc, group, style: { color } }
@@ -943,7 +981,7 @@
     T, parseTarget, areaHas, DOC_KINDS, DOC_KIND_LABELS, docMedia, dateKey, resolveProposals, reviewQueue, causalOrder, LEAD, LEAD_FIELDS, leadLists, statusLabel, leadActive, heads,
     replayProject, replayDocs, caveForName, liveCaves, notesOn, leadsOn,
     docInProject, docInbox, docsOf, docsForStation, docsForTarget, pageFor,
-    segmentsOf, segmentIndex, segmentsAt, proposalTarget, segmentStates, liveCavefiles, liveLayers,
+    segmentsOf, segmentIndex, segmentsAt, proposalTarget, segmentStates, liveCavefiles, liveLayers, areaLabelsOf, areaLabelId, areaLabelState, areaLabelUndo,
     liveFeatures, liveGroups, groupPath, featuresGeoJSON, featuresKML, featuresGPX, flexTag, makeFlexTag,
     selectForSync, syncManifest, newEntries,
     parseNum, shotFlags, shotReading, computeSurvey, stationLruds, suggestCaves,
