@@ -4011,6 +4011,12 @@ function _caltopoJsonToDataSource(result, ds) {
       const e = E.getById('ctf-' + f.id), par = f.properties.folderId && E.getById('ctf-' + f.properties.folderId);
       if (e && e.parent !== (par || undefined)) e.parent = par || undefined;
     });
+    // Features in no folder hang under Markers / Lines / Polygons, as CalTopo
+    // lists them (FLEX's display only: ids 'ctf-_markers' …, nothing in CalTopo).
+    const LOOSE = { Point: ['_markers', 'Markers'], LineString: ['_lines', 'Lines'], Polygon: ['_polygons', 'Polygons'] };
+    const looseOf = f => { const p = f.properties || {}, g = f.geometry; if (!g || p.class === 'Folder' || (p.folderId && E.getById('ctf-' + p.folderId))) return null; return LOOSE[g.type] || null; };
+    feats.forEach(f => { const L = looseOf(f); if (!L) return; const id = 'ctf-' + L[0]; if (!keep.has(id)) { keep.add(id); const e = E.getById(id) || E.add(new Cesium.Entity({ id })); e.name = L[1]; e._ctLoose = true; } });
+    const parentOf = f => { const L = looseOf(f); return L ? E.getById('ctf-' + L[0]) : (E.getById('ctf-' + (f.properties || {}).folderId) || undefined); };
     let n = 0;
     feats.forEach(f => {
       const p = f.properties || {}, g = f.geometry;
@@ -4018,9 +4024,9 @@ function _caltopoJsonToDataSource(result, ds) {
       const id = 'ct-' + f.id;
       const sig = JSON.stringify([g, p.title, p.description, p.stroke, p['stroke-width'], p['marker-color'], p.fill, p['fill-opacity'], p.folderId]);
       const had = E.getById(id);
-      if (had && had._ctSig === sig) { keep.add(id); n++; return; }
+      if (had && had._ctSig === sig) { keep.add(id); n++; const par = parentOf(f); if (had.parent !== par) had.parent = par; return; }
       if (had) E.remove(had);
-      const base = { id, name: p.title || '', description: p.description || '', parent: E.getById('ctf-' + p.folderId) || undefined };
+      const base = { id, name: p.title || '', description: p.description || '', parent: parentOf(f) };
       const P = c => Cesium.Cartesian3.fromDegrees(c[0], c[1], 0);
       let ent = null;
       try {

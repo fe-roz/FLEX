@@ -7,6 +7,16 @@
 // 💾 Save like every project change (project_workspace.js); until then the
 // row shows where it is going, with a dot. Cave sets show as folders in My
 // data. With no project open, the left column invites to open or start one.
+//
+// window._caveCols.reveal(key, { open }) → true when the row is shown: opens
+// the pane first with open: true, scrolls the cave's row into view and
+// flashes it (class row-flash, 1.8 s; a cave set holding it opens). The rows
+// are survey files, so a survey or a station reveals its file's row. key:
+//   '<survey file name>'  'file:<survey file name>'   (selection.js's key for a cave not in the project)
+//   'cave:<project cave id>'                          (its first survey file)
+//   'survey:<file>|<survey code>'  'station:<file>|<station name>'
+//   { source: 'cave', cave: <project cave id>, file, survey, station }   (the info panel's form; file wins)
+//   { caveIndex: i }                                  (window._caveImports[i])
 (function () {
   'use strict';
   const host = document.getElementById('cave-cols');
@@ -87,6 +97,52 @@
     const scroll = host.querySelector('.cc-cols') ? host.querySelector('.cc-cols').scrollTop : 0;
     host.innerHTML = html;
     host.querySelector('.cc-cols').scrollTop = scroll;
+    if (FLASH && Date.now() < FLASH.until) { const r = rowOf(FLASH.name); if (r) r.classList.add('row-flash'); } else FLASH = null;
+  }
+
+  // ── Reveal ───────────────────────────────────────────────────────────────
+  let FLASH = null;                                  // { name, until }: survives a re-render
+  const rowOf = name => [...host.querySelectorAll('.cc-it[data-name]')].find(r => r.dataset.name === name) || null;
+  function fileOf(key) {
+    const pj = PJ(), P = pj.P;
+    const ofCave = cid => { const c = P && P.caves && P.caves[cid]; return c && !c.removed && (c.sources || [])[0] ? c.sources[0].file : null; };
+    if (key == null) return null;
+    if (typeof key === 'object') {
+      if (key.file) return String(key.file);
+      if (key.cave) return ofCave(key.cave);
+      if (key.caveIndex != null) { const imp = (window._caveImports || [])[key.caveIndex]; return imp ? imp.name : null; }
+      return null;
+    }
+    key = String(key);
+    let m;
+    if ((m = key.match(/^(?:survey|station):(.*)\|[^|]*$/))) return m[1];
+    if ((m = key.match(/^file:(.*)$/))) return m[1];
+    if ((m = key.match(/^cave:(.*)$/))) return ofCave(m[1]);
+    return key;
+  }
+  async function reveal(key, opts) {
+    opts = opts || {};
+    const pane = document.getElementById('caveCollapsible');
+    if (opts.open && pane && !pane.classList.contains('show')) {
+      if (window._rail && window._rail.open) window._rail.open('#caveCollapsible');
+      else { const b = document.querySelector('#flex-rail [data-target="#caveCollapsible"]'); if (b) b.click(); }
+      for (let i = 0; i < 20 && !pane.classList.contains('show'); i++) await new Promise(r => setTimeout(r, 50));
+    }
+    const name = fileOf(key);
+    if (!name) return false;
+    last = ''; render();
+    let row = rowOf(name);
+    if (!row) {                                      // in a cave set only: open the set
+      const sets = ws() ? ws().sets() : [], i = sets.findIndex(x => x.caves.includes(name));
+      if (i >= 0) { openSets.add(sets[i].name); last = ''; render(); const h = host.querySelector(`[data-set="${i}"]`); row = h ? h.closest('.cc-set') : null; }
+    }
+    if (!row) return false;
+    host.querySelectorAll('.row-flash').forEach(r => r.classList.remove('row-flash'));
+    FLASH = { name, until: Date.now() + 1800 };
+    void row.offsetWidth; row.classList.add('row-flash');
+    try { row.scrollIntoView({ block: 'nearest' }); } catch (_) {}
+    setTimeout(() => { const r = rowOf(name); if (r) r.classList.remove('row-flash'); }, 1850);
+    return !!(pane && pane.classList.contains('show'));
   }
 
   // ── Actions ──────────────────────────────────────────────────────────────
@@ -248,13 +304,15 @@
   .cc-all input[type=color] { width: 40px; height: 20px; padding: 0; border: none; background: none; }
   .cc-all .cc-link { color: #7bbfff; font-size: 11.5px; padding: 3px 6px; }
   .cc-all .cc-note2 { font-size: 10.5px; color: rgba(255,255,255,.45); padding: 8px 6px 2px; line-height: 1.35; }
+  @keyframes row-flash { 0%, 40% { background: rgba(255,230,0,.35); box-shadow: inset 0 0 0 1px #ffe600; } 100% { background: transparent; box-shadow: none; } }
+  #cave-cols .row-flash { animation: row-flash 1.8s ease-out; }
   .cc-pop { position: fixed; z-index: 9900; background: rgba(20,22,30,.98); border: 1px solid rgba(255,255,255,.15); border-radius: 7px; padding: 6px; display: flex; flex-direction: column; min-width: 170px; box-shadow: 0 10px 30px rgba(0,0,0,.5); font: 12px system-ui, sans-serif; }
   .cc-pop-t { color: rgba(255,255,255,.55); font-size: 11px; padding: 2px 6px 4px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cc-pop button { background: none; border: none; color: #e8ece9; text-align: left; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 12px; }
   .cc-pop button:hover { background: rgba(255,255,255,.08); }`;
   document.head.appendChild(style);
 
-  window._caveCols = { render };
+  window._caveCols = { render, reveal };
   // Draw once flex.js and the project are there; then on every change (flex.js and project_workspace.js call render).
   const t = setInterval(() => { if (ws() && ws().recents) { clearInterval(t); render(); } }, 300);
 })();
