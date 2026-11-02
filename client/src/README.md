@@ -216,3 +216,9 @@ Short, in this order:
 | `modules/cesium-interactions.js` | mouse-button mapping, SpaceMouse init, input handler, fly speed, key flags, touch fly, fly tick (wave 1) | `getFlagForKeyCode`, `isLatchedFlag`, `clampFlyMult`, `flySpeedMps`, `downloadBlob` (pure); `setupCesiumInteractions({…})` → `{ handler, spaceMouse, getFlyMultiplier, setCameraButtons }` |
 | `modules/cave-import.js` | Cave Survey: recents (EPT + PLT), cave sets, wizard, Walls / Breakout loading, anchored / UTM render, replace survey, globe pick, `_displayUpdateRecent` | `jsonCopy`, `escH`, `btnCss`, `georefLabel`, `caveFindStation`, `replaceSurveyPlan`, `replaceGeoref` (pure); `setupCaveImport({ Cesium, cesiumViewer, viewModel, caveImports, state, … })` |
 | `modules/cave-georef.js` | Georectification (rectify panel, control points) and the warp | `computeWarpedOffset` (pure); `setupCaveGeoref({ … })` |
+| `modules/cave-display.js` | show/hide, the cave list, selection, re-anchor hooks, line/station drawing, colour by, display options | `SURVEY_PALETTE`, `defaultDisplayOptions`, `CAVE_COLOUR_MODES`, `fitColourRange`; `setupCaveDisplay(...)` |
+| `modules/cave-passages.js` | passage volumes from LRUDs, section frames | LRUD helpers, frames, spline, `buildBlocky`/`buildSmooth`, `PASSAGE_*`; `setupCavePassages(...)` |
+| `modules/cave-leads-labels.js` | lead markers, area labels and their panel, their visibility switches | `setupCaveLeadsLabels(...)` |
+| `modules/cave-depth.js` | station points, level frame, ground grids, depth from loaded LiDAR | `caveElevAt`, `lidarGroundAt`; `setupCaveDepth(...)` |
+| `modules/cave-utm.js` | UTM placement of caves (`_caveUtmConvertFn`, `_pcDatumDz`) | `latLonToUtm`; `setupCaveUtm(...)` |
+| `modules/cave-style-panel.js` | the cave style panel and "one style for every loaded cave" | `setupCaveStylePanel(...)` |
