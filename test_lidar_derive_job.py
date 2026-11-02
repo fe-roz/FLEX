@@ -13,7 +13,7 @@ sys.path.insert(0, HERE)
 import lidar_derive as L
 import export_terrain as et
 
-BBOX = [-123.2010, 41.4990, -123.1990, 41.5010]       # ~170 x 220 m, made up
+BBOX = [-100.5688, 45.1224, -100.5668, 45.1244]       # ~160 x 220 m around the example point 45.1234, -100.5678
 ok_n = fail_n = 0
 def check(label, cond, info=""):
     global ok_n, fail_n
