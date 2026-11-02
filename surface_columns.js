@@ -236,7 +236,7 @@
     const N = ctNews(), hot = !!(N && (N.fresh || N.conflicts));
     let d = b.querySelector('.sc-rail-dot');
     if (hot && !d) { d = document.createElement('b'); d.className = 'sc-rail-dot'; b.appendChild(d); }
-    if (!hot && d) d.remove();
+    if (!hot && d) { d.remove(); d = null; }       // (N is null once the map is cleared)
     if (d) d.title = N.fresh ? `${N.fresh} change${N.fresh === 1 ? '' : 's'} in CalTopo since you last looked` : `${N.conflicts} edit${N.conflicts === 1 ? '' : 's'} in conflict with CalTopo`;
     b.classList.toggle('sc-has-news', hot);
   }
