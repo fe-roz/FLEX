@@ -367,8 +367,21 @@ svg.ico { vertical-align: -2px; }
 </ul>
 <h3>Points, lines and areas: info first, editing second</h3>
 <ul>
-  <li>A click shows brief info in the details panel on the right: what it is, a few lines of its description, and how many photos, videos, documents, notes and leads go with it. A click never edits: use <b>✏️ Edit</b> for that.</li>
-  <li><b>More:</b> rest the pointer on the details panel for a moment (or press <b>⤢ More</b>) to open a larger panel beside it with everything: position and height, the whole description, notes, leads, photos, videos and documents. It goes away when the pointer leaves, unless you drag it by its header, pin it with 📌 or click inside it. × or <kbd>Esc</kbd> closes it.</li>
+  <li>A click shows brief info in the details panel on the right: what it is, where it comes from (the project, 👤 My data, the CalTopo map or a data file), a few lines of its description, and how many photos, videos, documents, notes and leads go with it. A click never edits: use <b>Edit</b> for that.</li>
+  <li><b>Badges</b> next to the source: <i>waiting for CalTopo</i> (saved here, sent when FLEX is online again), <i>changed in CalTopo</i>, <i>changed in CalTopo: choose</i> (edited in both places: click it to see both versions and keep one), <i>not in CalTopo</i> (a project feature the project's CalTopo map doesn't have), <i>read-only</i>.</li>
+  <li><b>More:</b> rest the pointer on the details panel for a moment (or press <b>⤢ More</b>) to open a larger panel beside it with everything:
+    <ul>
+      <li>the folder it is in (click a folder to open it in its list) and <b>Open in CalTopo ↗</b> for a CalTopo feature;</li>
+      <li>its position as latitude, longitude and UTM; the terrain height there, the LiDAR ground where a loaded point cloud covers it, its own height and how far that is above the ground;</li>
+      <li>its colour, symbol, whether its name shows on the map, when it was made and changed, and by whom;</li>
+      <li>what is related: for a station its survey, segment, the stations it connects to, its shots (length, azimuth, inclination) and LRUDs; for a survey its stations, length, segments, dates and team; for a cave its surveys, entrances, length, depth and open leads; for a point the cave it marks the entrance of and its project;</li>
+      <li>what is nearby: the nearest station, cave entrance and leads, with distance and bearing;</li>
+      <li>the whole description, notes, leads, photos, videos and documents.</li>
+    </ul>
+    It goes away when the pointer leaves, unless you drag it by its header, pin it with 📌 or click inside it. × or <kbd>Esc</kbd> closes it.</li>
+  <li><b>Show in list</b> opens the list that holds it (<svg class="ico" width="14" height="14"><use href="#i-pin"/></svg> Surface or <svg class="ico" width="14" height="14"><use href="#i-cave"/></svg> Caves) and shows its row. While that list is open, a click on the map opens the row's folder, scrolls to it and makes it flash.</li>
+  <li><b>Edit</b> opens one editor, the same for every point, line and area: name and description, folder, colour, CalTopo symbol, name on the map, and for a point its position (type latitude and longitude, or UTM zone, easting and northing). <b>Move on the map</b> lets you drag the point (or click where it goes; <kbd>Esc</kbd> cancels). <b>Delete</b> asks first.</li>
+  <li>Edits go where the item comes from: the project (undo in <svg class="ico" width="14" height="14"><use href="#i-folder"/></svg> History), 👤 My data, or the CalTopo map itself. FLEX says whether CalTopo took the change, is waiting to send it (offline), or refused it, and why. If the CalTopo key on this computer can only read, it tells you how to enter one that can write. Features from a data file are read-only: FLEX shows the file as it is.</li>
   <li><b>Photos and videos</b> are listed apart from other documents (<svg class="ico" width="14" height="14"><use href="#i-doc"/></svg> Docs → 🖼 Photos and 🎞 Videos). A video plays in the larger panel or in the document viewer and stops as soon as you close it. If your browser can't play one (often HEVC from phones), <b>⇩ Original</b> saves it for your own player.</li>
   <li>Documents can be tagged to a surface point, line or area too (🏷 Tags → find it by name).</li>
 </ul>

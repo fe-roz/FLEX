@@ -3589,8 +3589,8 @@ setTimeout(() => {
   }
   // Points of interest kept in My data
   if (window._myData) window._myData.points().then(ps => {
-    ps.forEach(p => cesiumViewer.entities.add({ label: { scale: p.scale, text: p.name }, position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.h),
-      properties: { isUserLabel: true, myFeature: p.id }, point: {} }));
+    ps.forEach(p => cesiumViewer.entities.add({ name: p.name, label: { scale: p.scale, text: p.name, show: p.label !== false }, position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.h),
+      properties: { isUserLabel: true, myFeature: p.id }, point: p.color ? { color: Cesium.Color.fromCssColorString(p.color) } : {} }));
     if (ps.length) renderPoiList();
   }).catch(e => console.warn('[my data] points:', e));
 
@@ -5320,8 +5320,11 @@ function parsePLT(text) {
       const nCode = rest.split(/\s+/)[0] || rest;
       const nDescM = rest.match(/C(.+)$/);
       const nDesc = nDescM ? nDescM[1].trim() : '';
+      // The survey's date (D <month> <day> <year>), for the info panel.
+      const nDate = rest.match(/^\S+\s+D\s+(\d{1,2})\s+(\d{1,2})\s+(\d{2,4})\b/);
+      const nIso = nDate ? `${nDate[3].length === 2 ? '19' + nDate[3] : nDate[3]}-${nDate[1].padStart(2, '0')}-${nDate[2].padStart(2, '0')}` : '';
       currentSurvey = { code: nCode, desc: nDesc };
-      result.surveys.push({ code: nCode, desc: nDesc });
+      result.surveys.push(nIso ? { code: nCode, desc: nDesc, date: nIso } : { code: nCode, desc: nDesc });
       // New survey starts a new segment context
       currentSeg = null;
       lastPt = null;
@@ -6918,6 +6921,28 @@ function _lidarClouds() {
       toLonLat: (x, y) => conv.forward([x, y]), toScene: (lon, lat) => conv.inverse([lon, lat]) } : null;
   }).filter(Boolean);
 }
+// The LiDAR ground under one spot (info_panel.js): the mean height of the
+// ground returns (class 2) of the loaded clouds within r metres, as drawn.
+// → { h, n } or null (no cloud there, or none of its ground loaded).
+window._lidarGroundAt = function(lon, lat, r = 3) {
+  let sum = 0, n = 0;
+  for (const cl of _lidarClouds()) {
+    const [cx, cy] = cl.toScene(lon, lat);
+    if (!Number.isFinite(cx) || !Number.isFinite(cy)) continue;
+    const r2 = r * r;
+    for (const { pos, cls, m } of cl.nodes) {
+      const N = Math.min(pos.length / 3, cls.length);
+      for (let i = 0, o = 0; i < N; i++, o += 3) {
+        if (Math.round(cls[i]) !== 2) continue;
+        const x = pos[o], y = pos[o + 1], z = pos[o + 2];
+        const dx = m[0] * x + m[4] * y + m[8] * z + m[12] - cx, dy = m[1] * x + m[5] * y + m[9] * z + m[13] - cy;
+        if (dx * dx + dy * dy > r2) continue;
+        sum += (m[2] * x + m[6] * y + m[10] * z + m[14]) / cl.zScale; n++;
+      }
+    }
+  }
+  return n ? { h: sum / n, n } : null;
+};
 window._caveDepthFromLidar = async function(on = true) {
   if (!on) {                                   // back to the terrain only
     for (const imp of _caveImports) {
