@@ -421,6 +421,7 @@ svg.ico { vertical-align: -2px; }
   <li><b>Colour by</b> survey, elevation, depth below ground, or difficulty.</li>
   <li><b>Replace survey file</b> keeps the placement when a cave's survey is updated, and warns about stations that changed.</li>
 </ul>
+<p><b>Export survey…</b> (a cave's ⋯ menu) writes the survey as <b>Survex</b> (<code>.svx</code>), <b>CSV</b> (one row per shot: survey, from, to, length, azimuth, inclination, left, right, up, down) and <b>Compass plot</b> (<code>.plt</code>) files; tick the ones you want. For a cave in the open project they go into the project folder, <code>Caves/&lt;cave&gt;/Survey/</code>, replacing the last export, and FLEX says where; otherwise they are downloaded. Everything is in metres and degrees. FLEX keeps station positions rather than the readings taken in the cave, so the shots are worked out from the positions; the Survex file fixes the anchored station at its latitude and longitude with the cave's declination, and each file's first lines say what it can't carry.</p>
 
 <h2 id="surface">Surface features</h2>
 <p><svg class="ico" width="14" height="14"><use href="#i-pin"/></svg> Surface lists the project's things on the left (its CalTopo map, folders of points, lines and areas, data files) and 👤 My data on the right. ▸ opens a row in place: a folder shows its folders and features (click one to highlight it, double-click to fly there, ✏️ to edit); the CalTopo map and data files show their own folders, each with its box.</p>

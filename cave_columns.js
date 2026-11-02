@@ -3,7 +3,7 @@
 //
 // Each row: a box that loads it (or shows / hides it once loaded), its name,
 // ⌖ fly to, ⋯ for the rest (Rectify, Style, Labels, Replace survey file,
-// Unload, Forget), and ← / → to move it across, or drag it. Moves wait for
+// Export survey…, Unload, Forget), and ← / → to move it across, or drag it. Moves wait for
 // 💾 Save like every project change (project_workspace.js); until then the
 // row shows where it is going, with a dot. Cave sets show as folders in My
 // data. With no project open, the left column invites to open or start one.
@@ -166,6 +166,7 @@
       acts.push(['⌖ Fly to', () => window._flyToCave(i)], ['🎯 Rectify', () => window._openRectifyPanel(i)], ['🎨 Style', () => window._openStylePanel(i)],
                 ['🏷 Labels', () => window._openLabelsPanel(i)], ['⟳ Replace survey file…', () => window._replaceCaveSurvey(i)], ['Unload', () => w.removeCave(name)]);
     }
+    acts.push(['⇩ Export survey…', () => exportSurvey(name), inP ? 'Survex, CSV and PLT files into the cave’s Survey folder in the project' : 'Survex, CSV and PLT files, downloaded']);
     if (pw && pw.caveMenu) acts.push(...pw.caveMenu(name, loaded));   // project: Copy CalTopo tag, Caves in this file…, Remove from project
     if (!inP) acts.push(['Forget', () => { if (loaded) w.removeCave(name); w.forgetRecent(name); }, 'Takes it out of My data (its file and history stay)']);
     const m = document.createElement('div'); m.className = 'cc-pop';
@@ -177,6 +178,57 @@
     const off = e => { if (!m.contains(e.target)) { m.remove(); document.removeEventListener('mousedown', off, true); } };
     setTimeout(() => document.addEventListener('mousedown', off, true), 0);
     m.addEventListener('click', e => { const b = e.target.closest('[data-k]'); if (!b) return; m.remove(); document.removeEventListener('mousedown', off, true); acts[+b.dataset.k][1](); setTimeout(render, 50); });
+  }
+  // ── ⇩ Export survey… (survey_export.js) ─────────────────────────────────
+  // A cave in the open project: written into <project folder>/Caves/<cave>/Survey/
+  // (POST /api/lib/survey-export). Otherwise (no project, My data): downloads.
+  async function surveyOf(name) {
+    const w = ws(), imp = (window._caveImports || []).find(i => i && i.parsed && i.name === name);
+    if (imp) return { parsed: imp.parsed, georef: imp.georef || null };
+    const P = PJ().P, f = P && P.cavefiles && P.cavefiles[name];
+    let text = null, georef = null;
+    if (f && !f.removed && f.h) { const r = await fetch('/api/lib/blob/' + f.h + '.' + (f.ext || 'plt')); if (r.ok) { text = await r.text(); georef = f.place || null; } }
+    if (text == null) { text = await w.recentText(name); const r = w.recents().find(x => x.name === name); georef = r ? r.georef : null; }
+    return text && w.parse ? { parsed: w.parse(text), georef } : null;
+  }
+  async function exportSurvey(name) {
+    const SE = window._surveyExport, A = window._pjApi, pj = PJ(), pw = PW();
+    if (!SE || !A) return;
+    const inP = !!(pw && pj.pid && pw.owns(name));
+    const caves = inP && pj.P ? Object.values(pj.P.caves || {}).filter(c => !c.removed && (c.sources || []).some(x => x.file === name)) : [];
+    const cave = caves.length === 1 ? caves[0].name : name.replace(/\.(plt|json)$/i, '');
+    const proj = inP ? (pj.projects || []).find(p => p.id === pj.pid) : null;
+    const folder = proj && proj.folder;
+    const ids = new Set(caves.map(c => c.id));
+    const segments = inP && pj.P ? Object.values(pj.P.segments || {}).filter(g => !g.removed && ids.has(g.cave)) : [];
+    const body = document.createElement('div'); body.className = 'cc-exp';
+    body.innerHTML = [['svx', 'Survex (.svx)', 'shots, passage sizes, dates, team, the fixed station'], ['csv', 'CSV (.csv)', 'one row per shot, for a spreadsheet'], ['plt', 'Compass plot (.plt)', 'station positions, as FLEX reads them']]
+      .map(([k, l, t]) => `<label class="cc-exp-r"><input type="checkbox" class="keep-box" data-fmt="${k}" checked> <b>${l}</b> <small>${t}</small></label>`).join('') +
+      `<div class="cc-exp-w">${inP && folder ? 'Into the project folder: <code>' + esc('Caves/' + cave + '/Survey/') + '</code> (files there are replaced).'
+        : inP ? 'This project has no folder yet, so the files are downloaded.' : pj.pid ? 'This cave is in 👤 My data, not the project: the files are downloaded.' : 'No project open: the files are downloaded.'}</div>
+      <div class="cc-exp-w">Metres and degrees. Shots are worked out from the station positions FLEX keeps; each file says what it can't carry.</div>`;
+    const r = await A.dialog({ title: 'Export survey: ' + cave, body, buttons: [{ label: 'Cancel', value: null }, { label: 'Export', value: 'ok', primary: true }] });
+    if (!r) return;
+    const fmts = [...r.box.querySelectorAll('[data-fmt]')].filter(x => x.checked).map(x => x.dataset.fmt);
+    if (!fmts.length) { A.toast('Nothing ticked: no files written'); return; }
+    const S = await surveyOf(name);
+    if (!S) { A.toast(`The survey file of “${name}” isn’t on this computer`); return; }
+    const files = SE.files(S.parsed, { name: cave, georef: S.georef, segments }, fmts);
+    if (inP && folder) {
+      try {
+        const res = await fetch('/api/lib/survey-export?project=' + encodeURIComponent(pj.pid), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cave, files: files.map(f => ({ name: f.name, text: f.text })) }) });
+        const o = await res.json();
+        if (!res.ok || !o.ok) throw new Error(o.error || res.statusText);
+        await A.dialog({ title: 'Survey exported', html: `Written to <code>${esc(o.path)}</code>:<br>${o.files.map(esc).join('<br>')}` });
+      } catch (e) { A.toast('Export failed: ' + (e.message || e)); }
+      return;
+    }
+    for (const f of files) {
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([f.text], { type: f.type + ';charset=utf-8' })); a.download = f.name;
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      await new Promise(res => setTimeout(res, 150));
+    }
+    A.toast('Downloaded ' + files.map(f => f.name).join(', '));
   }
   host.addEventListener('click', async e => {
     if (e.target.closest('[data-allstyle]')) { allStyle(e.target.closest('[data-allstyle]')); return; }
@@ -309,7 +361,11 @@
   .cc-pop { position: fixed; z-index: 9900; background: rgba(20,22,30,.98); border: 1px solid rgba(255,255,255,.15); border-radius: 7px; padding: 6px; display: flex; flex-direction: column; min-width: 170px; box-shadow: 0 10px 30px rgba(0,0,0,.5); font: 12px system-ui, sans-serif; }
   .cc-pop-t { color: rgba(255,255,255,.55); font-size: 11px; padding: 2px 6px 4px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cc-pop button { background: none; border: none; color: #e8ece9; text-align: left; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 12px; }
-  .cc-pop button:hover { background: rgba(255,255,255,.08); }`;
+  .cc-pop button:hover { background: rgba(255,255,255,.08); }
+  .cc-exp { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 8px; }
+  .cc-exp-r { display: flex; align-items: baseline; gap: 6px; margin: 0; font-size: 12.5px; cursor: pointer; }
+  .cc-exp-r small { opacity: .6; font-size: 11px; }
+  .cc-exp-w { font-size: 11.5px; opacity: .75; margin-top: 4px; line-height: 1.4; }`;
   document.head.appendChild(style);
 
   window._caveCols = { render, reveal };

@@ -333,6 +333,39 @@ function projFile(pid, rel) {
   try { return fs.statSync(f).isFile() ? f : null; } catch (_) { return null; }
 }
 
+// ── A cave's survey export (survey_export.js) ───────────────────────────────
+// <project folder>/Caves/<cave>/Survey/<cave>.svx|.csv|.plt — generated files,
+// rewritten each time, never read back (doc 14). Names are single plain path
+// parts (no / \ .. ), the folder must resolve inside the project, never .flex.
+const EXPORT_EXT = new Set(['svx', 'csv', 'plt']);
+const plainPart = s => typeof s === 'string' && !!s.trim() && s.length <= 200 && !/[/\\\0]/.test(s) && !s.includes('..');
+function inside(base, f) { const r = path.relative(base, f); return !!r && !r.startsWith('..') && !path.isAbsolute(r) && r.split(path.sep)[0] !== '.flex'; }
+function surveyExport(pid, cave, files) {
+  const pd = projDir(pid);
+  if (!pd) throw new Error('this project has no folder');
+  if (!plainPart(cave)) throw new Error('bad cave name');
+  if (!Array.isArray(files) || !files.length || files.length > 6) throw new Error('no files');
+  const rel = ['Caves', safeName(cave), 'Survey'];
+  const base = fs.realpathSync(pd);
+  let have = pd, k = 0;                                // the deepest part that exists already must be inside
+  for (let i = 1; i <= rel.length && fs.existsSync(path.join(pd, ...rel.slice(0, i))); i++) { have = path.join(pd, ...rel.slice(0, i)); k = i; }
+  if (k && !inside(base, fs.realpathSync(have))) throw new Error('bad path');
+  const dir = path.join(pd, ...rel);
+  fs.mkdirSync(dir, { recursive: true });
+  const real = fs.realpathSync(dir);
+  if (!inside(base, real)) throw new Error('bad path');
+  const out = [];
+  for (const f of files) {
+    const nm = f && f.name, ext = plainPart(nm) ? path.extname(nm).slice(1).toLowerCase() : '';
+    if (!EXPORT_EXT.has(ext) || typeof f.text !== 'string') throw new Error('bad file');
+    const n = safeName(nm), dest = path.join(real, n);
+    if (fs.existsSync(dest) && (fs.lstatSync(dest).isSymbolicLink() || !fs.statSync(dest).isFile())) throw new Error('bad path');
+    fs.writeFileSync(dest + '.part', f.text); fs.renameSync(dest + '.part', dest);
+    out.push(n);
+  }
+  return { ok: true, folder: rel.join('/'), path: real, files: out };
+}
+
 /** /api/lib/<rest> */
 async function handle(req, res, rest, query) {
   try {
@@ -395,6 +428,7 @@ async function handle(req, res, rest, query) {
       fs.writeFileSync(dest, await body(req, 256 << 20));
       return json(res, { ok: true, path: rel });
     }
+    if (req.method === 'POST' && rest === 'survey-export' && pidOf(q)) { const o = JSON.parse((await body(req, 32 << 20)).toString('utf8')); return json(res, surveyExport(pidOf(q), o.cave, o.files)); }
     if (req.method === 'GET' && rest === 'kv') return json(res, { v: kv()[q.k] ?? null });
     if (req.method === 'POST' && rest === 'kv') { const o = JSON.parse((await body(req, 1 << 20)).toString('utf8')); kvSet(o.k, o.v); return json(res, { ok: true }); }
     if (req.method === 'POST' && rest === 'blob') return json(res, putBlob(await body(req, MAX_BLOB + 1), String(q.ext || ''), q.h ? String(q.h) : null, pidOf(q)));
@@ -416,4 +450,4 @@ async function handle(req, res, rest, query) {
   }
 }
 
-module.exports = { listTree, projFile, handle, device, read, append, merge, putBlob, blobPath, projects, setProject, adoptFolder, registerPrivate, indexFile, makeFolder, safeName, projDir, kv, kvSet, ROOT, PROJECTS_DIR };
+module.exports = { listTree, projFile, surveyExport, handle, device, read, append, merge, putBlob, blobPath, projects, setProject, adoptFolder, registerPrivate, indexFile, makeFolder, safeName, projDir, kv, kvSet, ROOT, PROJECTS_DIR };
