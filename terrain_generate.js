@@ -14,7 +14,13 @@
 //   GET  /api/terrain/tiles/<project>/<folder>/<z>/<x>/<y>.png   a tile (a blank one where the area has none)
 //
 // Tiles live in the project folder, not the library: they don't travel in
-// sync files (the .bin does, as a blob).
+// sync files (the .bin does, as a blob). So the tiles URL carries ?dem=<blob>[,<blob>…]
+// (the terrain patches of the same area): on a computer whose project folder has no
+// such tile folder (the project arrived by sync files), a tile is drawn from those
+// patches, a plain DEM hillshade (north-west light), grey + alpha, transparent where
+// the patches have no data. Where the folder exists its own (LiDAR) tiles are served.
+// A big area is several patches (an overlap, later ones over earlier ones); the first
+// is `terrain`, all of them `terrains`.
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -24,6 +30,67 @@ const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
 const MAPS = 'FLEX maps';
 // 1 x 1 transparent PNG: the answer for a tile the area doesn't reach (inside a known folder).
 const BLANK = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+
+// ── Hillshade tiles drawn from terrain patches (for a project that arrived without its tile folder) ──
+const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const crc32 = b => { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+function chunk(type, data) {
+  const o = Buffer.alloc(12 + data.length); o.writeUInt32BE(data.length, 0); o.write(type, 4, 'latin1'); data.copy(o, 8);
+  o.writeUInt32BE(crc32(o.subarray(4, 8 + data.length)), 8 + data.length); return o;
+}
+/** A grey + alpha 8-bit PNG from `la` (w * h * 2 bytes). */
+function pngLA(w, h, la) {
+  const raw = Buffer.alloc((w * 2 + 1) * h);
+  for (let y = 0; y < h; y++) { raw[y * (w * 2 + 1)] = 0; la.copy(raw, y * (w * 2 + 1) + 1, y * w * 2, (y + 1) * w * 2); }
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 4;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', require('zlib').deflateSync(raw, { level: 6 })), chunk('IEND', Buffer.alloc(0))]);
+}
+/** A terrain patch file (terrain_patch.js format) → { west, south, east, north, nx, ny, g: Float32Array }. */
+function readPatch(buf) {
+  const n = buf.readUInt32LE(0), m = JSON.parse(buf.subarray(4, 4 + n).toString('utf8'));
+  if (m.format !== 'flex-terrain-patch') throw new Error('not a terrain patch');
+  const g = new Float32Array(m.nx * m.ny), src = buf.subarray(4 + n, 4 + n + m.nx * m.ny * 4);
+  Buffer.from(g.buffer).set(src);
+  return { west: m.west, south: m.south, east: m.east, north: m.north, nx: m.nx, ny: m.ny, g, cell: m.cell_m || 1 };
+}
+/** Height at lon/lat from the patches (the last one with data wins), NaN where none has. */
+function heightAt(P, lon, lat) {
+  for (let q = P.length - 1; q >= 0; q--) {
+    const p = P[q];
+    if (lon < p.west || lon > p.east || lat < p.south || lat > p.north) continue;
+    let fx = (lon - p.west) / (p.east - p.west) * (p.nx - 1), fy = (p.north - lat) / (p.north - p.south) * (p.ny - 1);
+    fx = Math.min(fx, p.nx - 1.001); fy = Math.min(fy, p.ny - 1.001); if (fx < 0) fx = 0; if (fy < 0) fy = 0;
+    const x0 = Math.floor(fx), y0 = Math.floor(fy), tx = fx - x0, ty = fy - y0, i = y0 * p.nx + x0, g = p.g;
+    const a = g[i], b = g[i + 1], c = g[i + p.nx], d = g[i + p.nx + 1];
+    if (a !== a || b !== b || c !== c || d !== d) continue;
+    return (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty;
+  }
+  return NaN;
+}
+/** The XYZ tile z/x/y as a PNG (grey hillshade + alpha) from patches P, or null when no patch is in it. */
+function hillshadeTile(P, z, x, y) {
+  const N = Math.pow(2, z), T = 256, lonOf = u => u / N * 360 - 180, latOf = v => Math.atan(Math.sinh(Math.PI * (1 - 2 * v / N))) * 180 / Math.PI;
+  const w = lonOf(x), e = lonOf(x + 1), n = latOf(y), s = latOf(y + 1);
+  if (!P.some(p => p.east > w && p.west < e && p.north > s && p.south < n)) return null;
+  const latMid = (n + s) / 2, mLon = 111320 * Math.cos(latMid * Math.PI / 180), mLat = 110540;
+  const mpp = (e - w) * mLon / T;
+  const cell = Math.min(...P.map(p => p.cell || 1)), step = Math.max(mpp, cell);          // metres between the samples the slope is taken from
+  const dLon = step / mLon, dLat = step / mLat, az = 315 * Math.PI / 180, alt = 45 * Math.PI / 180;
+  const Lx = Math.cos(alt) * Math.sin(az), Ly = Math.cos(alt) * Math.cos(az), Lz = Math.sin(alt), flat = Lz;
+  const out = Buffer.alloc(T * T * 2); let any = false;
+  for (let py = 0; py < T; py++) {
+    const lat = latOf(y + (py + 0.5) / T);
+    for (let px = 0; px < T; px++) {
+      const lon = lonOf(x + (px + 0.5) / T), h = heightAt(P, lon, lat), k = (py * T + px) * 2;
+      if (h !== h) continue;
+      const rd = (a, b) => { const v = heightAt(P, a, b); return v === v ? v : h; };
+      const dzdx = (rd(lon + dLon, lat) - rd(lon - dLon, lat)) / (2 * step), dzdy = (rd(lon, lat + dLat) - rd(lon, lat - dLat)) / (2 * step);
+      const inv = 1 / Math.sqrt(dzdx * dzdx + dzdy * dzdy + 1), sh = (-dzdx * Lx - dzdy * Ly + Lz) * inv;
+      out[k] = Math.max(0, Math.min(255, Math.round(255 * (0.62 + 1.1 * (sh - flat))))); out[k + 1] = 255; any = true;
+    }
+  }
+  return any ? pngLA(T, T, out) : null;
+}
 
 module.exports = function terrainGenerate({ python, script, library }) {
   const jobs = {};
@@ -54,17 +121,24 @@ module.exports = function terrainGenerate({ python, script, library }) {
     const R = JSON.parse(fs.readFileSync(path.join(job.outDir, 'result.json'), 'utf8'));
     const pd = library.projDir(job.pid);
     if (!pd) throw new Error('the project has no folder');
-    const bin = fs.readFileSync(path.join(job.outDir, R.terrain.file || 'terrain.bin'));
-    const b = library.putBlob(bin, 'bin', null, job.pid);
+    const list = Array.isArray(R.terrain_tiles) && R.terrain_tiles.length ? R.terrain_tiles : [R.terrain];
     const folder = freeFolder(pd, job.name || R.name);
+    const patches = list.map((t, k) => {
+      const bin = fs.readFileSync(path.join(job.outDir, t.file || 'terrain.bin'));
+      const b = library.putBlob(bin, 'bin', null, job.pid);
+      return { bin, blob: b.h + '.bin', bounds: t.bounds, nx: t.nx, ny: t.ny, cell_m: t.cell_m, name: t.name, k };
+    });
     moveDir(path.join(job.outDir, R.tiles.dir || 'tiles'), path.join(pd, MAPS, folder));
-    // A visible copy of the patch beside its tiles, as the browser bake keeps one (best effort).
-    try { fs.writeFileSync(path.join(pd, MAPS, folder, 'terrain patch.bin'), bin); } catch (_) {}
+    // A visible copy of each patch beside the tiles, as the browser bake keeps one (best effort).
+    for (const p of patches) { try { fs.writeFileSync(path.join(pd, MAPS, folder, p.k ? `terrain patch (part ${p.k + 1}).bin` : 'terrain patch.bin'), p.bin); } catch (_) {} }
     const name = job.name || R.name || 'LiDAR terrain';
+    const first = patches[0], dem = patches.map(p => p.blob).join(',');
     return {
       name, folder: MAPS + '/' + folder, z_offset: R.z_offset, ground: R.ground,
-      terrain: { blob: b.h + '.bin', bounds: R.terrain.bounds, nx: R.terrain.nx, ny: R.terrain.ny, cell_m: R.terrain.cell_m },
-      tiles: { url: `/api/terrain/tiles/${job.pid}/${encodeURIComponent(folder)}/{z}/{x}/{y}.png`, bounds: R.tiles.bounds,
+      terrain: { blob: first.blob, bounds: first.bounds, nx: first.nx, ny: first.ny, cell_m: first.cell_m },
+      terrains: patches.map(p => ({ blob: p.blob, bounds: p.bounds, nx: p.nx, ny: p.ny, cell_m: p.cell_m, name: p.name })),
+      // ?dem= : the patches the tiles can be drawn from when the folder is not on this computer (see the header)
+      tiles: { url: `/api/terrain/tiles/${job.pid}/${encodeURIComponent(folder)}/{z}/{x}/{y}.png?dem=${dem}`, bounds: R.tiles.bounds,
                minzoom: R.tiles.minzoom, maxzoom: R.tiles.maxzoom, count: R.tiles.count, cell_m: R.tiles.cell_m },
     };
   }
@@ -135,35 +209,82 @@ module.exports = function terrainGenerate({ python, script, library }) {
     json(res, { status: job.status, progress: pct, message: last, error: job.error, result: job.result });
   }
 
-  /** A tile from the project folder: fast, cached; blank inside a known folder where there is none. */
-  function tile(res, rest) {
+  // The patches named in ?dem=, read once and kept (the last two sets).
+  const cache = [];
+  function patchesOf(dem) {
+    const names = String(dem || '').split(',');
+    if (!names.length || names.length > 9 || !names.every(n => /^[0-9a-f]{64}\.bin$/.test(n))) return null;
+    const key = names.join(','), hit = cache.find(c => c.key === key);
+    if (hit) return hit.P;
+    const P = [];
+    for (const n of names) {
+      const f = library.blobPath(n); if (!f) return null;
+      try { P.push(readPatch(fs.readFileSync(f))); } catch (_) { return null; }
+    }
+    cache.unshift({ key, P }); cache.length = Math.min(cache.length, 2);
+    return P;
+  }
+
+  /** A tile from the project folder: fast, cached; blank inside a known folder where there is none. Without the folder, drawn from ?dem=. */
+  function tile(res, rest, query) {
     const m = /^([A-Za-z0-9_-]{1,40})\/([^/]{1,100})\/(\d{1,2})\/(\d{1,8})\/(\d{1,8})\.png$/.exec(rest);
     if (!m || m[2] === '.' || m[2] === '..' || m[2].includes('\\')) return json(res, { error: 'bad tile' }, 400);
     const pd = library.projDir(m[1]);
     if (!pd) return json(res, { error: 'not found' }, 404);
     const dir = path.join(pd, MAPS, m[2]);
     const f = path.join(dir, m[3], m[4], m[5] + '.png');
+    const send = (buf, age) => { res.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': buf.length, 'Cache-Control': 'max-age=' + age }); res.end(buf); };
     fs.stat(f, (err, st) => {
       if (!err && st.isFile()) {
         res.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': st.size, 'Cache-Control': 'max-age=86400' });
         return fs.createReadStream(f).pipe(res);
       }
       fs.stat(dir, (e2, sd) => {
-        if (e2 || !sd.isDirectory()) return json(res, { error: 'not found' }, 404);
-        res.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': BLANK.length, 'Cache-Control': 'max-age=86400' });
-        res.end(BLANK);
+        if (e2 || !sd.isDirectory()) {
+          const P = patchesOf(query && query.dem);              // no tile folder here: draw it from the terrain patches
+          if (!P) return json(res, { error: 'not found' }, 404);
+          let png; try { png = hillshadeTile(P, +m[3], +m[4], +m[5]); } catch (e) { return json(res, { error: e.message }, 500); }
+          return send(png || BLANK, 3600);
+        }
+        send(BLANK, 86400);
       });
     });
   }
 
   /** /api/terrain/<rest> */
-  function handle(req, res, rest) {
+  function handle(req, res, rest, query) {
     try {
       if (req.method === 'POST' && rest === 'generate') return void generate(req, res).catch(e => json(res, { ok: false, error: e.message }, 500));
       if (req.method === 'GET' && rest.startsWith('status/')) return status(res, rest.slice(7));
-      if (req.method === 'GET' && rest.startsWith('tiles/')) return tile(res, rest.slice(6));
+      if (req.method === 'GET' && rest.startsWith('tiles/')) return tile(res, rest.slice(6), query);
       return json(res, { error: 'not found' }, 404);
     } catch (e) { return json(res, { error: e.message || String(e) }, 500); }
   }
-  return { handle, jobs, finish };
+  // ── For the viewer export (server.js handleExportTerrain) ───────────────────
+  // The project's terrain patches, as files: names of blobs the library holds, nothing else is read.
+  function exportPatchFiles(names) {
+    if (!Array.isArray(names)) return [];
+    return names.slice(0, 9).map(n => (typeof n === 'string' && /^[0-9a-f]{64}\.bin$/.test(n)) ? library.blobPath(n) : null).filter(Boolean);
+  }
+  // A map layer {kind:'imagery', blob, bounds} (a picture on a lon/lat box) or {kind:'tiles', url} (an XYZ / TMS tile link;
+  // a link on this server, starting with /, is fetched from here) → the exporter's arguments for `what`
+  // ('satellite' | 'hillshade'), or null if it can't be used (the exporter's own source is taken then).
+  function exportLayerArgs(what, L, port) {
+    if (!L || typeof L !== 'object') return null;
+    if (L.kind === 'imagery') {
+      const f = typeof L.blob === 'string' && /^[0-9a-f]{64}\.(png|jpg|webp)$/.test(L.blob) ? library.blobPath(L.blob) : null;
+      const b = Array.isArray(L.bounds) && L.bounds.length === 4 && L.bounds.every(Number.isFinite) ? L.bounds : null;
+      if (!f || !b) return null;
+      return what === 'satellite' ? ['--satellite-source', 'image', '--satellite-image', f, '--satellite-bounds', ...b.map(String)]
+                                  : ['--hillshade', 'image', '--hillshade-image', f, '--hillshade-bounds', ...b.map(String)];
+    }
+    if (L.kind === 'tiles' && typeof L.url === 'string' && L.url.length < 2000 && /\{z\}/.test(L.url) && /\{x\}/.test(L.url) && /\{(y|-y|reverseY)\}/.test(L.url)) {
+      const url = L.url.startsWith('/') ? `http://127.0.0.1:${port}${L.url}` : (/^https?:\/\//i.test(L.url) ? L.url : null);
+      if (!url) return null;
+      return what === 'satellite' ? ['--satellite-source', 'xyz', '--satellite-url', url, '--satellite-tile-px', '256']
+                                  : ['--hillshade', 'url', '--hillshade-url', url, '--hillshade-tile-px', '256'];
+    }
+    return null;
+  }
+  return { handle, jobs, finish, hillshadeTile, readPatch, exportPatchFiles, exportLayerArgs };
 };

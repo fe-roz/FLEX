@@ -1554,6 +1554,7 @@
                   <div style="font-size:10px; color:rgba(255,255,255,0.4); margin-top:3px;">
                     From LiDAR shades the ground returns directly, from several light directions, at the finest resolution the data supports. From the terrain shades the export's own terrain: quick, and what map terrain uses. None skips it.
                   </div>
+                  <div id="export_layers_note" style="font-size:10px; color:rgba(255,255,255,0.4); margin-top:3px;"></div>
                 </div>
               </div>
             </div>
@@ -3484,7 +3485,7 @@
       _setProgress(0, mapTerrain ? 'Reading the map terrain…' : 'Submitting…');
 
       // Map terrain: read the heights here first, then send them with the job.
-      const ready = !mapTerrain ? Promise.resolve(body)
+      const ready0 = !mapTerrain ? Promise.resolve(body)
         : _sampleMapTerrain(w, s, e, n, mapCell, (f, cell, count) =>
             _setProgress(Math.round(f * 10), `Reading the map terrain: ${Math.round(f * 100)}% of ${count.toLocaleString()} heights (${cell} m)…`))
           .then(async g => {
@@ -3494,6 +3495,10 @@
             _setProgress(10, 'Submitting…');
             return body;
           });
+
+      // The project's terrain patches over the box, and a map layer chosen as satellite / hillshade (custom_layers.js)
+      const ready = ready0.then(b => window._customLayers && window._customLayers.exportExtras
+        ? window._customLayers.exportExtras(b, { w, s, e, n, mapTerrain, satelliteSource, hillshadeMode: document.getElementById('export_hillshade_mode').value }) : b);
 
       ready.then(b => fetch('/api/export/terrain', {
         method: 'POST',
