@@ -1,22 +1,16 @@
 // Tests the plan behind "⟳ Replace survey file…" (flex.js): which stations a
 // newer survey file adds, drops and moves, which stations the cave's placement
 // (anchor, control points) would lose, the suggested stand-ins, and the
-// placement rewritten for the new file. Pulls the real functions out of
-// flex.js (and parsePLT from client/src/modules/compass-plt.js). Synthetic surveys only.
+// placement rewritten for the new file. Uses the pure exports of
+// client/src/modules/cave-import.js (and parsePLT from compass-plt.js). Synthetic surveys only.
 //
 //   node tools/test_replace_survey.js
 'use strict';
-const fs = require('fs'), path = require('path');
-const src = fs.readFileSync(path.join(__dirname, '..', 'flex.js'), 'utf8');
-const grab = name => {
-  const m = src.match(new RegExp('function ' + name + '\\([\\s\\S]*?\\n\\}\\n'));
-  if (!m) throw new Error(name + ' not found in flex.js');
-  return m[0];
-};
-const jsonCopy = src.match(/const _jsonCopy = [^\n]+\n/)[0];
-const { parsePLT } = require(path.join(__dirname, '..', 'client', 'src', 'modules', 'compass-plt.js'));
-const api = new Function('parsePLT', jsonCopy + ['_caveFindStation', '_replaceSurveyPlan', '_replaceGeoref'].map(grab).join('\n') +
-  '\nreturn { parsePLT, _caveFindStation, _replaceSurveyPlan, _replaceGeoref };')(parsePLT);
+const path = require('path');
+const mods = path.join(__dirname, '..', 'client', 'src', 'modules');
+const { parsePLT } = require(path.join(mods, 'compass-plt.js'));
+const ci = require(path.join(mods, 'cave-import.js'));
+const api = { parsePLT, _caveFindStation: ci.caveFindStation, _replaceSurveyPlan: ci.replaceSurveyPlan, _replaceGeoref: ci.replaceGeoref };
 
 let pass = 0, fail = 0;
 const ok = (label, cond, info) => { if (cond) pass++; else { fail++; console.error('FAIL ' + label + (info !== undefined ? '\n  ' + JSON.stringify(info) : '')); } };
