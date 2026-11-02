@@ -71,6 +71,36 @@
     </div>`;
   }
 
+  // ── Multi-cave files and systems (doc 14, rule 3) ─────────────────────────
+  // Under a multi-cave file's row: its caves, then "Surface / not yet sorted". After the files: the systems.
+  const openSys = new Set();
+  const ic = n => (window.icon ? window.icon(n, 13) : '');
+  function subRows(x) {
+    const pj = PJ(), P = pj.P, MC = window._pjMulti;
+    const cf = P && P.cavefiles && P.cavefiles[x.name];
+    if (!x.inProject || !cf || !cf.multi || !MC) return '';
+    const imp = (window._caveImports || []).find(i => i && i.parsed && i.name === x.name);
+    const FL = window.FlexLib;
+    const codes = imp ? MC.codesOf(imp).map(c => c.code) : null;
+    let g;
+    if (codes && FL) g = FL.fileGroups(P, x.name, codes);
+    else g = { caves: FL.liveCaves(P).filter(c => (c.sources || []).some(s => s.file === x.name)).map(c => ({ id: c.id, name: c.name, surveys: ((c.sources.find(s => s.file === x.name) || {}).surveys) || [] })), surface: cf.surface || [], unsorted: null };
+    const n = (a, w) => a.length + ' ' + w + (a.length === 1 ? '' : 's');
+    return `<div class="cc-sub">${g.caves.map(c => `<div class="cc-sr" data-cave="${esc(c.id)}" data-file="${esc(x.name)}" title="Rename it, put it in a system">${ic('cave')} ${esc(c.name)} <small>${n(c.surveys, 'survey')}</small></div>`).join('')}` +
+      (g.unsorted && g.unsorted.length ? `<div class="cc-sr cc-un" data-sort="${esc(x.name)}" title="These surveys belong to no cave yet — click to sort them">Surface / not yet sorted <small>${n(g.unsorted, 'survey')}</small></div>` : '') +
+      (g.surface.length ? `<div class="cc-sr cc-un" data-sort="${esc(x.name)}" title="Marked as surface traverses">Surface traverses <small>${n(g.surface, 'survey')}</small></div>` : '') + '</div>';
+  }
+  function systemsHtml() {
+    const pj = PJ(), P = pj.P, FL = window.FlexLib, MC = window._pjMulti;
+    if (!P || !FL || !MC) return '';
+    const sys = FL.liveSystems(P);
+    return `<div class="cc-systems"><div class="cc-sys-h">Systems<span class="cc-tools"><button type="button" data-sysnew title="A system groups caves; their survey files stay separate">＋ New</button></span></div>` +
+      sys.map(g => `<div class="cc-sys" data-sys="${esc(g.id)}"><button type="button" class="cc-set-h" data-sysopen="${esc(g.id)}" title="${esc(MC.systemLine(g))}"><span>${openSys.has(g.id) ? '▾' : '▸'}</span> ${ic('folder')} ${esc(g.name)} <small>${esc(MC.systemLine(g))}</small></button>` +
+        `<span class="cc-tools"><button type="button" data-sysedit="${esc(g.id)}" title="Rename, change its caves, delete">⋯</button></span>` +
+        (openSys.has(g.id) ? `<div class="cc-set-kids">${g.caves.map(c => `<div class="cc-sk" data-skcave="${esc(c)}" title="Show its row">${ic('cave')} ${esc((P.caves[c] || {}).name)}</div>`).join('') || '<div>No caves in it yet</div>'}</div>` : '') + '</div>').join('') +
+      (sys.length ? '' : '<div class="cc-empty">None yet.</div>') + '</div>';
+  }
+
   function render() {
     if (!host.isConnected) return;
     const R = rows();
@@ -81,7 +111,7 @@
       ? `<div class="cc-col cc-p cc-invite"><span class="cc-note">No project open.</span>
            <button type="button" class="cc-btn" data-openpj>📁 Open a project…</button>
            <span class="cc-note">Your 👤 My data stays as it is.</span></div>`
-      : `<div class="cc-col cc-p" data-col="p">${R.project.map(x => item(x, 'p', true)).join('') || '<span class="cc-empty">No caves yet: drag one here from My data, or ← it.</span>'}</div>`;
+      : `<div class="cc-col cc-p" data-col="p">${R.project.map(x => item(x, 'p', true) + subRows(x)).join('') || '<span class="cc-empty">No caves yet: drag one here from My data, or ← it.</span>'}${systemsHtml()}</div>`;
     const sets = ws().sets();
     const setsHtml = sets.length ? `<div class="cc-sets">${sets.map((st, i) => `<div class="cc-set">
         <button type="button" class="cc-set-h" data-set="${i}" title="${esc(st.caves.join(', '))}"><span>${openSets.has(st.name) ? '▾' : '▸'}</span> 📁 ${esc(st.name)} <small>${st.caves.length}</small></button>
@@ -234,6 +264,14 @@
   host.addEventListener('click', async e => {
     if (e.target.closest('[data-allstyle]')) { allStyle(e.target.closest('[data-allstyle]')); return; }
     const it = e.target.closest('.cc-it'), name = it && it.dataset.name;
+    const MC = window._pjMulti, A0 = window._pjApi;
+    const so = e.target.closest('[data-sysopen]'); if (so) { const id = so.dataset.sysopen; if (openSys.has(id)) openSys.delete(id); else openSys.add(id); render(); return; }
+    if (e.target.closest('[data-sysnew]')) { if (MC) { await MC.editSystem(null); render(); } return; }
+    const se = e.target.closest('[data-sysedit]'); if (se) { if (MC) { await MC.editSystem(se.dataset.sysedit); render(); } return; }
+    const sk = e.target.closest('[data-skcave]'); if (sk) { reveal({ cave: sk.dataset.skcave }); return; }
+    const sr = e.target.closest('[data-cave]'); if (sr && A0 && A0.editCave) { await A0.editCave(sr.dataset.cave); render(); return; }
+    const sx = e.target.closest('[data-sort]');
+    if (sx && MC) { const imp = (window._caveImports || []).find(i => i && i.parsed && i.name === sx.dataset.sort); if (imp) { await MC.multiCave(imp); render(); } else if (A0) A0.toast('Load the file first'); return; }
     if (e.target.closest('[data-openpj]')) { const b = document.getElementById('rail-pj') || document.getElementById('pj-top-btn'); if (b) b.click(); return; }
     const sh = e.target.closest('[data-set]'); if (sh) { const st = ws().sets()[+sh.dataset.set]; if (st) { if (openSets.has(st.name)) openSets.delete(st.name); else openSets.add(st.name); } render(); return; }
     const sl = e.target.closest('[data-setload]'); if (sl) { ws().loadSet(+sl.dataset.setload); return; }
@@ -341,6 +379,17 @@
   #cave-cols .cc-set-h small { color: rgba(255,255,255,.4); }
   #cave-cols .cc-set .cc-tools button { font-size: 10px; }
   #cave-cols .cc-set-kids { grid-column: 1 / -1; padding: 0 0 3px 20px; font-size: 10px; color: rgba(255,255,255,.5); }
+  #cave-cols .cc-sub { margin: 0 0 2px 28px; font-size: 10.5px; color: rgba(255,255,255,.7); }
+  #cave-cols .cc-sr { padding: 1px 4px; border-radius: 4px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #cave-cols .cc-sr:hover, #cave-cols .cc-sk:hover { background: rgba(255,255,255,.08); }
+  #cave-cols .cc-sr small, #cave-cols .cc-sys small { color: rgba(255,255,255,.4); }
+  #cave-cols .cc-un { color: #f2c24e; }
+  #cave-cols .cc-sk { cursor: pointer; padding: 1px 4px; border-radius: 4px; }
+  #cave-cols .cc-systems { margin-top: 6px; border-top: 1px solid rgba(255,255,255,.08); padding-top: 3px; }
+  #cave-cols .cc-sys-h { display: flex; justify-content: space-between; align-items: center; font-size: 9.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: rgba(255,255,255,.5); padding: 0 3px; }
+  #cave-cols .cc-sys { display: grid; grid-template-columns: 1fr auto; align-items: center; }
+  #cave-cols .cc-sys:hover .cc-tools { opacity: 1; }
+  #cave-cols .cc-sys .cc-set-h { white-space: normal; }
   #cave-cols .cc-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
   #cave-cols .cc-hint { font-size: 10px; color: rgba(255,255,255,.4); }
   #cave-cols .cc-btn:disabled { opacity: .4; cursor: default; }
@@ -372,4 +421,7 @@
   window._caveCols = { render, reveal };
   // Draw once flex.js and the project are there; then on every change (flex.js and project_workspace.js call render).
   const t = setInterval(() => { if (ws() && ws().recents) { clearInterval(t); render(); } }, 300);
+  // Systems and the caves of a multi-cave file change through project records (also another device's, History's undo):
+  // draw again while the pane is open (an unchanged list keeps hover, focus and drags alive).
+  setInterval(() => { const pane = document.getElementById('caveCollapsible'); if (pane && pane.classList.contains('show') && ws() && ws().recents) render(); }, 1500);
 })();

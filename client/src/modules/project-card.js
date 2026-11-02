@@ -165,6 +165,16 @@
     const st = parts.reduce((n, { imp }) => n + ((imp.parsed && imp.parsed.stations) || []).length, 0);
     const codes = new Set(parts.flatMap(({ codes }) => [...codes]));
     box.appendChild(el('div', 'pj-sub', [(cv.sources || []).map(s => s.file).join(', ') || 'no files', codes.size ? codes.size + ' survey' + (codes.size === 1 ? '' : 's') : '', st ? st + ' stations' : 'not loaded'].filter(Boolean).join(' · ')));
+    const sysOf = FL.systemsOf(pj.P, c.cid), MC = window._pjMulti;
+    sysOf.forEach(g => box.appendChild(el('div', 'pj-sub', ['folder', `System “${g.name}”: ${MC ? MC.systemLine(g) : g.caves.length + ' caves'}`])));
+    const multiFile = (cv.sources || []).map(s => s.file).find(f => pj.P.cavefiles[f] && pj.P.cavefiles[f].multi);
+    if (multiFile) {
+      const others = FL.liveCaves(pj.P).filter(x => x.id !== c.cid && (x.sources || []).some(s => s.file === multiFile)).map(x => x.name);
+      box.appendChild(el('div', 'pj-sub', `Multi-cave file ${multiFile}` + (others.length ? ' · also holds ' + others.join(', ') : '')));
+    }
+    const mcBtns = el('div', 'pj-row');
+    if (MC) mcBtns.appendChild(btn(['folder', sysOf.length ? 'Systems…' : 'Add to a system…'], () => MC.caveSystems(c.cid), 'small'));
+    box.appendChild(mcBtns);
     const target = FL.T.cave(c.cid);
     const sec = (title, items) => { if (!items.length) return; box.appendChild(el('div', 'pj-h', title)); items.forEach(i => box.appendChild(i)); };
     sec('Notes', FL.notesOn(pj.P, target).map(noteEl));

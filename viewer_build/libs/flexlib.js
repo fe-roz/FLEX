@@ -312,7 +312,7 @@
   const TRIP_LISTS = ['people', 'caves', 'links'];
   function emptyProject(pid) {
     return { id: pid, name: '', desc: '', lists: {}, caves: {}, aliases: {}, notes: {}, leads: {},
-             surveys: {}, order: [], caveUpdates: {}, surveyVersions: {}, segments: {}, cavefiles: {}, layers: {}, features: {}, groups: {}, arealabels: {}, trips: {}, proposals: {}, archived: null, footprint: null, moves: {}, log: [], byId: new Map() };
+             surveys: {}, order: [], caveUpdates: {}, surveyVersions: {}, segments: {}, cavefiles: {}, systems: {}, layers: {}, features: {}, groups: {}, arealabels: {}, trips: {}, proposals: {}, archived: null, footprint: null, moves: {}, log: [], byId: new Map() };
   }
   function applyFieldSurvey(e, S) {
     const sv = e.sid != null ? S.surveys[e.sid] : null;
@@ -422,7 +422,29 @@
           if (e.display !== undefined) f.display = clone(e.display);           // My data: the cave's style
           if (e.lastUsed != null) f.lastUsed = String(e.lastUsed);
           if (e.group != null) f.group = String(e.group);
+          // Multi-cave survey file (doc 14, rule 3): `multi` marks a file that holds several caves (they are project caves
+          // with sources [{ file, surveys }]); `surfaceAdd` / `surfaceDel` mark surveys of the file as surface traverses
+          // (not part of any cave). Older readers ignore all three.
+          if (e.multi != null) f.multi = !!e.multi;
+          if (Array.isArray(e.surfaceAdd) || Array.isArray(e.surfaceDel)) {
+            const cur = f.surface || (f.surface = []);
+            (e.surfaceAdd || []).forEach(v => { v = String(v); if (!cur.includes(v)) cur.push(v); });
+            if (e.surfaceDel) f.surface = cur.filter(v => !e.surfaceDel.map(String).includes(v));
+          }
           f.updated = { t: e.t, who: e.who };
+          break;
+        }
+        // A system groups caves (doc 14, rule 3); their files stay separate. `add` / `remove`: cave ids (the last writer in
+        // replay order wins per cave, so two devices adding different caves both count); `removed` deletes it.
+        case 'system.set': {
+          if (e.system == null || e.system === '') break;
+          const g = S.systems[e.system] || (S.systems[e.system] = { id: String(e.system), name: '', desc: '', caves: [], created: { t: e.t, who: e.who } });
+          if (e.name != null) g.name = String(e.name);
+          if (e.desc != null) g.desc = String(e.desc);
+          (e.add || []).forEach(c => { c = String(c); if (!g.caves.includes(c)) g.caves.push(c); });
+          if (e.remove) g.caves = g.caves.filter(c => !e.remove.map(String).includes(c));
+          if (e.removed != null) g.removed = !!e.removed;
+          g.updated = { t: e.t, who: e.who };
           break;
         }
         // Surface features the project keeps itself (FLEX only — CalTopo keeps
@@ -551,6 +573,11 @@
     return c ? c.id : null;
   }
   const liveCaves = S => Object.values((S && S.caves) || {}).filter(c => !c.removed).sort((a, b) => a.name.localeCompare(b.name));
+  // Systems (system.set): live ones by name, each with its live caves' ids (a removed or moved-away cave drops out).
+  const liveSystems = S => Object.values((S && S.systems) || {}).filter(g => !g.removed)
+    .map(g => Object.assign({}, g, { caves: g.caves.filter(c => S.caves[c] && !S.caves[c].removed) }))
+    .sort((a, b) => (a.name || '').localeCompare(b.name || '') || (a.id < b.id ? -1 : 1));
+  const systemsOf = (S, cid) => liveSystems(S).filter(g => g.caves.includes(cid));
   // Notes / leads on a target, newest first.
   const notesOn = (S, target) => Object.values(S.notes).filter(n => n.target === target && !n.deleted).sort((a, b) => (a.t < b.t ? 1 : -1));
   const leadsOn = (S, target) => Object.values(S.leads).filter(l => l.target === target && !l.deleted);
@@ -698,6 +725,7 @@
       d.pages.forEach(p => { if (p.h) blobs.set(p.h + '.' + (p.ext || 'jpg'), { h: p.h, ext: p.ext || 'jpg' }); });
       if (d.file && d.file.h) { blobs.set(d.file.h + '.' + d.file.ext, { h: d.file.h, ext: d.file.ext }); if (d.file.path) readable.push({ h: d.file.h, ext: d.file.ext, path: d.file.path }); }
     });
+    names.forEach(n => { if (S.cavefiles[n].multi && !shared.includes(n)) shared.push(n); });   // a multi-cave file never goes with one cave
     return { cave: clone(c), id: cid, aliases, files: names.map(n => clone(S.cavefiles[n])), shared, segments: clone(segments), leads: clone(leads), notes: clone(notes),
              labels: clone(labels), docs: docs.map(d => d.id), blobs: [...blobs.values()], readable,
              counts: { files: names.length, segments: segments.length, leads: leads.length, notes: notes.length, labels: labels.length, docs: docs.length } };
@@ -757,6 +785,7 @@
     if (B.segments.length) out.push({ op: 'segment.del', segs: B.segments.map(g => g.id) });
     B.labels.forEach(a => out.push({ op: 'arealabel.set', label: a.id, file: a.file, removed: true }));
     B.files.forEach(f => out.push({ op: 'cavefile.set', file: f.file, removed: true }));
+    liveSystems(S).filter(g => g.caves.includes(B.id)).forEach(g => out.push({ op: 'system.set', system: g.id, remove: [B.id] }));
     out.push({ op: 'cave.set', cave: B.id, removed: true });
     return out;
   }
@@ -1202,6 +1231,125 @@
     return { caves: out, surface: [...surfaceSurveys].filter(s => !votes[s]).sort() };
   }
 
+  // ── Systems and multi-cave survey files (doc 14, rule 3) ───────────────────
+  // Totals of a system: length adds up; depth is the deepest cave's, or — when statsOf gives the heights (lo / hi, m) —
+  // the span of all of them together (caves of one system are connected, so the system is as deep as its extremes).
+  // statsOf(cid) → { len, depth, lo?, hi? } | null
+  function systemTotals(sys, statsOf) {
+    let len = 0, depth = 0, lo = Infinity, hi = -Infinity, n = 0, seen = 0;
+    (sys.caves || []).forEach(cid => {
+      const x = statsOf(cid);
+      n++;
+      if (!x) return;
+      seen++;
+      len += +x.len || 0;
+      depth = Math.max(depth, +x.depth || 0);
+      if (Number.isFinite(x.lo) && Number.isFinite(x.hi)) { lo = Math.min(lo, x.lo); hi = Math.max(hi, x.hi); }
+    });
+    if (Number.isFinite(lo) && Number.isFinite(hi)) depth = Math.max(depth, hi - lo);
+    return { caves: n, loaded: seen, len, depth };
+  }
+  // Which caves claim a survey of a file: a source without `surveys` claims the whole file.
+  const claims = (c, file, code) => (c.sources || []).some(s => s && s.file === file && (!s.surveys || !s.surveys.length || s.surveys.includes(code)));
+  // The groups inside a survey file: the caves made of its surveys, the surveys marked surface, and the rest
+  // ("Surface / not yet sorted"). A file that is not multi-cave and has one cave reads as that cave holding it all.
+  // codes: the survey codes in the file.
+  function fileGroups(S, file, codes) {
+    const f = (S && S.cavefiles && S.cavefiles[file]) || {};
+    const surface = (f.surface || []).filter(c => codes.includes(c));
+    const caves = liveCaves(S).filter(c => (c.sources || []).some(s => s && s.file === file)).map(c => ({ id: c.id, name: c.name, surveys: [] }));
+    const unsorted = [];
+    codes.forEach(code => {
+      if (surface.includes(code)) return;
+      const g = caves.find(x => claims(S.caves[x.id], file, code));
+      if (g) g.surveys.push(code); else unsorted.push(code);
+    });
+    return { multi: !!f.multi, surface, caves, unsorted };
+  }
+  // The records that make a file multi-cave with the caves the user settled on.
+  //   assign: { <survey code>: 'surface' | 'unsorted' | { cave: <cave id> } | { name: <new cave's name> } }
+  // Caves keep their other files; a cave left with no survey of this file drops the file from its sources. A cave id that
+  // is not in the project is made. Returns { ops, caves: { <cave id>: [codes] } }; entries are ready for record().
+  function planMulti(S, file, codes, assign, uid) {
+    const f = (S && S.cavefiles && S.cavefiles[file]) || {};
+    const per = {}, fresh = {}, names = {}, surf = [];
+    codes.forEach(code => {
+      const a = assign[code];
+      if (a === 'surface') { surf.push(code); return; }
+      if (!a || a === 'unsorted') return;
+      let id = a.cave;
+      if (!id && a.name) { id = fresh[a.name] || (fresh[a.name] = uid()); }
+      if (id) { (per[id] || (per[id] = [])).push(code); if (a.name) names[id] = a.name; }
+    });
+    const ops = [];
+    const old = f.surface || [];
+    const add = surf.filter(c => !old.includes(c)), del = old.filter(c => codes.includes(c) && !surf.includes(c));
+    const cf = { op: 'cavefile.set', file };
+    if (!f.multi) cf.multi = true;
+    if (add.length) cf.surfaceAdd = add;
+    if (del.length) cf.surfaceDel = del;
+    if (Object.keys(cf).length > 2) ops.push(cf);
+    const ids = new Set(Object.keys(per));
+    liveCaves(S).forEach(c => { if ((c.sources || []).some(s => s && s.file === file)) ids.add(c.id); });
+    ids.forEach(id => {
+      const c = S.caves[id] && !S.caves[id].removed ? S.caves[id] : null, mine = (per[id] || []).slice().sort();
+      const rest = ((c && c.sources) || []).filter(s => s && s.file !== file);
+      const sources = mine.length ? rest.concat([{ file, surveys: mine }]) : rest;
+      const renamed = c && names[id] && names[id] !== c.name;
+      if (c && same(c.sources || [], sources) && !renamed) return;
+      const op = { op: 'cave.set', cave: id, sources };
+      if (!c) { op.name = names[id] || ''; op.created = true; } else { op.prevSources = clone(c.sources || []); if (renamed) { op.name = names[id]; op.prevName = c.name; } }
+      ops.push(op);
+    });
+    // Aliases made the whole file one cave; with several caves in it the file name must not pick one.
+    if (S.aliases && S.aliases[file] && ids.size > 1) ops.push({ op: 'cave.unalias', cave: S.aliases[file], alias: file });
+    return { ops, caves: per };
+  }
+  // Undo of system.set / cave.set made here / cavefile.set flags: the entry that puts the earlier state back (or null).
+  function systemUndo(e) {
+    if (e.op !== 'system.set') return null;
+    const o = { op: 'system.set', system: e.system, base: [e.id] };
+    let n = 0;
+    if (e.created) { o.removed = true; return o; }
+    if (e.removed != null) { o.removed = !e.removed; n++; }
+    if (e.prevName != null) { o.name = e.prevName; n++; }
+    if (e.add && e.add.length) { o.remove = e.add; n++; }
+    if (e.remove && e.remove.length) { o.add = e.remove; n++; }
+    return n ? o : null;
+  }
+  function multiUndo(e) {
+    if (e.op === 'cave.set') {
+      if (e.created) return { op: 'cave.set', cave: e.cave, removed: true };
+      if (e.prevSources) return Object.assign({ op: 'cave.set', cave: e.cave, sources: e.prevSources }, e.prevName != null ? { name: e.prevName } : {});
+    }
+    if (e.op === 'cavefile.set' && !e.removed && !e.h && (e.multi != null || e.surfaceAdd || e.surfaceDel))
+      return { op: 'cavefile.set', file: e.file, multi: e.multi != null ? !e.multi : undefined, surfaceAdd: e.surfaceDel, surfaceDel: e.surfaceAdd };
+    return null;
+  }
+  // Entrances of a cave (markers whose tag carries its id): the main one is where the file is placed, else the first found.
+  // tags: [{ cid, station, at: [lon, lat, h?], z?, placedHere? }] (project_features.js scanTags). Returns the cave's tags, main first.
+  function entrancesOf(tags, cid) {
+    const mine = (tags || []).filter(t => t && t.cid === cid);
+    const i = mine.findIndex(t => t.placedHere);
+    if (i > 0) mine.unshift(mine.splice(i, 1)[0]);
+    return mine.map((t, k) => Object.assign({}, t, { main: k === 0 }));
+  }
+  // How a file is fitted to its entrance markers: the first marker places it, every other marker (another entrance, or
+  // the entrance of another cave in the same file) pins its station (a control point) so the whole file follows them.
+  // tags: markers of the file's caves, main first; stations: the file's station names (a marker on none is left out).
+  function entranceFit(tags, stations) {
+    const has = n => !stations || (stations.has ? stations.has(n) : stations.includes(n));
+    const use = (tags || []).filter(t => t && t.station && t.at && has(t.station));
+    if (!use.length) return null;
+    const main = use[0], seen = new Set([main.station]), pins = [];
+    use.slice(1).forEach(t => {
+      if (seen.has(t.station)) return;
+      seen.add(t.station);
+      pins.push({ station: t.station, lat: t.at[1], lon: t.at[0], elev: Number.isFinite(t.z) ? t.z : (t.at[2] || 0) });
+    });
+    return { main, pins };
+  }
+
   return {
     FORMAT, FT, DOCS, projScope, scopeProject, sha256, uid, clone, nowIso, same, cmp, sortEntries, surveyCode,
     T, parseTarget, areaHas, DOC_KINDS, DOC_KIND_LABELS, docMedia, dateKey, resolveProposals, reviewQueue, causalOrder, LEAD, LEAD_FIELDS, leadLists, statusLabel, leadActive, heads,
@@ -1213,5 +1361,6 @@
     liveFeatures, liveGroups, groupPath, featuresGeoJSON, featuresKML, featuresGPX, flexTag, makeFlexTag,
     selectForSync, syncManifest, newEntries,
     parseNum, shotFlags, shotReading, computeSurvey, stationLruds, suggestCaves,
+    liveSystems, systemsOf, systemTotals, fileGroups, planMulti, systemUndo, multiUndo, entrancesOf, entranceFit,
   };
 });

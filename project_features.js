@@ -379,14 +379,27 @@
       t.placedHere = !!(place && place.mode === 'anchor' && place.station === t.station &&
         Math.abs(place.lat - t.at[1]) < 1e-5 && Math.abs(place.lon - t.at[0]) < 1e-5);
     });
+    // Several entrances per cave (doc 14, rule 3): markers with the same cave id; the first is the main entrance.
+    const byCave = {};
+    out.forEach(t => { if (t.cid) (byCave[t.cid] || (byCave[t.cid] = [])).push(t); });
+    Object.keys(byCave).forEach(cid => {
+      const e = FL.entrancesOf(byCave[cid], cid), same = (t, x) => x.at === t.at && x.station === t.station;
+      byCave[cid].forEach(t => { const k = e.findIndex(x => same(t, x)); t.main = k === 0; t.entrance = k + 1; t.entrances = e.length; });
+    });
+    // One marker places a file; the others (extra entrances, other caves of a multi-cave file) pin it.
+    const byFile = {};
+    out.forEach(t => { if (t.cid && t.file) (byFile[t.file] || (byFile[t.file] = [])).push(t); });
+    Object.values(byFile).forEach(l => { const m = l.find(t => t.placedHere) || l.find(t => t.main) || l[0]; l.forEach(t => { t.fileMain = t === m; }); });
+    out.forEach(t => {
+      const pl = t.file && pj.P.cavefiles[t.file].place;
+      t.pinned = !!(pl && (pl.controlPoints || []).some(cp => cp.station === t.station && Math.abs(cp.lat - t.at[1]) < 1e-5 && Math.abs(cp.lon - t.at[0]) < 1e-5));
+    });
     F.tags = out;
     return out;
   }
-  async function placeAtTag(t) {
-    const w = ws(), cf = pj.P.cavefiles[t.file];
-    if (!cf) return;
-    // Height: the tag's z when it has one (else the marker's own); the terrain's reading wins only when it has one worth using
-    // (no terrain loaded reads 0, which must not override a z).
+  // The height of an entrance: the tag's z when it has one (else the marker's own); the terrain's reading wins only when it has one
+  // worth using (no terrain loaded reads 0, which must not override a z).
+  async function entranceElev(t) {
     const zTag = isFinite(t.z) ? t.z : (t.at[2] || 0);
     let elev = zTag;
     try {
@@ -394,17 +407,51 @@
       const s = await Cesium.sampleTerrainMostDetailed(V().terrainProvider, k);
       if (s && s[0] && isFinite(s[0].height) && !(Math.abs(s[0].height) < 0.01 && zTag)) elev = s[0].height;
     } catch (_) {}
+    return +elev.toFixed(1);
+  }
+  // Save a file's placement and redraw it there.
+  async function placeFile(file, place) {
+    const w = ws(), cf = pj.P.cavefiles[file];
+    await record('cavefile.set', { file, place });
+    const r = await fetch('/api/lib/blob/' + cf.h + '.' + (cf.ext || 'plt'));
+    if (!r.ok) { toast('The survey file isn’t on this computer'); return false; }
+    const style = (w.caveState().find(c => c.name === file) || {}).displayOptions || null;
+    w.switching = true;
+    try { w.removeCave(file); w.loadCave(file, await r.text(), place, style); } finally { w.switching = false; }
+    return true;
+  }
+  async function placeAtTag(t) {
+    const cf = pj.P.cavefiles[t.file];
+    if (!cf) return;
+    const elev = await entranceElev(t);
     const old = cf.place || {};
-    const place = { mode: 'anchor', station: t.station, lat: t.at[1], lon: t.at[0], elev: +elev.toFixed(1), survey: '', declination: old.declination ?? null };
+    const place = { mode: 'anchor', station: t.station, lat: t.at[1], lon: t.at[0], elev, survey: '', declination: old.declination ?? null };
     if (old.heights) place.heights = old.heights;
     if (old.mode === 'anchor' && old.station === t.station && old.controlPoints) place.controlPoints = old.controlPoints;
-    await record('cavefile.set', { file: t.file, place });
-    const r = await fetch('/api/lib/blob/' + cf.h + '.' + (cf.ext || 'plt'));
-    if (!r.ok) { toast('The survey file isn’t on this computer'); return; }
-    const style = (w.caveState().find(c => c.name === t.file) || {}).displayOptions || null;
-    w.switching = true;
-    try { w.removeCave(t.file); w.loadCave(t.file, await r.text(), place, style); } finally { w.switching = false; }
-    toast(`${t.cave} placed at ${t.point || 'the marker'} (station ${t.station})`);
+    if (await placeFile(t.file, place)) toast(`${t.cave} placed at ${t.point || 'the marker'} (station ${t.station})`);
+  }
+  // Another entrance (of this cave, or of another cave in the same file) held where its marker is: a 🎯 pin, so the file follows.
+  async function pinAtTag(t) {
+    const cf = pj.P.cavefiles[t.file];
+    if (!cf) return;
+    if (!cf.place || cf.place.mode !== 'anchor') { toast('Place the cave at its main entrance first'); return; }
+    const cp = { station: t.station, lat: t.at[1], lon: t.at[0], elev: await entranceElev(t) };
+    const place = Object.assign({}, cf.place, { controlPoints: (cf.place.controlPoints || []).filter(x => x.station !== t.station).concat([cp]) });
+    if (await placeFile(t.file, place)) toast(`Pinned station ${t.station} at ${t.point || 'the marker'}`);
+  }
+  // Place a file at its first entrance and pin every other entrance of its caves, so the whole file fits the markers.
+  async function fitFileToEntrances(file) {
+    const cf = pj.P.cavefiles[file];
+    const tags = F.tags.filter(t => t.file === file && t.cid && t.station);
+    const order = tags.filter(t => t.placedHere).concat(tags.filter(t => t.main && !t.placedHere), tags.filter(t => !t.main && !t.placedHere));
+    const imp = (window._caveImports || []).find(i => i && i.parsed && i.name === file);
+    const fit = FL.entranceFit(order, imp ? new Set(imp.parsed.stations.map(s => s.name)) : null);
+    if (!cf || !fit) { toast('None of the entrance markers is on a station of this file'); return; }
+    const old = cf.place || {};
+    const place = { mode: 'anchor', station: fit.main.station, lat: fit.main.at[1], lon: fit.main.at[0], elev: await entranceElev(fit.main), survey: '', declination: old.declination ?? null };
+    if (old.heights) place.heights = old.heights;
+    if (fit.pins.length) place.controlPoints = fit.pins;
+    if (await placeFile(file, place)) toast(`${file} fitted to ${fit.pins.length + 1} entrance${fit.pins.length ? 's' : ''}`);
   }
   // For the workspace list: the tag to paste into a CalTopo marker.
   function copyTag(file) {
@@ -443,15 +490,25 @@
     sec(root, `Cave entrances on the map (${tags.length})`, tags.some(t => !t.placedHere), b => {
       b.appendChild(el('div', 'pj-note', 'A point whose description has a line “flex: cave=<cave name>; station=<entrance station>; z=<metres>; id=<cave id>” (z and id are optional) — in CalTopo or in this project — marks where a cave’s entrance is. FLEX places the cave there when you say so. 🕳 Caves → ⋯ on the cave → “Copy CalTopo tag” gives you the line.'));
       if (!tags.length) b.appendChild(el('div', 'pj-sub', 'None found.'));
+      const fitted = new Set();
       tags.forEach(t => {
         const r = el('div', 'pj-item');
-        r.appendChild(el('div', 'pj-item-t', `🕳 ${t.cave} · station ${t.station || '?'}`));
+        r.appendChild(el('div', 'pj-item-t', `🕳 ${t.cave} · station ${t.station || '?'}${t.entrances > 1 ? ` · entrance ${t.entrance} of ${t.entrances}${t.main ? ' (main)' : ''}` : ''}`));
         r.appendChild(el('div', 'pj-sub', `${t.point || 'point'} (${t.from}) · ${t.at[1].toFixed(5)}, ${t.at[0].toFixed(5)}`));
         const row = el('div', 'pj-row');
-        if (!t.cid && !t.file) row.appendChild(el('span', 'pj-sub', 'No cave of that name in this project (check the name, or add the cave).'));
+        const multi = t.file && (pj.P.cavefiles[t.file] || {}).multi;
+        if (!t.cid && !t.file) row.appendChild(el('span', 'pj-sub', 'No cave of that name in this project: until it is surveyed this is a surface point (check the name, or add the cave).'));
         else if (!t.file) row.appendChild(el('span', 'pj-sub', 'The cave’s survey file isn’t stored in the project yet: load it and save.'));
-        else if (t.placedHere) row.appendChild(el('span', 'pj-sub', '✓ placed here'));
+        else if (!t.fileMain && t.cid) {
+          if (t.pinned) row.appendChild(el('span', 'pj-sub', '🎯 pinned here'));
+          else row.appendChild(btn('Pin the cave here', () => pinAtTag(t), 'small'));
+        } else if (t.placedHere) row.appendChild(el('span', 'pj-sub', '✓ placed here'));
         else row.appendChild(btn('Place the cave here', () => placeAtTag(t), 'small primary'));
+        const same = tags.filter(x => x.file === t.file && x.cid && x.station);
+        if (t.file && !fitted.has(t.file) && new Set(same.map(x => x.station)).size > 1) {
+          fitted.add(t.file);
+          row.appendChild(btn(multi ? 'Fit the whole file to its entrances' : 'Fit the cave to its entrances', () => fitFileToEntrances(t.file), 'small'));
+        }
         r.appendChild(row);
         b.appendChild(r);
       });
