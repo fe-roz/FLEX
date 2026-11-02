@@ -1,0 +1,113 @@
+// Tests of the pure parts of client/src/modules/{potree-pointcloud,pointcloud-incidence,pointcloud-hag}.js:
+// cloud names from URLs, the incidence flight-line fit and colours, and the HAG
+// ground grids (translation, anchoring, window, packing / sampling round trip).
+// Made-up data only.
+//
+//   node tools/test_pointcloud_modules.js
+'use strict';
+const path = require('path');
+const M = f => require(path.join(__dirname, '..', 'client', 'src', 'modules', f));
+const PC = M('potree-pointcloud.js'), I = M('pointcloud-incidence.js'), H = M('pointcloud-hag.js');
+
+let pass = 0, fail = 0;
+const ok = (label, cond, info) => { if (cond) pass++; else { fail++; console.error('FAIL ' + label + (info !== undefined ? '\n  ' + JSON.stringify(info).slice(0, 600) : '')); } };
+const near = (a, b, t = 1e-9) => Math.abs(a - b) <= t;
+
+// ── cloud names ──────────────────────────────────────────────────────────────
+{
+  ok('name from ept url', PC.pcNameFromUrl('http://localhost:8083/Cave Ridge/ept.json') === 'Cave Ridge');
+  ok('name: trailing slash falls back to the url', PC.pcNameFromUrl('http://h/a/') === 'http://h/a/');
+  ok('key: last non-empty segment', PC.pcUrlKey('http://h/a/Cave Ridge/ept.json?x=1') === 'Cave Ridge' && PC.pcUrlKey('http://h/a/Cave Ridge/') === 'Cave Ridge');
+  ok('key: ept.json?query stripped', PC.pcUrlKey('http://h/Cave Ridge/ept.json') === 'Cave Ridge');
+}
+
+// ── incidence ────────────────────────────────────────────────────────────────
+{
+  ok('flightLineHue golden angle', I.flightLineHue(0) === 0 && near(I.flightLineHue(1), 0.618034) && near(I.flightLineHue(2), 0.236068));
+  ok('angleHue nadir green, 30 deg red, clamped', near(I.angleHue(0), 0.33) && near(I.angleHue(30), 0) && near(I.angleHue(-60), 0) && near(I.angleHue(15), 0.165));
+  // a flight line along +Y: nadir points on x = 100, y spread, increasing gps time with y
+  const pts = [];
+  for (let i = 0; i < 10; i++) pts.push({ x: 100, y: i * 10, z: 5, scanAngle: 0, gpsTime: 1000 + i });
+  const samples = new Map([[7, { nadirPts: pts, allPts: pts }], [8, { nadirPts: [], allPts: pts.slice(0, 2) }]]);
+  const h = I.headingsFromSamples(samples);
+  const a = h.get(7);
+  ok('line along +Y', a && near(Math.abs(a.alongY), 1, 1e-6) && Math.abs(a.alongX) < 1e-6 && a.alongY > 0, a);
+  ok('across = 90 deg CCW of along', near(a.acrossX, -a.alongY) && near(a.acrossY, a.alongX));
+  ok('path at flight altitude, extended 50 m', a.pathPts.length === 2 && a.pathPts[0].z === I.FLIGHT_ALT && near(a.pathPts[0].y, -50, 1e-6) && near(a.pathPts[1].y, 140, 1e-6), a.pathPts);
+  ok('too few points: no heading', !h.has(8));
+  // reversed gps time flips the direction
+  const rev = pts.map((p, i) => ({ ...p, gpsTime: 2000 - i }));
+  ok('gps time orients it', I.headingsFromSamples(new Map([[1, { nadirPts: rev, allPts: rev }]])).get(1).alongY < 0);
+}
+
+// ── HAG grids ────────────────────────────────────────────────────────────────
+{
+  const mk = (d, l) => { const x = H.hagMakeGrid(d, l); x.texture = { version: 1 }; return x; };
+  const g = mk(8, 'test');
+  ok('make: arrays sized and empty', g.ground.length === 64 && g.upload.length === 256 && g.ground[0] === Math.fround(H.HAG_NONE) && g.groundMax[0] === Math.fround(-H.HAG_NONE));
+  ok('fallback cell clamps 4..32 m', H.hagFallbackCell(0.25) === 4 && H.hagFallbackCell(1) === 16 && H.hagFallbackCell(10) === 32);
+
+  H.hagAnchor(g, 2, 1000.3, 2000.7);
+  ok('anchor snaps to the lattice, centred', g.originX % 2 === 0 && g.originY % 2 === 0 && near(g.originX + 8, 1000, 2) && g.cell === 2);
+  const e = H.hagExtent(g);
+  ok('extent', e.maxX - e.minX === 16 && near(e.cx, g.originX + 8));
+
+  // translate: data at (x,y) moves to (x-dx, y-dy); exposed margin is empty
+  const arr = new Float32Array(16); for (let i = 0; i < 16; i++) arr[i] = i + 1;
+  const t1 = arr.slice(); H.hagTranslate(t1, 4, 1, 1, 0, 0);
+  ok('translate dx=1', t1[0] === 2 && t1[1] === 3 && t1[2] === 4 && t1[3] === 0 && t1[4] === 6, Array.from(t1));
+  const t2 = arr.slice(); H.hagTranslate(t2, 4, 1, 0, -1, 0);
+  ok('translate dy=-1', t2[0] === 0 && t2[4] === 1 && t2[15] === 12, Array.from(t2));
+  const t3 = arr.slice(); H.hagTranslate(t3, 4, 1, 4, 0, -9);
+  ok('translate past the window clears all', t3.every(v => v === -9));
+  const t4 = new Uint8Array(32).fill(7); H.hagTranslate(t4, 4, 2, 1, 1, 0);
+  ok('translate stride 2: surviving cells keep both bytes', t4[0] === 7 && t4[1] === 7 && t4[6] === 0 && t4[24] === 0);
+
+  // shift keeps data in range
+  const s = mk(8, 's'); H.hagAnchor(s, 1, 4, 4);
+  const ix = 4 + 1 - s.originX; // a cell 1 m right of centre
+  const k = 4 * 8 + ix; s.ground[k] = 10; s.groundMax[k] = 12; s.upload[k * 4 + 3] = 255;
+  const ox = s.originX;
+  ok('shift by whole cells', H.hagShift(s, 4 + 2, 4) === true && s.originX === ox + 2);
+  ok('data travelled with the shift', s.ground[k - 2] === 10 && s.groundMax[k - 2] === 12 && s.ground[k] === Math.fround(H.HAG_NONE));
+  ok('recount after shift', s.groundCells === 1 && s.filled === 1, [s.groundCells, s.filled]);
+  ok('no shift when already there', H.hagShift(s, 4 + 2, 4) === false);
+
+  // exposed
+  const A = { minX: 0, maxX: 10, minY: 0, maxY: 10 };
+  ok('exposed: disjoint -> whole', H.hagExposed(A, { minX: 20, maxX: 30, minY: 0, maxY: 10 }).length === 1);
+  const ex = H.hagExposed(A, { minX: 2, maxX: 12, minY: 3, maxY: 13 });
+  ok('exposed: an L of two rectangles', ex.length === 2, ex);
+  ok('overlaps', H.hagOverlaps({ minX: 0, maxX: 5, minY: 0, maxY: 5 }, A) && !H.hagOverlaps({ minX: 10, maxX: 12, minY: 0, maxY: 5 }, A));
+
+  // window + pack / read round trip
+  const w0 = H.hagWindow(100, 500);
+  ok('window padded 25 %, zInv matches', near(w0.zMin, 0) && near(w0.zSpan, 600) && near(w0.zInv, 65535 / 600), w0);
+  const w = H.hagWindow(100, 300);
+  ok('window min span 100', H.hagWindow(10, 10).zSpan === 100 && H.hagWindow(10, 10).zMin === -40);
+
+  const p = mk(4, 'p'); H.hagAnchor(p, 1, 0, 0);
+  const c0 = 1 * 4 + 1;
+  p.ground[c0] = 120.5; p.groundMax[c0] = 150.5;       // a ground band
+  const c1 = 2 * 4 + 3; p.fallback[c1] = 130.25;       // an estimate only
+  H.hagRepackGrid(p, w.zMin, w.zSpan);
+  ok('repack counts', p.filled === 2 && p.groundCells === 1, [p.filled, p.groundCells]);
+  ok('provenance bytes', p.upload[c0 * 4 + 3] === 255 && p.upload[c1 * 4 + 3] === 128 && p.upload[0 + 3] === 0);
+  const wx = p.originX + 1.5, wy = p.originY + 1.5;
+  const r0 = H.hagReadCell(p, w.zMin, w.zSpan, wx, wy);
+  ok('read: ground low within a cm', r0 && r0.ground && near(r0.z, 120.5, 0.01), r0);
+  ok('read: band top within a spread step', near(r0.hi, 150.5, H.HAG_SPREAD_MAX / 255 + 0.01), r0);
+  const r1 = H.hagReadCell(p, w.zMin, w.zSpan, p.originX + 3.5, p.originY + 2.5);
+  ok('read: estimate is not ground, no band', r1 && !r1.ground && near(r1.z, 130.25, 0.01) && near(r1.hi, r1.z), r1);
+  ok('read: empty cell and outside are null', H.hagReadCell(p, w.zMin, w.zSpan, p.originX + 0.5, p.originY + 0.5) === null && H.hagReadCell(p, w.zMin, w.zSpan, p.originX - 1, 0) === null);
+  // a height never packs to 0 (reserved for "never uploaded")
+  const q = mk(2, 'q'); H.hagAnchor(q, 1, 0, 0); q.ground[0] = -1e6; q.groundMax[0] = -1e6;
+  H.hagRepackGrid(q, w.zMin, w.zSpan);
+  ok('height byte pair never 0', (q.upload[0] << 8 | q.upload[1]) === 1);
+
+  ok('pct formatting', H.hagPct(50, 100) === '50' && H.hagPct(1, 1000) === '0.10' && H.hagPct(0, 10) === '0');
+  ok('cover string', H.hagCover({ dim: 10, groundCells: 50, filled: 75 }) === '50% ground, 25% est');
+}
+
+console.log(`${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);
