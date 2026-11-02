@@ -983,9 +983,8 @@
                     style="font-size:11px; background:#1a1a2e; color:#fff;
                            border:1px solid rgba(255,255,255,0.3); border-radius:4px; padding:2px 4px;">
                     <option value="0">Off (manual)</option>
-                    <option value="10">10 s</option>
-                    <option value="30" selected>30 s</option>
-                    <option value="60">1 min</option>
+                    <option value="30">30 s</option>
+                    <option value="60" selected>1 min</option>
                     <option value="300">5 min</option>
                   </select>
                   <button onclick="window._loadCaltopo()" class="btn btn-sm btn-primary"
@@ -2023,6 +2022,7 @@
 <script src="project_workspace.js"></script>
 <!-- 📁 Project: the Projects list, the open project's overview -->
 <script src="caltopo_match.js"></script>  <!-- which project surface features are on the CalTopo map (📁 Project, 📍 Surface) -->
+<script src="caltopo_send.js"></script>  <!-- hand project items over to CalTopo, only when asked; entrance tag parsing (window._ctSend) -->
 <script src="caltopo_write.js"></script>  <!-- editing the CalTopo map: writes, offline queue, conflicts, changes (window._ctWrite) -->
 <script src="projects_panel.js"></script>
 <!-- 📄 Docs: the project folder as on disk -->

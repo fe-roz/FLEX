@@ -3577,7 +3577,7 @@ setTimeout(() => {
     if (sel && _savedSession.caltopoInterval != null) {
       sel.value = String(_savedSession.caltopoInterval);
     }
-    loadCaltopoKml(_savedSession.caltopoUrl, _savedSession.caltopoInterval ?? 30);
+    loadCaltopoKml(_savedSession.caltopoUrl, _savedSession.caltopoInterval ?? 60);
   }
 
   // Data files: My data's (it takes in URL files the old saved view still lists)
@@ -4153,6 +4153,8 @@ async function loadCaltopoKml(rawUrl, intervalSecs) {
     _setCaltopoStatus('⚠ invalid CalTopo URL', '#f88');
     return;
   }
+  if (window._ctInterval) intervalSecs = window._ctInterval(intervalSecs);   // 0 = off, nothing under 30 s (caltopo_write.js)
+  { const s = document.getElementById('caltopo_interval_select'); if (s) s.value = String(intervalSecs); }
   _clearCaltopoTimers();
   caltopoState.url      = kmlUrl;
   caltopoState.interval = intervalSecs;
@@ -4187,7 +4189,7 @@ function clearCaltopo() {
   if (window._ctLayers) window._ctLayers.apply(null);
   if (window._onVectorSourcesChanged) window._onVectorSourcesChanged();
   _setCaltopoStatus('', '');
-  notifyCaltopoChanged(null, 30);
+  notifyCaltopoChanged(null, 60);
   renderCaltopoStatus();
 }
 
@@ -5166,7 +5168,7 @@ window._ws = {
     const input = document.getElementById('caltopo_url_input'), sel = document.getElementById('caltopo_interval_select');
     if (input) input.value = url;
     if (sel && interval != null) sel.value = String(interval);
-    return loadCaltopoKml(url, interval ?? 30);
+    return loadCaltopoKml(url, interval ?? 60);
   },
   clearCaltopo: () => clearCaltopo(),
   dataFiles: () => loadedDataFiles.filter(f => f.url).map(f => ({ url: f.url, label: f.label, myId: f.myId || null, show: f.show !== false,
@@ -8146,7 +8148,7 @@ function renderLayerList() {
 // Expose to toolbar onclick handlers (can't use ES module imports from inline HTML)
 window._loadCaltopo = () => {
   const url      = (document.getElementById('caltopo_url_input')?.value || '').trim();
-  const interval = parseInt(document.getElementById('caltopo_interval_select')?.value || '30', 10);
+  const interval = parseInt(document.getElementById('caltopo_interval_select')?.value || '60', 10);
   if (url) loadCaltopoKml(url, interval);
 };
 window._clearCaltopo = () => clearCaltopo();

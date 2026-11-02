@@ -37,8 +37,11 @@
 //   POST /api/caltopo/key            {id, key, accountId?, label?}  (empty id clears it)
 //   GET  /api/caltopo/maps           → maps the key can see (needs accountId)
 //   GET  /api/caltopo/map?id=…&since=…  → the map's features (CalTopo JSON as is); a full
-//        pull (no since) is cached, diffed and logged, and sends waiting edits. CalTopo not
-//        reachable → the cached copy with flexOffline: true, flexPulled: <ms>.
+//        pull (no since) is cached, diffed and logged, and sends waiting edits. A map pulled
+//        within the last 28 s (any window) or while CalTopo said "not now" (unreachable, 429, 5xx;
+//        back-off 60/120/300 s) is answered from the copy; unreachable → the copy with
+//        flexOffline: true, flexPulled: <ms>. Full pulls only: CalTopo's since/<time> does not
+//        say what was deleted, so a merged copy could keep features that are gone.
 //   POST /api/caltopo/feature        {map, fid, cls?, base?, patch}  update (patch: property names
 //        and/or geometry) — or {map, fid, cls?, base?, feature} whole feature — or {map, cls?, feature}
 //        (no fid) create. → { ok:true, feature, fid } | { queued:true } | { conflict:true, mine, theirs }
@@ -63,7 +66,16 @@ const QUEUE_FILE = path.join(DIR, 'caltopo_queue.json');
 const LOG_FILE = path.join(DIR, 'caltopo_log.jsonl');
 const HOST = process.env.FLEX_CALTOPO_HOST || 'caltopo.com';            // tests: http://localhost:<port>
 const TEST = /^http:\/\//.test(HOST) ? new URL(HOST) : null;
-const RETRY_MS = +process.env.FLEX_CALTOPO_RETRY_MS || 30000;
+// Reaching out to CalTopo is kept quiet (one limiter for every request; see `request`):
+//   GAP_MS    at least this long between two requests to CalTopo
+//   PULL_MS   a map pulled within this long ago is answered from FLEX's copy, however many windows ask
+//   FRESH_MS  the conflict check before a write may reuse a pull this young
+//   RETRY_MS  waiting edits are tried again by this server timer; after a failure (unreachable, 429, 5xx)
+//             the wait grows 1x, 2x, 5x RETRY_MS (60 s, 120 s, 300 s) until a request succeeds
+const RETRY_MS = +process.env.FLEX_CALTOPO_RETRY_MS || 60000;
+const envMs = (n, d) => (process.env[n] != null && process.env[n] !== '' && !isNaN(+process.env[n]) ? +process.env[n] : d);
+const GAP_MS = envMs('FLEX_CALTOPO_GAP_MS', 1000), PULL_MS = envMs('FLEX_CALTOPO_PULL_MS', 28000), FRESH_MS = envMs('FLEX_CALTOPO_FRESH_MS', 15000);
+const BACKOFF = [1, 2, 5];
 const ID_RE = /^[A-Za-z0-9]{1,40}$/;
 const FID_RE = /^[A-Za-z0-9_-]{1,80}$/;
 const KEEP_CHANGES = 300;
@@ -94,7 +106,7 @@ function formBody(urlPath, key, payload, now = Date.now()) {
 }
 
 /** A signed request to CalTopo. Rejects with .status (CalTopo answered) and .offline (it could not be reached). */
-function request(method, urlPath, key, obj) {
+function rawRequest(method, urlPath, key, obj) {
   method = method.toUpperCase();
   const payload = method === 'POST' ? JSON.stringify(obj || {}) : '';
   const bodyText = method === 'POST' ? formBody(urlPath, key, payload) : '';
@@ -111,7 +123,7 @@ function request(method, urlPath, key, obj) {
         if (res.statusCode >= 400 || !j || (j.status && j.status !== 'ok')) {
           const why = (j && (j.message || j.error)) || text.slice(0, 200) || res.statusMessage;
           return reject(Object.assign(new Error(`CalTopo said ${res.statusCode}: ${why}`),
-            { status: res.statusCode >= 400 ? res.statusCode : 502, offline: [502, 503, 504].includes(res.statusCode) }));
+            { status: res.statusCode >= 400 ? res.statusCode : 502, offline: res.statusCode === 429 || res.statusCode >= 500 }));
         }
         resolve(j);
       });
@@ -122,7 +134,37 @@ function request(method, urlPath, key, obj) {
     req.end();
   });
 }
+
+// The one outbound limiter: every request to CalTopo (reads and writes) waits for its turn, GAP_MS apart,
+// and is counted. Failures that mean "not now" (unreachable, 429, 5xx) start the back-off; a success ends it.
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let nextAt = 0, backoffStep = 0, backoffUntil = 0;
+const sent = [];                                  // times of the requests made (the counter in the console)
+const stats = { total: 0 };
+async function request(method, urlPath, key, obj) {
+  const now = Date.now(), at = Math.max(now, nextAt);
+  nextAt = at + GAP_MS;
+  if (at > now) await sleep(at - now);
+  sent.push(Date.now()); stats.total++;
+  try {
+    const r = await rawRequest(method, urlPath, key, obj);
+    backoffStep = 0; backoffUntil = 0;
+    return r;
+  } catch (e) {
+    if (e.offline) { backoffUntil = Date.now() + RETRY_MS * BACKOFF[Math.min(backoffStep, BACKOFF.length - 1)]; backoffStep++; }
+    throw e;
+  }
+}
+const inBackoff = () => Date.now() < backoffUntil;
 const get = (urlPath, key) => request('GET', urlPath, key);
+// One line in the console at most every 10 minutes: how often FLEX reached out to CalTopo.
+const COUNT_MS = envMs('FLEX_CALTOPO_COUNT_MS', 600000);
+const counter = setInterval(() => {
+  const from = Date.now() - COUNT_MS, n = sent.filter(t => t >= from).length;
+  while (sent.length && sent[0] < from) sent.shift();
+  if (n) console.log(`[caltopo] ${n} request${n === 1 ? '' : 's'} to CalTopo in the last ${Math.round(COUNT_MS / 60000)} min (${(n / (COUNT_MS / 60000)).toFixed(1)} per minute)`);
+}, COUNT_MS);
+if (counter.unref) counter.unref();
 
 function body(req, max = 1 << 22) {
   return new Promise((resolve, reject) => {
@@ -191,7 +233,8 @@ const pushedSincePull = {}, lastPushed = {};
 const bag = (o, map) => (o[map] = o[map] || new Map());
 
 /** A full pull of the map: cached, diffed against the last copy, logged. */
-async function pull(map, k) {
+async function pull(map, k, maxAge) {
+  if (maxAge > 0) { const c = readCache(map); if (c && c.result && Date.now() - c.pulled < maxAge) return c.result; }
   const r = await get('/api/v1/map/' + map + '/since/0', k);
   const result = r.result || {};
   absorb(map, result);
@@ -238,21 +281,27 @@ const answerOf = q => q.state === 'conflict' ? { conflict: true, mine: q.mine, t
   : q.state === 'failed' ? Object.assign({ ok: false, error: q.error }, q.readOnly ? { readOnly: true } : {}) : { queued: true };
 
 /** Send the map's waiting edits (pulls first, unless given the result of one). → Map(qid → answer) */
-async function flush(map, k, result) {
+async function flush(map, k, result, force) {
   const out = new Map();
   const todo = queue.filter(q => q.map === map && q.state === 'waiting');
   if (!todo.length) return out;
+  let down = !force && inBackoff();                // CalTopo said "not now" a moment ago: wait, don't ask again
   const offline = q => {
+    if (down && !q.tries) { out.set(q.qid, { queued: true }); return; }
     q.tries = (q.tries || 0) + 1; q.lastTry = Date.now(); q.error = 'CalTopo could not be reached';
     if (q.tries === 1) log({ kind: 'push', map, op: q.op, fid: q.fid, title: q.title, result: 'queued' });
     out.set(q.qid, { queued: true });
   };
-  if (!result) {
-    try { result = await pull(map, k); }
+  if (down) { todo.forEach(offline); saveQueue(); return out; }
+  // Only changes and deletes need the map first (the conflict check); a new feature has nothing to clash with.
+  if (!result && todo.some(q => q.op !== 'create')) {
+    try { result = await pull(map, k, FRESH_MS); }
     catch (e) { if (!e.offline) throw e; todo.forEach(offline); saveQueue(); return out; }
   }
+  if (!result) result = {};
   const cur = index(result), since = bag(pushedSincePull, map), last = bag(lastPushed, map);
   for (const q of todo) {
+    if (down) { offline(q); continue; }
     const now = cur.get(q.fid) || null, upd = updOf(now);
     if (q.op !== 'create' && !(q.op === 'delete' && !now)) {
       const ours = last.has(q.fid) && last.get(q.fid) === upd;
@@ -287,7 +336,7 @@ async function flush(map, k, result) {
       log(o);
       out.set(q.qid, { ok: true, feature: got, fid });
     } catch (e) {
-      if (e.offline) { offline(q); saveQueue(); continue; }
+      if (e.offline) { down = true; offline(q); saveQueue(); continue; }
       const readOnly = e.status === 401 || e.status === 403;
       const error = readOnly ? READ_ONLY_MSG : (e.message || String(e));
       log({ kind: 'push', map, op: q.op, fid: q.fid, title: q.title, result: 'failed', error: readOnly ? 'read-only key' : error });
@@ -349,17 +398,16 @@ async function resolve(map, k, fid, pick) {
     if (q.op === 'delete' && !q.theirs) { queue = queue.filter(x => x !== q); saveQueue(); return { ok: true }; }
   }
   q.state = 'waiting'; delete q.error; delete q.readOnly; saveQueue();
-  const out = await flush(map, k);
+  const out = await flush(map, k, undefined, true);
   return out.get(q.qid) || answerOf(q);
 }
 
 // Waiting edits are tried again on a timer (and on pulls and other requests).
-let lastAuto = 0;
 function autoRetry() {
+  if (inBackoff()) return;
   const maps = [...new Set(queue.filter(q => q.state === 'waiting').map(q => q.map))];
   const k = readKey();
   if (!maps.length || !k) return;
-  lastAuto = Date.now();
   maps.forEach(m => locked(() => flush(m, k)).catch(e => console.warn('[caltopo] retry:', e.message)));
 }
 const timer = setInterval(autoRetry, RETRY_MS); if (timer.unref) timer.unref();
@@ -399,7 +447,6 @@ async function handle(req, res, rest, query) {
     }
     const k = readKey();
     if (!k) return json(res, { ok: false, error: 'No CalTopo key on this computer yet (📍 Surface → CalTopo map: link and key → 🔑).' }, 400);
-    if (Date.now() - lastAuto > 10000 && rest !== 'map') autoRetry();
     if (rest === 'maps' && req.method === 'GET') {
       if (!k.accountId) return json(res, { error: 'Add your account / team ID to list maps (or paste a map’s ID).' }, 400);
       const r = await get('/api/v1/acct/' + k.accountId + '/since/0', k);
@@ -418,12 +465,12 @@ async function handle(req, res, rest, query) {
       if (since !== '0') { const r = await get('/api/v1/map/' + id + '/since/' + since, k); return json(res, r.result || {}); }
       try {
         const result = await locked(async () => {
-          const r = await pull(id, k);
+          if (inBackoff()) { const c = readCache(id); if (c) return Object.assign({}, c.result, { flexOffline: true, flexPulled: c.pulled }); }
+          const r = await pull(id, k, PULL_MS);
           if (!queue.some(x => x.map === id && x.state === 'waiting')) return r;
           await flush(id, k, r);
           return (readCache(id) || {}).result || r;          // with what was just sent
         });
-        lastAuto = Date.now();
         return json(res, result);
       } catch (e) {
         const c = e.offline && readCache(id);
@@ -437,7 +484,7 @@ async function handle(req, res, rest, query) {
       if (!ID_RE.test(map)) return json(res, { ok: false, error: 'bad map id' }, 400);
       if (req.method === 'POST' && !o.patch && !o.feature) return json(res, { ok: false, error: 'nothing to change' }, 400);
       o.op = req.method === 'DELETE' ? 'delete' : o.fid ? 'update' : 'create';
-      if (o.op === 'create' && !(o.feature && o.feature.geometry)) return json(res, { ok: false, error: 'a new feature needs a geometry' }, 400);
+      if (o.op === 'create' && !(o.feature && (o.feature.geometry || (o.feature.properties && o.feature.properties.class === 'Folder')))) return json(res, { ok: false, error: 'a new feature needs a geometry' }, 400);
       return json(res, await locked(() => edit(map, k, o)));
     }
     if (rest === 'resolve' && req.method === 'POST') {
@@ -449,7 +496,7 @@ async function handle(req, res, rest, query) {
       const o = JSON.parse((await body(req)) || '{}');
       const one = ID_RE.test(String(o.map || '')) ? String(o.map) : '';
       const maps = one ? [one] : [...new Set(queue.filter(x => x.state === 'waiting').map(x => x.map))];
-      for (const m of maps) await locked(() => flush(m, k));
+      for (const m of maps) await locked(() => flush(m, k, undefined, true));
       return json(res, { pending: pendingOf(one) });
     }
     return json(res, { error: 'not found' }, 404);
@@ -458,4 +505,4 @@ async function handle(req, res, rest, query) {
   }
 }
 
-module.exports = { handle, signedQuery, formBody, readKey, KEY_FILE, _t: { diff, compose, classOf, READ_ONLY_MSG } };
+module.exports = { handle, stats: () => ({ total: stats.total, backoffMs: Math.max(0, backoffUntil - Date.now()) }), signedQuery, formBody, readKey, KEY_FILE, _t: { diff, compose, classOf, READ_ONLY_MSG } };

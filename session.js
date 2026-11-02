@@ -18,7 +18,7 @@ let _cameraSettleTimer  = null;
 let _indicator       = null;
 let _indicatorTimer  = null;
 let _caltopoUrl      = null;
-let _caltopoInterval = 30;
+let _caltopoInterval = 60;
 let _dataFiles       = [];   // [{label, type, url}] — URL-sourced only
 let _caveVisible     = false;
 let _poiVisible      = true;
@@ -59,7 +59,7 @@ export function notifyPcLoaded(url) {
  */
 export function notifyCaltopoChanged(url, intervalSecs) {
   _caltopoUrl      = url || null;
-  _caltopoInterval = (intervalSecs != null) ? intervalSecs : 30;
+  _caltopoInterval = (intervalSecs != null) ? intervalSecs : 60;
   saveSession();
 }
 
