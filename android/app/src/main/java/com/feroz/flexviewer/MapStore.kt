@@ -130,7 +130,7 @@ class MapStore(private val ctx: Context) {
                     if (wanted || legacy) {
                         val out = File(dir, base)
                         // Only known basenames are written, but check anyway (zip-slip).
-                        require(out.canonicalPath.startsWith(canonical)) { "bad entry ${e.name}" }
+                        require(out.canonicalPath.startsWith(canonical)) { "bad entry $base" }
                         progress("Unpacking $base", -1)
                         FileOutputStream(out).use { zin.copyTo(it, 1 shl 16) }
                         if (wanted) seen.add(base) else gotViewer = true
