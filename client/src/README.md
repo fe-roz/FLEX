@@ -227,3 +227,10 @@ Short, in this order:
 | `page/hag-controls.js` | live HAG filter controls (`#lp-hag-*`) | classic script, calls `window._hag*` |
 
 `page/` holds index.html's former inline scripts as **classic** `<script src>` files at the same place in the page, so they run at parse time exactly as the inline code did (an ES module would be deferred). They are not importable.
+| `modules/search-pins.js` | search pins (geocoder result → pin + fly-in), `window._clearSearchPins` | `escapeHtml` (pure); `setupSearchPins(...)` |
+| `modules/selection-monitor.js` | floating "Add Point Cloud" button, 100 ms selected-entity watcher | `setupSelectionMonitor(...)` |
+| `modules/update-checker.js` | `window._checkForUpdates` | `setupUpdateChecker()` |
+| `modules/poi-list.js` | Points of Interest panel list, `window._exportPoi` | `setupPoiList(...)` (called early in flex.js) |
+| `modules/workspace-hooks.js` | `window._ws` (project workspace hooks), `_caveGeometry` | `setupWorkspaceHooks(...)` |
+| `modules/measure-mode.js` | depth / distance measurement mode (V) | `setupMeasureMode(...)` |
+| `modules/html-labels.js` | HTML screen-space label overlay | `setupHtmlLabels(...)` |
