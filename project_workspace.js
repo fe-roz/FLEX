@@ -291,7 +291,7 @@
     m.appendChild(el('div', 'pj-save-menu-t', `${pending.length} change${pending.length > 1 ? 's' : ''} waiting for “${projName()}”`));
     pending.forEach(p => m.appendChild(el('div', 'pj-save-menu-i', `• ${p.name} — ${p.what}`)));
     const row = el('div', 'pj-row');
-    row.appendChild(btn('💾 Save into the project', async () => { m.remove(); await save(); A.render && A.render(); }, 'small primary'));
+    row.appendChild(btn(['save', 'Save into the project'], async () => { m.remove(); await save(); A.render && A.render(); }, 'small primary'));
     row.appendChild(btn('Discard', async () => { m.remove(); await discardAsk(); }, 'small'));
     row.appendChild(btn('Cancel', () => m.remove(), 'small'));
     m.appendChild(row);
@@ -318,7 +318,7 @@
   async function removed(kind, key) {
     if (!pj.pid || W.entering) return;
     const isIn = kind === 'cave' ? inProject.cave(key) : (() => { const l = pj.P.layers[layerId(kind, key)]; return !!(l && !l.removed); })();
-    if (isIn) toast('Unloaded; it stays in the project (🕳 Caves: → moves it to My data)');
+    if (isIn) toast('Unloaded; it stays in the project (Caves: → moves it to My data)');
     setTimeout(badge, 50);
   }
 
@@ -483,8 +483,8 @@
     const b = document.getElementById('pj-top-btn');
     if (!b) return;
     const name = pj.pid ? projName() : 'No project';
-    b.textContent = '📁 ' + name;
-    b.title = pj.pid ? `Project “${name}”: caves, layers, CalTopo, notes, leads, documents. 💾 Save puts changes into it.` : 'No project open: your own caves and points (My data). Open or create a project here.';
+    window.iconLabel(b, ['folder', name], 16);
+    b.title = pj.pid ? `Project “${name}”: caves, layers, CalTopo, notes, leads, documents. Save puts changes into it.` : 'No project open: your own caves and points (My data). Open or create a project here.';
     b.classList.toggle('pj-top-on', !!pj.pid);
     if (window._renderPcList) window._renderPcList();     // ☁ LiDAR rows: their 📁
     placeCaltopo();
@@ -535,12 +535,12 @@
   function caveMenu(name, loaded) {
     if (!pj.pid || !pj.P) return [];
     const out = [], saved = inProject.cave(name) && !moving(name, 'out');
-    if (saved && window._pjf) out.push(['🏷 Copy CalTopo tag', () => window._pjf.copyTag(name), 'A line for the entrance marker’s description in CalTopo: FLEX places the cave there']);
+    if (saved && window._pjf) out.push(['Copy CalTopo tag', () => window._pjf.copyTag(name), 'A line for the entrance marker’s description in CalTopo: FLEX places the cave there']);
     const imp = loaded && (window._caveImports || []).find(i => i && i.parsed && i.name === name);
-    if (imp && owns(name) && A.linkFile) out.push(['✂ Caves in this file…', () => A.linkFile(imp), 'Which project cave this file is, or split it into the caves FLEX finds inside it']);
+    if (imp && owns(name) && A.linkFile) out.push(['Caves in this file…', () => A.linkFile(imp), 'Which project cave this file is, or split it into the caves FLEX finds inside it']);
     // The project caves made of this file (name, what they are made of, remove).
     FL.liveCaves(pj.P).filter(c => (c.sources || []).some(s => s.file === name)).slice(0, 4)
-      .forEach(c => A.editCave && out.push([`🕳 Cave “${c.name}”…`, () => A.editCave(c.id), 'Rename it, see what it is made of']));
+      .forEach(c => A.editCave && out.push([`Cave “${c.name}”…`, () => A.editCave(c.id), 'Rename it, see what it is made of']));
     if (saved) out.push(['Remove from project', () => removeCaveFile(name), 'Out of the project (→ moves it to My data instead)']);
     return out;
   }
@@ -552,7 +552,7 @@
     if (!pj.pid || !pj.P || !url || !row) return;
     const id = layerId('pointcloud', url), cur = pj.P.layers[id], isIn = !!(cur && !cur.removed);
     const b = document.createElement('button');
-    b.type = 'button'; b.className = 'lp-pj-btn' + (isIn ? ' on' : ''); b.textContent = '📁';
+    b.type = 'button'; b.className = 'lp-pj-btn' + (isIn ? ' on' : ''); b.innerHTML = window.icon('folder', 14);
     b.title = isIn ? `In “${projName()}” (click to remove it from the project)` : `Add to “${projName()}”`;
     b.addEventListener('click', async e => {
       e.stopPropagation();

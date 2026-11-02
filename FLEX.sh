@@ -1,4 +1,5 @@
 #!/bin/bash
+cd "$(dirname "$0")"   # run from the FLEX folder, wherever it was cloned
 
 # Check if Node.js is installed
 if ! command -v node >/dev/null 2>&1; then

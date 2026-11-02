@@ -7,6 +7,7 @@
 //
 //   window.icon(name, size = 20, cls) → '<svg …><use href="#i-name"/></svg>'
 //   window.ICONS                      → the names
+//   window.iconLabel(node, ['pin', 'text']) / window.iconHTML('pin', 'text') → icon + text (JS-built rows)
 // In HTML: <svg class="ico" width="20" height="20"><use href="#i-folder"/></svg>
 // (the stroke settings come from the .ico rule below; window.icon sets them as
 // attributes too, so its markup also works where that rule is not loaded).
@@ -43,6 +44,31 @@
     'folder-move': '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 13h6M13 11l2 2-2 2"/>',
     'folder-plus': '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10v6M9 13h6"/>',
     trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/><path d="M10 11v5M14 11v5"/>',
+    // JS-built rows and buttons (they replaced emoji): add, warn, key, link, …
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    x: '<path d="M6 6l12 12M18 6 6 18"/>',
+    warn: '<path d="M10.3 4.6 2.8 18a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3L13.7 4.6a2 2 0 0 0-3.4 0z"/><path d="M12 10v4M12 17.5h.01"/>',
+    key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l2.5 2.5M14.5 8.5 16.5 10.5"/>',
+    link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+    clipboard: '<rect x="5" y="4" width="14" height="17" rx="2"/><rect x="9" y="2.5" width="6" height="3.5" rx="1"/>',
+    image: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="m21 15-4.5-4.5L7 19"/>',
+    video: '<rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3"/>',
+    note: '<path d="M5 4h14v10l-6 6H5z"/><path d="M13 20v-6h6M8 9h8M8 13h3"/>',
+    scissors: '<circle cx="6" cy="7" r="2.5"/><circle cx="6" cy="17" r="2.5"/><path d="M8.2 8.3 20 18M8.2 15.7 20 6"/>',
+    download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
+    upload: '<path d="M12 15V4M7 9l5-5 5 5M5 20h14"/>',
+    user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+    mountain: '<path d="m2.5 20 7-12 4 6.5 2.5-3.5 5.5 9z"/>',
+    search: '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/>',
+    history: '<path d="M3.5 12a8.5 8.5 0 1 0 2.5-6L3.5 8.5"/><path d="M3.5 4v4.5H8M12 7.5V12l3 2"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M2.5 12h2M19.5 12h2M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>',
+    chart: '<path d="M4 20h16M7 20v-6M12 20V8M17 20v-10"/>',
+    ruler: '<path d="M3 17 17 3l4 4L7 21z"/><path d="m7 13 2 2M10 10l2 2M13 7l2 2"/>',
+    globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+    paperclip: '<path d="m20 11.5-8.3 8.3a5 5 0 0 1-7-7L13 4.5a3.3 3.3 0 0 1 4.7 4.7l-8.3 8.3a1.7 1.7 0 0 1-2.4-2.4L14.5 7.6"/>',
+    polygon: '<path d="M12 3.5 20.5 9.7 17.3 20H6.7L3.5 9.7z"/>',
+    puzzle: '<path d="M5 8h3.5a2 2 0 1 1 4 0H16v3.5a2 2 0 1 1 0 4V19H5z"/>',
+    layers: '<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>',
   };
   const NS = 'http://www.w3.org/2000/svg';
   const ATTR = 'fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"';
@@ -51,6 +77,24 @@
   window.icon = function (name, size, cls) {
     const s = size || 20;
     return `<svg class="ico${cls ? ' ' + cls : ''}" width="${s}" height="${s}" viewBox="0 0 24 24" ${ATTR}><use href="#i-${name}"/></svg>`;
+  };
+
+  // A JS-built label: window.iconLabel(node, label, size)
+  //   label = 'text'            → plain text, as textContent
+  //   label = ['name', 'text']  → the line icon, then the text in its own <span>
+  //   label = ['name']          → the icon alone
+  // Returns the node. size defaults to 1.15em, so the icon follows the text.
+  window.iconLabel = function (node, label, size) {
+    if (!Array.isArray(label)) { node.textContent = label == null ? '' : label; return node; }
+    const [name, text] = label;
+    node.innerHTML = window.icon(name, size || '1.15em', text ? 'ico-l' : '');
+    if (text) { const sp = document.createElement('span'); sp.textContent = text; node.appendChild(sp); }
+    return node;
+  };
+  // The same as markup for code that builds HTML strings: window.iconHTML('pin', 'text') → icon + escaped text.
+  window.iconHTML = function (name, text, size) {
+    const t = text == null ? '' : String(text).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    return window.icon(name, size || '1.15em', t ? 'ico-l' : '') + (t ? '<span>' + t + '</span>' : '');
   };
 
   function inject() {
@@ -62,7 +106,7 @@
   }
   // The look of an icon in markup: lines, not fills; size from width/height.
   const st = document.createElement('style');
-  st.textContent = 'svg.ico { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; vertical-align: -0.2em; overflow: visible; }';
+  st.textContent = 'svg.ico { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; vertical-align: -0.2em; overflow: visible; } svg.ico.ico-l { margin-right: .3em; }';
   document.head.appendChild(st);
   if (document.body) inject(); else document.addEventListener('DOMContentLoaded', inject);
 })();

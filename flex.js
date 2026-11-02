@@ -33,6 +33,9 @@ import { rampColor, rampRgb, rampCss, percentileRange, lazyPick, materialize, in
 import { levelFrame, planGroundGrid, pushFootLine, sampleGroundGrid, gridCovers, depthBelowGround,
          binLidarGround, mergeLidarGround, gridFromLidar } from "./cave_ground.js";
 
+// A line icon (icons.js) in front of a label in HTML built here: `${_ic('pin')}Label`.
+const _ic = name => (window.icon ? window.icon(name, '1.15em', 'ico-l') : '');
+
 function isAoiGeometry(geometry) {
   if (!geometry || typeof geometry !== "object") {
     return false;
@@ -1767,8 +1770,8 @@ function _updateSearchPinButton() {
     _searchPinButton = document.createElement('button');
     _searchPinButton.type = 'button';
     _searchPinButton.className = 'cesium-button cesium-toolbar-button';
-    _searchPinButton.style.cssText = 'font-size:11px; line-height:30px; padding:0; letter-spacing:-1px;';
-    _searchPinButton.textContent = '\u{1F4CD}\u2715';   // pin + cross: clears, not adds
+    _searchPinButton.style.cssText = 'padding:0; display:inline-flex; align-items:center; justify-content:center;';
+    _searchPinButton.innerHTML = window.icon('pin', 16) + window.icon('x', 10);   // pin + cross: clears, not adds
     _searchPinButton.addEventListener('click', () => window._clearSearchPins());
     const geocoder = bar.querySelector('.cesium-viewer-geocoderContainer');
     bar.insertBefore(_searchPinButton, geocoder ? geocoder.nextSibling : bar.firstChild);
@@ -1861,7 +1864,7 @@ function createFloatingButton() {
       box-shadow: 0 4px 12px rgba(0,0,0,0.3);
       display: none;
       transition: all 0.3s ease;
-    ">📊 Add Point Cloud</button>
+    ">${_ic('cloud')}Add Point Cloud</button>
   `;
   
   // Add click handler
@@ -4643,7 +4646,7 @@ function _renderPltRecents() {
       return `<div style="border-bottom:1px solid rgba(255,255,255,0.05);">
         <div style="display:flex;align-items:center;gap:4px;padding:2px 0;">
           <button onclick="window._caveSetToggle(${i})" title="Show the caves in this set" style="background:none;border:none;color:rgba(255,255,255,0.5);cursor:pointer;font-size:9px;padding:0;width:10px;">${open ? '▾' : '▸'}</button>
-          <div style="flex:1;min-width:0;font-size:9px;color:rgba(255,255,255,0.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(st.name)}">📁 ${esc(st.name)} <span style="opacity:0.45;">· ${st.caves.length}</span></div>
+          <div style="flex:1;min-width:0;font-size:9px;color:rgba(255,255,255,0.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(st.name)}">${_ic('folder')}${esc(st.name)} <span style="opacity:0.45;">· ${st.caves.length}</span></div>
           <button onclick="window._caveSetLoad(${i})" title="Load every cave in the set (ones already loaded are skipped)" style="${_btnCss('rgba(0,200,120,0.15)', 'rgba(0,200,120,0.3)', '#8fa')}">Load</button>
           <button onclick="window._caveSetDelete(${i})" title="Delete the set (its caves stay in Recent)" style="font-size:9px;padding:1px 4px;background:none;border:none;color:rgba(255,100,100,0.6);cursor:pointer;flex-shrink:0;">✕</button>
         </div>${members}</div>`;
@@ -4694,7 +4697,7 @@ async function _placeCaveRecord(r, { recent = true, rawText: text = null } = {})
     // Was placed silently at the first point; say so (Replace survey… / Rectify fix it).
     _flexDialog({ title: 'Anchor station not found',
       html: `“${_escH(r.name)}” is anchored at station ${_escH(georef.station)}, which its survey file no longer has, so it was placed at the first station instead. ` +
-            `Use ⟳ Replace survey… (re-pick the anchor) or 🎯 Rectify to fix it.` });
+            `Use Replace survey file… (re-pick the anchor) or Rectify to fix it.` });
   }
   if (georef.mode === 'anchor') {
     entry = renderCaveSurveyAnchored(r.name, parsed, georef.station, georef.lat, georef.lon, georef.elev, georef.survey || '', georef.declination ?? null);
@@ -5519,13 +5522,13 @@ function _renderCaveList() {
             </div>
             <div style="display:flex; gap:5px;">
               <button onclick="window._openRectifyPanel(${i})" style="font-size:11px;padding:4px 10px;background:rgba(255,200,50,0.15);border:1px solid rgba(255,200,50,0.4);color:#fd8;border-radius:4px;cursor:pointer;flex:1;" title="Georeference by pinning stations to known positions">
-                🎯 Rectify${cpCount ? ' (' + cpCount + ')' : ''}
+                ${_ic('target')}Rectify${cpCount ? ' (' + cpCount + ')' : ''}
               </button>
               <button onclick="window._openStylePanel(${i})" style="font-size:11px;padding:4px 10px;background:rgba(180,100,255,0.15);border:1px solid rgba(180,100,255,0.4);color:#c8a0ff;border-radius:4px;cursor:pointer;flex:1;" title="Survey display options">
-                🎨 Style
+                ${_ic('palette')}Style
               </button>
               <button onclick="window._openLabelsPanel(${i})" style="font-size:11px;padding:4px 10px;background:rgba(80,220,255,0.12);border:1px solid rgba(80,220,255,0.4);color:#8ee8ff;border-radius:4px;cursor:pointer;flex:1;" title="Name areas of the cave, placed where the camera is">
-                🏷 Labels${(imp.displayOptions && imp.displayOptions.areaLabels && imp.displayOptions.areaLabels.length) ? ' (' + imp.displayOptions.areaLabels.length + ')' : ''}
+                ${_ic('tag')}Labels${(imp.displayOptions && imp.displayOptions.areaLabels && imp.displayOptions.areaLabels.length) ? ' (' + imp.displayOptions.areaLabels.length + ')' : ''}
               </button>
             </div>
             <button onclick="window._replaceCaveSurvey(${i})" style="margin-top:5px;width:100%;font-size:11px;padding:4px 10px;background:rgba(120,220,120,0.10);border:1px solid rgba(120,220,120,0.35);color:#b8f0b8;border-radius:4px;cursor:pointer;" title="Load a newer survey file (PLT, Breakout or Walls) in place of this one, keeping where it is placed, its control points and its style">
@@ -5542,13 +5545,13 @@ function _renderCaveList() {
             </div>
             <div style="display:flex; gap:5px;">
               <button onclick="window._openRectifyPanel(${i})" style="font-size:11px;padding:4px 10px;background:rgba(255,200,50,0.15);border:1px solid rgba(255,200,50,0.4);color:#fd8;border-radius:4px;cursor:pointer;flex:1;" title="Correct the placement by pinning stations to known positions">
-                🎯 Rectify${cpCount ? ' (' + cpCount + ')' : ''}
+                ${_ic('target')}Rectify${cpCount ? ' (' + cpCount + ')' : ''}
               </button>
               <button onclick="window._openStylePanel(${i})" style="font-size:11px;padding:4px 10px;background:rgba(180,100,255,0.15);border:1px solid rgba(180,100,255,0.4);color:#c8a0ff;border-radius:4px;cursor:pointer;flex:1;" title="Survey display options">
-                🎨 Style
+                ${_ic('palette')}Style
               </button>
               <button onclick="window._openLabelsPanel(${i})" style="font-size:11px;padding:4px 10px;background:rgba(80,220,255,0.12);border:1px solid rgba(80,220,255,0.4);color:#8ee8ff;border-radius:4px;cursor:pointer;flex:1;" title="Name areas of the cave, placed where the camera is">
-                🏷 Labels${(imp.displayOptions && imp.displayOptions.areaLabels && imp.displayOptions.areaLabels.length) ? ' (' + imp.displayOptions.areaLabels.length + ')' : ''}
+                ${_ic('tag')}Labels${(imp.displayOptions && imp.displayOptions.areaLabels && imp.displayOptions.areaLabels.length) ? ' (' + imp.displayOptions.areaLabels.length + ')' : ''}
               </button>
             </div>
             <button onclick="window._replaceCaveSurvey(${i})" style="margin-top:5px;width:100%;font-size:11px;padding:4px 10px;background:rgba(120,220,120,0.10);border:1px solid rgba(120,220,120,0.35);color:#b8f0b8;border-radius:4px;cursor:pointer;" title="Load a newer survey file (PLT, Breakout or Walls) in place of this one, keeping where it is placed, its control points and its style">
@@ -5566,7 +5569,7 @@ function _renderCaveList() {
           <input type="checkbox" class="ui-sw ui-sw-sm" role="switch" ${imp.visible ? 'checked' : ''} onchange="window._toggleCaveImport(${i}, this.checked)" style="margin:0; flex-shrink:0;" aria-label="Show ${imp.name}">
           <span class="lp-row-name" style="font-size:10px; cursor:pointer;" title="${imp.name}" onclick="window._toggleCaveInfo(${i})">${imp.name}</span>
           <button onclick="window._flyToCave(${i})" style="background:none;border:none;color:rgba(255,255,255,0.5);cursor:pointer;font-size:12px;padding:0 2px;flex-shrink:0;" title="Fly to this cave">⌖</button>
-          <button onclick="window._toggleCaveInfo(${i})" style="background:none;border:none;color:rgba(255,255,255,0.4);cursor:pointer;font-size:11px;padding:0 2px;flex-shrink:0;" title="Info / Edit">ℹ</button>
+          <button onclick="window._toggleCaveInfo(${i})" style="background:none;border:none;color:rgba(255,255,255,0.4);cursor:pointer;font-size:11px;padding:0 2px;flex-shrink:0;" title="Info / Edit">${window.icon('info', 12)}</button>
           <button onclick="window._removeCaveImport(${i})" style="background:none;border:none;color:#f88;cursor:pointer;font-size:11px;padding:0 2px;flex-shrink:0;" title="Remove">✕</button>
         </div>
         <div id="cave-info-${i}" style="display:none; padding-left:14px;">${infoHtml}</div>
@@ -6466,7 +6469,7 @@ function _labelsPanelEl() {
   el.style.cssText = 'background:#16212a;border:1px solid rgba(80,220,255,0.25);border-radius:6px;padding:12px;font-size:13px;color:#ddd;';
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-      <div style="font-weight:600;font-size:13px;">🏷 Area Labels</div>
+      <div style="font-weight:600;font-size:13px;">${_ic('tag')}Area Labels</div>
       <button onclick="window._labelsClose()" style="background:none;border:none;color:#888;cursor:pointer;font-size:14px;padding:0 2px;">✕</button>
     </div>
     <div id="labels-cave-name" style="font-size:11px;opacity:0.5;margin-bottom:6px;"></div>
@@ -6495,7 +6498,7 @@ function _labelsRenderList() {
     <div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
       <input type="text" value="${_escapeHtml(lb.text)}" maxlength="60" onchange="window._labelsRename(${li}, this.value)"
         style="flex:1;min-width:0;padding:3px 5px;background:transparent;border:1px solid rgba(255,255,255,0.1);border-radius:3px;color:${AREA_LABEL_COLOR};font-size:12px;">
-      <button onclick="window._labelsFlyTo(${li})" title="Fly to this label" style="background:none;border:none;cursor:pointer;font-size:13px;padding:0;">🎯</button>
+      <button onclick="window._labelsFlyTo(${li})" title="Fly to this label" style="background:none;border:none;cursor:pointer;font-size:13px;padding:0;color:inherit;">${window.icon('target', 14)}</button>
       <button onclick="window._labelsMoveHere(${li})" title="Move this label to the camera" style="background:none;border:none;cursor:pointer;font-size:12px;padding:0;color:#8ee8ff;">⤓</button>
       <button onclick="window._labelsDelete(${li})" title="Delete" style="background:none;border:none;cursor:pointer;font-size:13px;padding:0;color:#f88;">✕</button>
     </div>`).join('')
@@ -7064,7 +7067,7 @@ function _renderCaveColourUI() {
   if (_caveColourMode === 'survey' || !_caveImports.length) { lg.style.display = 'none'; return; }
   if (_caveHookMode()) {
     const h = typeof window._caveReviewLegendHtml === 'function' ? window._caveReviewLegendHtml(_caveColourMode) : '';
-    lg.innerHTML = h || `<div style="font-size:9px;opacity:0.6;margin-top:2px;">Open a project (📁) to colour by its review state.</div>`;
+    lg.innerHTML = h || `<div style="font-size:9px;opacity:0.6;margin-top:2px;">Open a project to colour by its review state.</div>`;
     lg.style.display = 'block';
     return;
   }
@@ -7102,7 +7105,7 @@ function _renderCaveColourUI() {
         : 'Could not read the terrain for some caves (grey).');
       else if (R) html += note('Below the 3D terrain (Cesium), straight above each point.');
       if (_caveLidarNote) html += note(_caveLidarNote);
-      if (_loadedClouds().length) html += btn('⛰ Use the loaded LiDAR ground', 'window._caveDepthFromLidar(true)',
+      if (_loadedClouds().length) html += btn(_ic('mountain') + 'Use the loaded LiDAR ground', 'window._caveDepthFromLidar(true)',
         'Measure depth from the ground returns (class 2) of the point clouds loaded now, where they cover the caves');
     }
   }
@@ -7327,7 +7330,7 @@ function _startGlobePick(source = 'cesium') {
       if (wizOverlay) wizOverlay.style.display = 'none';
       if (banner) {
         banner.querySelector && (banner.querySelector('span:first-child').textContent =
-          '☁ Click on the point cloud to set the anchor · Esc to cancel');
+          'Click on the point cloud to set the anchor · Esc to cancel');
         banner.style.display = 'block';
       }
       const clickH = (event) => {
@@ -7973,7 +7976,7 @@ function renderLayerList() {
     const nameSpan = document.createElement('span');
     const ctl = layer._custom && layer._custom.owner === 'c';      // from the CalTopo map (caltopo_layers.js): a line icon, read-only
     if (ctl && window.icon) { nameSpan.innerHTML = window.icon('map', 12, 'lp-ct-ico'); nameSpan.appendChild(document.createTextNode(' ' + layer.name)); }
-    else nameSpan.textContent = (layer._custom ? (layer._custom.owner === 'p' ? '📁 ' : '👤 ') : '') + layer.name;
+    else window.iconLabel(nameSpan, layer._custom ? [layer._custom.owner === 'p' ? 'folder' : 'user', layer.name] : layer.name);
     if (layer._custom) nameSpan.title = ctl ? 'From the CalTopo map (change or remove it in CalTopo)' : layer._custom.owner === 'p' ? 'Part of the project' : 'In My data';
     if (layer._custom && layer._custom.warn) { const w = document.createElement('span'); w.className = 'lp-warn'; w.textContent = ' no tiles'; w.style.color = '#fc6'; nameSpan.appendChild(w); nameSpan.title += '. ' + layer._custom.warn; }
     nameSpan.style.cssText = 'flex:1; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
@@ -8083,9 +8086,9 @@ function renderLayerList() {
   });
 
   if (window._customLayers) {            // your own: a GeoTIFF or a tile link (custom_layers.js); in a project they go into it (📁)
-    [['📄 GeoTIFF file…', () => window._customLayers.pickFile()], ['🔗 Tile link…', () => window._customLayers.askTiles()]].forEach(([label, fn]) => {
+    [[['doc', 'GeoTIFF file…'], () => window._customLayers.pickFile()], [['link', 'Tile link…'], () => window._customLayers.askTiles()]].forEach(([label, fn]) => {
       const item = document.createElement('div');
-      item.textContent = label;
+      window.iconLabel(item, label);
       item.style.cssText = 'padding:6px 10px; font-size:11px; color:rgba(255,255,255,0.85); cursor:pointer; white-space:nowrap; border-top:1px solid rgba(255,255,255,0.1);';
       item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,0.1)'; });
       item.addEventListener('mouseleave', () => { item.style.background = ''; });
@@ -8130,10 +8133,10 @@ async function _renderCaltopoKey() {
   _caltopoKeySet = !!k.set;
   const b = (label, fn) => `<button onclick="${fn}" class="btn btn-sm btn-secondary" style="font-size:10px; padding:1px 6px;">${label}</button>`;
   box.innerHTML = k.set
-    ? `<span style="color:#8f8;">🔑 Key ${k.id}${k.accountId ? ' · account ' + k.accountId : ''}: private maps are read through the CalTopo API</span>
+    ? `<span style="color:#8f8;">${_ic('key')}Key ${k.id}${k.accountId ? ' · account ' + k.accountId : ''}: private maps are read through the CalTopo API</span>
        <div style="display:flex; gap:4px; margin-top:3px; flex-wrap:wrap;">${k.accountId ? b('Pick a map…', 'window._caltopoPickMap()') : ''}${b('Change key…', 'window._caltopoKeyDialog()')}${b('Remove key', 'window._caltopoKeyClear()')}</div>`
     : `<span style="opacity:0.7;">Private maps need a CalTopo key (Team service account, or your account's key).</span>
-       <div style="margin-top:3px;">${b('🔑 Add a CalTopo key…', 'window._caltopoKeyDialog()')}</div>`;
+       <div style="margin-top:3px;">${b(_ic('key') + 'Add a CalTopo key…', 'window._caltopoKeyDialog()')}</div>`;
 }
 window._caltopoKeyDialog = function () {
   const ov = document.createElement('div');
@@ -9647,7 +9650,7 @@ function _copySurveyShot() {
   const text = `${dist}\t${az}\t${inc}\t(${unit})`;
   navigator.clipboard.writeText(text).then(() => {
     const btn = document.getElementById('measure_copy_btn');
-    if (btn) { btn.textContent = '✓ Copied'; setTimeout(() => { btn.textContent = '📋 Copy'; }, 1500); }
+    if (btn) { btn.textContent = '✓ Copied'; setTimeout(() => { btn.innerHTML = _ic('clipboard') + 'Copy'; }, 1500); }
   }).catch(() => {
     console.warn('[measure] clipboard write failed');
   });
@@ -9684,10 +9687,10 @@ function updateMeasureDisplay() {
     const header = document.createElement('div');
     header.style.cssText = 'margin-bottom:5px; display:flex; justify-content:space-between; align-items:center;';
     header.innerHTML =
-      `<span style="opacity:0.6;font-size:11px;">📐 Measuring from origin &nbsp;|&nbsp; press V to clear</span>` +
+      `<span style="opacity:0.6;font-size:11px;">${_ic('ruler')}Measuring from origin &nbsp;|&nbsp; press V to clear</span>` +
       `<span>` +
         `<button id="measure_unit_btn" style="${btnStyle}">[m]</button>` +
-        `<button id="measure_copy_btn" style="${btnStyle}">📋 Copy</button>` +
+        `<button id="measure_copy_btn" style="${btnStyle}">${_ic('clipboard')}Copy</button>` +
       `</span>`;
     panel.appendChild(header);
 
@@ -10024,7 +10027,7 @@ function _renderEntwineBtn() {
   const btn = document.getElementById('entwine-btn');
   if (!btn) return;
   if (!_entwineConfig) {
-    btn.textContent = '🔗 Link Entwine';
+    btn.innerHTML = _ic('server') + 'Link Entwine';
     btn.style.background = 'rgba(80,180,120,0.1)';
     btn.style.borderColor = 'rgba(80,180,120,0.3)';
     btn.style.color = '#8ecfa8';
@@ -10036,7 +10039,7 @@ function _renderEntwineBtn() {
     btn.style.color = '#f5c842';
     btn.title = 'Enable local Entwine server (' + _entwineConfig.url + ')';
   } else {
-    btn.textContent = '📂 Entwine Datasets';
+    btn.innerHTML = _ic('folder-open') + 'Entwine Datasets';
     btn.style.background = 'rgba(80,180,120,0.2)';
     btn.style.borderColor = 'rgba(80,180,120,0.45)';
     btn.style.color = '#6ee08a';
@@ -10251,7 +10254,7 @@ window._openStylePanel = function(i) {
     return `<div data-survey-code="${sv.code}" style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.05);${rowStyle}">
       <button class="ui-eye ui-eye-sm${isHidden ? ' half' : ' on'}" onclick="window._styleSurveyToggle('${sv.code}')" title="${isHidden ? 'Show' : 'Hide'} this survey"></button>
       <button onclick="window._styleSurveyMarkSurface('${sv.code}')" title="${isMarkedSurface ? 'Unmark as surface' : 'Mark as surface (hides with surface toggle)'}"
-        style="background:none;border:none;cursor:pointer;font-size:12px;padding:0;flex-shrink:0;line-height:1;opacity:${isMarkedSurface ? '1' : '0.3'};">☀</button>
+        style="background:none;border:none;cursor:pointer;font-size:12px;padding:0;flex-shrink:0;line-height:1;color:inherit;opacity:${isMarkedSurface ? '1' : '0.3'};">${window.icon('sun', 14)}</button>
       <input type="color" value="${col}" data-survey="${sv.code}"
         onchange="window._styleColorChange(this)"
         style="width:26px;height:20px;border:none;background:none;cursor:pointer;padding:0;border-radius:3px;flex-shrink:0;">

@@ -1,3 +1,9 @@
+/**
+ * @license
+ * three.js r128, examples/js/controls/OrbitControls.js (https://github.com/mrdoob/three.js)
+ * Copyright 2010-2021 Three.js Authors
+ * SPDX-License-Identifier: MIT
+ */
 ( function () {
 
 	// Unlike TrackballControls, it maintains the "up" direction object.up (+Y by default).

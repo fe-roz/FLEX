@@ -111,10 +111,10 @@ work with no network at all. It declares no `INTERNET` permission.
 
 ## Status and credits
 
-Still rough in places, and licences and credits across the vendored
-dependencies need a proper pass. `PotreeCopied/` is a vendored copy of
+Still rough in places. `PotreeCopied/` is a vendored copy of
 [Potree](https://github.com/potree/potree) by Markus Schütz. The globe is
 [CesiumJS](https://cesium.com/platform/cesiumjs/); the offline viewer uses
-[three.js](https://threejs.org/).
+[three.js](https://threejs.org/). Every third-party library, its version,
+licence and source is listed in [THIRD_PARTY.md](THIRD_PARTY.md).
 
 See `CLAUDE.md` for architecture notes and the non-obvious pitfalls.

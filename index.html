@@ -863,7 +863,7 @@
         <div id="flex-topbar" style="display:flex; align-items:center; gap:4px; flex-wrap:wrap; position:sticky; top:-4px; z-index:5; background:rgba(30,32,36,0.97); margin:-4px -4px 0; padding:8px 6px 4px;">
           <button id="pj-top-btn" class="btn btn-sm btn-secondary" type="button" data-target="#projectCollapsible" hidden
             title="No project open: FLEX as usual. Open or create a project here."
-            style="font-size:11px; padding:2px 8px; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">📁 No project</button>
+            style="font-size:11px; padding:2px 8px; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"><svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-folder"/></svg><span>No project</span></button>
           <button id="session_save_btn" class="btn btn-sm btn-secondary" type="button"
             onclick="window._saveAll ? window._saveAll() : (window._sessionSave && window._sessionSave())"
             title="Save your view — and, with a project open, the changes waiting for it"
@@ -931,7 +931,7 @@
             <div id="surf-cols"></div>
             <div class="sc-extra">
               <input type="checkbox" id="html_labels_toggle" checked hidden>  <!-- driven by 📍 Surface → Labels -->
-              <span title="Your points in 👤 My data, as a file">⇩ My points: <a href="#" onclick="window._exportPoi('kmz');return false;">KMZ</a> <a href="#" onclick="window._exportPoi('geojson');return false;">GeoJSON</a></span>
+              <span title="Your points in My data, as a file"><svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-download"/></svg>My points: <a href="#" onclick="window._exportPoi('kmz');return false;">KMZ</a> <a href="#" onclick="window._exportPoi('geojson');return false;">GeoJSON</a></span>
             </div>
             <!-- Kept for flex.js; the columns show these now. -->
             <div hidden><span id="lp-poi-count-badge"></span><div id="lp-poi-body"><div id="lp-poi-group"><div id="lp-poi-list"></div></div></div><div id="lp-data-body"><div id="lp-data-list"></div></div><div id="pjf-panel"></div></div>
@@ -957,7 +957,7 @@
                              border:1px solid rgba(255,160,0,0.5); border-radius:4px;
                              font-size:11px; font-weight:bold; text-decoration:none;
                              cursor:grab; user-select:none;" title="Drag to bookmarks bar">
-                      📎 Link FLEX to CalTopo
+                      <svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-link"/></svg>Link FLEX to CalTopo
                     </a><br>
                     <b style="opacity:1;">Step 2</b> — log into CalTopo in any tab, then click the bookmark.
                   </div>
@@ -1024,7 +1024,7 @@
                     <input type="checkbox" id="lp-cave-leads-toggle" checked style="margin:0;" onchange="window._setCaveLeadsVisible(this.checked)">
                     <span style="font-size:10px; opacity:0.7; margin-left:4px;">Leads</span>
                   </label>
-                  <label class="lp-row" style="margin:0; cursor:pointer;" title="Area names placed with 🏷 Labels, for every cave (each cave also has its own switch in its Labels panel)">
+                  <label class="lp-row" style="margin:0; cursor:pointer;" title="Area names placed with Labels, for every cave (each cave also has its own switch in its Labels panel)">
                     <input type="checkbox" id="lp-cave-areas-toggle" checked style="margin:0;" onchange="window._setCaveAreaLabelsVisible(this.checked)">
                     <span style="font-size:10px; opacity:0.7; margin-left:4px;">Area names</span>
                   </label>
@@ -1033,7 +1033,7 @@
                 <div style="display:flex; align-items:center; gap:6px; margin-top:5px; font-size:10px;">
                   <span style="opacity:0.7;" title="How every loaded cave's lines, station dots and walls are coloured">Colour</span>
                   <div id="lp-cave-colour-modes" style="display:flex; flex:1;">
-                    <button type="button" data-mode="survey" onclick="window._setCaveColourMode('survey')" title="Each survey in its own colour (set in 🎨 Style)" style="flex:1;padding:2px 0;font-size:10px;cursor:pointer;border:1px solid rgba(255,255,255,0.18);border-radius:4px 0 0 4px;">Survey</button>
+                    <button type="button" data-mode="survey" onclick="window._setCaveColourMode('survey')" title="Each survey in its own colour (set in Style)" style="flex:1;padding:2px 0;font-size:10px;cursor:pointer;border:1px solid rgba(255,255,255,0.18);border-radius:4px 0 0 4px;">Survey</button>
                     <button type="button" data-mode="elev" onclick="window._setCaveColourMode('elev')" title="By elevation (above sea level, as in the survey), one range across all loaded caves" style="flex:1;padding:2px 0;font-size:10px;cursor:pointer;border:1px solid rgba(255,255,255,0.18);border-left:none;">Elevation</button>
                     <button type="button" data-mode="depth" onclick="window._setCaveColourMode('depth')" title="By depth below ground: the 3D terrain straight above each point, less its height. One range across all loaded caves" style="flex:1;padding:2px 0;font-size:10px;cursor:pointer;border:1px solid rgba(255,255,255,0.18);border-left:none;">Depth</button>
                     <button type="button" data-mode="hard" onclick="window._setCaveColourMode('hard')" title="By passage difficulty from the measured LRUDs: narrow (blue), low (red), both (magenta), steep (green), as in the portable viewer" style="flex:1;padding:2px 0;font-size:10px;cursor:pointer;border:1px solid rgba(255,255,255,0.18);border-left:none;">Difficulty</button>
@@ -1065,7 +1065,7 @@
                 <div id="lp-pc-status" style="font-size:10px; color:#aaa; min-height:14px; padding:2px 0;"></div>
                 <div style="margin-top:4px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
                   <button class="btn btn-sm btn-primary lp-add-btn" onclick="addEPT()">+ Add EPT link</button>
-                  <button id="entwine-btn" class="btn btn-sm lp-add-btn" onclick="window._entwineBtn()" style="font-size:11px;background:rgba(80,180,120,0.15);border:1px solid rgba(80,180,120,0.35);color:#8ecfa8;">🗄 Link Entwine</button>
+                  <button id="entwine-btn" class="btn btn-sm lp-add-btn" onclick="window._entwineBtn()" style="font-size:11px;background:rgba(80,180,120,0.15);border:1px solid rgba(80,180,120,0.35);color:#8ecfa8;"><svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-server"/></svg>Link Entwine</button>
                   <label class="lp-row" style="margin:0; cursor:pointer;">
                     <input type="checkbox" data-bind="checked: usgsRef" style="margin:0;">
                     <span style="font-size:10px; opacity:0.7;">USGS Ref Fix</span>
@@ -1298,7 +1298,7 @@
                   </label>
                   <button id="incidence_flip" class="btn btn-sm btn-secondary" style="margin-top:6px;">Flip Angles</button>
                   <div style="margin-top:6px;">
-                    <strong>Show classes:</strong><br>
+                    <div style="font-size:11px; font-weight:600; color:var(--ui-text); margin-bottom:2px;">Show classes</div>
                     <label><input type="checkbox" id="incidence_cls_2"> Ground (2)</label><br>
                     <label><input type="checkbox" id="incidence_cls_3"> Low Veg (3)</label><br>
                     <label><input type="checkbox" id="incidence_cls_4"> Med Veg (4)</label><br>
@@ -1407,12 +1407,12 @@
                   Draw a box or a polygon, then click Export.
                 </div>
                 <button id="export_draw_btn" class="btn btn-sm btn-primary" style="margin-top:6px; width:100%;"
-                  onclick="window._exportStartDraw()">✏ Draw BBox</button>
+                  onclick="window._exportStartDraw()"><svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-pencil"/></svg>Draw BBox</button>
                 <div style="display:flex; gap:4px; margin-top:4px;">
                   <button id="export_poly_btn" class="btn btn-sm btn-primary" style="flex:1;"
-                    onclick="window._exportStartPolygon()" title="Click points on the globe; click the first point, double-click or press Enter to close">⬠ Draw polygon</button>
+                    onclick="window._exportStartPolygon()" title="Click points on the globe; click the first point, double-click or press Enter to close"><svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-polygon"/></svg>Draw polygon</button>
                   <button id="export_kml_btn" class="btn btn-sm btn-secondary" style="flex:1;"
-                    onclick="window._exportLoadKml()" title="Use a polygon from a KML or KMZ file (e.g. saved from Google Earth or CalTopo); the largest one if there are several">📂 KML…</button>
+                    onclick="window._exportLoadKml()" title="Use a polygon from a KML or KMZ file (e.g. saved from Google Earth or CalTopo); the largest one if there are several"><svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-folder-open"/></svg>KML…</button>
                 </div>
                 <div id="export_bbox_display" style="margin-top:6px; font-size:10px; color:rgba(255,255,255,0.5); display:none; width:0; min-width:100%; box-sizing:border-box;">
                   <span id="export_bbox_text">—</span>
@@ -1512,7 +1512,7 @@
                     </select>
                   </label>
                   <div style="font-size:10px; color:rgba(255,255,255,0.4);">
-                    Walls go as drawn in FLEX (🎨 Style → Passage), so a cave with walls off sends lines either way. Lines only makes a smaller export.
+                    Walls go as drawn in FLEX (Style → Passage), so a cave with walls off sends lines either way. Lines only makes a smaller export.
                   </div>
                 </div>
               </div>
@@ -1559,7 +1559,7 @@
             <div style="padding:6px 0;">
               <button id="export_run_btn" class="btn btn-primary" style="width:100%; font-size:13px;"
                 onclick="window._exportRun()" disabled>
-                📦 Export ZIP
+                <svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-pack"/></svg>Export ZIP
               </button>
               <div id="export_progress_wrap" style="display:none; margin-top:8px;">
                 <div style="height:4px; background:rgba(255,255,255,.12); border-radius:2px;">
@@ -1569,7 +1569,7 @@
               </div>
               <div id="export_download_wrap" style="display:none; margin-top:8px;">
                 <a id="export_download_link" class="btn btn-primary" style="width:100%; text-align:center; display:block; font-size:12px;"
-                  href="#" download>⬇ Download ZIP</a>
+                  href="#" download><svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-download"/></svg>Download ZIP</a>
               </div>
             </div>
 
@@ -1589,7 +1589,7 @@
                   Uses the same drawn rectangle as Export.
                 </div>
                 <button class="btn btn-sm btn-primary" style="margin-top:6px; width:100%;"
-                  onclick="window._exportStartDraw()">✏ Draw BBox</button>
+                  onclick="window._exportStartDraw()"><svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-pencil"/></svg>Draw BBox</button>
                 <div id="lidar_bbox_text" style="margin-top:6px; font-size:10px; color:rgba(255,255,255,0.5);">— no area drawn —</div>
               </div>
             </div>
@@ -1691,7 +1691,7 @@
             <div class="lp-section">
               <div class="lp-section-body open">
                 <button id="lidar_run_btn" class="btn btn-primary" style="width:100%;"
-                  onclick="window._lidarRun()">🌿 Analyze Area</button>
+                  onclick="window._lidarRun()"><svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-leaf"/></svg>Analyze Area</button>
                 <div id="lidar_progress_wrap" style="display:none; margin-top:8px;">
                   <div style="height:4px; background:rgba(255,255,255,.12); border-radius:2px;">
                     <div id="lidar_progress_bar" style="height:4px; width:0; background:#00e5ff; border-radius:2px; transition:width .4s;"></div>
@@ -1708,9 +1708,9 @@
                   </label>
                   <div id="lidar_stats" style="font-size:10px; color:rgba(255,255,255,0.45); margin-top:6px; line-height:1.6;"></div>
                   <div style="margin-top:8px; display:flex; gap:5px; flex-wrap:wrap;">
-                    <a id="lidar_dl_veg"    class="btn btn-sm btn-secondary" style="font-size:10px;" href="#" download>⬇ vegetation.tif</a>
-                    <a id="lidar_dl_void"   class="btn btn-sm btn-secondary" style="font-size:10px;" href="#" download>⬇ voids.tif</a>
-                    <a id="lidar_dl_ground" class="btn btn-sm btn-secondary" style="font-size:10px;" href="#" download>⬇ ground.tif</a>
+                    <a id="lidar_dl_veg"    class="btn btn-sm btn-secondary" style="font-size:10px;" href="#" download><svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-download"/></svg>vegetation.tif</a>
+                    <a id="lidar_dl_void"   class="btn btn-sm btn-secondary" style="font-size:10px;" href="#" download><svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-download"/></svg>voids.tif</a>
+                    <a id="lidar_dl_ground" class="btn btn-sm btn-secondary" style="font-size:10px;" href="#" download><svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-download"/></svg>ground.tif</a>
                   </div>
                 </div>
               </div>
@@ -1723,11 +1723,7 @@
         <div style="display:block;" id="coord_container">
           <span>Coordinates: </span>
           <span id="coord_display"></span>
-          <button onclick="copyCoords()">
-            <span style="font-size:.875em; margin-right:.125em; position:relative; top:-.25em; left:-.125em">
-              📄<span style="position:absolute; top:.25em; left:.25em">📄</span>
-            </span>
-          </button>
+          <button onclick="copyCoords()" title="Copy the coordinates"><svg class="ico" width="14" height="14"><use href="#i-clipboard"/></svg></button>
           <div id="elev_display"></div>
         </div>
       </div>
@@ -1868,7 +1864,7 @@
   border-radius:6px; padding:10px 18px; color:#7cf; font-size:13px;
   z-index:9998; pointer-events:none; white-space:nowrap;
   box-shadow:0 4px 16px rgba(0,0,0,0.5);">
-  📍 Click anywhere on the globe to set the anchor point &nbsp;·&nbsp; <span style="color:#f88;">Esc to cancel</span>
+  <svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-pin"/></svg>Click anywhere on the globe to set the anchor point &nbsp;·&nbsp; <span style="color:#f88;">Esc to cancel</span>
 </div>
 
 <div id="cave-wizard-overlay" style="
@@ -1969,7 +1965,7 @@
               <button id="cwiz-decl-fetch" class="btn btn-sm" style="
                 font-size:10px; padding:2px 8px; background:rgba(0,180,120,0.15);
                 border:1px solid rgba(0,180,120,0.3); color:#8fa; border-radius:3px; cursor:pointer;"
-                title="Fetch from NOAA World Magnetic Model using the lat/lon above">🧭 Auto-fetch</button>
+                title="Fetch from NOAA World Magnetic Model using the lat/lon above"><svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-compass"/></svg>Auto-fetch</button>
               <span id="cwiz-decl-status" style="font-size:10px; color:rgba(255,255,255,0.35);"></span>
             </div>
             <div style="font-size:10px; color:rgba(255,255,255,0.3); margin-top:3px;">Rotates survey from magnetic north → true north. Leave blank to skip.</div>
@@ -1981,22 +1977,22 @@
               font-size:11px; padding:4px 10px; background:rgba(0,220,150,0.2);
               border:1px solid rgba(0,220,150,0.5); color:#5fb; border-radius:4px; cursor:pointer;"
               title="Place the first station at the center of the current view (terrain elevation auto-sampled)">
-              📍 Screen center
+              <svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-pin"/></svg>Screen center
             </button>
             <button id="cwiz-pick-cesium" class="btn btn-sm" style="
               font-size:11px; padding:4px 10px; background:rgba(0,140,255,0.2);
               border:1px solid rgba(0,140,255,0.5); color:#7cf; border-radius:4px; cursor:pointer;">
-              🌐 Cesium globe
+              <svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-globe"/></svg>Cesium globe
             </button>
             <button id="cwiz-pick-potree" class="btn btn-sm" title="Point cloud pick — coming soon" style="
               font-size:11px; padding:4px 10px; background:rgba(255,255,255,0.05);
               border:1px solid rgba(255,255,255,0.15); color:rgba(255,255,255,0.3); border-radius:4px; cursor:not-allowed; opacity:0.45;" disabled>
-              ☁ Point cloud
+              <svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-cloud"/></svg>Point cloud
             </button>
             <button id="cwiz-pick-manual" class="btn btn-sm" style="
               font-size:11px; padding:4px 10px; background:rgba(255,255,255,0.05);
               border:1px solid rgba(255,255,255,0.2); color:rgba(255,255,255,0.7); border-radius:4px; cursor:pointer;">
-              ✏ Manual entry
+              <svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-pencil"/></svg>Manual entry
             </button>
           </div>
         </div>
@@ -2206,12 +2202,12 @@
         <select id="rectify-station-select" style="flex:1;background:#111;border:1px solid rgba(255,255,255,0.2);border-radius:4px;padding:4px 6px;color:#ddd;font-size:12px;">
           <option value="">-- Select station --</option>
         </select>
-        <button onclick="window._rectifyPickStationOnMap()" title="Click a station dot on the 3D globe" style="padding:4px 8px;background:rgba(80,150,255,0.18);border:1px solid rgba(80,150,255,0.4);border-radius:4px;color:#8af;cursor:pointer;font-size:12px;">🗺</button>
+        <button onclick="window._rectifyPickStationOnMap()" title="Click a station dot on the 3D globe" style="padding:4px 8px;background:rgba(80,150,255,0.18);border:1px solid rgba(80,150,255,0.4);border-radius:4px;color:#8af;cursor:pointer;font-size:12px;"><svg class="ico" width="14" height="14"><use href="#i-map"/></svg></button>
         <button onclick="window._rectifyStartPick()" style="padding:4px 10px;background:rgba(80,180,120,0.2);border:1px solid rgba(80,180,120,0.4);border-radius:4px;color:#8ecfa8;cursor:pointer;font-size:12px;">+ Add</button>
       </div>
       <div id="rectify-panel-error" style="font-size:11px;color:#f88;margin-bottom:6px;display:none;"></div>
       <div style="display:flex;gap:6px;justify-content:flex-end;">
-        <button onclick="window._rectifySaveToRecent()" title="Save control points so they reload with this PLT" style="padding:4px 12px;background:rgba(0,200,120,0.12);border:1px solid rgba(0,200,120,0.3);border-radius:4px;color:#8fa;cursor:pointer;font-size:12px;">💾 Save</button>
+        <button onclick="window._rectifySaveToRecent()" title="Save control points so they reload with this PLT" style="padding:4px 12px;background:rgba(0,200,120,0.12);border:1px solid rgba(0,200,120,0.3);border-radius:4px;color:#8fa;cursor:pointer;font-size:12px;"><svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-save"/></svg>Save</button>
         <button onclick="window._rectifyReset()" style="padding:4px 12px;background:rgba(255,100,100,0.1);border:1px solid rgba(255,100,100,0.3);border-radius:4px;color:#f88;cursor:pointer;font-size:12px;">Reset</button>
       </div>
     </div>
@@ -2258,7 +2254,7 @@
   <div id="export-draw-banner" style="display:none;position:fixed;top:60px;left:50%;transform:translateX(-50%);
     z-index:10002;background:rgba(0,150,255,0.92);color:#fff;padding:10px 24px;border-radius:8px;
     font-size:14px;font-weight:600;box-shadow:0 2px 16px rgba(0,0,0,0.5);text-align:center;cursor:default;">
-    ✏ Click first corner &nbsp;·&nbsp; <span style="opacity:0.75;font-size:12px;">Esc to cancel</span>
+    <svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-pencil"/></svg>Click first corner &nbsp;·&nbsp; <span style="opacity:0.75;font-size:12px;">Esc to cancel</span>
   </div>
 
   <script>
@@ -2340,7 +2336,7 @@
       _exportClearBbox();
       const banner = document.getElementById('export-draw-banner');
       banner.style.display = 'block';
-      banner.textContent = '✏ Click first corner  ·  Esc to cancel';
+      banner.innerHTML = '' + window.icon('pencil', '1.15em', 'ico-l') + 'Click first corner  ·  Esc to cancel';
 
       // Esc handler
       const onKey = (e) => { if (e.key === 'Escape') { _stopDraw(); } };
@@ -2359,7 +2355,7 @@
         if (step === 0) {
           _bboxCorner1 = [lon, lat];
           step = 1;
-          banner.textContent = '✏ Click opposite corner  ·  Esc to cancel';
+          banner.innerHTML = '' + window.icon('pencil', '1.15em', 'ico-l') + 'Click opposite corner  ·  Esc to cancel';
         } else {
           _bboxCorner2 = [lon, lat];
           _drawRectEntity();
@@ -2421,7 +2417,7 @@
       txt.style.color = '';
       if (_exportPoly) {
         const crossing = _polySelfCrossing(_exportPoly);
-        txt.innerHTML = `⬠ Polygon${_exportPolyLabel ? ' ' + _exportPolyLabel.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])) : ''}: ` +
+        txt.innerHTML = `${window.icon('polygon', '1.15em', 'ico-l')}Polygon${_exportPolyLabel ? ' ' + _exportPolyLabel.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])) : ''}: ` +
           `${_exportPoly.length} points, ${_polyAreaKm2(_exportPoly).toFixed(3)} km²` +
           (_exportPoly.length <= POLY_EDIT_MAX ? '<br><span style="opacity:.75">Drag a dot to move it, a small dot to add one; right-click removes one.</span>'
                                               : '<br><span style="opacity:.75">Too many points to edit here.</span>') +
@@ -2564,9 +2560,9 @@
       const banner = document.getElementById('export-draw-banner');
       const say = () => {
         banner.style.display = 'block';
-        banner.textContent = _polyDraft.length < 3
-          ? `⬠ Click points of the polygon (${_polyDraft.length})  ·  Backspace undoes  ·  Esc cancels`
-          : `⬠ ${_polyDraft.length} points  ·  click the first point, double-click or Enter to close  ·  Backspace undoes  ·  Esc cancels`;
+        banner.innerHTML = window.icon('polygon', '1.15em', 'ico-l') + (_polyDraft.length < 3
+          ? `Click points of the polygon (${_polyDraft.length})  ·  Backspace undoes  ·  Esc cancels`
+          : `${_polyDraft.length} points  ·  click the first point, double-click or Enter to close  ·  Backspace undoes  ·  Esc cancels`);
       };
       say();
       const finish = () => {
@@ -3502,7 +3498,7 @@
         _pollProgress();
       })
       .catch(err => {
-        _setProgress(0, '❌ ' + err.message);
+        _setProgress(0, '✗ ' + err.message);
         document.getElementById('export_run_btn').disabled = false;
       });
     };
@@ -3520,14 +3516,14 @@
       .then(data => {
         _setProgress(data.progress || 0, data.message || data.status || '…');
         if (data.status === 'done') {
-          _setProgress(100, '✅ Done!');
+          _setProgress(100, '✓ Done!');
           const dl = document.getElementById('export_download_link');
           dl.href = '/api/export/download/' + _exportJobId;
           dl.download = data.filename || 'flex_export.zip';
           document.getElementById('export_download_wrap').style.display = 'block';
           document.getElementById('export_run_btn').disabled = false;
         } else if (data.status === 'error') {
-          _setProgress(0, '❌ ' + (data.error || 'Export failed'));
+          _setProgress(0, '✗ ' + (data.error || 'Export failed'));
           document.getElementById('export_run_btn').disabled = false;
         } else {
           _pollTimer = setTimeout(_pollProgress, 1500);
@@ -3542,7 +3538,7 @@
   </script>
 
   <div id="rectify-station-pick-banner" style="display:none;position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:10001;background:rgba(60,130,255,0.93);color:#fff;padding:10px 24px;border-radius:8px;font-size:14px;font-weight:600;box-shadow:0 2px 16px rgba(0,0,0,0.5);pointer-events:none;text-align:center;">
-    🗺 Click a station dot on the map &nbsp;·&nbsp; <span style="opacity:0.8;font-size:12px;">Esc to cancel</span>
+    <svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-map"/></svg>Click a station dot on the map &nbsp;·&nbsp; <span style="opacity:0.8;font-size:12px;">Esc to cancel</span>
   </div>
   <div id="rectify-pick-banner" style="display:none;position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:10000;background:rgba(80,180,120,0.9);border-radius:6px;padding:8px 20px;font-size:13px;color:#fff;font-weight:600;pointer-events:none;">
     Click on the globe to place <span id="rectify-pick-station-name"></span> — Esc to cancel

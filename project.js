@@ -31,7 +31,8 @@
   window._pj = pj;                               // for the console and tests
   const $ = id => document.getElementById(id);
   const esc = t => String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  // text: a string, or ['icon', 'text'] for a line icon in front (icons.js iconLabel).
+  function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) window.iconLabel(e, text); return e; }
   function btn(label, fn, cls) { const b = el('button', 'pj-btn' + (cls ? ' ' + cls : ''), label); b.type = 'button'; b.addEventListener('click', e => { e.stopPropagation(); fn(e); }); return b; }
   function when(iso) {
     const d = new Date(iso);
@@ -145,7 +146,7 @@
   // quiet: many in a row (an import) — saved and kept, the screen refreshed once
   // afterwards with refresh().
   async function record(op, data, where, { quiet = false } = {}) {
-    if (!pj.pid && where !== 'docs') { toast('Choose or create a project first (📁 Project)'); return null; }
+    if (!pj.pid && where !== 'docs') { toast('Choose or create a project first (Project panel)'); return null; }
     if (!(await ensureAuthor())) return null;
     const scope = where === 'docs' ? FL.DOCS : FL.projScope(pj.pid);
     let e;
@@ -223,8 +224,8 @@
     const sug = suggest(imp);
     const cur = caveFor(imp, '');
     const opts = FL.liveCaves(pj.P).map(c => ({ label: (c.id === cur ? '✓ ' : '') + c.name, sub: 'this file is part of it', value: 'c:' + c.id }));
-    opts.push({ label: `＋ A new cave “${imp.name}”`, sub: 'the whole file', value: 'new', primary: !opts.length });
-    if (sug.caves.length > 1) opts.push({ label: `✂ ${sug.caves.length} caves in this file`, sub: 'surveys joined underground form a cave: ' +
+    opts.push({ label: ['plus', `A new cave “${imp.name}”`], sub: 'the whole file', value: 'new', primary: !opts.length });
+    if (sug.caves.length > 1) opts.push({ label: ['scissors', `${sug.caves.length} caves in this file`], sub: 'surveys joined underground form a cave: ' +
       sug.caves.map(c => c.surveys.slice(0, 3).join(', ') + (c.surveys.length > 3 ? '…' : '')).join(' · '), value: 'split' });
     if (cur) opts.push({ label: 'Unlink this file', value: 'unlink' });
     const r = await choose(`“${imp.name}” is…`, 'Notes, leads and documents hang on project caves, so a renamed or re-versioned file stays the same cave.', opts);
@@ -365,7 +366,7 @@
     const cur = noteId ? pj.P.notes[noteId] : null;
     const r = await dialog({ title: (cur ? 'Note on ' : 'New note on ') + targetLabel(target), wide: true,
       html: cur ? `${esc(cur.created.who)}, ${when(cur.created.t)}` + (cur.history.length > 1 ? ` · last edit ${esc(cur.who)}, ${when(cur.t)}` : '') +
-        (cur.conflict ? '<div class="pj-conflict">⚠ Edited on two devices:<br>' + cur.conflict.map(c => `<b>${esc(c.who)}</b>: ${esc(c.text)}`).join('<br>') + '<br>Saving keeps what is in the box.</div>' : '') : '',
+        (cur.conflict ? '<div class="pj-conflict">' + window.icon('warn', '1.15em', 'ico-l') + 'Edited on two devices:<br>' + cur.conflict.map(c => `<b>${esc(c.who)}</b>: ${esc(c.text)}`).join('<br>') + '<br>Saving keeps what is in the box.</div>' : '') : '',
       textarea: { value: cur ? cur.text : '', placeholder: 'What’s here?' },
       buttons: [{ label: 'Cancel', value: null }, ...(cur ? [{ label: 'Remove', value: 'rm', danger: true }] : []), { label: 'Save', value: 'ok', primary: true }] });
     if (!r) return;
@@ -377,7 +378,7 @@
   function noteEl(n) {
     const d = el('div', 'pj-item' + (n.conflict ? ' conflict' : ''));
     d.appendChild(el('div', 'pj-item-t', n.text || '(removed on one device)'));
-    d.appendChild(el('div', 'pj-sub', `${n.who || '?'} · ${when(n.t)}${n.history.length > 1 ? ' · edited' : ''}${n.conflict ? ' · ⚠ edited on two devices' : ''}`));
+    d.appendChild(el('div', 'pj-sub', `${n.who || '?'} · ${when(n.t)}${n.history.length > 1 ? ' · edited' : ''}${n.conflict ? ' · edited on two devices' : ''}`));
     d.addEventListener('click', () => editNote(n.target, n.id));
     return d;
   }
@@ -413,7 +414,7 @@
         };
         choices.forEach(([v, label]) => box.appendChild(chip(v, label)));
         if (fd.list && fd.list !== 'status') {
-          const add = btn('＋', async () => {
+          const add = btn(['plus'], async () => {
             const r = await dialog({ title: 'Add to “' + fd.label + '”', text: 'Added for everyone in this project.', input: { value: '' },
               buttons: [{ label: 'Cancel', value: null }, { label: 'Add', value: 'ok', primary: true }] });
             if (!r || !r.value.trim()) return;
@@ -436,7 +437,7 @@
         });
         row.appendChild(inp);
       }
-      if (conflicts[fd.k]) row.appendChild(el('div', 'pj-conflict', '⚠ two devices: ' + conflicts[fd.k].map(c => `${Array.isArray(c.v) ? c.v.join(', ') : c.v} (${c.who})`).join(' / ')));
+      if (conflicts[fd.k]) row.appendChild(el('div', 'pj-conflict', ['warn', 'two devices: ' + conflicts[fd.k].map(c => `${Array.isArray(c.v) ? c.v.join(', ') : c.v} (${c.who})`).join(' / ')]));
       form.appendChild(row);
     });
     if (rec && rec.sightings && rec.sightings.length) {
@@ -470,9 +471,9 @@
   }
   function leadEl(cid, name, x) {
     const d = el('div', 'pj-item' + (x.active ? '' : ' closed') + (x.rec && x.rec.conflicts ? ' conflict' : ''));
-    d.appendChild(el('div', 'pj-item-t', '❓ ' + leadSummary(x.fields)));
+    d.appendChild(el('div', 'pj-item-t', ['help', leadSummary(x.fields)]));
     if (x.fields.desc) d.appendChild(el('div', 'pj-sub', x.fields.desc));
-    if (x.fields.tie) d.appendChild(el('div', 'pj-sub', '📍 ' + x.fields.tie));
+    if (x.fields.tie) d.appendChild(el('div', 'pj-sub', ['pin', x.fields.tie]));
     if (x.rec) d.appendChild(el('div', 'pj-sub', `${x.rec.updated.who} · ${when(x.rec.updated.t)}${x.rec.sightings ? ' · seen ' + x.rec.sightings.length + '×' : ''}`));
     else d.appendChild(el('div', 'pj-sub', 'from the survey file'));
     d.addEventListener('click', () => editLead(cid, name, x));
@@ -484,11 +485,11 @@
   function docSub(d) {
     const tags = d.tagList.filter(t => t !== FL.T.project(pj.pid)).map(targetLabel);
     const m = FL.docMedia(d);
-    const what = m === 'video' ? '🎞 Video' : m === 'photo' ? `🖼 ${d.pages.length > 1 ? d.pages.length + ' photos' : 'Photo'}`
+    const what = m === 'video' ? 'Video' : m === 'photo' ? `${d.pages.length > 1 ? d.pages.length + ' photos' : 'Photo'}`
       : `${d.pages.length} page${d.pages.length === 1 ? '' : 's'}${d.kind ? ' · ' + (FL.DOC_KIND_LABELS[d.kind] || d.kind) : ''}`;
     return `${what}${d.date ? ' · ' + d.date : ''} · ` +
       (tags.length ? tags.slice(0, 3).join(', ') + (tags.length > 3 ? ` +${tags.length - 3}` : '') : 'inbox') +
-      (d.has_coordinates ? ' · 📌 shows coordinates' : '') + (d.conflicts ? ' · ⚠ edited on two devices' : '');
+      (d.has_coordinates ? ' · shows coordinates' : '') + (d.conflicts ? ' · edited on two devices' : '');
   }
   function docEl(d, target) {
     const r = el('div', 'pj-item pj-doc');
@@ -496,7 +497,7 @@
     const p = d.pages[at];
     const vid = FL.docMedia(d) === 'video';
     if (p && p.ext !== 'pdf') { const im = el('img', 'pj-thumb'); im.loading = 'lazy'; im.src = blobUrl(p); if (p.rot) im.style.transform = `rotate(${p.rot}deg)`; r.appendChild(im); }
-    else r.appendChild(el('div', 'pj-thumb pj-thumb-x', vid ? '🎞' : p ? 'PDF' : '—'));
+    else r.appendChild(el('div', 'pj-thumb pj-thumb-x', vid ? ['video'] : p ? 'PDF' : '—'));
     if (vid) r.classList.add('pj-doc-video');
     const t = el('div'); t.appendChild(el('div', 'pj-item-t', d.title || 'Untitled')); t.appendChild(el('div', 'pj-sub', docSub(d)));
     r.appendChild(t);
@@ -662,7 +663,7 @@
     const bb = g.querySelector('.pjg-btns'); bb.textContent = '';
     const isVid = !!(d.file && /^(mp4|m4v|mov|webm|mkv)$/i.test(d.file.ext)), fileUrl = d.file && d.file.path ? API + 'file?project=' + encodeURIComponent(pj.pid) + '&path=' + encodeURIComponent(d.file.path) : null;
     if (d.file) {
-      const a = el('a', 'pj-btn'); a.textContent = isVid ? '⇩ Original' : '📄 Original';
+      const a = el('a', 'pj-btn'); window.iconLabel(a, [isVid ? 'download' : 'doc', 'Original']);
       a.href = isVid && fileUrl ? fileUrl : API + 'blob/' + d.file.h + '.' + d.file.ext;
       // A video is saved, to open in your own player, not played in a tab of its own (where it goes on unseen).
       if (isVid) { a.download = d.file.name || 'video.' + d.file.ext; a.title = 'Save the video to open it in your own player: ' + d.file.path; }
@@ -673,10 +674,10 @@
       bb.appendChild(btn('⟲', () => record('doc.rotate', { doc: d.id, h: p.h, rot: ((p.rot || 0) + 270) % 360, prev: p.rot || 0 }, 'docs')));
       bb.appendChild(btn('⟳', () => record('doc.rotate', { doc: d.id, h: p.h, rot: ((p.rot || 0) + 90) % 360, prev: p.rot || 0 }, 'docs')));
     }
-    bb.appendChild(btn('🏷 Tags', () => editTags(d.id)));
-    bb.appendChild(btn('✏️ Details', () => editDoc(d.id)));
-    bb.appendChild(btn('＋ Pages', () => addPages({ docId: d.id })));
-    bb.appendChild(btn('📝 Note', () => editNote(FL.T.doc(d.id), (FL.notesOn(pj.P, FL.T.doc(d.id))[0] || {}).id)));
+    bb.appendChild(btn(['tag', 'Tags'], () => editTags(d.id)));
+    bb.appendChild(btn(['pencil', 'Details'], () => editDoc(d.id)));
+    bb.appendChild(btn(['plus', 'Pages'], () => addPages({ docId: d.id })));
+    bb.appendChild(btn(['note', 'Note'], () => editNote(FL.T.doc(d.id), (FL.notesOn(pj.P, FL.T.doc(d.id))[0] || {}).id)));
     bb.appendChild(btn('⋯', () => docMenu(d.id)));
     bb.appendChild(btn('✕', galleryClose));
     const v = g.querySelector('.pjg-view');
@@ -697,7 +698,7 @@
     }
     const tg = g.querySelector('.pjg-tags');
     const notes = FL.notesOn(pj.P, FL.T.doc(d.id));
-    tg.textContent = docSub(d) + (d.desc ? ' — ' + d.desc : '') + (notes.length ? ` · 📝 ${notes[0].text}` : '');
+    tg.textContent = docSub(d) + (d.desc ? ' — ' + d.desc : '') + (notes.length ? ` · Note: ${notes[0].text}` : '');
     g.querySelector('.pjg-prev').disabled = G.i <= 0;
     g.querySelector('.pjg-next').disabled = G.i >= n - 1;
   }
@@ -705,7 +706,7 @@
   function videoEl(url, poster, cls) {
     const box = el('div', 'pj-video ' + (cls || ''));
     const vd = el('video', 'pjg-img'); vd.controls = true; vd.preload = 'metadata'; vd.playsInline = true; vd.src = url; vd.dataset.src = url; if (poster) vd.poster = poster;
-    const note = el('div', 'pj-video-note', 'This browser cannot play this video (probably HEVC). Use ⇩ Original to save it and open it in your own player.');
+    const note = el('div', 'pj-video-note', 'This browser cannot play this video (probably HEVC). Use Original to save it and open it in your own player.');
     vd.addEventListener('error', () => { note.style.display = 'block'; });
     // HEVC in a browser without it: sometimes no error, only sound and no picture.
     vd.addEventListener('loadedmetadata', () => { if (!vd.videoWidth) note.style.display = 'block'; });
@@ -716,7 +717,7 @@
     const url = API + 'file?project=' + encodeURIComponent(pj.pid) + '&path=' + encodeURIComponent(path), name = path.split('/').pop(), vid = isVideoName(name);
     g.querySelector('.pjg-title').innerHTML = `<b>${esc(name)}</b> <span>${esc(path)}</span>`;
     const bb = g.querySelector('.pjg-btns'); bb.textContent = '';
-    const a = el('a', 'pj-btn'); a.textContent = '⇩ Original'; a.href = url; a.download = name; bb.appendChild(a);
+    const a = el('a', 'pj-btn'); window.iconLabel(a, ['download', 'Original']); a.href = url; a.download = name; bb.appendChild(a);
     bb.appendChild(btn('✕', galleryClose));
     const v = g.querySelector('.pjg-view');
     const playing = v.querySelector('video');
@@ -728,8 +729,8 @@
     const d = pj.D.docs[docId];
     const G = pj.gallery;
     const r = await choose(d.title || 'Document', `${d.pages.length} page(s) · added by ${(d.created && d.created.who) || '?'}, ${when(d.created && d.created.t)}`, [
-      ...(d.pages.length ? [{ label: '✏️ This page: kind and date', value: 'page' }, { label: '🗑 Remove this page', value: 'drop' }] : []),
-      { label: '📜 History', value: 'hist' }, { label: '🗑 Delete the document', value: 'del' }]);
+      ...(d.pages.length ? [{ label: ['pencil', 'This page: kind and date'], value: 'page' }, { label: ['trash', 'Remove this page'], value: 'drop' }] : []),
+      { label: ['history', 'History'], value: 'hist' }, { label: ['trash', 'Delete the document'], value: 'del' }]);
     if (!r) return;
     const pg = d.pages[G ? G.i : 0];
     if (r === 'hist') history(d.history, 'Document history', 'docs');
@@ -767,7 +768,7 @@
     const de = el('textarea', 'pj-input'); de.rows = 3; de.value = d.desc || '';
     const co = el('label', 'pj-check'); const cb = el('input'); cb.type = 'checkbox'; cb.checked = !!d.has_coordinates; co.append(cb, ' Shows coordinates');
     form.append(labelled('Title', ti), labelled('Kind', ki), labelled('Date (can be approximate)', da), labelled('Description', de), co);
-    if (d.conflicts) form.appendChild(el('div', 'pj-conflict', '⚠ Edited on two devices: ' + Object.entries(d.conflicts).map(([k, v]) => k + ': ' + v.map(x => `${x.v} (${x.who})`).join(' / ')).join('; ')));
+    if (d.conflicts) form.appendChild(el('div', 'pj-conflict', ['warn', 'Edited on two devices: ' + Object.entries(d.conflicts).map(([k, v]) => k + ': ' + v.map(x => `${x.v} (${x.who})`).join(' / ')).join('; ')]));
     const r = await dialog({ title: 'Document', body: form, wide: true, buttons: [{ label: 'Cancel', value: null }, { label: 'Save', value: 'ok', primary: true }] });
     if (!r) return;
     const now = { title: ti.value.trim(), kind: ki.value.trim(), date: da.value.trim(), desc: de.value.trim(), has_coordinates: cb.checked };
@@ -810,10 +811,10 @@
       list.textContent = '';
       const s = q.value.trim().toLowerCase();
       all.filter(c => !want.has(c.target) && (!s || c.label.toLowerCase().includes(s))).slice(0, 40)
-        .forEach(c => list.appendChild(btn('＋ ' + c.label, () => { want.add(c.target); paintChips(); paintList(); }, 'row')));
+        .forEach(c => list.appendChild(btn(['plus', c.label], () => { want.add(c.target); paintChips(); paintList(); }, 'row')));
     };
     q.addEventListener('input', paintList);
-    const area = btn('＋ Area: a set of stations…', async () => {
+    const area = btn(['plus', 'Area: a set of stations…'], async () => {
       const caves = FL.liveCaves(pj.P);
       if (!caves.length) return;
       const cid = caves.length === 1 ? caves[0].id : await choose('Area in which cave?', null, caves.map(c => ({ label: c.name, value: c.id })));
@@ -952,7 +953,7 @@
         if (ev) r.appendChild(el('div', 'pj-sub', 'Evidence: ' + ev));
         const pages = (p.evidence || []).map(x => x.page && x.page.h).filter(Boolean);
         const row = el('div', 'pj-row');
-        pages.slice(0, 3).forEach(h => { const d = docByPage(h); if (d) row.appendChild(btn('📄 ' + (d.title || 'page'), () => docOpen(d.id, d.pages.findIndex(x => x.h === h)), 'small')); });
+        pages.slice(0, 3).forEach(h => { const d = docByPage(h); if (d) row.appendChild(btn(['doc', d.title || 'page'], () => docOpen(d.id, d.pages.findIndex(x => x.h === h)), 'small')); });
         const docs = !!pj.D.proposals[p.id];
         row.appendChild(btn('Accept', async () => { await record('accept', { ref: p.id, base: [p.id].concat(headsFor(p)) }, docs ? 'docs' : null); paint(); }, 'small primary'));
         row.appendChild(btn('Turn down', async () => { await record('reject', { ref: p.id }, docs ? 'docs' : null); paint(); }, 'small'));
@@ -1051,7 +1052,7 @@
       if (!pj.pid && man.project && man.project.id) await setProject(man.project.id); else await loadAll();
       render(); refreshCard(); drawField(); drawLeads();
       dialog({ title: 'Sync file imported', text: `${added} new change(s) and ${pages} new page(s)` + (man.from && man.from.who ? ` from ${man.from.who}` : '') +
-        (man.project ? ` for project “${man.project.name || man.project.id}”` : '') + '.' + (other ? ' That isn’t the open project; choose it in 📁 Project to see it.' : '') });
+        (man.project ? ` for project “${man.project.name || man.project.id}”` : '') + '.' + (other ? ' That isn’t the open project; choose it in Project to see it.' : '') });
     } catch (e) {
       dialog({ title: 'Sync file not imported', text: e.message || String(e) });
     }
@@ -1158,7 +1159,7 @@
       leadSrc.entities.add(Object.assign({
         position: pos,
         name: (suggested ? 'Suggested lead at ' : 'Lead at ') + t.name,
-        description: (suggested ? `Suggested by ${esc(by || '?')} — not accepted yet (📁 Project → Suggestions).<br>` : '') + esc(leadSummary(fields)) + (fields.desc ? '<br>' + esc(fields.desc) : ''),
+        description: (suggested ? `Suggested by ${esc(by || '?')} — not accepted yet (Project → Suggestions).<br>` : '') + esc(leadSummary(fields)) + (fields.desc ? '<br>' + esc(fields.desc) : ''),
         properties: t.kind === 'feature' ? { isFeatureLead: true, leadId: leadId || '', isProjectLead: true, suggested: !!suggested }
           : { isFieldStation: true, cave: t.cave, stationName: t.name, isProjectLead: true, suggested: !!suggested },
       }, look));
@@ -1199,11 +1200,11 @@
     box.textContent = '';
     box.classList.add('open');
     const head = el('div', 'pj-card-h');
-    head.appendChild(el('div', 'pj-card-t', c.level === 'cave' ? `🕳 ${c.cid ? caveName(c.cid) : (c.imp ? c.imp.name : 'Cave')}` : c.survey ? `Survey ${c.code || '(none)'}` : `📍 ${c.name}${c.field ? ' (field)' : ''}`));
+    head.appendChild(el('div', 'pj-card-t', c.level === 'cave' ? ['cave', c.cid ? caveName(c.cid) : (c.imp ? c.imp.name : 'Cave')] : c.survey ? `Survey ${c.code || '(none)'}` : ['pin', `${c.name}${c.field ? ' (field)' : ''}`]));
     head.appendChild(btn('✕', closeCard, 'small'));
     box.appendChild(head);
     if (!pj.pid) {
-      box.appendChild(el('div', 'pj-note', 'Notes, leads and documents belong to a project: open 📁 Project to choose or create one.'));
+      box.appendChild(el('div', 'pj-note', 'Notes, leads and documents belong to a project: open Project to choose or create one.'));
       return;
     }
     if (!c.cid) {
@@ -1240,13 +1241,13 @@
     } else {
       sec('Documents · this survey', FL.docsForTarget(pj.D, target).map(d => docEl(d)));
       if (!(window._pjSeg && window._pjSeg.on())) sec('Documents · the cave', FL.docsForTarget(pj.D, FL.T.cave(c.cid)).filter(d => !d.tags[target]).map(d => docEl(d)));
-      if (c.ends.length) { const r = el('div', 'pj-row'); c.ends.forEach(n => r.appendChild(btn('📍 ' + n, () => openCard({ imp: c.imp, code: c.code, cid: c.cid, name: n }), 'small'))); box.appendChild(r); }
+      if (c.ends.length) { const r = el('div', 'pj-row'); c.ends.forEach(n => r.appendChild(btn(['pin', n], () => openCard({ imp: c.imp, code: c.code, cid: c.cid, name: n }), 'small'))); box.appendChild(r); }
     }
     const row = el('div', 'pj-row pj-card-btns');
-    row.appendChild(btn('✏️ Note', () => editNote(target)));
-    if (!c.survey) row.appendChild(btn('❓ Lead', () => editLead(c.cid, c.name, null)));
-    row.appendChild(btn('📄 Add pages', () => addPages({ tags: [target] })));
-    row.appendChild(btn('🏷 From inbox', () => tagFromInbox(target)));
+    row.appendChild(btn(['pencil', 'Note'], () => editNote(target)));
+    if (!c.survey) row.appendChild(btn(['help', 'Lead'], () => editLead(c.cid, c.name, null)));
+    row.appendChild(btn(['doc', 'Add pages'], () => addPages({ tags: [target] })));
+    row.appendChild(btn(['tag', 'From inbox'], () => tagFromInbox(target)));
     box.appendChild(row);
   }
   // ── Files and History of what is selected (Details / Files / History) ─────
@@ -1284,8 +1285,8 @@
       if (pj.fold === k) f.below.forEach(d => box.appendChild(docEl(d)));
     }
     const row = el('div', 'pj-row pj-card-btns');
-    row.appendChild(btn('📄 Add pages', () => addPages({ tags: [cardTarget(c)] })));
-    row.appendChild(btn('🏷 From inbox', () => tagFromInbox(cardTarget(c))));
+    row.appendChild(btn(['doc', 'Add pages'], () => addPages({ tags: [cardTarget(c)] })));
+    row.appendChild(btn(['tag', 'From inbox'], () => tagFromInbox(cardTarget(c))));
     box.appendChild(row);
   }
   /** Changes about it (and, for a cave or survey, about what is in it), newest first. */
@@ -1333,16 +1334,16 @@
       .sort((a, b) => (Number(a.fields.priority) || 9) - (Number(b.fields.priority) || 9));
     sec(`Open leads (${ls.length})`, ls.slice(0, 30).map(x => {
       const t = FL.parseTarget(x.target), r = el('div', 'pj-item');
-      r.appendChild(el('div', 'pj-item-t', `❓ ${t.name || '?'}`));
+      r.appendChild(el('div', 'pj-item-t', ['help', t.name || '?']));
       r.appendChild(el('div', 'pj-sub', leadSummary(x.fields) + (x.fields.desc ? ' — ' + x.fields.desc : '')));
       r.addEventListener('click', () => flyTo(c.cid, t.name));
       return r;
     }));
     sec('Documents · the cave', FL.docsForTarget(pj.D, target).map(d => docEl(d)));
     const row = el('div', 'pj-row pj-card-btns');
-    row.appendChild(btn('✏️ Note', () => editNote(target)));
-    row.appendChild(btn('📄 Add pages', () => addPages({ tags: [target] })));
-    row.appendChild(btn('🏷 From inbox', () => tagFromInbox(target)));
+    row.appendChild(btn(['pencil', 'Note'], () => editNote(target)));
+    row.appendChild(btn(['doc', 'Add pages'], () => addPages({ tags: [target] })));
+    row.appendChild(btn(['tag', 'From inbox'], () => tagFromInbox(target)));
     box.appendChild(row);
   }
   async function tagFromInbox(target) {
@@ -1390,12 +1391,12 @@
       pj.projects.forEach(p => sel.appendChild(new Option(p.name || p.id, p.id, false, p.id === pj.pid)));
       sel.addEventListener('change', () => setProject(sel.value));
       row.appendChild(sel);
-      row.appendChild(btn('＋ New', newProject, 'small'));
-      if (pj.pid) row.appendChild(btn('✏️', renameProject, 'small'));
+      row.appendChild(btn(['plus', 'New'], newProject, 'small'));
+      if (pj.pid) row.appendChild(Object.assign(btn(['pencil'], renameProject, 'small'), { title: 'Rename the project' }));
       b.appendChild(row);
       if (pj.pid) {
         const dr = el('div', 'pj-row pj-sub');
-        dr.append(pj.P.desc ? pj.P.desc + ' ' : '', btn(pj.P.desc ? 'edit' : '＋ description', editDescription, 'link'));
+        dr.append(pj.P.desc ? pj.P.desc + ' ' : '', btn(pj.P.desc ? 'edit' : ['plus', 'description'], editDescription, 'link'));
         b.appendChild(dr);
       }
       const r2 = el('div', 'pj-row pj-sub');
@@ -1403,13 +1404,13 @@
       b.appendChild(r2);
       if (!pj.pid) b.appendChild(el('div', 'pj-note', 'A project is an area: its caves (survey files and where they are placed), point clouds, CalTopo map, documents, notes, leads and field survey — opened together, saved together, shared with friends and FLEX Field by sync files. Without one, FLEX works as usual.'));
     });
-    if (!pj.pid) { if (!window._pjx) section(root, 'Sync files', true, b => b.appendChild(btn('⇩ Import a sync file…', () => importSync()))); return; }
+    if (!pj.pid) { if (!window._pjx) section(root, 'Sync files', true, b => b.appendChild(btn(['download', 'Import a sync file…'], () => importSync()))); return; }
     const q = FL.reviewQueue(pj.P, pj.D);
     section(revRoot, `Suggestions (${q.length})`, true, b => {
       if (!q.length) { b.appendChild(el('div', 'pj-note', 'Nothing waiting. Suggestions come from the archive processor or a helper, in sync files; they change nothing until accepted.')); return; }
       b.appendChild(el('div', 'pj-note', `${q.length} suggestion(s) waiting — from ${[...new Set(q.map(p => p.by))].join(', ')}. They change nothing until accepted.`));
       const by = {};
-      q.forEach(p => { const k = p.op === 'lead.set' ? '❓ Leads' : p.op === 'note.set' ? '📝 Notes' : /^doc\./.test(p.op) ? '📄 Document links' : p.op === 'survey.version' ? '🕳 Missing surveys' : '• Other'; by[k] = (by[k] || 0) + 1; });
+      q.forEach(p => { const k = p.op === 'lead.set' ? 'Leads' : p.op === 'note.set' ? 'Notes' : /^doc\./.test(p.op) ? 'Document links' : p.op === 'survey.version' ? 'Missing surveys' : 'Other'; by[k] = (by[k] || 0) + 1; });
       const kinds = el('div', 'pj-sub');
       kinds.textContent = Object.entries(by).map(([k, n]) => `${k} ${n}`).join(' · ');
       b.appendChild(kinds);
@@ -1446,7 +1447,7 @@
         });
         b.appendChild(r);
       });
-      b.appendChild(btn('⇩ CSV', leadsCsv, 'small'));
+      b.appendChild(btn(['download', 'CSV'], leadsCsv, 'small'));
     });
     if (window._pjDocs && docsRoot !== root) window._pjDocs.tree(docsRoot, section);
     section(docsRoot, 'Documents', true, b => {
@@ -1455,10 +1456,10 @@
       // Photos and videos apart from the papers (both are media).
       const photos = all.filter(d => FL.docMedia(d) === 'photo'), videos = all.filter(d => FL.docMedia(d) === 'video');
       const tabs = el('div', 'pj-tabs');
-      [['inbox', `Inbox (${inbox.length})`], ['all', `All (${all.length})`], ['photos', `🖼 Photos (${photos.length})`], ['videos', `🎞 Videos (${videos.length})`]]
+      [['inbox', `Inbox (${inbox.length})`], ['all', `All (${all.length})`], ['photos', ['image', `Photos (${photos.length})`]], ['videos', ['video', `Videos (${videos.length})`]]]
         .forEach(([k, l]) => tabs.appendChild(btn(l, () => { pj.docTab = k; render(); }, pj.docTab === k ? 'on' : '')));
       b.appendChild(tabs);
-      const add = btn('＋ Add files (photos, scans, TIFF, PDF)…', () => addPages({}), 'primary');
+      const add = btn(['plus', 'Add files (photos, scans, TIFF, PDF)…'], () => addPages({}), 'primary');
       b.appendChild(add);
       const drop = el('div', 'pj-drop', 'or drop files here');
       drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('on'); });
@@ -1487,7 +1488,7 @@
     section(root, 'Sync files', false, b => {
       b.appendChild(el('div', 'pj-note', 'Share changes with FLEX Field and teammates: make a file, send it (email, cloud, cable); they import it. The first file has everything.'));
       const r = el('div', 'pj-row');
-      r.append(btn('⇧ Make: changes since last', () => makeSync('since'), 'primary small'), btn('⇧ Everything', () => makeSync('all'), 'small'), btn('⇩ Import…', () => importSync(), 'small'));
+      r.append(btn(['upload', 'Make: changes since last'], () => makeSync('since'), 'primary small'), btn(['upload', 'Everything'], () => makeSync('all'), 'small'), btn(['download', 'Import…'], () => importSync(), 'small'));
       b.appendChild(r);
     });
     // History: the last 5 changes right under its header; the rest (with undo) in its window.
@@ -1513,7 +1514,7 @@
     if (loaded && window._pjWs) {
       const c = await choose(`New project “${name}”`, `${loaded} thing(s) are loaded now (caves, point clouds, CalTopo, files).`, [
         { label: 'Start it with what is loaded now', sub: 'they become the project’s', value: 'keep', primary: true },
-        { label: 'Start it empty', sub: 'what is loaded now stays loaded; add things later (← in 🕳 Caves and 📍 Surface, 📁 in ☁ LiDAR)', value: 'empty' }]);
+        { label: 'Start it empty', sub: 'what is loaded now stays loaded; add things later (← in Caves and Surface, the folder button in LiDAR)', value: 'empty' }]);
       if (!c) return;
       keep = c === 'keep';
     }
