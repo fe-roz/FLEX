@@ -21,7 +21,7 @@ function device(dev, who) {
     return Object.assign({ id: dev + '.' + seq, dev, seq, t, who, op }, data);
   };
 }
-const A = device('phoneA', 'Ana'), B = device('phoneB', 'Bo'), PC = device('pc', 'Felipe');
+const A = device('phoneA', 'Ana'), B = device('phoneB', 'Bo'), PC = device('pc', 'Cy');
 const pid = 'proj1', cid = 'cave1', cid2 = 'cave2';
 
 // 1) Project, caves, aliases
@@ -79,7 +79,7 @@ const pid = 'proj1', cid = 'cave1', cid2 = 'cave2';
   ok('lead fields merged', ld.fields.status === 'confirmed' && ld.fields.w === 0.4 && ld.fields.types[0] === 'Sediment dig', ld);
   ok('different fields: no conflict', !ld.conflicts, ld.conflicts);
   ok('who changed status', ld.fieldBy.status.who === 'Ana');
-  ok('created = the first entry, even with a slower clock', ld.created.who === 'Felipe');
+  ok('created = the first entry, even with a slower clock', ld.created.who === 'Cy');
   const b2 = B('lead.set', { lead: 'L1', fields: { status: 'deadend' }, base: [b.id] });
   S = L.replayProject([l1, a, b, b2], pid);
   ok('confirmed is active', L.leadActive(ld));
@@ -138,7 +138,7 @@ const pid = 'proj1', cid = 'cave1', cid2 = 'cave2';
   ok('next sync file: only the new entry', sel.count === 1 && sel.entries.docs[0].id === later.id, sel.entries);
   ok('…no pages already sent, none of other projects', sel.blobs.length === 0, sel.blobs);
   ok('"everything" ignores what was sent', L.selectForSync(projEntries, docs, S2, D, sent, 'all').count === projEntries.length + docs.length);
-  const man = L.syncManifest(S2, 'pc', 'Felipe', L.selectForSync(projEntries, docs, S2, D, null, 'all'));
+  const man = L.syncManifest(S2, 'pc', 'Cy', L.selectForSync(projEntries, docs, S2, D, null, 'all'));
   ok('manifest ranges', man.scopes.docs.pc.n === 4 && man.scopes.docs.phoneA.n === 4 && man.project.id === pid, man);
 
   // 6) Merging: union by id, malformed skipped

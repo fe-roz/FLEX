@@ -5,3 +5,6 @@ Cesium.Ion.defaultAccessToken = "PasteAPIKeyHere";
 
 //Google Maps API (If you wan the Google Maps Model):
 Cesium.GoogleMaps.defaultApiKey = "PasteAPIKeyHere";
+
+// LiDAR processing backend on another machine (optional; default http://127.0.0.1:8083):
+// window.FLEX_BACKEND_URL = "http://<backend address>:8083";

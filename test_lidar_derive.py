@@ -1,7 +1,8 @@
 """Verify the numeric core against synthetic clouds with known ground truth."""
 import sys, time
 import numpy as np
-sys.path.insert(0, '/home/claude/flexwork')
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lidar_derive as L
 
 rng = np.random.default_rng(42)

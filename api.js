@@ -10,6 +10,8 @@
 // ---------------------------------------------------------------------------
 
 export function getBackendBaseUrl() {
+  // This computer's own backend (Tokens.js, gitignored) wins over the shared default in settings.js.
+  if (typeof window.FLEX_BACKEND_URL === "string" && window.FLEX_BACKEND_URL) return window.FLEX_BACKEND_URL.replace(/\/$/, "");
   if (window.serverConfig && window.serverConfig.backend && window.serverConfig.backend.baseUrl) {
     return window.serverConfig.backend.baseUrl.replace(/\/$/, "");
   }

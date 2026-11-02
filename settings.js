@@ -38,7 +38,7 @@ const serverConfig = {
         ]
     },
     backend: {
-        baseUrl: 'http://10.3.90.211:8083',
+        baseUrl: 'http://127.0.0.1:8083',   // a backend elsewhere: set window.FLEX_BACKEND_URL in Tokens.js (this computer only)
         autoLoadCatalog: true
     }
 };
