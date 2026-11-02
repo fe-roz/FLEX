@@ -309,9 +309,10 @@
   }
 
   // ── Project replay ────────────────────────────────────────────────────────
+  const TRIP_LISTS = ['people', 'caves', 'links'];
   function emptyProject(pid) {
     return { id: pid, name: '', desc: '', lists: {}, caves: {}, aliases: {}, notes: {}, leads: {},
-             surveys: {}, order: [], caveUpdates: {}, surveyVersions: {}, segments: {}, cavefiles: {}, layers: {}, features: {}, groups: {}, arealabels: {}, proposals: {}, log: [], byId: new Map() };
+             surveys: {}, order: [], caveUpdates: {}, surveyVersions: {}, segments: {}, cavefiles: {}, layers: {}, features: {}, groups: {}, arealabels: {}, trips: {}, proposals: {}, log: [], byId: new Map() };
   }
   function applyFieldSurvey(e, S) {
     const sv = e.sid != null ? S.surveys[e.sid] : null;
@@ -452,6 +453,25 @@
           if (e.removed != null) a.removed = !!e.removed;
           a.history.push(e.id);
           a.updated = { t: e.t, who: e.who };
+          break;
+        }
+        // Trips: a day or a run of days underground or in the field, with who
+        // went, the caves visited and links to that trip's segments, notes and
+        // documents (photos). Scalars (name, start, end, desc, removed): the
+        // last writer in replay order. Lists (people, caves, links): `add` /
+        // `drop` deltas, so two devices adding different people both count.
+        // Older readers fall through to `default` and ignore the op.
+        case 'trip.set': {
+          if (e.trip == null || e.trip === '') break;
+          const t = S.trips[e.trip] || (S.trips[e.trip] = { id: String(e.trip), name: '', start: '', end: '', desc: '', people: [], caves: [], links: [], created: { t: e.t, who: e.who }, history: [] });
+          ['name', 'start', 'end', 'desc'].forEach(k => { if (e[k] != null) t[k] = String(e[k]); });
+          if (e.removed != null) t.removed = !!e.removed;
+          TRIP_LISTS.forEach(k => {
+            ((e.drop && e.drop[k]) || []).forEach(v => { t[k] = t[k].filter(x => x !== String(v)); });
+            ((e.add && e.add[k]) || []).forEach(v => { v = String(v).trim(); if (v && !t[k].includes(v)) t[k].push(v); });
+          });
+          t.history.push(e.id);
+          t.updated = { t: e.t, who: e.who };
           break;
         }
         case 'note.set': (recs.note[e.note] || (recs.note[e.note] = { id: e.note, entries: [] })).entries.push(e); break;
@@ -636,6 +656,80 @@
     const out = { op: 'arealabel.set', label: e.label, file: e.file, base: [e.id] };
     if (e.prev === null) return Object.assign(out, { removed: true, prev: { text: e.text, n: e.n, e: e.e, v: e.v, removed: !!e.removed } });
     return Object.assign(out, clone(e.prev), { prev: { text: e.text, n: e.n, e: e.e, v: e.v, removed: !!e.removed } });
+  }
+
+
+  // ── Trips (trip.set) ─────────────────────────────────────────────────────
+  // { id, name, start, end ('' = a one-day trip), desc, people: [names as
+  // entered], caves: [project cave ids], links: ['segment:<id>' | 'note:<id>'
+  // | 'doc:<id>'] }. Links are kept on the trip; tripSuggest only proposes.
+  const tripState = t => (t ? { name: t.name, start: t.start, end: t.end, desc: t.desc, removed: !!t.removed } : null);
+  // The body of the entry that turns trip `cur` (null: a new one) into `next`
+  // ({ name, start, end, desc, people, caves, links }, any subset); null when
+  // nothing changes. Carries `prev` so History can undo it (tripUndo).
+  function tripEdit(cur, next) {
+    const body = {}, prev = {};
+    ['name', 'start', 'end', 'desc'].forEach(k => {
+      if (next[k] == null) return;
+      const v = String(next[k]);
+      if (!cur || cur[k] !== v) { body[k] = v; prev[k] = cur ? cur[k] : ''; }
+    });
+    if (cur && cur.removed && next.removed !== true) { body.removed = false; prev.removed = true; }
+    if (next.removed === true && (!cur || !cur.removed)) { body.removed = true; prev.removed = false; }
+    TRIP_LISTS.forEach(k => {
+      if (!Array.isArray(next[k])) return;
+      const want = [...new Set(next[k].map(x => String(x).trim()).filter(Boolean))], have = cur ? cur[k] : [];
+      const add = want.filter(x => !have.includes(x)), drop = have.filter(x => !want.includes(x));
+      if (add.length) (body.add || (body.add = {}))[k] = add;
+      if (drop.length) (body.drop || (body.drop = {}))[k] = drop;
+    });
+    if (!cur) return Object.assign({ op: 'trip.set', prev: null }, body);
+    if (!Object.keys(body).length) return null;
+    return Object.assign({ op: 'trip.set', prev }, body);
+  }
+  // The entry that undoes a trip.set: a new trip is removed, an edit goes back
+  // (fields restored, added things dropped and dropped ones added). Entries
+  // without `prev` have no undo.
+  function tripUndo(e) {
+    if (!e || e.op !== 'trip.set' || e.prev === undefined) return null;
+    const out = { op: 'trip.set', trip: e.trip, base: [e.id] };
+    if (e.prev === null) return Object.assign(out, { removed: true, prev: { removed: false } });
+    const back = {};
+    Object.keys(e.prev).forEach(k => { back[k] = e.prev[k]; });
+    const now = {};
+    ['name', 'start', 'end', 'desc', 'removed'].forEach(k => { if (e[k] != null) now[k] = e[k]; });
+    Object.assign(out, back, { prev: now });
+    if (e.add) out.drop = e.add;
+    if (e.drop) out.add = e.drop;
+    return out;
+  }
+  // Live trips, newest first (by start, then end, then name).
+  const tripsOf = (S, opts) => Object.values((S && S.trips) || {}).filter(t => (opts && opts.removed ? t.removed : !t.removed))
+    .sort((a, b) => (a.start < b.start ? 1 : a.start > b.start ? -1 : (a.end || a.start) < (b.end || b.start) ? 1 : (a.end || a.start) > (b.end || b.start) ? -1 : a.name.localeCompare(b.name)));
+  // Trips that visited a cave, or hold a link ('segment:<id>' …).
+  const tripsFor = (S, o) => tripsOf(S).filter(t => (o.cave && t.caves.includes(o.cave)) || (o.link && t.links.includes(o.link)));
+  // A day "YYYY-MM-DD" from a date text (approximate dates have none), and from an ISO time (this device's day).
+  const fullDay = s => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || '').trim()); return m ? m[0] : ''; };
+  const localDay = iso => { const d = new Date(iso); if (isNaN(d)) return ''; const z = n => String(n).padStart(2, '0'); return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()); };
+  const tripDays = t => { const a = fullDay(t.start), b = fullDay(t.end) || a; return a ? [a, b < a ? a : b] : null; };
+  // Segments, notes and documents that fall inside a trip's days and belong to
+  // a cave it visited (items of no cave match by date alone), not linked yet:
+  // { segments: [seg], notes: [note], docs: [doc] }. Dates: a segment's date, a
+  // document's date, a note's day (when it was written).
+  function tripSuggest(S, D, t) {
+    const out = { segments: [], notes: [], docs: [] }, r = t && tripDays(t);
+    if (!r) return out;
+    const inside = d => d && d >= r[0] && d <= r[1];
+    const caveOk = c => !c || t.caves.includes(c);
+    const has = k => t.links.includes(k);
+    segmentsOf(S).forEach(g => { if (inside(fullDay(g.date)) && caveOk(g.cave) && !has('segment:' + g.id)) out.segments.push(g); });
+    Object.values(S.notes || {}).forEach(n => { if (!n.deleted && inside(localDay(n.created.t)) && caveOk(parseTarget(n.target).cave) && !has('note:' + n.id)) out.notes.push(n); });
+    if (D) docsOf(D, S).forEach(d => {
+      if (!inside(fullDay(d.date)) || has('doc:' + d.id)) return;
+      const cs = d.tagList.map(x => parseTarget(x).cave).filter(Boolean);
+      if (!cs.length || cs.some(c => t.caves.includes(c))) out.docs.push(d);
+    });
+    return out;
   }
 
   // ── Surface features (the project's own; FLEX only — not in CalTopo) ──────
@@ -982,6 +1076,7 @@
     replayProject, replayDocs, caveForName, liveCaves, notesOn, leadsOn,
     docInProject, docInbox, docsOf, docsForStation, docsForTarget, pageFor,
     segmentsOf, segmentIndex, segmentsAt, proposalTarget, segmentStates, liveCavefiles, liveLayers, areaLabelsOf, areaLabelId, areaLabelState, areaLabelUndo,
+    tripState, tripEdit, tripUndo, tripsOf, tripsFor, tripSuggest, tripDays, fullDay,
     liveFeatures, liveGroups, groupPath, featuresGeoJSON, featuresKML, featuresGPX, flexTag, makeFlexTag,
     selectForSync, syncManifest, newEntries,
     parseNum, shotFlags, shotReading, computeSurvey, stationLruds, suggestCaves,

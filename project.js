@@ -880,6 +880,7 @@
       'segment.del': () => `Removed ${[].concat(e.seg != null ? [e.seg] : [], e.segs || []).length} segment(s)`,
       'feature.set': () => { const f = pj.P.features[e.feature] || {}, k = e.kind || f.kind, nm = e.name || f.name || ''; return e.removed ? `Removed ${k || 'feature'} “${nm}”` : `${{ point: 'Point', line: 'Line', area: 'Area' }[k] || 'Feature'} “${nm}”`; },
       'arealabel.set': () => { const a = pj.P.arealabels[e.label] || {}, nm = e.text || a.text || '', f = e.file || a.file || ''; return (e.removed ? `Removed area label “${nm}”` : e.removed === false ? `Area label “${nm}” back` : e.prev === null ? `Area label “${nm}”` : e.text != null ? `Renamed area label to “${nm}”` : `Moved area label “${nm}”`) + (f ? ' in ' + f : ''); },
+      'trip.set': () => { const t = pj.P.trips[e.trip] || {}, nm = e.name || t.name || 'trip'; return e.removed ? `Deleted trip “${nm}”` : e.removed === false ? `Trip “${nm}” back` : e.prev === null ? `Trip “${nm}”` : `Edited trip “${nm}”: ` + [['name', 'name'], ['start', 'dates'], ['end', 'dates'], ['desc', 'notes']].filter(([k]) => e[k] != null).map(x => x[1]).concat(['people', 'caves', 'links'].filter(k => (e.add && e.add[k]) || (e.drop && e.drop[k])).map(k => k === 'links' ? 'surveys, notes, photos' : k)).filter((v, i, a) => a.indexOf(v) === i).join(', '); },
       'group.set': () => e.removed ? `Removed folder “${(pj.P.groups[e.group] || {}).name || ''}”` : `Folder “${e.name || (pj.P.groups[e.group] || {}).name || ''}”`,
       accept: () => `Accepted ${n} suggestion(s)${e.note ? ': ' + e.note : ''}`,
       reject: () => `Turned down ${n} suggestion(s)${e.why ? ': ' + e.why : ''}`,
@@ -905,6 +906,7 @@
       case 'cavefile.set': return e.removed ? { op: 'cavefile.set', file: e.file, removed: false } : null;
       case 'layer.set': return e.removed ? { op: 'layer.set', layer: e.layer, removed: false } : null;
       case 'arealabel.set': return FL.areaLabelUndo(e);
+      case 'trip.set': return FL.tripUndo(e);
       default: return null;
     }
   }
@@ -1386,8 +1388,8 @@
     root.textContent = '';
     // 📄 Docs, ❓ Leads, ✓ Review have panels of their own (strip icons); the
     // 📁 panel keeps the rest. Without them (older page), all in one.
-    const docsRoot = $('pj-docs-panel') || root, leadsRoot = $('pj-leads-panel') || root, revRoot = $('pj-review-panel') || root;
-    [docsRoot, leadsRoot, revRoot].forEach(r => { if (r !== root) r.textContent = ''; });
+    const docsRoot = $('pj-docs-panel') || root, leadsRoot = $('pj-leads-panel') || root, revRoot = $('pj-review-panel') || root, tripsRoot = $('pj-trips-panel');
+    [docsRoot, leadsRoot, revRoot, tripsRoot].forEach(r => { if (r && r !== root) r.textContent = ''; });
     // The Projects list / the open project's overview (projects_panel.js).
     if (window._pjx) window._pjx.top(root, section);
     else section(root, 'Project', true, b => {
@@ -1430,6 +1432,7 @@
       b.appendChild(row);
     });
     if (window._pjSeg) window._pjSeg.section(revRoot, section);
+    if (window._pjTrips && tripsRoot) window._pjTrips.section(tripsRoot, section);
     section(leadsRoot, 'Leads', true, b => {
       const all = allLeads();
       const tabs = el('div', 'pj-tabs');

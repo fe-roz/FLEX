@@ -9,7 +9,7 @@
 //   - the open project's name under the folder icon, in green,
 //   - the project-only icons (data-pj-only: Docs, Leads, Trips, Review)
 //     greyed with no project open, and their panels closed when it closes;
-//     Trips (data-rail-later) stays greyed until it is built,
+//     (data-rail-later would grey one that is not built yet),
 //   - a dot on Review when suggestions are waiting,
 //   - Help (info icon): the guide over the map (no panel).
 (function () {
@@ -23,7 +23,7 @@
     const pj = window._pj || {};
     const open = !!pj.pid;
     rail.querySelectorAll('[data-pj-only]').forEach(b => {
-      b.disabled = !open || b.hasAttribute('data-rail-later');
+      b.disabled = !open || b.hasAttribute('data-rail-later');   // data-rail-later: an icon not built yet (none now)
       const t = b.dataset.target && document.querySelector(b.dataset.target);
       if (!open && t && t.classList.contains('show')) t.classList.remove('show');   // the project closed under it
     });
