@@ -23,7 +23,7 @@ def check(label, cond, info=""):
 def fake_read(ept, utm_bbox, bbox_latlon=None, progress=print, zone=None, south=False):
     check("covering box passed to the reader is a lat/lon box around the drawn one",
           bbox_latlon[0] <= BBOX[0] and bbox_latlon[3] >= BBOX[3], bbox_latlon)
-    check("reader got the zone", zone == 10 and not south, zone)
+    check("reader got the zone", zone == 14 and not south, zone)
     rng = np.random.default_rng(7)
     e0, n0, e1, n1 = utm_bbox
     n = 60000
