@@ -253,7 +253,10 @@
     const folderIds = () => { const fs = (C.folders && C.folders()) || []; const kids = new Set([String(fid)]); let grew = true; while (grew) { grew = false; fs.forEach(f => { if (f.folderId && kids.has(String(f.folderId)) && !kids.has(String(f.id))) { kids.add(String(f.id)); grew = true; } }); } return { fs, kids }; };
     return [
       off({ id: 'rename', icon: 'text', label: 'Rename…', run: async () => { const n = await askText(`Rename the CalTopo folder “${name}”`, name, 'Rename'); if (n && n !== name) await C.update(fid, { title: n }); } }),
-      off({ id: 'newsub', icon: 'folder-plus', label: 'New subfolder…', run: async () => { const n = await askText(`A new folder in “${name}”`, '', 'Add'); if (n) await C.create({ type: 'Feature', geometry: null, properties: { class: 'Folder', title: n, folderId: fid } }); } }),
+      off({ id: 'newsub', icon: 'folder-plus', label: 'New subfolder…', title: 'A folder that is created in CalTopo when you press Send', run: async () => {
+        const SC = window._surfCols, path = SC && SC.ctFolderPath && SC.ctFolderPath(fid);
+        if (path && SC.merged && SC.merged()) { await SC.newFolder(path); return; }
+        const n = await askText(`A new folder in “${name}”`, '', 'Add'); if (n && ok) await C.create({ type: 'Feature', geometry: null, properties: { class: 'Folder', title: n, folderId: fid } }); } }),
       off({ id: 'move', icon: 'folder-move', label: 'Move…', run: async () => {
         const { fs, kids } = folderIds(), list = [];
         const walk = (pid, d) => fs.filter(f => String(f.folderId || '') === pid).sort((x, y) => String(x.title).localeCompare(String(y.title), undefined, { numeric: true }))
@@ -279,7 +282,9 @@
   function ctMapEntries() {
     const SC = window._surfCols, m = SC && SC.ctMap && SC.ctMap();
     if (!m) return [];
-    const list = [{ id: 'maprename', icon: 'text', label: 'Rename…', title: 'Only FLEX shows the new name; CalTopo is not changed', run: async () => { const n = await askText('Rename the CalTopo map (here only)', m.name, 'Rename'); if (n && n !== m.name) await SC.ctRename(n); } }];
+    const list = [];
+    if (SC.merged && SC.merged()) list.push({ id: 'mapnewfolder', icon: 'folder-plus', label: 'New folder…', title: 'A folder that is created in CalTopo when you press Send', run: () => SC.newFolder([]) });
+    list.push({ id: 'maprename', icon: 'text', label: 'Rename…', title: 'Only FLEX shows the new name; CalTopo is not changed', run: async () => { const n = await askText('Rename the CalTopo map (here only)', m.name, 'Rename'); if (n && n !== m.name) await SC.ctRename(n); } });
     if (m.inProject) {
       if (m.dir) list.push({ id: 'cancelmove', icon: 'folder-move', label: m.dir === 'remove' ? 'Cancel the removal' : 'Cancel the move', run: () => SC.ctLeave('cancel') });
       else list.push({ id: 'mapout', icon: 'folder-move', label: 'Move to My data', title: 'Out of the project; the map stays loaded as yours. Waits for 💾 Save', run: () => SC.ctLeave('out') },

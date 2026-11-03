@@ -446,6 +446,7 @@
       const S = await MD.state(true);
       const pts = Object.values(S.features || {}).filter(f => !f.removed && f.kind === 'point' && f.coords && (m.kind === 'point' ? f.id === m.id : f.group === m.id));
       let group = '';
+      if (m.kind === 'point' && m.target && m.target.length && window._surfMerge) group = await window._surfMerge.ensureGroupPath(m.target);   // dropped on a folder of the merged tree (surface-columns.js)
       if (m.kind === 'pgroup') { group = FL.uid(10); await record('group.set', { group, name: (S.groups[m.id] || {}).name || m.name || 'Points', parent: '' }, null, { quiet: true }); }
       for (const f of pts) {
         await record('feature.set', { feature: FL.uid(12), kind: 'point', coords: f.coords, name: f.name || 'Point', group }, null, { quiet: true });

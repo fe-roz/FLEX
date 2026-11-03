@@ -44,5 +44,10 @@ ok('nested match by path', pl.folders.find(x => x.name === 'Checked').id === 'F3
 pl = S.plan(feats, [{ id: 'F3', title: 'Checked', folderId: 'F9' }], pathOf);
 ok('a folder of the same name under another parent is not a match', pl.folders.find(x => x.name === 'Checked').id === null);
 
+// Folders wanted with nothing in them yet (the project's empty folders, the target of a held move)
+pl = S.plan([], [{ id: 'F1', title: 'Pits', folderId: null }], pathOf, [['pits', 'New'], ['Brand new']]);
+ok('extra paths: found by name, the missing ones created, no items', pl.items.length === 0 && pl.folders.length === 3 && pl.folders[0].id === 'F1' && pl.folders[1].id === null && pl.folders[1].parent === pl.folders[0].key && pl.folders[2].id === null && pl.folders[2].parent === null, pl.folders);
+ok('keyOf(names) gives the folder key of a path', pl.keyOf(['Brand new']) === pl.folders[2].key && pl.keyOf(['pits', 'New']) === pl.folders[1].key);
+
 console.log(pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
