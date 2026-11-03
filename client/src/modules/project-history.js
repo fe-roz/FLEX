@@ -56,7 +56,7 @@
       'shot.delete': () => `Deleted shot in “${sv(e.sid)}”`,
       'cave.update': () => `Updated ${caveName(e.cave)} from ${e.file || 'a file'} on a phone (approximate)`,
       'cave.revert': () => `Put ${caveName(e.cave)} back as exported`,
-      'cavefile.set': () => (e.multi != null || e.surfaceAdd || e.surfaceDel) && !e.h ? [e.multi === true ? `${e.file} is a multi-cave file` : e.multi === false ? `${e.file} is no longer a multi-cave file` : '', e.surfaceAdd && e.surfaceAdd.length ? `Surface traverse: ${e.surfaceAdd.join(', ')} of ${e.file}` : '', e.surfaceDel && e.surfaceDel.length ? `Not a surface traverse any more: ${e.surfaceDel.join(', ')} of ${e.file}` : ''].filter(Boolean).join('; ') : e.removed ? `Removed survey file ${e.file} from the project` : e.h ? `Survey file ${e.file}${e.place ? ' and where it is placed' : ''}` : `Placed ${e.file}${e.place && e.place.station ? ' at station ' + e.place.station : ''}`,
+      'cavefile.set': () => e.split ? `Split ${(pj.P.caves && Object.values(pj.P.caves).find(c => (c.sources || []).some(x => x.file === e.file)) || {}).name || 'a cave'} out of ${e.split} into its own file ${e.file}` : (e.multi != null || e.surfaceAdd || e.surfaceDel) && !e.h ? [e.multi === true ? `${e.file} is a multi-cave file` : e.multi === false ? `${e.file} is no longer a multi-cave file` : '', e.surfaceAdd && e.surfaceAdd.length ? `Surface traverse: ${e.surfaceAdd.join(', ')} of ${e.file}` : '', e.surfaceDel && e.surfaceDel.length ? `Not a surface traverse any more: ${e.surfaceDel.join(', ')} of ${e.file}` : ''].filter(Boolean).join('; ') : e.removed ? `Removed survey file ${e.file} from the project` : e.h ? `Survey file ${e.file}${e.place ? ' and where it is placed' : ''}` : `Placed ${e.file}${e.place && e.place.station ? ' at station ' + e.place.station : ''}`,
       'layer.set': () => e.removed ? `Removed ${(pj.P.layers[e.layer] || {}).name || 'a layer'} from the project` : `${{ pointcloud: 'Point cloud', caltopo: 'CalTopo map', file: 'Data file', imagery: 'Map layer', tiles: 'Tile link' }[e.kind || (pj.P.layers[e.layer] || {}).kind] || 'Layer'} ${e.name || (pj.P.layers[e.layer] || {}).name || ''}`,
       'survey.version': () => e.raw && e.raw.tie ? `Survey ${e.code || ''} missing from the file: ${(e.raw.shots || []).length} shot(s) from ${e.raw.tie}${e.note ? ' — ' + e.note : ''}`
         : `New version of survey ${e.code} (${e.version || 'transcribed'})`,
@@ -89,7 +89,7 @@
       case 'cave.alias': return { op: 'cave.unalias', cave: e.cave, alias: e.alias };
       case 'system.set': return FL.systemUndo(e);
       case 'cave.set': return FL.multiUndo(e);
-      case 'cavefile.set': if (e.multi != null || e.surfaceAdd || e.surfaceDel) return FL.multiUndo(e); return e.removed ? { op: 'cavefile.set', file: e.file, removed: false } : null;
+      case 'cavefile.set': if (e.multi != null || e.surfaceAdd || e.surfaceDel) return FL.multiUndo(e); return e.removed ? { op: 'cavefile.set', file: e.file, removed: false } : e.split ? { op: 'cavefile.set', file: e.file, removed: true } : null;
       case 'layer.set': return e.removed ? { op: 'layer.set', layer: e.layer, removed: false } : null;
       case 'arealabel.set': return FL.areaLabelUndo(e);
       case 'trip.set': return FL.tripUndo(e);
