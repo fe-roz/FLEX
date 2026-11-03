@@ -134,5 +134,37 @@ const near = (a, b, t = 1e-9) => Math.abs(a - b) <= t;
   ok('options: EDL applied only for keys given', v.e === false && v.s === 1 && v.r === undefined);
 }
 
+// ── USGS Ref Fix, automatic (made-up projections) ────────────────────────────
+{
+  const U = M('usgs-auto.js');
+  const utm = '+proj=utm +zone=12 +datum=NAD83 +units=m +no_defs';
+  const utmNavd = 'COMPD_CS["NAD83 / UTM zone 12N + NAVD88 height",PROJCS["NAD83 / UTM zone 12N",PROJECTION["Transverse_Mercator"]],VERT_CS["NAVD88 height"]]';
+  const merc = 'PROJCS["WGS 84 / Pseudo-Mercator",AUTHORITY["EPSG","3857"]]';
+  ok('class: none and 3857 are on', U.classifyProjection(null) === 'on' && U.classifyProjection('EPSG:3857') === 'on' && U.classifyProjection(merc) === 'on');
+  ok('class: UTM (no vertical datum) is off', U.classifyProjection(utm) === 'off' && U.classifyProjection('EPSG:32612') === 'off');
+  ok('class: UTM + orthometric vertical datum is on', U.classifyProjection(utmNavd) === 'on');
+  ok('class: geographic is on (unknown)', U.classifyProjection('+proj=longlat +datum=WGS84') === 'on');
+  ok('choose: mixed is on, all off is off, none is no change', U.chooseUsgsRef(['on', 'off']) === true && U.chooseUsgsRef(['off', 'off']) === false && U.chooseUsgsRef([]) === null);
+  const vm = { usgsRef: true, usgsRefAuto: true };
+  const pc = k => ({ _usgsKind: k });
+  U.applyAutoUsgsRef(vm, [pc('off')]);
+  ok('auto: UTM cloud turns it off', vm.usgsRef === false);
+  U.applyAutoUsgsRef(vm, [pc('off'), pc('on')]);
+  ok('auto: mixed turns it on', vm.usgsRef === true);
+  vm.usgsRefAuto = false; vm.usgsRef = false;
+  U.applyAutoUsgsRef(vm, [pc('on')]);
+  ok('manual choice is kept', vm.usgsRef === false);
+  const saved = U.usgsRefToSave(vm);
+  ok('save: manual flag stored', saved.usgsRef === false && saved.usgsRefManual === true);
+  const vm2 = { usgsRef: true, usgsRefAuto: true };
+  U.restoreUsgsRef(vm2, saved);
+  ok('restore: manual kept', vm2.usgsRef === false && vm2.usgsRefAuto === false);
+  const vm3 = { usgsRef: true, usgsRefAuto: true };
+  U.restoreUsgsRef(vm3, { usgsRef: false });
+  ok('restore: old session (false, no flag) is automatic and keeps the new default', vm3.usgsRefAuto === true && vm3.usgsRef === true);
+  const seen = []; U.applyAutoUsgsRef({ usgsRef: true, usgsRefAuto: true }, [pc('off'), pc('on')], m => seen.push(m));
+  ok('mixed logs a note', seen.length === 1);
+}
+
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -501,6 +501,7 @@ svg.ico { vertical-align: -2px; }
 <ul>
   <li><svg class="ico" width="14" height="14"><use href="#i-cloud"/></svg> <b>LiDAR</b> loads point clouds: public datasets (<b>Show OpenTopo Datasets</b> shows what's available where you are), or a link to an <code>ept.json</code>. Clouds in the laszip form of EPT work, and so do <code>.copc.laz</code> files. EPT in the plain binary form does not load (the laszip form, which Entwine makes, does).</li>
   <li><b>Your own scans:</b> convert them with <a href="https://entwine.io" target="_blank" rel="noopener">Entwine</a> into a folder, then <b>🗄 Link Entwine</b> with that folder and the address FLEX should serve it on (e.g. <code>http://localhost:8083</code>). FLEX starts and stops that server for you.</li>
+  <li><b>USGS Ref Fix</b> (next to the point clouds) lifts a cloud whose heights are measured from the geoid onto the globe; it is on by default and <b>auto</b> turns it on or off from each cloud's projection when the cloud loads (most clouds need it). Flipping the switch yourself keeps your choice until you tick <b>auto</b> again.</li>
   <li><b>Ground and height</b> (in the LiDAR panel) colours by height above ground and can hide everything but bare earth.</li>
   <li><b>Point cloud look</b> (in the LiDAR panel, closed at first) sets how every loaded cloud is drawn:
     <ul>

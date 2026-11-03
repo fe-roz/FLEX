@@ -1068,6 +1068,10 @@
                     <input type="checkbox" data-bind="checked: usgsRef" style="margin:0;">
                     <span style="font-size:10px; opacity:0.7;">USGS Ref Fix</span>
                   </label>
+                  <label class="lp-row" style="margin:0; cursor:pointer;" title="Automatic: USGS Ref Fix follows each cloud's projection. Flipping the switch yourself keeps your choice; tick this to go back to automatic.">
+                    <input type="checkbox" data-bind="checked: usgsRefAuto" style="margin:0;">
+                    <span style="font-size:10px; opacity:0.7;">auto</span>
+                  </label>
                   <label class="lp-row" style="margin:0; cursor:pointer;" title="EGM96: precise per-location geoid lookup. Overrides USGS Ref Fix when both are on.">
                     <input type="checkbox" data-bind="checked: egm96" style="margin:0;">
                     <span style="font-size:10px; opacity:0.7;">EGM96</span>
@@ -1243,15 +1247,15 @@
 
                   <div id="lp-hag-keep" style="display:none;">
                     <div style="font-size:11px; color:rgba(255,255,255,0.7);">
-                      Keep points between <span id="lp-hag-label">−20.0 m – 20.0 m</span>
+                      Keep points between <span id="lp-hag-label">−20.0 m – 2.5 m</span>
                     </div>
                     <label style="display:block; margin-top:6px; font-size:11px;">
                       Min <span id="lp-hag-min-label" style="color:#00e5ff;">−20.0 m</span>
                       <input id="lp-hag-min" type="range" min="-100" max="10" step="0.25" value="-20" style="width:100%; box-sizing:border-box;">
                     </label>
                     <label style="display:block; font-size:11px;">
-                      Max <span id="lp-hag-max-label" style="color:#00e5ff;">20.0 m</span>
-                      <input id="lp-hag-max" type="range" min="-10" max="100" step="0.25" value="20" style="width:100%; box-sizing:border-box;">
+                      Max <span id="lp-hag-max-label" style="color:#00e5ff;">2.5 m</span>
+                      <input id="lp-hag-max" type="range" min="-10" max="100" step="0.25" value="2.5" style="width:100%; box-sizing:border-box;">
                     </label>
                   </div>
 

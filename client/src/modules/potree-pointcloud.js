@@ -30,6 +30,7 @@ export function pcUrlKey(url) {
 }
 
 import { setupPointcloudOptions } from "./pointcloud-options.js";
+import { classifyProjection, applyAutoUsgsRef } from "./usgs-auto.js";
 
 export function setupPotreePointcloud({
   THREE, Potree, proj4, potreeViewer, viewModel,
@@ -73,6 +74,8 @@ export function setupPotreePointcloud({
     e.pointcloud._pcLat   = pcCenterC[1];   // stash for EGM96 reactive re-apply
     e.pointcloud._pcLon   = pcCenterC[0];
     // console.log(pcZscale);
+    e.pointcloud._usgsKind = classifyProjection(e.pointcloud.projection);
+    applyAutoUsgsRef(viewModel, potreeViewer.scene.pointclouds, console.log);   // unless set by hand
     applyPcMatrix(e.pointcloud);
   
 
