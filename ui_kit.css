@@ -11,7 +11,7 @@
  * The knob is a background gradient rather than ::before, which not every
  * engine draws on an <input>.
  *
- * Scope: #toolbar (every rail panel) and the minimap controls. Not the Potree
+ * Scope: #toolbar (every rail panel), #flex-dock (Speed, Settings, Help) and the minimap controls. Not the Potree
  * sidebar, Cesium widgets or dialogs (.pj-modal: form fields saved with the
  * dialog's button, so checkboxes by the rule).
  */
@@ -29,7 +29,7 @@
 
 /* ── Switch: a checkbox in a panel, or .ui-sw on any checkbox ───────────── */
 input.ui-sw[type=checkbox],
-:is(#toolbar, #mini_map_controls) input[type=checkbox]:not(.keep-box) {
+:is(#toolbar, #flex-dock, #mini_map_controls) input[type=checkbox]:not(.keep-box) {
   --sw-w: 28px; --sw-h: 15px; --sw-k: 11px;   /* main panels */
   -webkit-appearance: none; appearance: none;
   box-sizing: border-box; flex: none;
@@ -44,27 +44,27 @@ input.ui-sw[type=checkbox],
   transition: background-position .15s, background-color .15s;
 }
 input.ui-sw[type=checkbox]:checked,
-:is(#toolbar, #mini_map_controls) input[type=checkbox]:not(.keep-box):checked {
+:is(#toolbar, #flex-dock, #mini_map_controls) input[type=checkbox]:not(.keep-box):checked {
   background-color: var(--ui-on);
   background-position: calc(100% - (var(--sw-h) - var(--sw-k)) / 2) 50%;
 }
 /* the gradient's base colour is a layer, so hover/checked change it through background-color on top */
 input.ui-sw[type=checkbox]:not(:checked):hover:not(:disabled),
-:is(#toolbar, #mini_map_controls) input[type=checkbox]:not(.keep-box):not(:checked):hover:not(:disabled) {
+:is(#toolbar, #flex-dock, #mini_map_controls) input[type=checkbox]:not(.keep-box):not(:checked):hover:not(:disabled) {
   background-color: var(--ui-off-hover);
 }
 input.ui-sw[type=checkbox]:checked:hover:not(:disabled),
-:is(#toolbar, #mini_map_controls) input[type=checkbox]:not(.keep-box):checked:hover:not(:disabled) {
+:is(#toolbar, #flex-dock, #mini_map_controls) input[type=checkbox]:not(.keep-box):checked:hover:not(:disabled) {
   background-color: var(--ui-on-hover);
 }
 input.ui-sw[type=checkbox]:focus-visible,
-:is(#toolbar, #mini_map_controls) input[type=checkbox]:not(.keep-box):focus-visible {
+:is(#toolbar, #flex-dock, #mini_map_controls) input[type=checkbox]:not(.keep-box):focus-visible {
   outline: 2px solid var(--ui-focus); outline-offset: 2px;
 }
 input.ui-sw[type=checkbox]:focus:not(:focus-visible),
-:is(#toolbar, #mini_map_controls) input[type=checkbox]:not(.keep-box):focus:not(:focus-visible) { outline: none; }
+:is(#toolbar, #flex-dock, #mini_map_controls) input[type=checkbox]:not(.keep-box):focus:not(:focus-visible) { outline: none; }
 input.ui-sw[type=checkbox]:disabled,
-:is(#toolbar, #mini_map_controls) input[type=checkbox]:not(.keep-box):disabled {
+:is(#toolbar, #flex-dock, #mini_map_controls) input[type=checkbox]:not(.keep-box):disabled {
   opacity: var(--ui-disabled-opacity); cursor: not-allowed;
 }
 /* Compact sizes for dense rows. */
@@ -73,12 +73,12 @@ input.ui-sw-xs[type=checkbox] { --sw-w: 20px; --sw-h: 11px; --sw-k: 7px; }
 
 /* Label text beside a switch: readable on the dark panels, aligned with it. */
 /* :where() keeps this weaker than any class that sets its own colour. */
-:where(#toolbar) label, :where(#toolbar) .sw-row { color: var(--ui-text); }
+:where(#toolbar, #flex-dock) label, :where(#toolbar, #flex-dock) .sw-row { color: var(--ui-text); }
 .sw-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; cursor: pointer; font-size: 11px; }
 .sw-row > input[type=checkbox] { margin: 0; top: 0; }
 /* A label around a switch: pointer, and the panels' 11px text (some had none
    and came out at the page's 16px). Weakest possible, so any set size wins. */
-:where(#toolbar label:has(> input[type=checkbox]:not(.keep-box))) { cursor: pointer; font-size: 11px; }
+:where(:is(#toolbar, #flex-dock) label:has(> input[type=checkbox]:not(.keep-box))) { cursor: pointer; font-size: 11px; }
 
 /* ── Switch drawn as a span (inside a button that is the control) ──────────
    <button class="on"><span class="ui-sw"></span>Labels</button>; the button

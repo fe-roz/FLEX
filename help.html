@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>FLEX Guide</title>
 <!-- The FLEX guide: setting up, how FLEX is organised, and the diagrams.
-     Opened from Help in the icon strip (in a frame over the map; the contents row below the
-     title replaces the old Help pane's section buttons) or on its own at /help.html.
+     Opened from Help at the bottom of the icon strip (in a panel docked at the bottom left, beside
+     the strip) or on its own at /help.html.
      Self-contained and offline: no fonts or scripts from the network.
      Example names only — no real places, caves or people. -->
 <style>
@@ -89,6 +89,8 @@ svg.ico { vertical-align: -2px; }
 .screen .col { border: 1px solid rgba(255,255,255,.12); border-radius: 5px; padding: 4px; min-height: 160px; }
 .screen .col b { display: block; font-size: 10.5px; margin-bottom: 3px; }
 .screen .row { background: rgba(255,255,255,.06); border-radius: 3px; margin: 3px 0; height: 13px; }
+.screen .dockp { position: absolute; left: 52px; bottom: 8px; width: 150px; height: 74px; z-index: 2; background: rgba(32,34,38,.97); border: 1px solid rgba(255,255,255,.22); border-radius: 7px; padding: 6px 8px; box-shadow: 0 4px 14px rgba(0,0,0,.5); }
+.screen .dockp b { display: flex; justify-content: space-between; font-size: 10.5px; margin-bottom: 4px; }
 .screen .insp { position: absolute; right: 8px; top: 8px; bottom: 8px; width: 170px; background: rgba(20,24,30,.92); border: 1px solid rgba(255,255,255,.15); border-radius: 7px; padding: 8px; }
 .screen .insp .tabs { display: flex; gap: 4px; margin: 6px 0; }
 .screen .insp .tabs span { padding: 1px 6px; border-radius: 4px; background: rgba(255,255,255,.07); }
@@ -160,7 +162,9 @@ svg.ico { vertical-align: -2px; }
 
 @media (max-width: 760px) {
   .page { grid-template-columns: 1fr; }
-  nav { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--rule); }
+  nav { position: static; height: auto; border-right: none; padding: 16px 16px 0; }
+  nav a, nav .grp { display: none; }      /* narrow (the guide in the dock panel, a phone): the contents pills under the title do the job */
+  nav .brand { margin-bottom: 0; }
   main { padding: 18px 16px 60px; }
 }
 </style>
@@ -242,13 +246,14 @@ svg.ico { vertical-align: -2px; }
 <!-- ═════════════════════════════════════════════════════════════════════ -->
 <h2 id="screen">The screen</h2>
 <div class="fig">
-  <div class="screen" role="img" aria-label="FLEX screen: icon strip on the left, a panel beside it with two columns, the details panel on the right, Save and Updates on top">
+  <div class="screen" role="img" aria-label="FLEX screen: icon strip on the left, a panel beside it with two columns, a small dock panel at the bottom left, the details panel on the right, Save and Updates on top">
     <div class="rail">
       <span class="pjopen" title="Project (open: Ridge Area)"><svg class="ico" width="16" height="16"><use href="#i-folder"/></svg></span><i></i><span><svg class="ico" width="16" height="16"><use href="#i-map"/></svg></span><span><svg class="ico" width="16" height="16"><use href="#i-mountain"/></svg></span><span><svg class="ico" width="16" height="16"><use href="#i-cloud"/></svg></span><i></i><span><svg class="ico" width="16" height="16"><use href="#i-pin"/></svg></span><span class="on"><svg class="ico" width="16" height="16"><use href="#i-cave"/></svg></span><i></i><span><svg class="ico" width="16" height="16"><use href="#i-doc"/></svg></span><span><svg class="ico" width="16" height="16"><use href="#i-help"/></svg></span><span><svg class="ico" width="16" height="16"><use href="#i-check"/></svg></span><i></i><span><svg class="ico" width="16" height="16"><use href="#i-pack"/></svg></span><span><svg class="ico" width="16" height="16"><use href="#i-leaf"/></svg></span><span class="gap"></span><span><svg class="ico" width="16" height="16"><use href="#i-gauge"/></svg></span><span><svg class="ico" width="16" height="16"><use href="#i-sliders"/></svg></span><span><svg class="ico" width="16" height="16"><use href="#i-info"/></svg></span>
     </div>
     <div class="panel"><b><svg class="ico" width="14" height="14"><use href="#i-cave"/></svg> Caves</b>
       <div class="cols"><div class="col"><b>📁 Ridge Area</b><div class="row"></div><div class="row"></div><div class="row"></div></div><div class="col"><b>👤 My data</b><div class="row"></div><div class="row"></div></div></div>
     </div>
+    <div class="dockp"><b><span><svg class="ico" width="12" height="12"><use href="#i-gauge"/></svg> Speed</span><span>×</span></b><div class="row"></div><div class="row"></div></div>
     <div class="topbar"><span class="chip"><svg class="ico" width="12" height="12"><use href="#i-save"/></svg> Save · 2</span><span class="chip"><svg class="ico" width="12" height="12"><use href="#i-refresh"/></svg> Updates</span></div>
     <svg class="cave" viewBox="0 0 150 90" aria-hidden="true"><path d="M5 20 L40 30 L62 55 L95 50 L120 75 L145 70 M62 55 L70 85 M40 30 L55 8" stroke="#ee8a5e" stroke-width="2.4" fill="none"/><circle cx="95" cy="50" r="5" fill="none" stroke="#fff" stroke-width="1.5"/></svg>
     <div class="insp"><b>Ridge Cave › Survey A</b><div class="tabs"><span class="on">Details</span><span>Files</span><span>History</span></div><div class="row" style="height:40px;background:rgba(255,255,255,.05)"></div><div class="row"></div><div class="row"></div></div>
@@ -257,10 +262,12 @@ svg.ico { vertical-align: -2px; }
     <span class="callout" style="left:244px;top:4px">3</span>
     <span class="callout" style="left:390px;top:120px">4</span>
     <span class="callout" style="right:150px;top:290px">5</span>
+    <span class="callout" style="left:206px;top:258px">6</span>
   </div>
   <div class="keylist">
-    <div><span class="n">1</span><span><b>Icon strip.</b> One panel per kind of data. <svg class="ico" width="14" height="14"><use href="#i-folder"/></svg> Project · <svg class="ico" width="14" height="14"><use href="#i-map"/></svg> Layers · <svg class="ico" width="14" height="14"><use href="#i-mountain"/></svg> Terrain · <svg class="ico" width="14" height="14"><use href="#i-cloud"/></svg> LiDAR · <svg class="ico" width="14" height="14"><use href="#i-pin"/></svg> Surface · <svg class="ico" width="14" height="14"><use href="#i-cave"/></svg> Caves, then the project-only ones (<svg class="ico" width="14" height="14"><use href="#i-doc"/></svg> Docs, <svg class="ico" width="14" height="14"><use href="#i-help"/></svg> Leads, <svg class="ico" width="14" height="14"><use href="#i-check"/></svg> Review; grey with no project), <svg class="ico" width="14" height="14"><use href="#i-pack"/></svg> Export, <svg class="ico" width="14" height="14"><use href="#i-leaf"/></svg> Analyze, <svg class="ico" width="14" height="14"><use href="#i-gauge"/></svg> Speed, <svg class="ico" width="14" height="14"><use href="#i-sliders"/></svg> Settings, <svg class="ico" width="14" height="14"><use href="#i-info"/></svg> Help (this guide; Help again or <kbd>Esc</kbd> closes it). The open panel has an orange bar; the open project's name shows under the folder, in green; a yellow dot on Review means suggestions wait.</span></div>
+    <div><span class="n">1</span><span><b>Icon strip.</b> One panel per kind of data. <svg class="ico" width="14" height="14"><use href="#i-folder"/></svg> Project · <svg class="ico" width="14" height="14"><use href="#i-map"/></svg> Layers · <svg class="ico" width="14" height="14"><use href="#i-mountain"/></svg> Terrain · <svg class="ico" width="14" height="14"><use href="#i-cloud"/></svg> LiDAR · <svg class="ico" width="14" height="14"><use href="#i-pin"/></svg> Surface · <svg class="ico" width="14" height="14"><use href="#i-cave"/></svg> Caves, then the project-only ones (<svg class="ico" width="14" height="14"><use href="#i-doc"/></svg> Docs, <svg class="ico" width="14" height="14"><use href="#i-help"/></svg> Leads, <svg class="ico" width="14" height="14"><use href="#i-check"/></svg> Review; grey with no project), <svg class="ico" width="14" height="14"><use href="#i-pack"/></svg> Export, <svg class="ico" width="14" height="14"><use href="#i-leaf"/></svg> Analyze, <svg class="ico" width="14" height="14"><use href="#i-gauge"/></svg> Speed, <svg class="ico" width="14" height="14"><use href="#i-sliders"/></svg> Settings, <svg class="ico" width="14" height="14"><use href="#i-info"/></svg> Help (this guide). Speed, Settings and Help are the three at the bottom: they open in their own small panel (6), not in the main panel. The open menu panel has an orange bar; the open project's name shows under the folder, in green; a yellow dot on Review means suggestions wait.</span></div>
     <div><span class="n">2</span><span><b>Panel.</b> Caves and Surface have two columns: the open project on the left, 👤 My data on the right. ← / → moves an item between them. A plain click on the map closes the panel (Export and Analyze stay open).</span></div>
+    <div><span class="n">6</span><span><b>Dock panel.</b> <svg class="ico" width="14" height="14"><use href="#i-gauge"/></svg> Speed, <svg class="ico" width="14" height="14"><use href="#i-sliders"/></svg> Settings or <svg class="ico" width="14" height="14"><use href="#i-info"/></svg> Help (this guide, in a larger panel) open at the bottom left, beside the strip. One at a time, and they stay open next to whichever panel 2 is open — a click on the map does not close them. Press the same icon again, <b>×</b> or <kbd>Esc</kbd> to close.</span></div>
     <div><span class="n">3</span><span><b>Top bar.</b> <svg class="ico" width="14" height="14"><use href="#i-save"/></svg> Save (with how many project changes wait) and <svg class="ico" width="14" height="14"><use href="#i-refresh"/></svg> Updates.</span></div>
     <div><span class="n">4</span><span><b>The map.</b> Click a cave to select it; click again to go deeper. Right-click for a menu.</span></div>
     <div><span class="n">5</span><span><b>Details panel.</b> What is selected: the path (each part clickable) and Details / Files / History. × or Esc closes it.</span></div>
@@ -574,7 +581,7 @@ svg.ico { vertical-align: -2px; }
 <div class="note">A sync file carries survey data and cave positions. Send it only to people who should have them.</div>
 
 <h2 id="perf">Performance</h2>
-<p>When FLEX feels slow, open <svg class="ico" width="14" height="14"><use href="#i-gauge"/></svg> <b>Speed</b> (just above Settings). It always measures the frame rate and, for every frame, how long each kind of work takes: <b>point clouds</b>, <b>terrain &amp; globe</b>, <b>map layers</b>, <b>features &amp; labels</b>, <b>FLEX's own work</b> (minimap, compass, measuring, incidence lines) and the <b>GPU</b>. The coloured bar is one frame, in milliseconds; beside it are counts (points on screen against the point budget, terrain tiles, features by source, map layers shown, Google 3D model, shading).</p>
+<p>When FLEX feels slow, open <svg class="ico" width="14" height="14"><use href="#i-gauge"/></svg> <b>Speed</b> (bottom of the strip, above Settings; it opens in the dock panel at the bottom left, so you can keep it open while you work in another panel). It always measures the frame rate and, for every frame, how long each kind of work takes: <b>point clouds</b>, <b>terrain &amp; globe</b>, <b>map layers</b>, <b>features &amp; labels</b>, <b>FLEX's own work</b> (minimap, compass, measuring, incidence lines) and the <b>GPU</b>. The coloured bar is one frame, in milliseconds; beside it are counts (points on screen against the point budget, terrain tiles, features by source, map layers shown, Google 3D model, shading).</p>
 <p><b>Run tests</b> finds what is worth turning off. It switches one thing off at a time for about a second (names, each big folder, the CalTopo map, each data file, half the point budget, shading, the Google 3D model, terrain patches, the minimap, incidence lines, the height filter), measures how much faster the view gets, and puts it back exactly as it was. The view flickers while it runs, so it only runs when you press the button. The result is a bar per test and a list of <b>suggestions</b>, best first. Nothing changes until you press <b>Apply</b>; <b>Undo</b> puts the old setting back.</p>
 <p>If the view stays under 20 frames a second for 10 seconds, a small <b>Running slowly — see why</b> note appears (once per session, not while a project is loading). It only opens the panel; it never runs tests by itself. The GPU time is an estimate (the frame time minus the measured work) unless your browser offers a GPU timer; the panel says which.</p>
 

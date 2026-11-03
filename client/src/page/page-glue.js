@@ -58,7 +58,6 @@
             '#caveCollapsible',
             '#lidarCollapsible',
             '#terrainCollapsible',
-            '#settingsCollapsible',
             '#exportCollapsible',
             '#projectCollapsible',
             '#docsCollapsible',

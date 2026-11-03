@@ -33,7 +33,7 @@
         border-radius: 4px;
       }
 
-      #toolbar input {
+      #toolbar input, #flex-dock input {
         vertical-align: middle;
         padding-top: 2px;
         padding-bottom: 2px;
@@ -854,10 +854,82 @@
         <button type="button" data-target="#exportCollapsible" title="Export an offline map"><svg class="ico"><use href="#i-pack"/></svg><small>Export</small></button>
         <button type="button" data-target="#lidarDeriveCollapsible" title="Analyze the point clouds"><svg class="ico"><use href="#i-leaf"/></svg><small>Analyze</small></button>
         <div class="rail-grow"></div>
-        <button type="button" data-target="#perfCollapsible" title="Performance: frame rate, where the time goes, what to turn off"><svg class="ico"><use href="#i-gauge"/></svg><small>Speed</small></button>
-        <button type="button" data-target="#settingsCollapsible" title="Settings"><svg class="ico"><use href="#i-sliders"/></svg><small>Settings</small></button>
-        <button type="button" id="rail-help" aria-pressed="false" title="Help: the FLEX guide"><svg class="ico"><use href="#i-info"/></svg><small>Help</small></button>
+        <button type="button" id="rail-perf" data-dock="perf" aria-pressed="false" title="Performance: frame rate, where the time goes, what to turn off"><svg class="ico"><use href="#i-gauge"/></svg><small>Speed</small></button>
+        <button type="button" id="rail-settings" data-dock="settings" aria-pressed="false" title="Settings"><svg class="ico"><use href="#i-sliders"/></svg><small>Settings</small></button>
+        <button type="button" id="rail-help" data-dock="help" aria-pressed="false" title="Help: the FLEX guide"><svg class="ico"><use href="#i-info"/></svg><small>Help</small></button>
       </nav>
+      <!-- ── The dock: Speed, Settings and Help open here, bottom left beside the strip, one at a time and
+           independent of the menu panel in #toolbar (flex-rail.js). Each panel gets a title bar with × from flex-rail.js. -->
+      <div id="flex-dock" aria-label="Speed, Settings, Help">
+        <!-- Speed: perf-panel.js draws into #perf-panel -->
+        <div class="collapse dock-panel" id="perfCollapsible" data-dock="perf" data-title="Speed" data-icon="gauge">
+          <div class="lp-panel-wrap" id="perf-panel"></div>
+        </div>
+
+        <!-- Settings -->
+        <div class="collapse dock-panel" id="settingsCollapsible" data-dock="settings" data-title="Settings" data-icon="sliders">
+          <div class="lp-panel-wrap">
+
+            <!-- 3Dconnexion SpaceMouse (spacemouse.js, WebHID: Chrome/Edge) -->
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▸</span> SpaceMouse
+              </div>
+              <div class="lp-section-body" id="lp-spacemouse-body">
+                <div style="padding:2px 0; font-size:11px;">
+                  <button id="sm_connect_btn" class="btn btn-sm btn-primary" style="width:100%;">Connect SpaceMouse</button>
+                  <div id="sm_status" style="margin-top:4px; color:rgba(255,255,255,0.55);">Not connected</div>
+                  <label style="display:block; margin-top:6px;"><input type="checkbox" id="sm_enabled" checked> Control the camera</label>
+                  <label style="display:block; margin-top:4px;">
+                    Speed: <input type="range" id="sm_speed" min="-6" max="6" step="0.25" value="0" style="width:110px; vertical-align:middle;">
+                    <span id="sm_speed_label">×1</span>
+                  </label>
+                  <label style="display:block; margin-top:4px;">
+                    Turn: <input type="range" id="sm_turn" min="0.1" max="3" step="0.05" value="1" style="width:110px; vertical-align:middle;">
+                    <span id="sm_turn_label">×1.00</span>
+                  </label>
+                  <div style="margin-top:6px; color:rgba(255,255,255,0.7);">Invert:
+                    <label><input type="checkbox" id="sm_inv_fwd"> fwd</label>
+                    <label><input type="checkbox" id="sm_inv_right"> side</label>
+                    <label><input type="checkbox" id="sm_inv_up"> up</label>
+                    <label><input type="checkbox" id="sm_inv_yaw"> turn</label>
+                    <label><input type="checkbox" id="sm_inv_pitch"> tilt</label>
+                  </div>
+                  <div id="sm_live" style="margin-top:4px; font-family:monospace; color:rgba(255,255,255,0.45);"></div>
+                  <div style="margin-top:4px; color:rgba(255,255,255,0.4);">
+                    Left button halves the speed, right doubles it. If the 3Dconnexion driver also scrolls or zooms the page, set Chrome to "no action" in 3DxWare.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Units (units.js): metric by default, imperial option; kept on this computer -->
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▸</span> Units
+              </div>
+              <div class="lp-section-body" id="units-body">
+                <div style="padding:2px 0; font-size:11px;">
+                  <label style="display:block;"><input type="radio" name="units-sys" id="units-metric" checked> Metric (m, km)</label>
+                  <label style="display:block; margin-top:4px;"><input type="radio" name="units-sys" id="units-imperial"> Imperial (ft, mi, ft of climb)</label>
+                  <div style="margin-top:4px; color:rgba(255,255,255,0.4);">Used for distances, heights and depths in the details panel and the route graph.</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Offline cache (offline-cache.js): saves tiles and point-cloud data as they load -->
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▸</span> Offline maps
+              </div>
+              <div class="lp-section-body" id="offline-cache-body"></div>
+            </div>
+
+          </div>
+        </div>
+        <!-- Help: the guide (help.html) in a frame, made when first opened -->
+        <div class="collapse dock-panel" id="flex-guide" data-dock="help" data-title="FLEX guide" data-icon="info"></div>
+      </div>
       <div id="toolbar" style="z-index: 10;">
 
         <!-- ── Save + Updates (stays at the top while a panel scrolls) ───── -->
@@ -1390,71 +1462,7 @@
           </div>
         </div>
 
-        <!-- ══════════════ SETTINGS ════════════════════════════════════════ -->
-        <div class="collapse" id="perfCollapsible">
-          <div class="lp-panel-wrap" id="perf-panel"></div>
-        </div>
-
-        <div class="collapse" id="settingsCollapsible">
-          <div class="lp-panel-wrap">
-
-            <!-- 3Dconnexion SpaceMouse (spacemouse.js, WebHID: Chrome/Edge) -->
-            <div class="lp-section">
-              <div class="lp-section-header" onclick="window._lpToggle(this)">
-                <span class="lp-section-arrow">▸</span> SpaceMouse
-              </div>
-              <div class="lp-section-body" id="lp-spacemouse-body">
-                <div style="padding:2px 0; font-size:11px;">
-                  <button id="sm_connect_btn" class="btn btn-sm btn-primary" style="width:100%;">Connect SpaceMouse</button>
-                  <div id="sm_status" style="margin-top:4px; color:rgba(255,255,255,0.55);">Not connected</div>
-                  <label style="display:block; margin-top:6px;"><input type="checkbox" id="sm_enabled" checked> Control the camera</label>
-                  <label style="display:block; margin-top:4px;">
-                    Speed: <input type="range" id="sm_speed" min="-6" max="6" step="0.25" value="0" style="width:110px; vertical-align:middle;">
-                    <span id="sm_speed_label">×1</span>
-                  </label>
-                  <label style="display:block; margin-top:4px;">
-                    Turn: <input type="range" id="sm_turn" min="0.1" max="3" step="0.05" value="1" style="width:110px; vertical-align:middle;">
-                    <span id="sm_turn_label">×1.00</span>
-                  </label>
-                  <div style="margin-top:6px; color:rgba(255,255,255,0.7);">Invert:
-                    <label><input type="checkbox" id="sm_inv_fwd"> fwd</label>
-                    <label><input type="checkbox" id="sm_inv_right"> side</label>
-                    <label><input type="checkbox" id="sm_inv_up"> up</label>
-                    <label><input type="checkbox" id="sm_inv_yaw"> turn</label>
-                    <label><input type="checkbox" id="sm_inv_pitch"> tilt</label>
-                  </div>
-                  <div id="sm_live" style="margin-top:4px; font-family:monospace; color:rgba(255,255,255,0.45);"></div>
-                  <div style="margin-top:4px; color:rgba(255,255,255,0.4);">
-                    Left button halves the speed, right doubles it. If the 3Dconnexion driver also scrolls or zooms the page, set Chrome to "no action" in 3DxWare.
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Units (units.js): metric by default, imperial option; kept on this computer -->
-            <div class="lp-section">
-              <div class="lp-section-header" onclick="window._lpToggle(this)">
-                <span class="lp-section-arrow">▸</span> Units
-              </div>
-              <div class="lp-section-body" id="units-body">
-                <div style="padding:2px 0; font-size:11px;">
-                  <label style="display:block;"><input type="radio" name="units-sys" id="units-metric" checked> Metric (m, km)</label>
-                  <label style="display:block; margin-top:4px;"><input type="radio" name="units-sys" id="units-imperial"> Imperial (ft, mi, ft of climb)</label>
-                  <div style="margin-top:4px; color:rgba(255,255,255,0.4);">Used for distances, heights and depths in the details panel and the route graph.</div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Offline cache (offline-cache.js): saves tiles and point-cloud data as they load -->
-            <div class="lp-section">
-              <div class="lp-section-header" onclick="window._lpToggle(this)">
-                <span class="lp-section-arrow">▸</span> Offline maps
-              </div>
-              <div class="lp-section-body" id="offline-cache-body"></div>
-            </div>
-
-          </div>
-        </div>
+        <!-- Speed and Settings are in the bottom-left dock (#flex-dock, flex-rail.js), outside this box. -->
 
         <!-- ══════════════ EXPORT ═══════════════════════════════════════════ -->
         <!-- ══════════════ PROJECT (project.js) ═══════════════════════════════ -->
