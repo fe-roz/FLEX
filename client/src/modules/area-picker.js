@@ -140,9 +140,9 @@
       if (!ring || ring.length < 2) { const v = V(); if (v && v.scene.requestRender) v.scene.requestRender(); return; }
       const pos = ring.map(p => Cesium.Cartesian3.fromDegrees(p[0], p[1]));
       const col = Cesium.Color.fromCssColorString('#00e5ff');
-      ds.entities.add({ polyline: { positions: draft ? pos : pos.concat([pos[0]]), width: 3, material: col, clampToGround: true } });
+      ds.entities.add({ polyline: { positions: draft ? pos : pos.concat([pos[0]]), width: 3, material: col, clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN } });
       if (!draft && ring.length >= 3) ds.entities.add({ polygon: { hierarchy: pos, material: col.withAlpha(0.12), classificationType: Cesium.ClassificationType.TERRAIN } });
-      if (draft) ring.forEach(p => ds.entities.add({ position: Cesium.Cartesian3.fromDegrees(p[0], p[1]), point: { pixelSize: 8, color: Cesium.Color.WHITE, outlineColor: col, outlineWidth: 2, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY } }));
+      if (draft) ring.forEach(p => ds.entities.add({ position: Cesium.Cartesian3.fromDegrees(p[0], p[1]), point: { pixelSize: 8, color: Cesium.Color.WHITE, outlineColor: col, outlineWidth: 2, heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN, disableDepthTestDistance: Number.POSITIVE_INFINITY } }));
       const v = V(); if (v && v.scene.requestRender) v.scene.requestRender();
     }
 
