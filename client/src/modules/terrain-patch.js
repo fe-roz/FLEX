@@ -31,6 +31,18 @@
   const SKIRT_FACTOR = 6;       // skirts this many times Cesium's default
 
   const schemes = new WeakMap();
+  /** The finest level worth answering for this DEM: the first whose sample spacing reaches the DEM's own post
+   *  spacing (finer levels only bilinear-interpolate the same posts, and every level down is 4x the tiles,
+   *  all baked on the main thread). A fixed 19 made a 2 m DEM build ~64x more tiles up close than useful. */
+  function levelFor(ts, p) {
+    try {
+      const lat0 = C.Math.toRadians((p.south + p.north) / 2), mLon = 111320 * Math.cos(lat0);
+      const post = Math.max(0.05, Math.min(p.dlon * mLon, p.dlat * 110540));           // metres between DEM posts
+      const widthM = l => C.Math.toDegrees(ts.rectangle.width) / ts.getNumberOfXTilesAtLevel(l) * mLon;
+      for (let l = MIN_LEVEL + 1; l < DEFAULT_MAX_LEVEL; l++) if (widthM(l) / (TILE - 1) <= post) return l;
+    } catch (_) {}
+    return DEFAULT_MAX_LEVEL;
+  }
   function skirtScheme(ts) {
     let p = schemes.get(ts);
     if (!p) {
@@ -63,7 +75,7 @@
 
   class PatchTerrainProvider {
     constructor(base, patch) {
-      this._base = base; this._p = patch; this._max = patch.maxLevel || DEFAULT_MAX_LEVEL;
+      this._base = base; this._p = patch; this._max = patch.maxLevel || levelFor(base.tilingScheme, patch);
       this.tilingScheme = base.tilingScheme;
       const p = patch, d = C.Math.toRadians;
       this._w = d(p.west); this._e = d(p.east); this._s = d(p.south); this._n = d(p.north);
@@ -88,7 +100,9 @@
     _inside(lon, lat) { return lon >= this._w && lon <= this._e && lat >= this._s && lat <= this._n; }
     /** Does the tile touch the patch (and is it a level the patch answers)? */
     _overlaps(x, y, level) {
-      if (level < MIN_LEVEL || level > this._max || x < 0 || y < 0) return false;
+      // answers every level up to DEFAULT_MAX_LEVEL (a height asked for at a fixed fine level must still be the
+      // patch's); _max only stops refinement: tiles at _max report no children (childTileMask below)
+      if (level < MIN_LEVEL || level > Math.max(this._max, DEFAULT_MAX_LEVEL) || x < 0 || y < 0) return false;
       const r = this.tilingScheme.tileXYToRectangle(x, y, level);
       return r.east > this._w && r.west < this._e && r.north > this._s && r.south < this._n;
     }
@@ -328,21 +342,23 @@
     viewer.terrainProvider = tp;
     return tp;
   }
-  /** Fill the unknown cells of a lattice from the nearest known ones (repeated one-cell growth). */
+  /** Fill the unknown cells of a lattice from the nearest known ones, one ring at a time: each unknown cell
+   *  takes the mean of its already-known 4-neighbours. Same result as rescanning the lattice once per ring,
+   *  but each cell is visited once (a ragged polygon left many rings, and that rescan was the slow part). */
   function spread(v, known, nx, ny) {
     let left = 0; for (let k = 0; k < known.length; k++) if (!known[k]) left++;
     if (left === known.length) { v.fill(0); return; }
-    while (left > 0) {
-      const add = [];
-      for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
-        const k = j * nx + i; if (known[k]) continue;
-        let s = 0, c = 0;
-        if (i > 0 && known[k - 1]) { s += v[k - 1]; c++; } if (i < nx - 1 && known[k + 1]) { s += v[k + 1]; c++; }
-        if (j > 0 && known[k - nx]) { s += v[k - nx]; c++; } if (j < ny - 1 && known[k + nx]) { s += v[k + nx]; c++; }
-        if (c) add.push(k, s / c);
-      }
-      if (!add.length) break;
-      for (let q = 0; q < add.length; q += 2) { v[add[q]] = add[q + 1]; known[add[q]] = 1; left--; }
+    const queued = new Uint8Array(known.length);
+    let ring = [];
+    const nb = (k, f) => { const i = k % nx, j = (k - i) / nx; if (i > 0) f(k - 1); if (i < nx - 1) f(k + 1); if (j > 0) f(k - nx); if (j < ny - 1) f(k + nx); };
+    for (let k = 0; k < known.length; k++) if (!known[k]) { let touch = false; nb(k, q => { if (known[q]) touch = true; }); if (touch) { ring.push(k); queued[k] = 1; } }
+    while (ring.length) {
+      const vals = new Float64Array(ring.length);
+      ring.forEach((k, r) => { let s = 0, c = 0; nb(k, q => { if (known[q]) { s += v[q]; c++; } }); vals[r] = s / c; });
+      ring.forEach((k, r) => { v[k] = vals[r]; known[k] = 1; });
+      const next = [];
+      ring.forEach(k => nb(k, q => { if (!known[q] && !queued[q]) { queued[q] = 1; next.push(q); } }));
+      ring = next;
     }
   }
   /** Take every patch off, back to the original terrain. */
