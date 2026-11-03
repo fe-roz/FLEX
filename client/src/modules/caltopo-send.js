@@ -8,8 +8,10 @@
 //   notInIds(P, src)     the same as a Set of ids, or null with no CalTopo map loaded
 //   isNotIn(f)           one feature
 //   can()                '' or why nothing can be sent now (no private CalTopo map loaded …)
-//   reminder()           null | { n, old, html } — the quiet note for 📍 Surface (many items wait / edits waiting > 1 day)
-//   dismiss()            hides the note for this session;  threshold(n?) the "more than N items" setting (default 10)
+//   reminder()           null | { n, old, html } — the note for 📍 Surface: at least one item not in CalTopo (can't be
+//                        dismissed; it goes by itself when nothing is left) / edits waiting > 1 day
+//   highlight(on?)       marks every not-in-CalTopo item on the map (a halo) and, in 📍 Surface, its row (toggles);
+//                        hlSync() keeps it current as items are sent (ends by itself when none is left); hlOn()
 //   removeCopies(list)   the separate, confirmed step: take items out of the project once they are in CalTopo
 //   parseTag(desc) / makeTag(cave, station, {z, id})   cave entrance tags (see below)
 //
@@ -118,8 +120,7 @@
   const ic = (n, s) => (window.icon ? window.icon(n, s || 14) : '');
   const toast = m => { const a = A(); if (a && a.toast) a.toast(m); };
   const ctSrc = () => { const w = window._ws; return (w && w.vectorSources && w.vectorSources().find(s => s.kind === 'caltopo')) || null; };
-  let busy = false, dismissed = false;
-  try { dismissed = sessionStorage.getItem('flex.ctsend.dismissed') === '1'; } catch (_) {}
+  let busy = false;
 
   /** Why nothing can be sent now ('' when it can). */
   function can() {
@@ -151,24 +152,40 @@
   const isNotIn = f => { const s = ctSrc(); return !!(s && M() && !M().matchFeature(f, s) && !linked(f)); };
 
   // ── The note in 📍 Surface ────────────────────────────────────────────────
-  const threshold = n => {
-    if (n !== undefined) { try { localStorage.setItem('flex.ctsend.n', String(Math.max(1, Math.round(+n) || 10))); } catch (_) {} }
-    let v = 10; try { v = +localStorage.getItem('flex.ctsend.n') || 10; } catch (_) {}
-    return v;
-  };
+  // The highlight: a halo on the map for every item that is not in CalTopo (a data source of its own).
+  let hlFlag = false, hlSig = '', hlDs = null;
+  function hlSync() {
+    const v = window.cesiumViewer, pj = PJ();
+    const list = hlFlag && pj.P && window.Cesium ? notIn(pj.P) : [];
+    if (hlFlag && !list.length) hlFlag = false;                 // nothing left: it ends by itself
+    const sig = hlFlag ? list.map(f => f.id + ':' + (f.coords || []).length).join('|') : '';
+    if (sig === hlSig) return hlFlag;
+    hlSig = sig;
+    if (!v || !window.Cesium) return hlFlag;
+    if (!hlDs) { hlDs = new Cesium.CustomDataSource('ct-notin-highlight'); v.dataSources.add(hlDs); }
+    hlDs.entities.removeAll();
+    const C = Cesium.Color.fromCssColorString('#ff6a00');
+    list.forEach(f => {
+      const pos = (f.coords || []).map(p => Cesium.Cartesian3.fromDegrees(p[0], p[1], p[2] || 0));
+      if (!pos.length) return;
+      if (f.kind === 'point') hlDs.entities.add({ position: pos[0], properties: { ctNotInHl: f.id }, point: { pixelSize: 26, color: C.withAlpha(0.22), outlineColor: C, outlineWidth: 3, heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN, disableDepthTestDistance: Number.POSITIVE_INFINITY } });
+      else hlDs.entities.add({ properties: { ctNotInHl: f.id }, polyline: { positions: f.kind === 'area' ? pos.concat([pos[0]]) : pos, width: 8, material: new Cesium.PolylineGlowMaterialProperty({ color: C, glowPower: 0.3 }), clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN } });
+    });
+    if (v.scene.requestRender) v.scene.requestRender();
+    return hlFlag;
+  }
+  function highlight(on) { hlFlag = on === undefined ? !hlFlag : !!on; hlSig = hlFlag ? '' : hlSig; if (!hlFlag) hlSig = 'x'; return hlSync(); }
   function reminder() {
-    if (dismissed) return null;
     const w = W(), pj = PJ();
     if (!w || !w.available() || !pj.P) return null;
     const n = notIn(pj.P).length;
     const old = w.pending().filter(p => p.state === 'waiting' && Date.now() - (p.at || 0) > 86400000).length;
     const bits = [];
-    if (n > threshold()) bits.push(`${n} items not in CalTopo — <button type="button" class="sc-link" data-tool="ctsend">Send…</button>`);
+    if (n >= 1) bits.push(`${n} item${n === 1 ? '' : 's'} not in CalTopo — <button type="button" class="sc-link" data-tool="ctsend">Send…</button> · <button type="button" class="sc-link${hlFlag ? ' sc-on' : ''}" data-tool="cthl" title="${hlFlag ? 'Remove the marks' : 'Mark them on the map and in the list'}">${hlFlag ? 'Clear highlight' : 'Highlight'}</button>`);
     if (old) bits.push(`${old} edit${old === 1 ? '' : 's'} waiting for CalTopo for over a day — <button type="button" class="sc-link" data-tool="ctretry">Try now</button>`);
     if (!bits.length) return null;
-    return { n, old, html: `<div class="sc-remind" data-ctremind>${ic('info', 13)} <span>${bits.join(' · ')}</span><button type="button" class="sc-link" data-tool="ctdismiss" title="Hide this until FLEX is opened again">Not now</button></div>` };
+    return { n, old, html: `<div class="sc-remind" data-ctremind>${ic('info', 13)} <span>${bits.join(' · ')}</span></div>` };
   }
-  function dismiss() { dismissed = true; try { sessionStorage.setItem('flex.ctsend.dismissed', '1'); } catch (_) {} }
 
   // ── Sending ───────────────────────────────────────────────────────────────
   function pick(target, P) {
@@ -190,10 +207,9 @@
     const n = pl.items.length;
     const html = `<style>.cts-list{max-height:34vh;overflow:auto;margin:6px 0;font-size:12px}.cts-row{padding:2px 0}.cts-k{display:inline-block;min-width:34px;opacity:.6;font-size:10.5px;text-transform:uppercase}.cts-p{opacity:.65}.cts-set{margin-top:8px;font-size:11.5px;opacity:.8}.cts-set input{width:48px}</style>
       <div>${n} item${n === 1 ? '' : 's'} will be added to the CalTopo map${folderNew.length ? `, and ${folderNew.length} folder${folderNew.length === 1 ? '' : 's'} created there (${folderNew.map(x => esc(x.name)).join(', ')})` : ''}. The project keeps its copies; they stop being marked “not in CalTopo”.${n > 20 ? ' CalTopo is asked gently, about one item a second.' : ''}</div>
-      <div class="cts-list">${rows}</div>
-      ${single ? '' : `<div class="cts-set">Remind me in 📍 Surface when more than <input type="number" min="1" max="999" value="${threshold()}" data-ctn> items are not in CalTopo.</div>`}`;
+      <div class="cts-list">${rows}</div>`;
     return a.dialog({ title: 'Send to CalTopo', html, wide: true, buttons: [{ label: 'Cancel', value: null }, { label: `Send ${n} to CalTopo`, value: 'go', primary: true }] })
-      .then(r => { const i = r && r.box && r.box.querySelector('[data-ctn]'); if (i) threshold(i.value); return !!(r && r.button === 'go'); });
+      .then(r => !!(r && r.button === 'go'));
   }
 
   function progressBox() {
@@ -301,5 +317,5 @@
     return n;
   }
 
-  return { send, notIn, notInIds, isNotIn, can, reminder, dismiss, threshold, removeCopies, parseTag, makeTag, toCalTopo, plan, hex, _linked: linked };
+  return { send, notIn, notInIds, isNotIn, can, reminder, highlight, hlSync, hlOn: () => hlFlag, removeCopies, parseTag, makeTag, toCalTopo, plan, hex, _linked: linked };
 });

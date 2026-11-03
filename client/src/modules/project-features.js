@@ -76,9 +76,9 @@
     if (!v || !window.Cesium) return;
     if (!F.src) { F.src = new Cesium.CustomDataSource('pj-features'); v.dataSources.add(F.src); }
     HL.divs.forEach(d => d.remove()); HL.divs.clear(); HL.mode = null;
-    const want = new Set();
+    const want = new Set(), hid = hidden();            // hid['f:<id>']: that feature hidden on its own (📍 Surface)
     if (pj.pid) FL.liveFeatures(pj.P).forEach(f => {
-      if (groupHidden(f.group) || !f.coords || !f.coords.length) return;
+      if (hid['f:' + f.id] || groupHidden(f.group) || !f.coords || !f.coords.length) return;
       want.add(f.id);
       const col = colorOf(f), sig = sigOf(f, col), had = drawn.get(f.id);
       if (had && had.sig === sig) return;
@@ -543,7 +543,7 @@
     const v = V(); if (!v || !g || !g.coords || !g.coords.length) return;
     if (!F.hl) { F.hl = new Cesium.CustomDataSource('pjf-highlight'); v.dataSources.add(F.hl); }
     F.hl.entities.removeAll();
-    F.hlKey = g.key || null;
+    F.hlKey = g.key || null; window.dispatchEvent(new Event('flex-highlight'));      // 📍 Surface marks its row
     const coords = await grounded(g.coords);
     const pos = coords.map(p => Cesium.Cartesian3.fromDegrees(p[0], p[1], p[2]));
     const Y = Cesium.Color.fromCssColorString('#ffe600');
@@ -558,7 +558,7 @@
     }
     v.scene.requestRender && v.scene.requestRender();
   }
-  function clearHighlight() { if (F.hl) F.hl.entities.removeAll(); F.hlKey = null; }
+  function clearHighlight() { const had = F.hlKey != null; if (F.hl) F.hl.entities.removeAll(); F.hlKey = null; if (had) window.dispatchEvent(new Event('flex-highlight')); if (V() && V().scene.requestRender) V().scene.requestRender(); }
   const flyTo = f => highlight({ kind: f.kind, coords: f.coords, key: 'f:' + f.id }, true);
   // A row: click highlights, double-click flies there too.
   function rowActs(r, get) {

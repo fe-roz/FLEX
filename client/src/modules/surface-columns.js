@@ -88,7 +88,7 @@
     try { localStorage.setItem('flex.surface.off', MS.off ? '1' : '0'); } catch (_) {}
     applyMaster(); last = ''; render();
   }
-  setInterval(() => { if (MS.off) applyMaster(); }, 1000);
+  setInterval(() => { if (MS.off) applyMaster(); try { applyMyHidden(); } catch (_) {} }, 1000);
 
   // ── Labels on/off: names of project features, CalTopo and data-file
   // features (project-features.js draws those) and your points (flex.js,
@@ -123,7 +123,34 @@
   const mapId = u => (String(u || '').match(/\/m\/([A-Za-z0-9]+)/) || [])[1] || null;
   const nItems = ds => (ds._ctCount != null ? ds._ctCount : ds.entities.values.length);
   const sameMap = (a, b) => { const x = mapId(a), y = mapId(b); return x && y ? x === y : String(a || '') === String(b || ''); };
+  // CalTopo maps by their names: the project's record (renamed or first known), a rename kept on this computer
+  // (My data), the key's map list (/api/caltopo/maps), the title the pulled map carries, else the map id.
+  const CTN = { list: null, at: 0, busy: false, ok: false, tried: new Set() };
+  function ctMaps() {
+    if (!CTN.busy && Date.now() - CTN.at > (CTN.ok ? 600000 : 60000)) {
+      CTN.busy = true; CTN.at = Date.now();
+      fetch('/api/caltopo/maps').then(r => (r.ok ? r.json() : null)).then(j => { CTN.ok = !!(j && Array.isArray(j.maps)); if (CTN.ok) { CTN.list = j.maps; last = ''; soon(); } })
+        .catch(() => {}).finally(() => { CTN.busy = false; });
+    }
+    return CTN.list;
+  }
+  const ctLocal = () => { try { return JSON.parse(localStorage.getItem('flex.ct.names') || '{}'); } catch (_) { return {}; } };
+  const GENERIC = 'CalTopo map';
+  /** The name known from CalTopo (list, then the pulled map's title), or ''. */
+  function ctKnown(url, src) {
+    const id = mapId(url), m = id && (ctMaps() || []).find(x => x.id === id);
+    return (m && m.title) || (src && src.ds && src.ds._ctTitle) || '';
+  }
+  function ctName(url, rec, src, local) {
+    if (rec && rec.name && rec.name !== GENERIC) return rec.name;
+    const id = mapId(url);
+    return (local && id && ctLocal()[id]) || ctKnown(url, src) || id || GENERIC;
+  }
+  let MODEL = null;
   async function model() {
+    const M = await model0(); MODEL = M; return M;
+  }
+  async function model0() {
     const w = ws(), pj = PJ(), pw = PW();
     if (!w) return null;
     let S = await myState();
@@ -157,10 +184,16 @@
       const ct = (FL.liveLayers(pj.P) || []).filter(l => l.kind === 'caltopo');
       const now = w.caltopo(), src = w.vectorSources().find(s => s.kind === 'caltopo');
       const isNow = l => !!(now && sameMap(now.url, l.url));        // the same map, however its link is written
-      ct.forEach(l => L.unshift({ kind: 'caltopo', id: l.id, name: 'CalTopo map', url: l.url, interval: l.interval, loaded: isNow(l),
-        shown: !!(src && own(src.ds) && isNow(l)), items: src ? nItems(src.ds) : 0, src: src && isNow(l) ? src : null }));
+      ct.forEach(l => {
+        const sr = src && isNow(l) ? src : null, known = ctKnown(l.url, sr), dir = moving('caltopo', l.id);
+        // First known name: kept on the project's layer record, so it travels with the project.
+        if (known && (!l.name || l.name === GENERIC) && !CTN.tried.has(l.id) && !pj.readonly && window._pjApi) { CTN.tried.add(l.id); Promise.resolve(window._pjApi.record('layer.set', { layer: l.id, name: known })).catch(e => console.warn('[surface] name', e)); }
+        const x = { kind: 'caltopo', id: l.id, name: ctName(l.url, l, sr), url: l.url, interval: l.interval, loaded: isNow(l), inProject: true, dir,
+          shown: !!(src && own(src.ds) && isNow(l)), items: src ? nItems(src.ds) : 0, src: sr };
+        (dir === 'out' ? R : L).unshift(x);
+      });
       // A CalTopo map loaded that the project doesn't have: yours (My data), ← puts it in the project.
-      if (src && now && !ct.some(isNow)) R.unshift({ kind: 'caltopo', id: 'ct', name: 'CalTopo map', url: now.url, interval: now.interval, loaded: true, shown: own(src.ds), items: nItems(src.ds), src, mine: true });
+      if (src && now && !ct.some(isNow)) R.unshift({ kind: 'caltopo', id: 'ct', name: ctName(now.url, null, src, true), url: now.url, interval: now.interval, loaded: true, shown: own(src.ds), items: nItems(src.ds), src, mine: true });
       const h = PF() ? PF().hidden() : {};
       const feats = FL.liveFeatures(pj.P), groups = FL.liveGroups(pj.P);
       NICT = notInCt(pj.P);
@@ -179,7 +212,7 @@
     } else {
       // No project: a CalTopo map loaded on its own is still listed (in My data).
       const src = w.vectorSources().find(s => s.kind === 'caltopo');
-      if (src) R.unshift({ kind: 'caltopo', id: 'ct', name: 'CalTopo map', url: src.url, loaded: true, shown: own(src.ds), items: nItems(src.ds), src });
+      if (src) R.unshift({ kind: 'caltopo', id: 'ct', name: ctName(src.url, null, src, true), url: src.url, loaded: true, shown: own(src.ds), items: nItems(src.ds), src });
     }
     [...L, ...R].forEach(x => { if (x.kind === 'file' && x.loaded) x.src = srcOf(x.url); });
     return { isOpen, L, R };
@@ -273,11 +306,11 @@
   const isExp = k => (k.startsWith('g:') || k === 'loose' ? !!fOpen()[k] : open.has(k));
   function row(x, side, isOpen) {
     if (!x.dir && (x.kind === 'folder' ? folderWaits(x.id) : x.kind === 'loose' && queued().includes('loose'))) x.wait = true;
-    const sub = x.wait ? WAIT : x.dir ? (x.dir === 'in' ? 'moving into the project' : 'moving to My data')
+    const sub = x.wait ? WAIT : x.dir ? (x.dir === 'in' ? 'moving into the project' : x.dir === 'remove' ? 'leaving the project' : 'moving to My data')
       : x.kind === 'file' ? (x.loaded ? (x.items ? x.items + ' items' : 'loaded') : 'not loaded')
       : x.kind === 'caltopo' ? (x.loaded ? x.items + ' items' : 'not loaded')
       : (x.n != null ? x.n + (x.kind === 'pgroup' ? (x.nPt === x.n ? ' point' : ' item') + (x.n === 1 ? '' : 's') : '') : '');
-    const canMove = isOpen && (x.kind === 'pgroup' || x.kind === 'file' || (x.kind === 'caltopo' && x.mine));
+    const canMove = isOpen && (x.kind === 'pgroup' || x.kind === 'file' || (x.kind === 'caltopo' && (x.mine || x.dir)));
     const arrow = !canMove ? '' : side === 'p'
       ? (x.kind === 'pgroup' && x.dir !== 'in' ? '' : `<button type="button" class="cc-mv" data-mv="out" title="${x.dir === 'in' ? 'Back to My data (cancel the move)' : 'Move to My data'}">→</button>`)
       : `<button type="button" class="cc-mv" data-mv="in" title="${x.dir === 'out' ? 'Back into the project (cancel the move)' : 'Move into the project'}">←</button>`;
@@ -295,10 +328,27 @@
     if (exp) html += `<div class="sc-kids">${kids(x, isOpen)}</div>`;
     return html;
   }
+  // My data items hidden one by one: 'm:<id>' in the same store as folders and project features (_pjf.hidden).
+  const setOwn = (o, v) => { if (MS.saved.has(o)) MS.saved.set(o, v); else o.show = v; };
+  function applyMyHidden() {
+    const P = PF(); if (!P) return;
+    const ids = new Set(Object.keys(P.hidden()).filter(k => k.startsWith('m:')).map(k => k.slice(2)));
+    if (!ids.size) return;
+    pointEntities(ids).concat(shapeEnts(ids)).forEach(e => { if (own(e)) setOwn(e, false); });
+  }
+  function toggleMy(id, to) {
+    const P = PF(); if (!P) return;
+    const hide = to === undefined ? !P.hidden()['m:' + id] : to;
+    P.setHidden('m:' + id, hide);
+    pointEntities(new Set([id])).concat(shapeEnts([id])).forEach(e => setOwn(e, !hide));
+    const v = V(); if (v && v.scene.requestRender) v.scene.requestRender();
+    last = ''; soon();
+  }
   const shapeShown = id => { const e = shapeEnts([id])[0]; return !!e && own(e); };
   function kids(x, isOpen) {
-    if (x.kind === 'pgroup') return x.points.map(f => f.kind !== 'point' ? `<div class="sc-pt sc-shape" data-pt="${esc(f.id)}" data-shape="1" data-rkey="my:${esc(f.id)}"><button type="button" class="cc-eye ui-eye ui-eye-sm${shapeShown(f.id) ? ' on' : ' half'}" data-shpeye title="${shapeShown(f.id) ? 'Hide' : 'Show'}"></button><span title="${esc(f.name)}">${fIcon[f.kind]} ${esc(f.name || (f.kind === 'area' ? 'Area' : 'Line'))}</span>
-        <span class="cc-tools">${moreBtn()}</span></div>` : `<div class="sc-pt" data-pt="${esc(f.id)}" data-rkey="my:${esc(f.id)}"><span title="${esc(f.name)}">${esc(f.name || 'Point')}</span>
+    const mh = (PF() ? PF().hidden() : {}), myEye = (f, a) => `<button type="button" class="cc-eye ui-eye ui-eye-sm${mh['m:' + f.id] ? ' half' : ' on'}" ${a} title="${mh['m:' + f.id] ? 'Show' : 'Hide'}"></button>`;
+    if (x.kind === 'pgroup') return x.points.map(f => f.kind !== 'point' ? `<div class="sc-pt sc-wide sc-shape" data-pt="${esc(f.id)}" data-shape="1" data-rkey="my:${esc(f.id)}">${myEye(f, 'data-shpeye')}<span title="${esc(f.name)}">${fIcon[f.kind]} ${esc(f.name || (f.kind === 'area' ? 'Area' : 'Line'))}</span>
+        <span class="cc-tools">${moreBtn()}</span></div>` : `<div class="sc-pt sc-wide" data-pt="${esc(f.id)}" data-rkey="my:${esc(f.id)}">${myEye(f, 'data-pteye')}<span title="${esc(f.name)}">${esc(f.name || 'Point')}</span>
         <span class="cc-tools"><button type="button" data-ptfly title="Fly to">⌖</button>${isOpen ? '<button type="button" class="cc-mv" data-ptin title="Move this point into the project">←</button>' : ''}<button type="button" data-ptdel title="Delete the point">✕</button>${moreBtn()}</span></div>`).join('');
     if (x.kind === 'folder' || x.kind === 'loose') return projectTree(x.kind === 'loose' ? null : x.id, 0);
     if (x.src) return overlayTree(x.src);
@@ -320,8 +370,8 @@
     });
     FL.liveFeatures(pj.P).filter(f => (f.group || null) === (gid || null)).sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true })).forEach(f => {
       const fm = featWaits(f);
-      out += `<div class="sc-sub sc-feat${NICT && NICT.has(f.id) ? ' sc-is-nict' : ''}${fm ? ' cc-moving' : ''}" data-feat="${esc(f.id)}" data-rkey="f:${esc(f.id)}" ${pad(depth)} title="Click: highlight · double-click: fly there"><span class="sc-ic" style="color:${esc(P.colorOf(f))}">${fIcon[f.kind] || '•'}</span>
-        <span class="sc-nm">${esc(f.name || '(no name)')}${FL.flexTag(f.desc) ? ' <small>🕳</small>' : ''}${fm ? ` <small class="sc-wait">${WAIT}</small>` : ''}${NICT && NICT.has(f.id) ? ' ' + nictMark() : ''}</span>
+      out += `<div class="sc-sub sc-feat${NICT && NICT.has(f.id) ? ' sc-is-nict' + (window._ctSend && window._ctSend.hlOn() ? ' sc-hl' : '') : ''}${fm ? ' cc-moving' : ''}" data-feat="${esc(f.id)}" data-rkey="f:${esc(f.id)}" ${pad(depth)} title="Click: highlight · double-click: fly there"><button type="button" class="cc-eye ui-eye ui-eye-sm${h['f:' + f.id] ? ' half' : ' on'}" data-feye="${esc(f.id)}" title="${h['f:' + f.id] ? 'Show' : 'Hide'}"></button>
+        <span class="sc-nm"><span class="sc-ic" style="color:${esc(P.colorOf(f))}">${fIcon[f.kind] || '•'}</span> ${esc(f.name || '(no name)')}${FL.flexTag(f.desc) ? ' <small>🕳</small>' : ''}${fm ? ` <small class="sc-wait">${WAIT}</small>` : ''}${NICT && NICT.has(f.id) ? ' ' + nictMark() : ''}</span>
         <span class="cc-tools"><button type="button" data-fedit="${esc(f.id)}" title="Edit">✏️</button>${moreBtn()}</span></div>`;
     });
     return out || '<div class="sc-sub sc-none">empty</div>';
@@ -407,7 +457,7 @@
       ? `<button type="button" data-draw="point" title="Draw a point in the project">＋ Point</button><button type="button" data-draw="line" title="Draw a line">＋ Line</button><button type="button" data-draw="area" title="Draw an area">＋ Area</button><button type="button" data-tool="folder" title="A new folder">＋ Folder</button><button type="button" data-tool="import" title="GPX / KML / KMZ / GeoJSON into the project's features">⇪ Import</button><button type="button" data-tool="download" title="All the project's features, for CalTopo">⇩ Download</button><button type="button" data-tool="file" title="Show a KMZ / GeoJSON / GPX file as it is (a data file)">📄 Add file</button>${NICT && NICT.size && window._ctSend ? `<button type="button" data-tool="ctsend" title="Add the items that are not in the CalTopo map to it (you see the list first)">⇪ Send ${NICT.size} to CalTopo</button>` : ''}${ctSrc() && window._ctMatch ? '<button type="button" data-tool="dups" title="The project’s features that the loaded CalTopo map already has (same name, within 15 m)">⧉ Duplicates of CalTopo</button>' : ''}`
       : `<button type="button" data-tool="file" title="Show a KMZ / GeoJSON / GPX file">📄 Add KMZ / GeoJSON / GPX</button>`;
     const lab = labelsOn();
-    return `<div class="sc-bar"><button type="button" class="sc-master${on ? ' on' : ''}" data-master role="switch" aria-checked="${!!on}" title="${on ? 'Hide every feature on the surface (each keeps its own setting)' : 'Show the features again, as each was set'}"><span class="ui-sw ui-sw-sm"></span>Show features</button><button type="button" class="sc-master sc-lab${lab ? ' on' : ''}" data-labels role="switch" aria-checked="${!!lab}" title="${lab ? 'Hide the names on the map' : 'Show the names on the map'}"><span class="ui-sw ui-sw-sm"></span>Labels</button><span class="sc-tools">${tools}</span></div>${isOpen && window._ctSend && window._ctSend.reminder() ? window._ctSend.reminder().html : ''}`;
+    return `<div class="sc-bar"><button type="button" class="sc-master${on ? ' on' : ''}" data-master role="switch" aria-checked="${!!on}" title="${on ? 'Hide every feature on the surface (each keeps its own setting)' : 'Show the features again, as each was set'}"><span class="ui-sw ui-sw-sm"></span>Show features</button><button type="button" class="sc-master sc-lab${lab ? ' on' : ''}" data-labels role="switch" aria-checked="${!!lab}" title="${lab ? 'Hide the names on the map' : 'Show the names on the map'}"><span class="ui-sw ui-sw-sm"></span>Labels</button><span class="sc-tools">${tools}</span></div>${isOpen && window._ctSend && (window._ctSend.hlSync(), window._ctSend.reminder()) ? window._ctSend.reminder().html : ''}`;
   }
 
   async function render() {
@@ -431,7 +481,7 @@
       const sc = host.querySelector('.cc-cols') ? host.querySelector('.cc-cols').scrollTop : 0;
       host.innerHTML = html;
       host.querySelector('.cc-cols').scrollTop = sc;
-      flashNow();
+      flashNow(); syncSel();
       railMark();
     } catch (e) { console.warn('[surface] render', e); }
     finally { busy = false; if (again) { again = false; setTimeout(render, 0); } }
@@ -596,7 +646,7 @@
     masterOnFirst();
     const x = await find(kind, id), w = ws();
     if (!x) return;
-    if (kind === 'pgroup') { const ids = new Set(x.points.map(f => f.id)); const ents = pointEntities(ids).concat(shapeEnts(ids)); ents.forEach(e => { e.show = !x.shown; }); }
+    if (kind === 'pgroup') { x.points.forEach(f => PF() && PF().setHidden('m:' + f.id, x.shown)); const ids = new Set(x.points.map(f => f.id)); const ents = pointEntities(ids).concat(shapeEnts(ids)); ents.forEach(e => { e.show = !x.shown; }); }
     else if (kind === 'folder' || kind === 'loose') { if (PF()) { PF().setHidden(kind === 'loose' ? 'root' : 'g:' + id, x.shown); PF().draw(); } }
     else if (kind === 'caltopo') {
       if (!x.loaded) await w.setCaltopo(x.url, x.interval ?? 60);
@@ -611,6 +661,10 @@
     const pw = PW(), x = await find(kind, id);
     if (!pw || !x || !PJ().pid) return;
     if (kind === 'pgroup' && dir === 'out' && x.dir !== 'in') return;   // project features don't go back to My data (yet)
+    if (kind === 'caltopo' && (x.dir || (dir === 'out' && x.inProject))) {    // a project map leaves: waits for 💾 Save; the same again cancels
+      await pw.moveItem({ kind: 'caltopo', id: x.id, name: x.name, dir: x.dir ? x.dir : 'out', url: x.url });
+      soon(); return;
+    }
     if (kind === 'caltopo') {                                           // the loaded CalTopo map becomes the project's
       if (dir !== 'in' || !window._pjApi) return;
       await window._pjApi.record('layer.set', { layer: pw.layerId('caltopo', x.url), kind: 'caltopo', url: x.url, interval: x.interval ?? 60, order: (window.FlexLib.liveLayers(PJ().P) || []).length, removed: false });
@@ -633,9 +687,34 @@
     const e = ov.get(el.dataset.ov); if (!e || !P) return null;
     const g = P.entCoords(e); return g ? Object.assign(g, { key: 'e:' + e.id }) : null;
   }
+  // A row click selects the item and opens its full info (the same as ⋯ → Info); the map highlight and the row mark
+  // stay while it is the selection (info-panel.js drops them on deselect; closing the pane does too).
+  const SEL = { sel: null, key: null };
+  function myGeom(row) {
+    const id = row.dataset.pt, e = row.dataset.shape ? shapeEnts([id])[0] : pointEntities(new Set([id]))[0], g = e && PF() && PF().entCoords(e);
+    return g ? Object.assign(g, { key: 'e:' + e.id }) : null;
+  }
+  function syncSel() {
+    host.querySelectorAll('.sc-sel').forEach(r => r.classList.remove('sc-sel'));
+    const k = (window._pjfState || {}).hlKey;
+    if (SEL.sel && k && k === SEL.key) { const r = host.querySelector(SEL.sel); if (r) r.classList.add('sc-sel'); } else SEL.sel = SEL.key = null;
+  }
+  window.addEventListener('flex-highlight', syncSel);
+  // Closing the pane leaves nothing highlighted on the map or marked in the list.
+  (function () {
+    const pane = document.getElementById('featuresCollapsible'); if (!pane || !window.MutationObserver) return;
+    let was = pane.classList.contains('show');
+    new MutationObserver(() => { const now = pane.classList.contains('show'); if (was && !now && window._pjf) { const k = (window._pjfState || {}).hlKey; if (k && SEL.key === k) window._pjf.clearHighlight(); } was = now; }).observe(pane, { attributes: true, attributeFilter: ['class'] });
+  })();
+  async function pick(row, g, fly) {
+    const rk = row.dataset.rkey;
+    if (rk && window._rowMenu && window._rowMenu.info) window._rowMenu.info(rk);          // first: a new selection drops the old highlight
+    if (g && PF()) { SEL.sel = `[data-rkey="${cssq(rk)}"]`; SEL.key = g.key; await PF().highlight(g, fly); }
+    syncSel();
+  }
   host.addEventListener('dblclick', e => {
-    const r = e.target.closest('.sc-feat'); if (!r || e.target.closest('button')) return;
-    clearTimeout(clickT); const g = featureOf(r); if (g && PF()) PF().highlight(g, true);
+    const r = e.target.closest('.sc-feat, .sc-pt[data-rkey]'); if (!r || e.target.closest('button')) return;
+    clearTimeout(clickT); pick(r, r.dataset.feat || r.dataset.ov ? featureOf(r) : myGeom(r), true);
   });
   host.addEventListener('click', async e => {
     const P = PF();
@@ -657,15 +736,23 @@
       else if (t === 'dups') dupsDialog();
       else if (t === 'ctsend') window._ctSend.send({ all: true });
       else if (t === 'ctretry') { if (window._ctWrite) window._ctWrite.retry(); }
-      else if (t === 'ctdismiss') { window._ctSend.dismiss(); last = ''; render(); }
+      else if (t === 'cthl') {
+        const on = window._ctSend.highlight();
+        if (on && PJ().P) {                     // the folders holding them open, so the marked rows show
+          const FL = window.FlexLib, o = fOpen(), ids = window._ctSend.notInIds(PJ().P);
+          FL.liveFeatures(PJ().P).filter(f => ids && ids.has(f.id)).forEach(f => { if (!f.group) o.loose = true; else FL.groupPath(PJ().P, f.group).forEach(g => { o['g:' + g.id] = true; }); });
+        }
+        last = ''; render();
+      }
       return;
     }
     const ex = e.target.closest('[data-expand]');
     if (ex && !e.target.closest('.cc-eye, .cc-tools')) { toggle(ex.dataset.expand); return; }
-    const gb = e.target.closest('[data-gadd],[data-gdl],[data-gedit],[data-geye],[data-fedit],[data-oeye]');
+    const gb = e.target.closest('[data-gadd],[data-gdl],[data-gedit],[data-geye],[data-fedit],[data-oeye],[data-feye]');
     if (gb && P) {
       const d = gb.dataset, A = window._pjApi;
-      if (d.geye) { masterOnFirst(); const h = P.hidden(); P.setHidden('g:' + d.geye, !h['g:' + d.geye]); P.draw(); last = ''; render(); }
+      if (d.feye) { masterOnFirst(); const h = P.hidden(); P.setHidden('f:' + d.feye, !h['f:' + d.feye]); P.draw(); last = ''; render(); }
+      else if (d.geye) { masterOnFirst(); const h = P.hidden(); P.setHidden('g:' + d.geye, !h['g:' + d.geye]); P.draw(); last = ''; render(); }
       else if (d.oeye) { masterOnFirst(); const h = P.hidden(); P.setHidden(d.oeye, !h[d.oeye]); P.applyOverlayHidden(); last = ''; render(); }
       else if (d.fedit) { if (window._featEdit) window._featEdit.open({ source: 'project', id: d.fedit }); else P.editFeature(d.fedit); }   // the shared editor, as from ⋯ and the info panel
       else if (d.gdl) P.downloadMenu(d.gdl);
@@ -678,14 +765,16 @@
       return;
     }
     const ft = e.target.closest('.sc-feat');
-    if (ft) { clearTimeout(clickT); clickT = setTimeout(() => { const g = featureOf(ft); if (g && P) P.highlight(g, false); }, 220); return; }
+    if (ft) { clearTimeout(clickT); clickT = setTimeout(() => pick(ft, featureOf(ft), false), 220); return; }
     const pt = e.target.closest('[data-pt]');
+    if (pt && !e.target.closest('button') && !e.target.closest('.cc-tools')) { clearTimeout(clickT); clickT = setTimeout(() => pick(pt, myGeom(pt), false), 220); return; }
     if (pt && pt.dataset.shape) {
-      if (e.target.closest('[data-shpeye]')) { masterOnFirst(); const se = shapeEnts([pt.dataset.pt])[0]; if (se) { se.show = !own(se); if (V()) V().scene.requestRender(); soon(); } }
+      if (e.target.closest('[data-shpeye]')) { masterOnFirst(); toggleMy(pt.dataset.pt); }
       return;
     }
     if (pt) {
       const id = pt.dataset.pt, ent = pointEntities(new Set([id]))[0];
+      if (e.target.closest('[data-pteye]')) { masterOnFirst(); toggleMy(id); return; }
       if (e.target.closest('[data-ptfly]') && ent && V()) V().flyTo(ent, { duration: 1.2, offset: new Cesium.HeadingPitchRange(0, -0.6, 400) });
       if (e.target.closest('[data-ptin]')) { const S = await myState(); const f = S.features[id]; if (f && PW()) { await PW().moveItem({ kind: 'point', id, name: f.name || 'Point', dir: 'in' }); soon(); } }
       if (e.target.closest('[data-ptdel]')) { if (ent) { MD().forgetPoint(ent); V().entities.remove(ent); } else await MD().forgetPoint({ properties: { myFeature: { getValue: () => id } } }); soon(true); }
@@ -736,7 +825,7 @@
   #surf-cols .cc-nm[data-expand] { cursor: pointer; }
   #surf-cols .sc-kids { padding: 0 0 3px 14px; }
   #surf-cols .sc-pt, #surf-cols .sc-sub { display: grid; grid-template-columns: 1fr auto; gap: 4px; align-items: center; font-size: 10.5px; color: rgba(255,255,255,.75); padding: 1px 2px; border-radius: 4px; }
-  #surf-cols .sc-sub { grid-template-columns: 20px 1fr auto; }
+  #surf-cols .sc-sub, #surf-cols .sc-pt.sc-wide { grid-template-columns: 20px 1fr auto; }
   #surf-cols .sc-sub.sc-none { display: block; font-style: italic; color: rgba(255,255,255,.4); padding-left: 20px; }
   #surf-cols .sc-feat { cursor: pointer; user-select: none; }
   #surf-cols .sc-pt:hover, #surf-cols .sc-sub:hover { background: rgba(255,255,255,.06); }
@@ -769,6 +858,8 @@
   #surf-cols .cc-it:hover .cc-tools, #surf-cols .cc-it:focus-within .cc-tools { opacity: 1; }
   #surf-cols .cc-tools button { background: none; border: none; color: rgba(255,255,255,.7); padding: 0 3px; font-size: 12px; line-height: 16px; border-radius: 3px; cursor: pointer; }
   .sc-remind { display: flex; align-items: center; gap: 6px; margin: 4px 0; padding: 3px 8px; font-size: 11px; color: #f2c24e; background: rgba(242,194,78,.08); border: 1px solid rgba(242,194,78,.25); border-radius: 6px; }
+  #surf-cols .sc-sel { background: rgba(255,230,0,.16) !important; box-shadow: inset 2px 0 0 #ffe600; }
+  #surf-cols .sc-feat.sc-hl { background: rgba(255,106,0,.18); box-shadow: inset 2px 0 0 #ff6a00; }
   .sc-remind > span { flex: 1; } .sc-remind .sc-link { background: none; border: none; padding: 0; color: #8ab4ec; text-decoration: underline; cursor: pointer; font-size: inherit; }
   .sc-dups { max-height: 50vh; overflow: auto; margin: 6px 0; }
   .sc-dup { display: flex; align-items: center; gap: 6px; padding: 3px 2px; font-size: 12px; }
@@ -821,5 +912,20 @@
   window.addEventListener('flex-caltopo-queue', soonNews);
   window.addEventListener('flex-folder-style', () => { last = ''; soon(); });
   window.addEventListener('flex-feature-edited', () => { last = ''; soon(true); });
-  window._surfCols = { reveal, news: a => newsPop(a || host.querySelector('[data-ctnews]') || host), labels: on => (on === undefined ? LB : setLabels(on)), render: async () => { while (busy) await new Promise(r => setTimeout(r, 20)); last = ''; return render(); }, refresh: () => soon(true), master: on => (on === undefined ? !MS.off : setMaster(on)) };
+  // The CalTopo map row, for its ⋯ menu (row-menu.js): what it is and what can be done with it.
+  const ctMap = () => { const M = MODEL; const x = M && M.L.concat(M.R).find(r => r.kind === 'caltopo'); return x ? { id: x.id, url: x.url, name: x.name, inProject: !!x.inProject, mine: !x.inProject, dir: x.dir || null, loaded: !!x.loaded } : null; };
+  async function ctRename(name) {      // display only: never written to CalTopo
+    const x = ctMap(); name = String(name || '').trim().slice(0, 120); if (!x || !name) return;
+    if (x.inProject && window._pjApi) await window._pjApi.record('layer.set', { layer: x.id, name });
+    else { const id = mapId(x.url); if (id) { const l = ctLocal(); l[id] = name; try { localStorage.setItem('flex.ct.names', JSON.stringify(l)); } catch (_) {} } }
+    last = ''; soon();
+  }
+  async function ctLeave(how) {        // 'out' = Move to My data, 'remove' = Remove from project (both wait for 💾 Save); 'cancel'
+    const x = ctMap(), pw = PW(); if (!x || !x.inProject || !pw) return;
+    if (how === 'cancel') { if (x.dir) await pw.moveItem({ kind: 'caltopo', id: x.id, name: x.name, dir: x.dir, url: x.url }); }
+    else if (x.dir !== how) { if (x.dir) await pw.moveItem({ kind: 'caltopo', id: x.id, name: x.name, dir: x.dir, url: x.url }); await pw.moveItem({ kind: 'caltopo', id: x.id, name: x.name, dir: how, url: x.url }); }
+    last = ''; soon();
+  }
+  function ctUnload() { const w = ws(); if (w && w.clearCaltopo) w.clearCaltopo(); last = ''; soon(true); }   // a map in My data: Remove
+  window._surfCols = { ctMap, ctRename, ctLeave, ctUnload, reveal, news: a => newsPop(a || host.querySelector('[data-ctnews]') || host), labels: on => (on === undefined ? LB : setLabels(on)), render: async () => { while (busy) await new Promise(r => setTimeout(r, 20)); last = ''; return render(); }, refresh: () => soon(true), master: on => (on === undefined ? !MS.off : setMaster(on)) };
 })();

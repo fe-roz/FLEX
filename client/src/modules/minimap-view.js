@@ -1,5 +1,5 @@
 // The minimap's view overlay: a compass, the camera's view on the ground, and outlines of what is
-// drawn in detail (terrain patches, the finest terrain tiles Cesium is drawing, point clouds).
+// drawn in detail (terrain patches, point clouds).
 //
 // Cheap on purpose: flex.js calls update() from its minimap sync (only while the minimap is shown);
 // it returns at once unless ~120 ms have passed AND the camera moved. The view footprint is worked out
@@ -12,12 +12,12 @@
 (function () {
   'use strict';
   const FOV_INTERVAL_MS = 120;      // footprint at most this often
-  const OUTLINE_INTERVAL_MS = 1000; // patch / tile / cloud outlines at most this often
+  const OUTLINE_INTERVAL_MS = 1000; // patch / cloud outlines at most this often
   const R = 6378137;                // Web Mercator sphere (and good enough for metres → degrees here)
   const MAX_DIST_M = 25000, MIN_DIST_M = 150;
   const D2R = Math.PI / 180;
 
-  let map = null, layer = null, source = null, fovFeature = null, tilesFeature = null;
+  let map = null, layer = null, source = null, fovFeature = null;
   let compassEl = null, compassNeedle = null, legendEl = null;
   let lastFovAt = -1e9, lastOutlineAt = -1e9, lastHeading = NaN;
   const last = new Float64Array(8).fill(NaN);   // pos xyz, dir xyz, height, aspect
@@ -40,7 +40,6 @@
     return {
       fov: new S.Style({ fill: new S.Fill({ color: 'rgba(255,214,90,0.16)' }), stroke: new S.Stroke({ color: 'rgba(255,214,90,0.95)', width: 1.5 }) }),
       patch: new S.Style({ fill: new S.Fill({ color: 'rgba(80,200,255,0.06)' }), stroke: new S.Stroke({ color: 'rgba(80,200,255,0.95)', width: 1.5 }) }),
-      tiles: new S.Style({ stroke: new S.Stroke({ color: 'rgba(255,255,255,0.75)', width: 1, lineDash: [4, 4] }) }),
       cloud: new S.Style({ stroke: new S.Stroke({ color: 'rgba(230,120,255,0.9)', width: 1.5, lineDash: [6, 3] }) })
     };
   }
@@ -58,8 +57,6 @@
     source = new ol.source.Vector();
     fovFeature = new ol.Feature({ geometry: new ol.geom.Polygon(quadCoords) });
     fovFeature.setStyle(ST.fov); fovFeature.set('mmKind', 'fov');
-    tilesFeature = new ol.Feature({ geometry: new ol.geom.Polygon(rectRing(0, 0, 0, 0)) });
-    tilesFeature.setStyle(ST.tiles); tilesFeature.set('mmKind', 'tiles');
     source.addFeature(fovFeature);
     layer = new ol.layer.Vector({ source });
     // under the labels and the camera dot (the last two layers)
@@ -82,16 +79,15 @@
     legendEl = document.createElement('div');
     legendEl.id = 'mini_map_legend';
     box.appendChild(legendEl);
-    renderLegend(0, 0, -1);
+    renderLegend(0, 0);
   }
 
   let legendSig = '';
-  function renderLegend(nPatch, nCloud, tileLevel) {
-    const sig = nPatch + '|' + nCloud + '|' + tileLevel; if (sig === legendSig || !legendEl) return; legendSig = sig;
+  function renderLegend(nPatch, nCloud) {
+    const sig = nPatch + '|' + nCloud; if (sig === legendSig || !legendEl) return; legendSig = sig;
     const row = (cls, text) => '<div><i class="' + cls + '"></i>' + text + '</div>';
     legendEl.innerHTML = row('mm-fov', 'What the camera sees') +
       (nPatch ? row('mm-patch', 'Terrain patch' + (nPatch > 1 ? 'es (' + nPatch + ')' : '')) : '') +
-      (tileLevel >= 0 ? row('mm-tiles', 'Finest terrain drawn (level ' + tileLevel + ')') : '') +
       (nCloud ? row('mm-cloud', 'Point cloud' + (nCloud > 1 ? 's (' + nCloud + ')' : '')) : '');
   }
 
@@ -144,10 +140,9 @@
     return true;
   }
 
-  // ── outlines: terrain patches, finest tiles, point clouds ────────────────────
+  // ── outlines: terrain patches, point clouds ────────────────────
   const patchFeatures = new Map();   // patch object → feature
   const cloudFeatures = new Map();   // point cloud → feature
-  let tileLevel = -1;
   function updateOutlines(viewer) {
     // terrain patches: the chain of PatchTerrainProviders over the globe's terrain
     const TP = window._terrainPatch, seen = new Set();
@@ -162,29 +157,6 @@
       tp = tp._base;
     }
     for (const [p, f] of patchFeatures) if (!seen.has(p)) { source.removeFeature(f); patchFeatures.delete(p); }
-
-    // finest terrain tiles Cesium draws now: their bounding box (private API, so guarded)
-    let lvl = -1, w = 1e9, s = 1e9, e = -1e9, n = -1e9;
-    try {
-      const list = viewer.scene.globe._surface && viewer.scene.globe._surface._tilesToRender;
-      if (list && list.length) {
-        for (let i = 0; i < list.length; i++) if (list[i].level > lvl) lvl = list[i].level;
-        for (let i = 0; i < list.length; i++) {
-          const t = list[i]; if (t.level !== lvl) continue;
-          const rc = t.rectangle; if (rc.west < w) w = rc.west; if (rc.south < s) s = rc.south; if (rc.east > e) e = rc.east; if (rc.north > n) n = rc.north;
-        }
-      }
-    } catch (_) { lvl = -1; }
-    // only worth showing once tiles are fine enough to be "detail" (coarse levels cover half the planet)
-    if (lvl >= 10 && e > w) {
-      tilesFeature.getGeometry().setCoordinates(rectRing(w / D2R, s / D2R, e / D2R, n / D2R));
-      tilesFeature.set('labelText', 'Finest terrain drawn now (tile level ' + lvl + ')');
-      if (!tilesFeature._mmIn) { source.addFeature(tilesFeature); tilesFeature._mmIn = true; }
-      tileLevel = lvl;
-    } else {
-      if (tilesFeature._mmIn) { source.removeFeature(tilesFeature); tilesFeature._mmIn = false; }
-      tileLevel = -1;
-    }
 
     // point clouds: their bounding boxes, projected once per cloud
     const pcs = (window.potreeViewer && window.potreeViewer.scene && window.potreeViewer.scene.pointclouds) || [];
@@ -205,7 +177,7 @@
     }
     for (const [pc, f] of cloudFeatures) if (!live.has(pc)) { if (f) source.removeFeature(f); cloudFeatures.delete(pc); }
 
-    renderLegend(patchFeatures.size, [...cloudFeatures.values()].filter(Boolean).length, tileLevel);
+    renderLegend(patchFeatures.size, [...cloudFeatures.values()].filter(Boolean).length);
   }
 
   // ── per sync ──────────────────────────────────────────────────────────────
@@ -234,7 +206,7 @@
       fovCoords: fovFeature ? fovFeature.getGeometry().getCoordinates() : null,
       patches: [...patchFeatures.values()].map(f => f.get('labelText')),
       clouds: [...cloudFeatures.values()].filter(Boolean).map(f => f.get('labelText')),
-      tileLevel, compassTransform: compassNeedle ? compassNeedle.style.transform : '',
+      compassTransform: compassNeedle ? compassNeedle.style.transform : '',
       legend: legendEl ? legendEl.textContent : ''
     };
   }

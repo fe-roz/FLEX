@@ -274,6 +274,19 @@
       } }),
     ];
   }
+  // The CalTopo map row itself. Rename is display only (never written to CalTopo); leaving the project waits for 💾 Save like
+  // other moves (the map is unloaded then); nothing is deleted in CalTopo.
+  function ctMapEntries() {
+    const SC = window._surfCols, m = SC && SC.ctMap && SC.ctMap();
+    if (!m) return [];
+    const list = [{ id: 'maprename', icon: 'text', label: 'Rename…', title: 'Only FLEX shows the new name; CalTopo is not changed', run: async () => { const n = await askText('Rename the CalTopo map (here only)', m.name, 'Rename'); if (n && n !== m.name) await SC.ctRename(n); } }];
+    if (m.inProject) {
+      if (m.dir) list.push({ id: 'cancelmove', icon: 'folder-move', label: m.dir === 'remove' ? 'Cancel the removal' : 'Cancel the move', run: () => SC.ctLeave('cancel') });
+      else list.push({ id: 'mapout', icon: 'folder-move', label: 'Move to My data', title: 'Out of the project; the map stays loaded as yours. Waits for 💾 Save', run: () => SC.ctLeave('out') },
+        { id: 'mapremove', icon: 'trash', label: 'Remove from project', title: 'Out of the project and unloaded when you 💾 Save. Nothing is deleted in CalTopo', run: () => SC.ctLeave('remove') });
+    } else list.push({ id: 'mapremove', icon: 'trash', label: 'Remove', title: 'Unload the map. Nothing is deleted in CalTopo', run: () => SC.ctUnload() });
+    return list;
+  }
   function folderEntries(fkey) {
     const S = FS(), k = split(fkey);
     const title = S && S.label ? S.label(fkey) : 'Folder';
@@ -283,7 +296,8 @@
     const cur = S ? (S.get(fkey) || {}) : {}, on = cur.labels !== false;
     list.push({ id: 'names', icon: 'tag', label: on ? 'Names off' : 'Names on', title: on ? 'Hide the names of everything inside' : 'Show the names of everything inside', run: () => S.set(fkey, { labels: !on }) });
     let more = [];
-    if (k.kind === 'project' && k.id) more = projectFolder(k.id);
+    if (k.kind === 'caltopo' && !k.id) more = ctMapEntries();
+    else if (k.kind === 'project' && k.id) more = projectFolder(k.id);
     else if (k.kind === 'mydata' && k.id) more = myFolder(k.id);
     else if (k.kind === 'caltopo' && k.id) more = ctFolder(k.id);
     if (more.length) list.push('-', ...more);
@@ -314,5 +328,5 @@
   .rm-form { margin: 6px 0; } .rm-colour { width: 60px; height: 30px; padding: 0; border: none; background: none; } .rm-folder { width: 100%; }`;
   document.head.appendChild(st);
 
-  window._rowMenu = { open, close, entries, ref, get el() { return M; } };
+  window._rowMenu = { open, close, entries, ref, info: rk => { const x = ref(rk), e = FE(), r = x && e ? e.refOf(x) : null; return info(r); }, get el() { return M; } };
 })();

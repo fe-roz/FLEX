@@ -919,14 +919,17 @@
 
   // ── Wiring ───────────────────────────────────────────────────────────────
   /** Show a subject's brief in the details panel (null: none). */
+  // A row's highlight on the map (📍 Surface) goes with the selection: gone when it is deselected or another is shown.
+  const dropHl = () => { if (window._pjf && window._pjf.clearHighlight) window._pjf.clearHighlight(); };
   function show(s) {
     const same = s && I.subject && s.key === I.subject.key;
+    if (!same) dropHl();
     I.subject = s;
     if (window._inspector) window._inspector.setBrief(s ? { node: briefNode(s), title: `${s.icon && s.brief !== 'strip' ? s.icon + ' ' : ''}${s.title}`, hideInfo: s.hideInfo } : null);
     if (I.x) { if (s && (same || I.pinned)) { if (!same || !I.x.querySelector('.inf-player video')) render(); } else collapse(); }
     if (s && !same) setTimeout(() => { if (I.subject === s) reveal(s, { open: false }); }, 60);     // its pane open: its row
   }
-  function clear() { I.subject = null; collapse(); if (window._inspector && window._inspector.brief()) window._inspector.setBrief(null); }
+  function clear() { I.subject = null; dropHl(); collapse(); if (window._inspector && window._inspector.brief()) window._inspector.setBrief(null); }
   /** Saved changes (project.js, feature-editor.js, CalTopo): the same thing again, fresh. */
   let tChg = 0;
   function changed() {
@@ -944,7 +947,7 @@
     }, 150);
   }
   // The details panel closed (its ×, Esc, a click on empty map).
-  function panelClosed() { if (I.subject || I.x) { I.subject = null; collapse(); } }
+  function panelClosed() { dropHl(); if (I.subject || I.x) { I.subject = null; collapse(); } }
   // An edit (feature-editor.js): say how it went here too, then show it fresh.
   window.addEventListener('flex-feature-edited', e => {
     const d = e.detail || {}, s = I.subject, r = d.ref;
@@ -975,7 +978,7 @@
       const s = subjectOf(ent);
       if (s) show(s);
       else if (I.subject && I.subject.kind !== 'cave' && I.subject.kind !== 'survey' && I.subject.kind !== 'station') clear();
-      else { I.subject = null; if (I.x) collapse(); }
+      else { I.subject = null; dropHl(); if (I.x) collapse(); }
     });
     // Hovering the details panel a moment: the larger panel (not over the segment panel).
     const box = ins.el;
@@ -996,7 +999,7 @@
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape' || !I.x || document.querySelector('.pj-modal') || pj.gallery) return;
     e.stopPropagation(); e.preventDefault();
-    collapse();
+    if (window._pjfState && window._pjfState.hlKey) clear(); else collapse();     // a row's selection (📍 Surface) ends with Esc, highlight and all
   }, true);
 
   const st = document.createElement('style');
