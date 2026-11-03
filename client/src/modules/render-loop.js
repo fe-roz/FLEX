@@ -47,7 +47,10 @@ function loop(timestamp){
     cesiumViewer.render();
   }
 
-  let cCamPosCart = ellipsoid.cartesianToCartographic(cesiumViewer.camera.position);
+  // World frame: camera.position / .direction are relative to the camera's reference frame,
+  // which is not the world while Cesium tracks an entity (double-click on a point) - the
+  // minimap, the coordinates and the Potree sync then pointed somewhere else entirely.
+  let cCamPosCart = ellipsoid.cartesianToCartographic(cesiumViewer.camera.positionWC);
 
   let cCamLong = cCamPosCart.longitude * (180 / Math.PI);
   let cCamLat = cCamPosCart.latitude * (180 / Math.PI);
@@ -61,9 +64,9 @@ function loop(timestamp){
   if(window.toScene !== undefined){
     // do fun proj4 stuff with camera settings
     let cCamCenterObject = new Cesium.Cartesian3;
-    let cCamDir = cesiumViewer.camera.direction;
-    Cesium.Cartesian3.multiplyByScalar(cCamDir, 1000, cCamDir);
-    Cesium.Cartesian3.add(cesiumViewer.camera.position, cCamDir, cCamCenterObject);
+    // A copy: scaling camera.direction itself stretched the camera's own vector every frame.
+    let cCamDir = Cesium.Cartesian3.multiplyByScalar(cesiumViewer.camera.directionWC, 1000, new Cesium.Cartesian3());
+    Cesium.Cartesian3.add(cesiumViewer.camera.positionWC, cCamDir, cCamCenterObject);
 
     let cCamCenterObjectPosCart = ellipsoid.cartesianToCartographic(cCamCenterObject);
 

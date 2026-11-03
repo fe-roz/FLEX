@@ -242,12 +242,12 @@ export class ContextMenuController {
 
     // Final fallback: project camera straight down to the ellipsoid
     if (lat === undefined || lng === undefined) {
-      const carto = viewer.scene.globe.ellipsoid.cartesianToCartographic(viewer.camera.position);
+      const carto = viewer.scene.globe.ellipsoid.cartesianToCartographic(viewer.camera.positionWC);
       lat = Cesium.Math.toDegrees(carto.latitude);
       lng = Cesium.Math.toDegrees(carto.longitude);
     }
 
-    const camCarto = viewer.scene.globe.ellipsoid.cartesianToCartographic(viewer.camera.position);
+    const camCarto = viewer.scene.globe.ellipsoid.cartesianToCartographic(viewer.camera.positionWC);
     this.currentAltitude = camCarto.height;
     this.currentCoords   = { lat, lng };
 
