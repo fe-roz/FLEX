@@ -175,9 +175,20 @@ function handleFileRequest(req, res, sanitizedPath) {
             return;
         }
 
-        const head = { 'Content-Type': getContentType(filePath) };
+        // no-cache = "check with the server before reusing": without it the browser kept old
+        // copies of index.html and the scripts after a git pull (e.g. a removed panel still
+        // showing). An ETag (size + modification time to the millisecond) makes the check cheap and
+        // exact: an unchanged file answers 304. (Not Last-Modified: whole seconds miss two saves
+        // within one second, and a changed file was then answered "not modified".)
+        const etag = '"' + stats.size.toString(36) + '-' + Math.round(stats.mtimeMs).toString(36) + '"';
+        const head = { 'Content-Type': getContentType(filePath), 'Cache-Control': 'no-cache', 'ETag': etag };
         // The offline-cache worker lives in client/src/ but covers the whole app (scope "/").
-        if (sanitizedPath === '/client/src/sw.js') { head['Service-Worker-Allowed'] = '/'; head['Cache-Control'] = 'no-cache'; }
+        if (sanitizedPath === '/client/src/sw.js') head['Service-Worker-Allowed'] = '/';
+        if ((req.headers['if-none-match'] || '').split(/\s*,\s*/).includes(etag)) {
+            res.writeHead(304, { 'Cache-Control': 'no-cache', 'ETag': etag });
+            res.end();
+            return;
+        }
         res.writeHead(200, head);
         fs.createReadStream(filePath).pipe(res);
     });
