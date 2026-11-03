@@ -82,7 +82,8 @@
         e.style = st;
       }
       await rec('feature.set', e);
-      await state(true);
+      const S2 = await state(true), g = S2.features[id];
+      if (g && g.kind !== 'point') drawShape(g, S2);               // a line or area: drawn again as it is now
       return { ok: true };
     } catch (err) { return { ok: false, error: err.message || String(err) }; }
   }
@@ -146,6 +147,15 @@
       polygon: f.kind === 'area' && f.coords.length >= 3 ? { hierarchy: Cesium.Cartesian3.fromDegreesArray(flat), material: col.withAlpha(0.2), classificationType: Cesium.ClassificationType.TERRAIN } : undefined });
     V.scene.requestRender && V.scene.requestRender();
   }
+  /** A kept line or area's entity on the map (null when not drawn). */
+  const shapeEntity = id => (shapeDs && shapeDs.entities.getById('my-' + id)) || null;
+  /** Delete a kept line or area (or why 'moved'): the record and the drawing. */
+  async function forgetShape(id, why) {
+    if (!id) return;
+    try { await rec('feature.set', why === 'moved' ? { feature: id, removed: true, moved: true } : { feature: id, removed: true }); } catch (e) { console.warn('[my data]', e); }
+    const e = shapeEntity(id); if (e) shapeDs.entities.remove(e);
+    const V = window.cesiumViewer; if (V && V.scene.requestRender) V.scene.requestRender();
+  }
   function drawPoint(f) {
     const V = window.cesiumViewer; if (!V) return;
     if (V.entities.values.some(e => e.properties && e.properties.myFeature && e.properties.myFeature.getValue() === f.id)) return;
@@ -184,5 +194,5 @@
     state(true).then(S => shapes().forEach(f => drawShape(f, S))).catch(e => console.warn('[my data] shapes:', e));
   }, 500);
 
-  window._myData = { adopt, shapes, keepPoint, forgetPoint, update, cached: () => _state, points, keepFile, forgetFile, filesToRestore, state, record: rec };
+  window._myData = { adopt, shapes, shapeEntity, forgetShape, shapeDs: () => shapeDs, keepPoint, forgetPoint, update, cached: () => _state, points, keepFile, forgetFile, filesToRestore, state, record: rec };
 })();

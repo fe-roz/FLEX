@@ -122,12 +122,13 @@
   function myRef(id, ent) {
     const S = MD() && MD().cached ? MD().cached() : null, f = S && S.features && S.features[id];
     if (f && f.removed) return null;
-    ent = ent || myEntity(id);
+    const kind = f && (f.kind === 'line' || f.kind === 'area') ? f.kind : 'point';
+    ent = ent || (kind === 'point' ? myEntity(id) : (MD() && MD().shapeEntity ? MD().shapeEntity(id) : null));
     if (!f && !ent) return null;
     const st = (f && f.style) || {}, shape = ent ? entShape(ent) : null;
-    const name = (f && f.name) || (ent && ent.label ? String(val(ent.label.text) || '') : '') || 'Point';
+    const name = (f && f.name) || (ent && ent.label ? String(val(ent.label.text) || '') : '') || (kind === 'area' ? 'Area' : kind === 'line' ? 'Line' : 'Point');
     const g = f && f.group && S.groups[f.group];
-    return { source: 'mydata', id, kind: 'point', name, desc: (f && f.desc) || '', color: hex(st.color) || '#ffffff', symbol: null, label: st.label !== false,
+    return { source: 'mydata', id, kind, name, desc: (f && f.desc) || '', color: hex(st.color) || (kind === 'point' ? '#ffffff' : '#ffb020'), symbol: null, label: kind === 'point' ? st.label !== false : null,
       folder: (f && f.group) || '', path: g ? [{ id: g.id, name: g.name || 'Points' }] : [], coords: (f && f.coords) || (shape ? shape.coords : []), entity: ent || null,
       srcName: 'My data', created: (f && f.created) || null, updated: (f && f.updated) || null, editable: true, reason: '' };
   }
@@ -164,6 +165,7 @@
     if (!ent) return null;
     if (prop(ent, 'isProjectFeature')) return projectRef(prop(ent, 'featureId'));
     if (prop(ent, 'myFeature')) return myRef(prop(ent, 'myFeature'), ent);
+    if (prop(ent, 'myShape')) return myRef(prop(ent, 'myShape'), ent);
     const src = srcOfEntity(ent);
     if (src && src.kind === 'caltopo') return ctRef(ent, src);
     if (src) return fileRef(ent, src);
@@ -350,8 +352,9 @@
     try {
       if (r.source === 'project') res = (await record('feature.set', { feature: r.id, removed: true })) ? { ok: true } : { ok: false, error: 'the project could not be saved' };
       else if (r.source === 'mydata') {
-        const e = r.entity || myEntity(r.id);
-        if (e) { await MD().forgetPoint(e); V().entities.remove(e); } else await MD().forgetPoint({ properties: { myFeature: { getValue: () => r.id } } });
+        const e = r.entity || (r.kind === 'point' ? myEntity(r.id) : null);
+        if (r.kind !== 'point') await MD().forgetShape(r.id);
+        else if (e) { await MD().forgetPoint(e); V().entities.remove(e); } else await MD().forgetPoint({ properties: { myFeature: { getValue: () => r.id } } });
         if (window.renderPoiList) try { window.renderPoiList(); } catch (_) {}
         res = { ok: true };
         if (V() && V().selectedEntity === e) V().selectedEntity = undefined;

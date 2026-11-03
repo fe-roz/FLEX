@@ -72,6 +72,7 @@
     if (F && F.src) out.push(F.src);
     if (w) w.vectorSources().forEach(s => s.ds && out.push(s.ds));
     if (v) v.entities.values.forEach(e => { const p = e.properties; if (p && (p.isUserLabel || p.myFeature)) out.push(e); });
+    if (MD() && MD().shapeDs && MD().shapeDs()) MD().shapeDs().entities.values.forEach(e => out.push(e));
     return out;
   }
   const own = o => (MS.saved.has(o) ? MS.saved.get(o) : o.show !== false);
@@ -114,6 +115,7 @@
     return my;
   }
   const blobUrl = l => (l.blob ? '/api/lib/blob/' + l.blob : l.url);
+  const shapeEnts = ids => { const M = MD(); return M && M.shapeEntity ? [...ids].map(i => M.shapeEntity(i)).filter(Boolean) : []; };
   const pointEntities = ids => (V() ? V().entities.values.filter(e => e.properties && e.properties.myFeature && ids.has(e.properties.myFeature.getValue())) : []);
   const srcOf = url => (ws() ? ws().vectorSources().find(s => (s.url || s.name) === url) : null);
 
@@ -133,14 +135,15 @@
     const loaded = new Map(w.dataFiles().map(f => [f.url, f]));
     const L = [], R = [];
     // My data: point groups and files.
-    const pts = Object.values(S.features || {}).filter(f => !f.removed && f.kind === 'point');
+    const pts = Object.values(S.features || {}).filter(f => !f.removed && (f.kind === 'point' || f.kind === 'line' || f.kind === 'area') && (f.kind === 'point' || (f.coords && f.coords.length >= 2)));
     const byGroup = new Map();
     pts.forEach(f => { const g = f.group || ''; if (!byGroup.has(g)) byGroup.set(g, []); byGroup.get(g).push(f); });
     [...byGroup.entries()].sort((a, b) => String((S.groups[b[0]] || {}).name || '').localeCompare(String((S.groups[a[0]] || {}).name || '')))
       .forEach(([gid, list]) => {
         const name = (S.groups[gid] || {}).name || 'Points';
-        const ents = pointEntities(new Set(list.map(f => f.id)));
-        const x = { kind: 'pgroup', id: gid, name, n: list.length, shown: ents.some(own), points: list, dir: moving('pgroup', gid) };
+        const ids = new Set(list.map(f => f.id)), ents = pointEntities(ids).concat(shapeEnts(ids));
+        const nPt = list.filter(f => f.kind === 'point').length;
+        const x = { kind: 'pgroup', id: gid, name, n: list.length, nPt, shown: ents.some(own), points: list, dir: moving('pgroup', gid) };
         (x.dir === 'in' ? L : R).push(x);
       });
     Object.values(S.layers || {}).filter(l => l.kind === 'file' && !l.removed && (l.url || l.blob)).forEach(l => {
@@ -241,6 +244,21 @@
     b.classList.toggle('sc-has-news', hot);
   }
 
+  // Features / folders waiting to move to My data (queued until 💾 Save, project-workspace.js): 'moving to My data'.
+  const WAIT = 'moving to My data';
+  const queued = () => ((window._pjWsState && window._pjWsState.moves) || []).filter(m => m.kind === 'feats').map(m => m.id);
+  function featWaits(f) {
+    const q = queued(); if (!q.length) return false;
+    if (q.includes('f:' + f.id)) return true;
+    if (!f.group) return q.includes('loose');
+    const P = PJ().P, FL = window.FlexLib;
+    return !!P && FL.groupPath(P, f.group).some(g => q.includes('g:' + g.id));
+  }
+  function folderWaits(gid) {
+    const q = queued(); if (!q.length) return false;
+    const P = PJ().P, FL = window.FlexLib;
+    return !!P && FL.groupPath(P, gid).some(g => q.includes('g:' + g.id));
+  }
   // ── Rows ─────────────────────────────────────────────────────────────────
   const icon = { caltopo: '🗺', folder: '📁', loose: '•', pgroup: '📍', file: '📄' };
   const fIcon = { point: '•', line: '〰', area: '▱' };
@@ -254,10 +272,11 @@
   }
   const isExp = k => (k.startsWith('g:') || k === 'loose' ? !!fOpen()[k] : open.has(k));
   function row(x, side, isOpen) {
-    const sub = x.dir ? (x.dir === 'in' ? 'moving into the project' : 'moving to My data')
+    if (!x.dir && (x.kind === 'folder' ? folderWaits(x.id) : x.kind === 'loose' && queued().includes('loose'))) x.wait = true;
+    const sub = x.wait ? WAIT : x.dir ? (x.dir === 'in' ? 'moving into the project' : 'moving to My data')
       : x.kind === 'file' ? (x.loaded ? (x.items ? x.items + ' items' : 'loaded') : 'not loaded')
       : x.kind === 'caltopo' ? (x.loaded ? x.items + ' items' : 'not loaded')
-      : (x.n != null ? x.n + (x.kind === 'pgroup' ? ' point' + (x.n === 1 ? '' : 's') : '') : '');
+      : (x.n != null ? x.n + (x.kind === 'pgroup' ? (x.nPt === x.n ? ' point' : ' item') + (x.n === 1 ? '' : 's') : '') : '');
     const canMove = isOpen && (x.kind === 'pgroup' || x.kind === 'file' || (x.kind === 'caltopo' && x.mine));
     const arrow = !canMove ? '' : side === 'p'
       ? (x.kind === 'pgroup' && x.dir !== 'in' ? '' : `<button type="button" class="cc-mv" data-mv="out" title="${x.dir === 'in' ? 'Back to My data (cancel the move)' : 'Move to My data'}">→</button>`)
@@ -269,15 +288,17 @@
     const ftools = x.kind === 'folder' ? `<button type="button" data-gadd="${esc(x.id)}" title="Add to this folder">＋</button><button type="button" data-gdl="${esc(x.id)}" title="Download for CalTopo">⇩</button><button type="button" data-gedit="${esc(x.id)}" title="Rename, colour, move">✏️</button>` : '';
     const fk = !x.dir && fkeyOf(x);
     const marks = (x.nict ? `<b class="sc-st sc-nict" title="${NICT_TIP}">${x.nict} not in CalTopo</b>` : '') + (x.kind === 'caltopo' && x.src ? ctNewsBtn() : '');
-    let html = `<div class="cc-it${x.dir ? ' cc-moving' : ''}" data-kind="${x.kind}" data-id="${esc(x.id)}"${fk ? ` data-fkey="${esc(fk)}"` : ''} draggable="${canMove ? 'true' : 'false'}">
+    let html = `<div class="cc-it${x.dir || x.wait ? ' cc-moving' : ''}" data-kind="${x.kind}" data-id="${esc(x.id)}"${fk ? ` data-fkey="${esc(fk)}"` : ''} draggable="${canMove ? 'true' : 'false'}">
       <button type="button" class="cc-eye ui-eye${eyeOn ? ' on' : eyeHalf ? ' half' : ''}" data-eye title="${(x.kind === 'file' || x.kind === 'caltopo') && !x.loaded ? 'Load' : eyeOn ? 'Hide' : 'Show'}"></button>
-      <span class="cc-nm" title="${esc(x.name)}"${k ? ` data-expand="${esc(k)}"` : ''}>${k ? arrowOf(k, exp) : '<span class="sc-arrow"></span>'}${icon[x.kind] || ''} ${esc(x.name)}${x.dir ? '<b class="cc-dot">•</b>' : ''}<small>${esc(sub)}${marks}</small></span>
+      <span class="cc-nm" title="${esc(x.name)}"${k ? ` data-expand="${esc(k)}"` : ''}>${k ? arrowOf(k, exp) : '<span class="sc-arrow"></span>'}${icon[x.kind] || ''} ${esc(x.name)}${x.dir || x.wait ? '<b class="cc-dot" title="Waiting: 💾 Save puts it in">•</b>' : ''}<small>${esc(sub)}${marks}</small></span>
       <span class="cc-tools">${ftools}${fsBtn(fk)}${forget}${arrow}${fk ? moreBtn() : ''}</span></div>`;
     if (exp) html += `<div class="sc-kids">${kids(x, isOpen)}</div>`;
     return html;
   }
+  const shapeShown = id => { const e = shapeEnts([id])[0]; return !!e && own(e); };
   function kids(x, isOpen) {
-    if (x.kind === 'pgroup') return x.points.map(f => `<div class="sc-pt" data-pt="${esc(f.id)}" data-rkey="my:${esc(f.id)}"><span title="${esc(f.name)}">${esc(f.name || 'Point')}</span>
+    if (x.kind === 'pgroup') return x.points.map(f => f.kind !== 'point' ? `<div class="sc-pt sc-shape" data-pt="${esc(f.id)}" data-shape="1" data-rkey="my:${esc(f.id)}"><button type="button" class="cc-eye ui-eye ui-eye-sm${shapeShown(f.id) ? ' on' : ' half'}" data-shpeye title="${shapeShown(f.id) ? 'Hide' : 'Show'}"></button><span title="${esc(f.name)}">${fIcon[f.kind]} ${esc(f.name || (f.kind === 'area' ? 'Area' : 'Line'))}</span>
+        <span class="cc-tools">${moreBtn()}</span></div>` : `<div class="sc-pt" data-pt="${esc(f.id)}" data-rkey="my:${esc(f.id)}"><span title="${esc(f.name)}">${esc(f.name || 'Point')}</span>
         <span class="cc-tools"><button type="button" data-ptfly title="Fly to">⌖</button>${isOpen ? '<button type="button" class="cc-mv" data-ptin title="Move this point into the project">←</button>' : ''}<button type="button" data-ptdel title="Delete the point">✕</button>${moreBtn()}</span></div>`).join('');
     if (x.kind === 'folder' || x.kind === 'loose') return projectTree(x.kind === 'loose' ? null : x.id, 0);
     if (x.src) return overlayTree(x.src);
@@ -291,14 +312,16 @@
       const k = 'g:' + g.id, exp = !!fOpen()[k];
       const n = FL.liveFeatures(pj.P).filter(f => FL.groupPath(pj.P, f.group).some(y => y.id === g.id)).length;
       const nict = NICT ? FL.liveFeatures(pj.P).filter(f => NICT.has(f.id) && FL.groupPath(pj.P, f.group).some(y => y.id === g.id)).length : 0;
-      out += `<div class="sc-sub sc-fold" data-fkey="project:${esc(g.id)}" ${pad(depth)}><button type="button" class="cc-eye ui-eye ui-eye-sm${h[k] ? ' half' : ' on'}" data-geye="${esc(g.id)}" title="${h[k] ? 'Show' : 'Hide'}"></button>
-        <span class="sc-nm" data-expand="${esc(k)}">${arrowOf(k, exp)}<span class="pjs-sw" style="background:${esc(P.groupColor(g.id))}"></span>📁 ${esc(g.name)} <small>${n}</small>${nict ? ` <b class="sc-st sc-nict" title="${NICT_TIP}">${nict} not in CalTopo</b>` : ''}</span>
+      const fw = folderWaits(g.id);
+      out += `<div class="sc-sub sc-fold${fw ? ' cc-moving' : ''}" data-fkey="project:${esc(g.id)}" ${pad(depth)}${fw ? ` title="${WAIT}: 💾 Save puts it in"` : ''}><button type="button" class="cc-eye ui-eye ui-eye-sm${h[k] ? ' half' : ' on'}" data-geye="${esc(g.id)}" title="${h[k] ? 'Show' : 'Hide'}"></button>
+        <span class="sc-nm" data-expand="${esc(k)}">${arrowOf(k, exp)}<span class="pjs-sw" style="background:${esc(P.groupColor(g.id))}"></span>📁 ${esc(g.name)} <small>${fw ? WAIT : n}</small>${nict ? ` <b class="sc-st sc-nict" title="${NICT_TIP}">${nict} not in CalTopo</b>` : ''}</span>
         <span class="cc-tools"><button type="button" data-gadd="${esc(g.id)}" title="Add to this folder">＋</button><button type="button" data-gdl="${esc(g.id)}" title="Download for CalTopo">⇩</button><button type="button" data-gedit="${esc(g.id)}" title="Rename, colour, move">✏️</button>${fsBtn('project:' + g.id)}${moreBtn()}</span></div>`;
       if (exp) out += projectTree(g.id, depth + 1);
     });
     FL.liveFeatures(pj.P).filter(f => (f.group || null) === (gid || null)).sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true })).forEach(f => {
-      out += `<div class="sc-sub sc-feat${NICT && NICT.has(f.id) ? ' sc-is-nict' : ''}" data-feat="${esc(f.id)}" data-rkey="f:${esc(f.id)}" ${pad(depth)} title="Click: highlight · double-click: fly there"><span class="sc-ic" style="color:${esc(P.colorOf(f))}">${fIcon[f.kind] || '•'}</span>
-        <span class="sc-nm">${esc(f.name || '(no name)')}${FL.flexTag(f.desc) ? ' <small>🕳</small>' : ''}${NICT && NICT.has(f.id) ? ' ' + nictMark() : ''}</span>
+      const fm = featWaits(f);
+      out += `<div class="sc-sub sc-feat${NICT && NICT.has(f.id) ? ' sc-is-nict' : ''}${fm ? ' cc-moving' : ''}" data-feat="${esc(f.id)}" data-rkey="f:${esc(f.id)}" ${pad(depth)} title="Click: highlight · double-click: fly there"><span class="sc-ic" style="color:${esc(P.colorOf(f))}">${fIcon[f.kind] || '•'}</span>
+        <span class="sc-nm">${esc(f.name || '(no name)')}${FL.flexTag(f.desc) ? ' <small>🕳</small>' : ''}${fm ? ` <small class="sc-wait">${WAIT}</small>` : ''}${NICT && NICT.has(f.id) ? ' ' + nictMark() : ''}</span>
         <span class="cc-tools"><button type="button" data-fedit="${esc(f.id)}" title="Edit">✏️</button>${moreBtn()}</span></div>`;
     });
     return out || '<div class="sc-sub sc-none">empty</div>';
@@ -472,6 +495,7 @@
       const p = n => { const v = key.properties && key.properties[n]; return v && v.getValue ? v.getValue() : v; };
       if (p('isProjectFeature')) return target('f:' + p('featureId'));
       if (p('myFeature')) return target('my:' + p('myFeature'));
+      if (p('myShape')) return target('my:' + p('myShape'));
       const o = entityOfKey(key); return o ? ovTarget(o) : null;
     }
     if (typeof key === 'object') {
@@ -572,7 +596,7 @@
     masterOnFirst();
     const x = await find(kind, id), w = ws();
     if (!x) return;
-    if (kind === 'pgroup') { const ents = pointEntities(new Set(x.points.map(f => f.id))); ents.forEach(e => { e.show = !x.shown; }); }
+    if (kind === 'pgroup') { const ids = new Set(x.points.map(f => f.id)); const ents = pointEntities(ids).concat(shapeEnts(ids)); ents.forEach(e => { e.show = !x.shown; }); }
     else if (kind === 'folder' || kind === 'loose') { if (PF()) { PF().setHidden(kind === 'loose' ? 'root' : 'g:' + id, x.shown); PF().draw(); } }
     else if (kind === 'caltopo') {
       if (!x.loaded) await w.setCaltopo(x.url, x.interval ?? 60);
@@ -656,6 +680,10 @@
     const ft = e.target.closest('.sc-feat');
     if (ft) { clearTimeout(clickT); clickT = setTimeout(() => { const g = featureOf(ft); if (g && P) P.highlight(g, false); }, 220); return; }
     const pt = e.target.closest('[data-pt]');
+    if (pt && pt.dataset.shape) {
+      if (e.target.closest('[data-shpeye]')) { masterOnFirst(); const se = shapeEnts([pt.dataset.pt])[0]; if (se) { se.show = !own(se); if (V()) V().scene.requestRender(); soon(); } }
+      return;
+    }
     if (pt) {
       const id = pt.dataset.pt, ent = pointEntities(new Set([id]))[0];
       if (e.target.closest('[data-ptfly]') && ent && V()) V().flyTo(ent, { duration: 1.2, offset: new Cesium.HeadingPitchRange(0, -0.6, 400) });
@@ -735,7 +763,7 @@
   /* row eyes: the compact switch, .ui-eye (ui_kit.css); hidden folders/features are .half (loaded, hidden) */
   #surf-cols .cc-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(255,255,255,.88); }
   #surf-cols .cc-nm small { display: block; font-size: 9px; color: rgba(255,255,255,.4); overflow: hidden; text-overflow: ellipsis; padding-left: 12px; }
-  #surf-cols .cc-moving .cc-nm small { color: #f2c24e; }
+  #surf-cols .cc-moving .cc-nm small, #surf-cols .sc-wait { color: #f2c24e; }
   #surf-cols .cc-dot { color: #f2c24e; margin-left: 3px; }
   #surf-cols .cc-tools { display: inline-flex; gap: 1px; opacity: .35; }
   #surf-cols .cc-it:hover .cc-tools, #surf-cols .cc-it:focus-within .cc-tools { opacity: 1; }
