@@ -27,6 +27,8 @@ export function createClassificationScheme(flags) {
 export function setupPotreeViewer({ Potree, flags }) {
   const ClassificationScheme = createClassificationScheme(flags);
 
+  // Potree 1.8.2 still calls itself "1.8.0" (upstream never bumped it): say which build this is by what it can do.
+  console.log('[potree] build: ' + (typeof Potree.CopcLoader === 'function' ? '1.8.2 (COPC ready)' : '1.8 (no COPC: rebuild with  cd PotreeCopied && npm install)'));
   const potreeViewer = window.potreeViewer = new Potree.Viewer(document.getElementById("potree_render_area"), {
     useDefaultRenderLoop: false
   });
