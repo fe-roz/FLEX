@@ -32,10 +32,15 @@ export function setupRenderLoop({
   onCameraFrame, getFlyMultiplier, syncMiniMapFrame, incidenceState, updateIncidenceLines,
   updateNorthCompass, updateHtmlLabels, updateMeasureDisplay,
 }) {
+// perf-probe.js (the Performance panel's frame timing): frame() at the top, lap(stage) after each stage, end() at the bottom.
+const NOP = () => {};
+const PR = window._perfProbe || { frame: NOP, lap: NOP, end: NOP, wrapBegin: NOP, wrapEnd: NOP };
 function loop(timestamp){
   requestAnimationFrame(loop);
+  PR.frame(timestamp);
   if (_spaceMouse) _spaceMouse.update(timestamp);
   onCameraFrame();
+  PR.lap('own');
 
   // (LOD update + render happen at the end of this function, after the
   //  camera sync - see potreeViewer.update below.)
@@ -43,9 +48,12 @@ function loop(timestamp){
   cesiumViewer.resize();
   // potreeViewer.resize();
 
+  PR.wrapBegin(0);
   if (viewModel.cesiumRender) {
     cesiumViewer.render();
   }
+  PR.wrapEnd(0);
+  PR.lap('cesium');
 
   // World frame: camera.position / .direction are relative to the camera's reference frame,
   // which is not the world while Cesium tracks an entity (double-click on a point) - the
@@ -59,7 +67,9 @@ function loop(timestamp){
   document.getElementById("coord_display").innerText = coords;
   document.getElementById("elev_display").innerText = "Height: " + cCamHeight.toFixed(0) + "m" +
     (flags.Fly ? "  ·  fly ×" + +getFlyMultiplier().toPrecision(2) : "");
+  PR.lap('own');
   syncMiniMapFrame(timestamp, cCamPosCart);
+  PR.lap('minimap');
 
   if(window.toScene !== undefined){
     // do fun proj4 stuff with camera settings
@@ -95,8 +105,13 @@ function loop(timestamp){
   // Now that the Cesium camera has been synced onto the Potree camera, decide
   // LOD and draw. Order matters: update() is what runs updateVisibility, so it
   // has to see the camera we are about to render from.
+  PR.lap('own');
   potreeViewer.update(potreeViewer.clock.getDelta(), timestamp);
+  PR.lap('potreeUpdate');
+  PR.wrapBegin(1);
   potreeViewer.render();
+  PR.wrapEnd(1);
+  PR.lap('potreeRender');
 
   // Update incidence angle lines when camera moves 50m+ (with 2s minimum interval)
   if (incidenceState.enabled) {
@@ -109,10 +124,15 @@ function loop(timestamp){
       updateIncidenceLines();
     }
   }
+  PR.lap('incidence');
 
   updateNorthCompass();
+  PR.lap('compass');
   updateHtmlLabels();
+  PR.lap('labels');
   updateMeasureDisplay();
+  PR.lap('measure');
+  PR.end();
 }
 return { loop };
 }

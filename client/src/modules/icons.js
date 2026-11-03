@@ -68,6 +68,8 @@
     paperclip: '<path d="m20 11.5-8.3 8.3a5 5 0 0 1-7-7L13 4.5a3.3 3.3 0 0 1 4.7 4.7l-8.3 8.3a1.7 1.7 0 0 1-2.4-2.4L14.5 7.6"/>',
     polygon: '<path d="M12 3.5 20.5 9.7 17.3 20H6.7L3.5 9.7z"/>',
     puzzle: '<path d="M5 8h3.5a2 2 0 1 1 4 0H16v3.5a2 2 0 1 1 0 4V19H5z"/>',
+    // Performance: a gauge (arc, needle, ticks)
+    gauge: '<path d="M4.6 18a9 9 0 1 1 14.8 0"/><path d="m12 14 4.2-5.4"/><circle cx="12" cy="14" r="1.3"/><path d="M12 5.5v1.4M5.6 9.2l1.2.8M18.4 9.2l-1.2.8"/>',
     layers: '<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>',
   };
   const NS = 'http://www.w3.org/2000/svg';

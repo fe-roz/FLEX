@@ -18,6 +18,7 @@
     <!-- UI kit: switches, row eyes, their tokens (switch = takes effect now; .keep-box = tick to act later) -->
     <link rel="stylesheet" href="ui_kit.css">
     <script src="client/src/modules/ui-kit.js"></script>
+    <script src="client/src/modules/perf-probe.js"></script>  <!-- frame timing for the Performance panel (window._perfProbe); render-loop.js calls it -->
     <script src="client/src/modules/icons.js"></script>  <!-- line icons: inline sprite, window.icon() -->
     <script src="client/src/modules/proxy-url-generator.js"></script>
 
@@ -854,6 +855,7 @@
         <button type="button" data-target="#exportCollapsible" title="Export an offline map"><svg class="ico"><use href="#i-pack"/></svg><small>Export</small></button>
         <button type="button" data-target="#lidarDeriveCollapsible" title="Analyze the point clouds"><svg class="ico"><use href="#i-leaf"/></svg><small>Analyze</small></button>
         <div class="rail-grow"></div>
+        <button type="button" data-target="#perfCollapsible" title="Performance: frame rate, where the time goes, what to turn off"><svg class="ico"><use href="#i-gauge"/></svg><small>Speed</small></button>
         <button type="button" data-target="#settingsCollapsible" title="Settings"><svg class="ico"><use href="#i-sliders"/></svg><small>Settings</small></button>
         <button type="button" id="rail-help" aria-pressed="false" title="Help: the FLEX guide"><svg class="ico"><use href="#i-info"/></svg><small>Help</small></button>
       </nav>
@@ -1390,6 +1392,10 @@
         </div>
 
         <!-- ══════════════ SETTINGS ════════════════════════════════════════ -->
+        <div class="collapse" id="perfCollapsible">
+          <div class="lp-panel-wrap" id="perf-panel"></div>
+        </div>
+
         <div class="collapse" id="settingsCollapsible">
           <div class="lp-panel-wrap">
 
@@ -2071,6 +2077,7 @@
 <script src="client/src/modules/info-panel.js"></script>
 <!-- The icon strip down the left -->
 <script src="client/src/modules/flex-rail.js"></script>
+<script src="client/src/modules/perf-panel.js"></script>  <!-- Performance panel: frame time by category, counts, what-if tests, suggestions, the slow pill (window._perfPanel) -->
 <!-- 🕳 Caves: project | My data -->
 <script src="client/src/modules/survey-export.js"></script>  <!-- a cave's survey as Survex / CSV / PLT (window._surveyExport) -->
 <script src="client/src/modules/cave-columns.js"></script>
