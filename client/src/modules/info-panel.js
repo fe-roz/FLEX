@@ -61,8 +61,11 @@
   const prop = (e, k) => (e && e.properties && e.properties[k] ? e.properties[k].getValue() : null);
   const KIND = { point: 'Point', line: 'Line', area: 'Area' }, KICON = { point: '📍', line: '〰️', area: '⬠' };
   const deg = r => r * 180 / Math.PI;
-  const fmtLen = m => (m >= 1000 ? (m / 1000).toFixed(2) + ' km' : Math.round(m) + ' m');
-  const fmtDist = m => (m >= 1000 ? (m / 1000).toFixed(2) + ' km' : m >= 10 ? Math.round(m) + ' m' : m.toFixed(1) + ' m');
+  // Lengths and heights in the unit of Settings → Units (units.js: metric by default).
+  const RS = () => window._routeStats || null;
+  const fmtLen = m => window._units.len(m);
+  const fmtDist = m => window._units.dist(m);
+  const fmtHt = m => window._units.height(m);
   function lenOf(cs) {
     let L = 0;
     for (let i = 1; i < cs.length; i++) {
@@ -78,7 +81,7 @@
     for (let i = 0; i < cs.length; i++) { const a = cs[i], b = cs[(i + 1) % cs.length]; s += a[0] * mx * b[1] * my - b[0] * mx * a[1] * my; }
     return Math.abs(s / 2);
   }
-  const fmtArea = a => (a >= 1e6 ? (a / 1e6).toFixed(2) + ' km²' : a >= 1e4 ? (a / 1e4).toFixed(2) + ' ha' : Math.round(a) + ' m²');
+  const fmtArea = a => window._units.area(a);
   const latlon = c => `${c[1].toFixed(6)}, ${c[0].toFixed(6)}`;
   /** Distance (m) and initial bearing (° from north) from a to b, [lon, lat]. */
   function distBrg(a, b) {
@@ -88,7 +91,9 @@
     return { d: 2 * 6371008 * Math.asin(Math.min(1, Math.sqrt(h))), brg: (Math.atan2(y, x) / k + 360) % 360 };
   }
   const PTS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-  const fmtBrg = b => `${Math.round(b) % 360}° ${PTS[Math.round(b / 45) % 8]}`;
+  const fmtBrg = b => `${PTS[Math.round(b / 45) % 8]} (${Math.round(b) % 360}°)`;
+  /** "120 m SE (128°)" */
+  const fmtAway = db => `${fmtDist(db.d)} ${fmtBrg(db.brg)}`;
   const when = t => { if (!t) return ''; const d = new Date(t); if (isNaN(d)) return String(t); const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
   const utmText = c => { const U = FE() && FE().utm(c[0], c[1]); return U ? `${U.zone}${U.band} ${Math.round(U.e)} E ${Math.round(U.n)} N` : ''; };
   const cartoOf = p => { const k = Cesium.Cartographic.fromCartesian(p); return [deg(k.longitude), deg(k.latitude), k.height]; };
@@ -118,16 +123,18 @@
   // LiDAR: the ground returns of the loaded point clouds there (flex.js).
   function lidarAt(lon, lat) { try { const g = window._lidarGroundAt && window._lidarGroundAt(lon, lat); return g && Number.isFinite(g.h) ? g.h : null; } catch (_) { return null; } }
   /** Position rows. A value is text, { async: Promise<text|null> } or a function → node. */
-  function posFacts(c, kind, own) {
+  function posFacts(c, kind, own, deep) {
     const out = [[kind === 'line' ? 'Starts at' : kind === 'area' ? 'Centre' : 'Position', latlon(c)]];
     const u = utmText(c); if (u) out.push(['UTM', u]);
     if (kind === 'line' || kind === 'area') return out;
     const h = own !== false && Number.isFinite(c[2]) && c[2] !== 0 ? c[2] : null;
-    if (h != null) out.push(['Height', h.toFixed(1) + ' m']);
+    if (h != null) out.push(['Height', fmtHt(h)]);
     const ter = terrainAt(c[0], c[1]), lid = lidarAt(c[0], c[1]);
-    out.push(['Terrain height', { async: ter.then(t => (t == null ? null : t.toFixed(1) + ' m')) }]);
-    if (lid != null) out.push(['LiDAR ground', lid.toFixed(1) + ' m']);
-    if (h != null) out.push(['Above ground', { async: ter.then(t => { const g = lid != null ? lid : t; return g == null ? null : `${(h - g).toFixed(1)} m${lid != null ? ' (LiDAR)' : ''}`; }) }]);
+    out.push(['Terrain height', { async: ter.then(t => (t == null ? null : fmtHt(t))) }]);
+    if (lid != null) out.push(['LiDAR ground', fmtHt(lid)]);
+    if (h != null) out.push(['Above ground', { async: ter.then(t => { const g = lid != null ? lid : t; return g == null ? null : `${fmtHt(h - g)}${lid != null ? ' (LiDAR)' : ''}`; }) }]);
+    // A lead or station: how deep below the ground it is (ground − its height; LiDAR ground where there is one).
+    if (h != null && deep) out.push(['Below ground', { async: ter.then(t => { const g = lid != null ? lid : t; return g == null || g - h < 0.05 ? null : `${fmtHt(g - h)}${lid != null ? ' (LiDAR ground)' : ' (terrain)'}`; }) }]);
     return out;
   }
   const centre = cs => [cs.reduce((s, c) => s + c[0], 0) / cs.length, cs.reduce((s, c) => s + c[1], 0) / cs.length, 0];
@@ -208,24 +215,119 @@
     });
     return out;
   }
-  // self: { station: '<file>|<name>', target, lead } — not its own neighbour.
-  function nearby(c, self) {
+  // ── Points and lines on the map, for the stats ───────────────────────────
+  // Any source: the project's, My data, the CalTopo map, data files. A point: { source, id, name, at: [lon, lat, h?], ent?, desc() };
+  // a line: { source, id, name, coords, ent? }. A copy of the same thing in two sources (a project point also on the CalTopo map:
+  // same name, within 3 m) is listed once.
+  const sameSpot = (a, b) => distBrg(a, b).d < 3;
+  const normName = n => String(n == null ? '' : n).toLowerCase().replace(/\s+/g, ' ').trim();
+  const valNow = p => { try { return p && p.getValue ? p.getValue(Cesium.JulianDate.now()) : p; } catch (_) { return null; } };
+  const textOfDesc = h => String(h || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').trim();
+  function vectorEntities() {
+    const w = window._ws, out = [];
+    ((w && w.vectorSources) ? w.vectorSources() : []).forEach(src => { if (src.ds) src.ds.entities.values.forEach(e => out.push({ e, src })); });
+    return out;
+  }
+  const lineCache = new WeakMap();
+  function entLine(e) {
+    const ps = valNow(e.polyline && e.polyline.positions);
+    if (!ps || ps.length < 2) return null;
+    const c = lineCache.get(e);
+    if (c && c.ps === ps) return c.coords;
+    const coords = ps.map(cartoOf);
+    lineCache.set(e, { ps, coords });
+    return coords;
+  }
+  function allPoints() {
+    const out = [], seen = new Map();
+    const add = pt => {
+      const k = normName(pt.name), list = seen.get(k) || [];
+      if (k && list.some(a => sameSpot(a, pt.at))) return;
+      list.push(pt.at); seen.set(k, list);
+      out.push(pt);
+    };
+    if (pj.pid && pj.P) Object.values(pj.P.features).forEach(f => { if (!f.removed && f.kind === 'point' && f.coords && f.coords[0]) add({ source: 'project', id: f.id, name: f.name || 'Point', at: f.coords[0], desc: () => f.desc || '' }); });
+    const S = window._myData && window._myData.cached && window._myData.cached();
+    if (S && S.features) Object.values(S.features).forEach(f => { if (!f.removed && f.kind === 'point' && f.coords && f.coords[0]) add({ source: 'mydata', id: f.id, name: f.name || 'Point', at: f.coords[0], desc: () => f.desc || '' }); });
+    if (window.Cesium) vectorEntities().forEach(({ e, src }) => {
+      if (!e.position || e.polyline || e.polygon || !e.name) return;
+      const p = valNow(e.position); if (!p) return;
+      add({ source: src.kind === 'caltopo' ? 'caltopo' : 'file', id: src.kind === 'caltopo' ? String(e.id).replace(/^ct-/, '') : e.id, name: e.name, at: cartoOf(p), ent: e, desc: () => textOfDesc(valNow(e.description)) });
+    });
+    return out;
+  }
+  function allLines() {
     const out = [];
+    if (pj.pid && pj.P) Object.values(pj.P.features).forEach(f => { if (!f.removed && f.kind === 'line' && f.coords && f.coords.length >= 2) out.push({ source: 'project', id: f.id, name: f.name || 'Line', coords: f.coords }); });
+    if (window._myData && window._myData.shapes) { try { window._myData.shapes().forEach(f => { if (f.kind === 'line') out.push({ source: 'mydata', id: f.id, name: f.name || 'Line', coords: f.coords }); }); } catch (_) {} }
+    if (window.Cesium) vectorEntities().forEach(({ e, src }) => {
+      if (!e.polyline || e.polygon) return;
+      const coords = entLine(e); if (!coords) return;
+      out.push({ source: src.kind === 'caltopo' ? 'caltopo' : 'file', id: src.kind === 'caltopo' ? String(e.id).replace(/^ct-/, '') : e.id, name: e.name || 'Line', coords, ent: e });
+    });
+    const seen = new Map(), uniq = [];
+    out.forEach(l => {                                    // the same line in two sources: once
+      const k = normName(l.name), list = seen.get(k) || [];
+      if (k && list.some(a => sameSpot(a[0], l.coords[0]) && sameSpot(a[1], l.coords[l.coords.length - 1]))) return;
+      list.push([l.coords[0], l.coords[l.coords.length - 1]]); seen.set(k, list); uniq.push(l);
+    });
+    return uniq;
+  }
+  // The entity a point or line is drawn as, to select it (which opens it here).
+  function entityOf(it) {
+    const v = V(); if (!v) return null;
+    if (it.ent) return it.ent;
+    if (it.source === 'project') { const src = window._pjfState && window._pjfState.src; return src ? src.entities.values.find(x => prop(x, 'featureId') === it.id) || null : null; }
+    if (it.source === 'mydata') {
+      const e = v.entities.values.find(x => prop(x, 'myFeature') === it.id);
+      if (e) return e;
+      for (let i = 0; i < v.dataSources.length; i++) { const x = v.dataSources.get(i).entities.getById('my-' + it.id); if (x) return x; }
+    }
+    return null;
+  }
+  function openItem(it) {
+    const e = entityOf(it);
+    if (e) { v_select(e); return; }
+    if (it.source === 'project') show(featureSubject(it.id));
+  }
+  const v_select = e => { const v = V(); if (v) v.selectedEntity = e; };
+  /** The item the subject is, so it is not its own neighbour. */
+  const isSelf = (self, it) => !!(self && ((self.ref && self.ref.source === it.source && String(self.ref.id) === String(it.id)) || (self.target && it.source === 'project' && self.target === 'feature:' + it.id)));
+  const entranceOf = pt => { const t = FL.flexTag && FL.flexTag(pt.desc ? pt.desc() : ''); return t ? 'entrance of ' + t.cave : null; };
+
+  // self: { station: '<file>|<name>', target, lead, ref } — not its own neighbour. Up to 3 of each kind, each with
+  // distance and direction ("120 m SE (128°)"): stations, entrances, leads, other points, trails / lines.
+  function nearby(c, self) {
+    const out = [], N = 3;
     self = self || {};
-    let best = null;
+    const sts = [];
     imps().forEach(imp => stationsOfImp(imp).forEach(s => {
       if (self.station === imp.name + '|' + s.name) return;
       const db = distBrg(c, [s.lon, s.lat]);
-      if (!best || db.d < best.d) best = Object.assign(db, { s, imp });
+      if (sts.length < N || db.d < sts[sts.length - 1].d) { sts.push(Object.assign(db, { s, imp })); sts.sort((a, b) => a.d - b.d); if (sts.length > N) sts.pop(); }
     }));
-    if (best) out.push(['Nearest station', `${best.s.name} (${caveLabel(best.imp, best.s.survey)}) · ${fmtDist(best.d)} · ${fmtBrg(best.brg)}`]);
-    let ent = null, tags = [];
+    sts.forEach((x, i) => out.push([i ? '' : 'Nearest station', `${x.s.name} (${caveLabel(x.imp, x.s.survey)}) · ${fmtAway(x)}`]));
+    let ents = [], tags = [];
     if (pj.pid && window._pjf) try { tags = window._pjf.scanTags(); } catch (_) {}
-    tags.forEach(t => { const db = distBrg(c, t.at); if (db.d < 0.5) return; if (!ent || db.d < ent.d) ent = Object.assign(db, { t }); });
-    if (ent) out.push(['Nearest entrance', `${ent.t.cave}${ent.t.point ? ' (' + ent.t.point + ')' : ''} · ${fmtDist(ent.d)} · ${fmtBrg(ent.brg)}`]);
-    leadSpots().filter(x => x.target !== self.target && x.id !== self.lead).map(x => Object.assign(distBrg(c, x.at), x)).sort((a, b) => a.d - b.d).slice(0, 3)
-      .forEach((x, i) => out.push([i ? '' : 'Nearest leads', `${x.label} · ${fmtDist(x.d)} · ${fmtBrg(x.brg)}`]));
+    tags.forEach(t => { const db = distBrg(c, t.at); if (db.d < 0.5) return; ents.push(Object.assign(db, { t })); });
+    ents.sort((a, b) => a.d - b.d).slice(0, N).forEach((x, i) => out.push([i ? '' : 'Nearest entrance', `${x.t.cave}${x.t.point ? ' (' + x.t.point + ')' : ''} · ${fmtAway(x)}`]));
+    leadSpots().filter(x => x.target !== self.target && x.id !== self.lead).map(x => Object.assign(distBrg(c, x.at), x)).sort((a, b) => a.d - b.d).slice(0, N)
+      .forEach((x, i) => out.push([i ? '' : 'Nearest leads', `${x.label} · ${fmtAway(x)}`]));
+    const R = RS();
+    if (R && window.Cesium && !self.line) {
+      const here = [c[0], c[1]];
+      const pts = R.nearestPoints(here, allPoints(), N, pt => isSelf(self, pt) || (distBrg(here, pt.at).d < 1 && normName(pt.name) === normName(self.name)));
+      pts.forEach((x, i) => out.push([i ? '' : 'Nearest points', { node: () => itemLink(x.pt, `${x.pt.name} · ${fmtAway(x)}`) }]));
+      const lines = R.nearestLines(here, allLines(), N, l => isSelf(self, l));
+      lines.forEach((x, i) => out.push([i ? '' : 'Nearest trail / line', { node: () => itemLink(x.line, `${x.line.name} · ${fmtAway(x)}`) }]));
+    }
     return out;
+  }
+  // A line of text that opens the point or line it names.
+  function itemLink(it, text) {
+    const b = el('button', 'inf-link', text); b.type = 'button'; b.title = 'Open it';
+    b.addEventListener('click', () => openItem(it));
+    return b;
   }
 
   // ── Related ──────────────────────────────────────────────────────────────
@@ -287,7 +389,7 @@
     const codes = [...new Set([].concat(...parts.map(p => (p.codes ? [...p.codes] : (p.imp.parsed.surveys || []).map(s => s.code)))))].filter(x => x !== '');
     const S = caveStats(parts, null);
     if (codes.length) out.push(['Surveys', codes.join(', ')]);
-    out.push(['Length', fmtLen(S.len)], ['Depth', S.depth.toFixed(1) + ' m'], ['Stations', String(S.stations.size)]);
+    out.push(['Length', fmtLen(S.len)], ['Depth', fmtHt(S.depth)], ['Stations', String(S.stations.size)]);
     if (c.cid && pj.pid && pj.P && FL.systemsOf) {
       FL.systemsOf(pj.P, c.cid).forEach(g => {
         out.push(['System', g.name + (g.caves.length > 1 ? ' · with ' + g.caves.filter(x => x !== c.cid).map(A.caveName).join(', ') : '')]);
@@ -318,6 +420,13 @@
     if (kind === 'area' && cs.length > 2) out.push(['Area', fmtArea(areaOf(cs))], ['Perimeter', fmtLen(lenOf(cs.concat([cs[0]])))], ['Points', String(cs.length)]);
     return out;
   }
+  /** A line's route stats (route-stats.js): its coordinates, and the times a track carries (4th value, or a list the loader kept). */
+  function routeOf(kind, cs, ent) {
+    if (kind !== 'line' || !cs || cs.length < 2 || !RS()) return null;
+    let extra = null;
+    if (ent) ['coordTimes', 'times', 'when'].some(k => { const v = prop(ent, k); if (Array.isArray(v) && v.length) { extra = v; return true; } return false; });
+    return { coords: cs, times: RS().timesOf(cs, extra) };
+  }
   const posOfShape = (kind, cs) => (!cs || !cs.length ? null : kind === 'area' ? centre(cs) : cs[0]);
 
   function featureSubject(id) {
@@ -332,7 +441,7 @@
     return {
       key: 'feature:' + id, kind: 'feature', icon: KICON[f.kind] || '•', title: f.name || KIND[f.kind] || 'Feature',
       line: [KIND[f.kind], folder].filter(Boolean).join(' · '), color: window._pjf ? window._pjf.colorOf(f) : null,
-      facts, desc: f.desc || '', target: t, ref, pos, self: { target: t },
+      facts, desc: f.desc || '', target: t, ref, pos, self: { target: t }, route: routeOf(f.kind, cs),
       related: () => tagRelated(f.desc, 'project'),
       notes: FL.notesOn(pj.P, t), leads: leads.map(L => ({ item: leadItem(L), label: A.targetLabel(t) })),
       docs: uniq(docsOn(t).concat(...leads.map(L => docsOn(FL.T.lead(L.id))))),
@@ -347,7 +456,7 @@
     if (L.fields.priority) facts.push(['Priority', String(L.fields.priority)]);
     if (L.fields.types && L.fields.types.length) facts.push(['Needs', L.fields.types.join(', ')]);
     const pos = f && f.coords && f.coords[0] ? f.coords[0] : null;
-    if (pos) facts.push(...posFacts(pos, 'point'));
+    if (pos) facts.push(...posFacts(pos, 'point', true, true));
     const t = FL.T.lead(id);
     return {
       key: 'lead:' + id, kind: 'lead', icon: '❓', title: 'Lead at ' + at, line: A.leadSummary(L.fields), facts, desc: L.fields.desc || '', target: t,
@@ -380,7 +489,7 @@
     if (c.code) facts.push(['Survey', c.code]);
     const sp = A.stationPos(c.cid, c.name);
     const pos = sp && window.Cesium ? cartoOf(sp) : null;
-    if (pos) facts.push(...posFacts(pos, 'point'));
+    if (pos) facts.push(...posFacts(pos, 'point', true, true));
     const fs = FL.docsForStation(pj.D, pj.P, c.cid, c.name, c.code ? [c.code] : []);
     const leads = A.leadsAt(c.cid, c.name).filter(x => x.active);
     return { key: t, kind: 'station', icon: '📍', title: c.name, line: 'Station · ' + cave, facts, desc: '', target: t,
@@ -408,7 +517,7 @@
     const desc = ref ? ref.desc : raw.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|tr|li|h\d)>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\n{3,}/g, '\n\n').trim();
     const title = (ref && ref.name) || ent.name || KIND[kind];
     return { key: 'ent:' + ent.id, kind: 'entity', ent, entId: ent.id, icon: KICON[kind] || '•', title, line: [KIND[kind], from].filter(Boolean).join(' · '), facts, desc,
-      color: ref ? ref.color : null, ref, pos, self: {}, related: () => tagRelated(desc, ref && ref.source),
+      color: ref ? ref.color : null, ref, pos, self: {}, route: routeOf(kind, cs, ent), related: () => tagRelated(desc, ref && ref.source),
       target: null, notes: [], leads: [], docs: [], hideInfo: false, brief: 'strip', edit: refEdit(ref) };
   }
   function subjectOf(ent) {
@@ -657,7 +766,8 @@
       if (v && typeof v === 'object' && v.async) {
         td.textContent = '…';
         v.async.then(x => { if (x == null) r.remove(); else td.textContent = x; });
-      } else if (typeof v === 'function') { const n = v(); if (n) td.appendChild(n); }
+      } else if (v && typeof v === 'object' && v.node) { const n = v.node(); if (n) td.appendChild(n); }
+      else if (typeof v === 'function') { const n = v(); if (n) td.appendChild(n); }
       else td.textContent = v == null ? '' : String(v);
       r.append(el('th', null, k), td);
       t.appendChild(r);
@@ -667,7 +777,7 @@
   function render() {
     const s = I.subject, x = I.x;
     if (!s || !x) return;
-    stopMedia();
+    stopMedia(); if (RS()) RS().clearHover();
     x.querySelector('.inf-x-title').textContent = `${s.icon || ''} ${s.title}`.trim();
     const ed = x.querySelector('.inf-x-edit'); ed.style.display = s.edit ? '' : 'none';
     const body = x.querySelector('.inf-x-body'); body.textContent = '';
@@ -677,7 +787,8 @@
     const fn = folderNode(s);
     const facts = s.facts.slice();
     if (fn) facts.splice(1, 0, [s.ref && s.ref.source === 'mydata' ? 'Group' : 'Folder', () => fn]);
-    if (facts.length) body.appendChild(table(facts));
+    const ft = facts.length ? table(facts) : null;
+    if (ft) body.appendChild(ft);
     const sty = styleFacts(s);
     if (sty.length) body.appendChild(table(sty, 'inf-style'));
     const ro = s.ref && !s.refIsHost && !s.ref.editable && s.ref.reason;
@@ -686,8 +797,16 @@
     let rel = [];
     try { rel = s.related ? s.related() : []; } catch (e) { console.warn('[info] related', e); }
     if (rel.length) { sec(body, 'Related'); body.appendChild(table(rel, 'inf-rel')); }
+    if (s.route && RS()) {
+      try {
+        const me = { ref: s.ref, target: s.target };
+        const rn = RS().routeNode({ coords: s.route.coords, times: s.route.times, points: allPoints(), lines: allLines().filter(l => !isSelf(me, l)), entrance: entranceOf, open: openItem });
+        const sty2 = body.querySelector('.inf-style');
+        if (sty2) body.insertBefore(rn, sty2); else if (ft) ft.after(rn); else body.appendChild(rn);
+      } catch (e) { console.warn('[info] route', e); }
+    }
     let nb = [];
-    try { nb = s.pos ? nearby(s.pos, s.self) : []; } catch (e) { console.warn('[info] nearby', e); }
+    try { nb = s.pos ? nearby(s.pos, Object.assign({ name: s.title, ref: s.ref, line: !!s.route }, s.self)) : []; } catch (e) { console.warn('[info] nearby', e); }
     if (nb.length) { sec(body, 'Nearby'); body.appendChild(table(nb, 'inf-near')); }
     if (s.notes.length) { sec(body, 'Notes', s.notes.length); s.notes.forEach(n => body.appendChild(A.noteEl(n))); }
     if (s.leads.length) { sec(body, 'Leads', s.leads.length); s.leads.forEach(L => body.appendChild(A.leadEl(L.cid || null, L.label, L.item))); }
@@ -778,7 +897,7 @@
   function collapse() {
     clearTimeout(I.tOpen); clearTimeout(I.tClose);
     if (!I.x) return;
-    stopMedia();
+    stopMedia(); if (RS()) RS().clearHover();
     I.x.remove(); I.x = null; I.pinned = false; I.moved = false; I.overX = false;
   }
   function leaveSoon() {
@@ -830,7 +949,7 @@
     }
     changed();
   });
-  ['flex-caltopo-changed', 'flex-caltopo-queue'].forEach(n => window.addEventListener(n, () => changed()));
+  ['flex-caltopo-changed', 'flex-caltopo-queue', 'flex-units-changed'].forEach(n => window.addEventListener(n, () => changed()));
 
   const hook = setInterval(() => {
     const v = V(), ins = window._inspector;
@@ -926,8 +1045,10 @@
   #info-x .inf-player-h { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; } #info-x .inf-player-h span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #info-x .inf-player-h .pj-btn { margin: 0; }
   #info-x .inf-video video { width: 100%; max-height: 50vh; background: #000; }
+  #info-x .inf-link { background: none; border: none; padding: 0; color: #8ab4ec; font: inherit; text-align: left; cursor: pointer; }
+  #info-x .inf-link:hover { text-decoration: underline; }
   #info-x .inf-none { color: rgba(255,255,255,.45); font-style: italic; margin-top: 10px; }`;
   document.head.appendChild(st);
 
-  window._info = { show, clear, expand, collapse, stopMedia, changed, panelClosed, subjectOf, cardSubject, featureSubject, reveal, revealArg, nearby, utmText };
+  window._info = { allPoints, allLines, openItem, show, clear, expand, collapse, stopMedia, changed, panelClosed, subjectOf, cardSubject, featureSubject, reveal, revealArg, nearby, utmText };
 })();
