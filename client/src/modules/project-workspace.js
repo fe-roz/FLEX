@@ -182,7 +182,7 @@
     const w = ws(), out = { pending: [], extra: { caves: [], layers: [] } };
     if (!pj.pid || !w) return out;
     const S = pj.P;
-    W.moves.forEach(m => out.pending.push({ kind: 'move', move: m, name: m.name, dir: m.dir, what: m.kind === 'cavemove' || m.dir === 'project' ? 'to ' + (m.toName || 'another project') : m.dir === 'in' ? 'into the project' : 'out to My data' }));
+    W.moves.forEach(m => out.pending.push({ kind: 'move', move: m, name: m.name, dir: m.dir, what: m.kind === 'cavemove' || m.dir === 'project' ? 'to ' + (m.toName || 'another project') : m.dir === 'remove' ? 'removed from the project' : m.dir === 'in' ? 'into the project' : 'out to My data' }));
     for (const c of w.caves()) {
       if (!c.text) continue;
       if (moving(c.name)) continue;
@@ -454,6 +454,14 @@
         if (e) V.entities.remove(e);
       }
       if (window._pjf) window._pjf.draw();
+      return;
+    }
+    if (m.kind === 'caltopo') {                  // a CalTopo map leaves the project: 'out' stays loaded as yours, 'remove' is unloaded. Nothing changes in CalTopo.
+      await record('layer.set', { layer: m.id, removed: true }, null, { quiet: true });
+      const id = (String(m.url || '').match(/\/m\/([A-Za-z0-9]+)/) || [])[1], cur = w.caltopo && w.caltopo();
+      if (m.dir === 'out' && id && m.name) { try { const l = JSON.parse(localStorage.getItem('flex.ct.names') || '{}'); l[id] = m.name; localStorage.setItem('flex.ct.names', JSON.stringify(l)); } catch (_) {} }
+      if (m.dir === 'remove' && cur && String(cur.url || '').indexOf(id || '\u0000') >= 0) { w.switching = true; try { w.clearCaltopo(); } finally { w.switching = false; } }
+      A.refresh && A.refresh('layer.set');
       return;
     }
     if (m.kind === 'file') {

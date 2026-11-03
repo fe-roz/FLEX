@@ -92,6 +92,8 @@ function _ctSimplify(coords) {
 function _caltopoJsonToDataSource(result, ds) {
   ds = ds || new Cesium.CustomDataSource('CalTopo');
   const feats = (result && result.state && result.state.features) || [];
+  const ttl = result && (result.title || (result.state && (result.state.title || (result.state.properties || {}).title)) || (result.properties || {}).title);
+  if (ttl) ds._ctTitle = String(ttl);        // the map's own title when the pull carries one (📍 Surface names the map by it)
   const E = ds.entities, keep = new Set();
   ds.entities.suspendEvents();
   try {
