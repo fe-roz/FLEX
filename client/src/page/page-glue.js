@@ -62,7 +62,6 @@
             '#projectCollapsible',
             '#docsCollapsible',
             '#leadsCollapsible',
-            '#tripsCollapsible',
             '#reviewCollapsible',
             '#lidarDeriveCollapsible',
           ];

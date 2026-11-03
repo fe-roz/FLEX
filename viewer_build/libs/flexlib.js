@@ -309,7 +309,7 @@
   }
 
   // ── Project replay ────────────────────────────────────────────────────────
-  const TRIP_LISTS = ['people', 'caves', 'links', 'leads'];
+  const TRIP_LISTS = ['people', 'caves', 'links'];
   function emptyProject(pid) {
     return { id: pid, name: '', desc: '', lists: {}, caves: {}, aliases: {}, notes: {}, leads: {},
              surveys: {}, order: [], caveUpdates: {}, surveyVersions: {}, segments: {}, cavefiles: {}, systems: {}, layers: {}, features: {}, groups: {}, arealabels: {}, trips: {}, proposals: {}, archived: null, footprint: null, moves: {}, log: [], byId: new Map() };
@@ -504,21 +504,11 @@
         // Older readers fall through to `default` and ignore the op.
         case 'trip.set': {
           if (e.trip == null || e.trip === '') break;
-          const t = S.trips[e.trip] || (S.trips[e.trip] = { id: String(e.trip), name: '', start: '', end: '', desc: '', people: [], caves: [], links: [], leads: [], objectives: [], planned: false, created: { t: e.t, who: e.who }, history: [] });
+          const t = S.trips[e.trip] || (S.trips[e.trip] = { id: String(e.trip), name: '', start: '', end: '', desc: '', people: [], caves: [], links: [], created: { t: e.t, who: e.who }, history: [] });
           ['name', 'start', 'end', 'desc'].forEach(k => { if (e[k] != null) t[k] = String(e[k]); });
           if (e.removed != null) t.removed = !!e.removed;
-          // Planned trips (optional, older readers ignore them): `planned` true
-          // until the trip is started / done; `obj` { <id>: { text, done, removed } }
-          // merges per objective and per field, in the order objectives first appear.
-          if (e.planned != null) t.planned = !!e.planned;
-          if (e.obj && typeof e.obj === 'object') Object.keys(e.obj).forEach(oid => {
-            const f = e.obj[oid] || {};
-            let o = t.objectives.find(x => x.id === oid);
-            if (!o) t.objectives.push(o = { id: oid, text: '', done: false, removed: false });
-            if (f.text != null) o.text = String(f.text);
-            if (f.done != null) o.done = !!f.done;
-            if (f.removed != null) o.removed = !!f.removed;
-          });
+          // Old records may carry `planned`, `obj` and the `leads` list (planned trips,
+          // since removed): read and ignored.
           TRIP_LISTS.forEach(k => {
             ((e.drop && e.drop[k]) || []).forEach(v => { t[k] = t[k].filter(x => x !== String(v)); });
             ((e.add && e.add[k]) || []).forEach(v => { v = String(v).trim(); if (v && !t[k].includes(v)) t[k].push(v); });
@@ -835,7 +825,7 @@
   // { id, name, start, end ('' = a one-day trip), desc, people: [names as
   // entered], caves: [project cave ids], links: ['segment:<id>' | 'note:<id>'
   // | 'doc:<id>'] }. Links are kept on the trip; tripSuggest only proposes.
-  const tripState = t => (t ? { name: t.name, start: t.start, end: t.end, desc: t.desc, removed: !!t.removed, planned: !!t.planned } : null);
+  const tripState = t => (t ? { name: t.name, start: t.start, end: t.end, desc: t.desc, removed: !!t.removed } : null);
   // The body of the entry that turns trip `cur` (null: a new one) into `next`
   // ({ name, start, end, desc, people, caves, links }, any subset); null when
   // nothing changes. Carries `prev` so History can undo it (tripUndo).
@@ -848,28 +838,6 @@
     });
     if (cur && cur.removed && next.removed !== true) { body.removed = false; prev.removed = true; }
     if (next.removed === true && (!cur || !cur.removed)) { body.removed = true; prev.removed = false; }
-    if (next.planned != null && !!next.planned !== !!(cur && cur.planned)) { body.planned = !!next.planned; prev.planned = !!(cur && cur.planned); }
-    // objectives: [{ id?, text, done }] = the whole live list; changes go as a per-id map.
-    if (Array.isArray(next.objectives)) {
-      const have = ((cur && cur.objectives) || []).filter(o => !o.removed), keep = new Set();
-      const obj = {}, po = {};
-      next.objectives.forEach(o => {
-        const text = String(o.text == null ? '' : o.text).trim(), done = !!o.done, old = o.id && have.find(x => x.id === o.id);
-        if (!text && !old) return;
-        if (old) {
-          keep.add(old.id);
-          const f = {}, pf = {};
-          if (text && text !== old.text) { f.text = text; pf.text = old.text; }
-          if (done !== old.done) { f.done = done; pf.done = old.done; }
-          if (Object.keys(f).length) { obj[old.id] = f; po[old.id] = pf; }
-        } else {
-          const id = o.id || uid(6);
-          keep.add(id); obj[id] = { text, done }; po[id] = { removed: true };
-        }
-      });
-      have.forEach(o => { if (!keep.has(o.id)) { obj[o.id] = { removed: true }; po[o.id] = { removed: false }; } });
-      if (Object.keys(obj).length) { body.obj = obj; prev.obj = po; }
-    }
     TRIP_LISTS.forEach(k => {
       if (!Array.isArray(next[k])) return;
       const want = [...new Set(next[k].map(x => String(x).trim()).filter(Boolean))], have = cur ? cur[k] : [];
@@ -891,49 +859,73 @@
     const back = {};
     Object.keys(e.prev).forEach(k => { back[k] = e.prev[k]; });
     const now = {};
-    ['name', 'start', 'end', 'desc', 'removed', 'planned'].forEach(k => { if (e[k] != null) now[k] = e[k]; });
-    delete back.obj;
-    if (e.prev.obj) {
-      out.obj = e.prev.obj; now.obj = {};
-      Object.keys(e.prev.obj).forEach(oid => {
-        const g = {}; Object.keys(e.prev.obj[oid]).forEach(k => { g[k] = e.obj && e.obj[oid] && e.obj[oid][k] != null ? e.obj[oid][k] : (k === 'removed' ? false : e.prev.obj[oid][k]); });
-        now.obj[oid] = g;
-      });
-    }
+    ['name', 'start', 'end', 'desc', 'removed'].forEach(k => { if (e[k] != null) now[k] = e[k]; });
     Object.assign(out, back, { prev: now });
     if (e.add) out.drop = e.add;
     if (e.drop) out.add = e.drop;
     return out;
   }
   // Live trips, newest first (by start, then end, then name).
-  const tripsOf = (S, opts) => Object.values((S && S.trips) || {}).filter(t => (opts && opts.removed ? t.removed : !t.removed))
+  const TRIP_NONE = '_none';           // the reserved record that keeps items marked "not part of a trip"
+  const tripsOf = (S, opts) => Object.values((S && S.trips) || {}).filter(t => t.id !== TRIP_NONE && (opts && opts.removed ? t.removed : !t.removed))
     .sort((a, b) => (a.start < b.start ? 1 : a.start > b.start ? -1 : (a.end || a.start) < (b.end || b.start) ? 1 : (a.end || a.start) > (b.end || b.start) ? -1 : a.name.localeCompare(b.name)));
-  // Planned trips (soonest first) and past ones (newest first, as tripsOf).
-  const tripsPlanned = S => tripsOf(S).filter(t => t.planned).sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : a.name.localeCompare(b.name)));
-  const tripsPast = S => tripsOf(S).filter(t => !t.planned);
   // Trips that visited a cave, or hold a link ('segment:<id>' …).
   const tripsFor = (S, o) => tripsOf(S).filter(t => (o.cave && t.caves.includes(o.cave)) || (o.link && t.links.includes(o.link)));
   // A day "YYYY-MM-DD" from a date text (approximate dates have none), and from an ISO time (this device's day).
   const fullDay = s => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || '').trim()); return m ? m[0] : ''; };
-  const localDay = iso => { const d = new Date(iso); if (isNaN(d)) return ''; const z = n => String(n).padStart(2, '0'); return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()); };
   const tripDays = t => { const a = fullDay(t.start), b = fullDay(t.end) || a; return a ? [a, b < a ? a : b] : null; };
-  // Segments, notes and documents that fall inside a trip's days and belong to
-  // a cave it visited (items of no cave match by date alone), not linked yet:
-  // { segments: [seg], notes: [note], docs: [doc] }. Dates: a segment's date, a
-  // document's date, a note's day (when it was written).
-  function tripSuggest(S, D, t) {
-    const out = { segments: [], notes: [], docs: [] }, r = t && tripDays(t);
-    if (!r) return out;
-    const inside = d => d && d >= r[0] && d <= r[1];
-    const caveOk = c => !c || t.caves.includes(c);
-    const has = k => t.links.includes(k);
-    segmentsOf(S).forEach(g => { if (inside(fullDay(g.date)) && caveOk(g.cave) && !has('segment:' + g.id)) out.segments.push(g); });
-    Object.values(S.notes || {}).forEach(n => { if (!n.deleted && inside(localDay(n.created.t)) && caveOk(parseTarget(n.target).cave) && !has('note:' + n.id)) out.notes.push(n); });
-    if (D) docsOf(D, S).forEach(d => {
-      if (!inside(fullDay(d.date)) || has('doc:' + d.id)) return;
-      const cs = d.tagList.map(x => parseTarget(x).cave).filter(Boolean);
-      if (!cs.length || cs.some(c => t.caves.includes(c))) out.docs.push(d);
+  const dayNum = d => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)) / 864e5;
+  // The trips of a project as the person sees them: its trip records (they win),
+  // and trips suggested from survey dates. A suggested trip is surveys of the
+  // project on the same day or on consecutive days that no trip record holds
+  // (and none marked "not part of a trip"), plus the documents dated inside
+  // those days. Returns { groups: [{ id, suggested, name, start, end ('' = one
+  // day), people, segments: [seg], docs: [doc] }], by: Map('segment:<id>' |
+  // 'doc:<id>' -> group) }. A suggested group's id is 'sug:<first day>'.
+  function tripGroups(S, D) {
+    const groups = [], by = new Map();
+    const segs = segmentsOf(S), docs = D ? docsOf(D, S) : [];
+    const segBy = new Map(segs.map(g => ['segment:' + g.id, g])), docBy = new Map(docs.map(d => ['doc:' + d.id, d]));
+    const none = new Set(S && S.trips && S.trips[TRIP_NONE] && !S.trips[TRIP_NONE].removed ? S.trips[TRIP_NONE].links : []);
+    tripsOf(S).forEach(t => {
+      const G = { id: t.id, suggested: false, name: t.name, start: t.start, end: t.end, people: t.people.slice(), segments: [], docs: [] };
+      t.links.forEach(k => {
+        if (by.has(k)) return;
+        if (segBy.has(k)) { G.segments.push(segBy.get(k)); by.set(k, G); }
+        else if (docBy.has(k)) { G.docs.push(docBy.get(k)); by.set(k, G); }
+      });
+      groups.push(G);
     });
+    const free = segs.filter(g => !by.has('segment:' + g.id) && !none.has('segment:' + g.id) && fullDay(g.date))
+      .sort((a, b) => fullDay(a.date).localeCompare(fullDay(b.date)) || String(a.name).localeCompare(String(b.name)));
+    const sug = [];
+    free.forEach(g => {
+      const d = fullDay(g.date), last = sug[sug.length - 1];
+      if (last && dayNum(d) - dayNum(last.last) <= 1) { last.segments.push(g); if (d > last.last) last.last = d; }
+      else sug.push({ first: d, last: d, segments: [g] });
+    });
+    sug.forEach(c => {
+      const G = { id: 'sug:' + c.first, suggested: true, name: '', start: c.first, end: c.last > c.first ? c.last : '', people: [], segments: c.segments, docs: [] };
+      c.segments.forEach(g => by.set('segment:' + g.id, G));
+      docs.forEach(d => { const k = 'doc:' + d.id, x = fullDay(d.date); if (x && x >= c.first && x <= c.last && !by.has(k) && !none.has(k)) { G.docs.push(d); by.set(k, G); } });
+      groups.push(G);
+    });
+    return { groups, by };
+  }
+  // The trip.set entries that move an item ('segment:<id>' | 'doc:<id>') to
+  // another trip: to = { trip: <id> } (a suggested id makes that trip real, with
+  // everything in it), { none: true } or { create: { name, start, end, people } }.
+  // [{ trip, body }] for the host to record (each body from tripEdit).
+  function tripMoves(S, D, key, to) {
+    const out = [], G = tripGroups(S, D), trips = (S && S.trips) || {};
+    const edit = (id, f) => { const cur = trips[id] || null, body = tripEdit(cur, f(cur ? cur.links.slice() : [])); if (body) out.push({ trip: id, body }); };
+    Object.values(trips).forEach(t => { if (!t.removed && t.links.includes(key) && !(to.trip === t.id) && !(to.none && t.id === TRIP_NONE)) edit(t.id, l => ({ links: l.filter(k => k !== key) })); });
+    if (to.none) edit(TRIP_NONE, l => ({ links: l.concat(key) }));
+    else if (to.create) { const c = to.create; out.push({ trip: uid(10), body: tripEdit(null, { name: c.name || '', start: c.start || '', end: c.end && c.end !== c.start ? c.end : '', people: c.people || [], links: [key] }) }); }
+    else if (to.trip && String(to.trip).startsWith('sug:')) {
+      const g = G.groups.find(x => x.id === to.trip);
+      if (g) out.push({ trip: uid(10), body: tripEdit(null, { name: '', start: g.start, end: g.end, links: [key].concat(g.segments.map(x => 'segment:' + x.id), g.docs.map(x => 'doc:' + x.id)).filter((k, i, a) => a.indexOf(k) === i) }) });
+    } else if (to.trip) edit(to.trip, l => ({ links: l.includes(key) ? l : l.concat(key) }));
     return out;
   }
 
@@ -1401,7 +1393,7 @@
     replayProject, replayDocs, caveForName, liveCaves, notesOn, leadsOn,
     docInProject, docInbox, docsOf, docsForStation, docsForTarget, pageFor,
     segmentsOf, segmentIndex, segmentsAt, proposalTarget, segmentStates, liveCavefiles, liveLayers, areaLabelsOf, areaLabelId, areaLabelState, areaLabelUndo,
-    tripState, tripEdit, tripUndo, tripsOf, tripsPlanned, tripsPast, tripsFor, tripSuggest, tripDays, fullDay,
+    tripState, tripEdit, tripUndo, tripsOf, tripsFor, tripGroups, tripMoves, tripDays, fullDay, TRIP_NONE,
     snapshotTime, entriesAt, replayProjectAt, replayDocsAt, changeDays, caveBundle, moveRenames, caveMoveEntries, caveMoveClear, moveRecord, movesOf,
     liveFeatures, liveGroups, groupPath, featuresGeoJSON, featuresKML, featuresGPX, flexTag, makeFlexTag,
     selectForSync, syncManifest, newEntries,
