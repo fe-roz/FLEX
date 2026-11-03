@@ -109,7 +109,9 @@ export function parsePLT(text) {
       // Survey name line: N<code> <day-of-week> <month> <day> <year> C<description>
       // e.g. "NME D 3 24 2013 CEntrance series"
       const nCode = rest.split(/\s+/)[0] || rest;
-      const nDescM = rest.match(/C(.+)$/);
+      // Only a " C" after the code starts the description: a code may itself contain a "C" (CR, AC1, C).
+      const nAfter = rest.slice(nCode.length);
+      const nDescM = nAfter.match(/\sC(.*)$/);
       const nDesc = nDescM ? nDescM[1].trim() : '';
       // The survey's date (D <month> <day> <year>), for the info panel.
       const nDate = rest.match(/^\S+\s+D\s+(\d{1,2})\s+(\d{1,2})\s+(\d{2,4})\b/);
