@@ -267,9 +267,10 @@
     const G = pj.gallery;
     const r = await choose(d.title || 'Document', `${d.pages.length} page(s) · added by ${(d.created && d.created.who) || '?'}, ${when(d.created && d.created.t)}`, [
       ...(d.pages.length ? [{ label: ['pencil', 'This page: kind and date'], value: 'page' }, { label: ['trash', 'Remove this page'], value: 'drop' }] : []),
-      { label: ['history', 'History'], value: 'hist' }, { label: ['trash', 'Delete the document'], value: 'del' }]);
+      { label: ['compass', 'Trip…'], value: 'trip' }, { label: ['history', 'History'], value: 'hist' }, { label: ['trash', 'Delete the document'], value: 'del' }]);
     if (!r) return;
     const pg = d.pages[G ? G.i : 0];
+    if (r === 'trip') { if (window._pjTrips) await window._pjTrips.pick('doc:' + docId); return; }
     if (r === 'hist') history(d.history, 'Document history', 'docs');
     if (r === 'drop') await record('doc.droppage', { doc: docId, h: pg.h, page: pg, at: G ? G.i : 0 }, 'docs');
     if (r === 'del') {

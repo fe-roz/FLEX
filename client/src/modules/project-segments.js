@@ -146,6 +146,7 @@
   // ── Something changed: drop caches, redraw what depends on them ──────────
   let redrawTimer = null;
   function changed(e) {
+    if (e && e.op === 'trip.set') { if (dockOpen() && seg.sel) renderDock(); return; }      // only the card's Same trip line changes
     if (e && !/^(segment\.|accept$|reject$|note\.|lead\.|doc\.|survey\.version|cave\.)/.test(e.op)) return;
     seg.info.clear();
     if (seg.sel && !(pj.P.segments[seg.sel.sid] && !pj.P.segments[seg.sel.sid].removed)) seg.sel = null;
@@ -547,8 +548,11 @@
           nb.sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))).forEach(n => row.appendChild(btn(n.name || n.id, () => showSegment(cid, n.id, { fly: true }), 'small chip')));
           B.appendChild(row);
         }
+        const TR = window._pjTrips, st2 = TR && TR.sameTrip('segment:' + g.id);
+        if (st2) { const ln = el('div', 'pj-sub tr-line'); ln.dataset.sameTrip = '1'; ln.append(st2.label + ': ', st2.node); B.appendChild(ln); }
         const row = el('div', 'pj-row');
         row.appendChild(btn('Show on the map', () => flyToSegment(g), 'small'));
+        if (TR) { const tb = btn(['compass', 'Trip…'], () => TR.pick('segment:' + g.id), 'small'); tb.title = 'Which trip was this survey part of?'; tb.dataset.act = 'trip'; row.appendChild(tb); }
         B.appendChild(row);
       }
     }

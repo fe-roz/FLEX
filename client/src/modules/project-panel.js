@@ -21,14 +21,16 @@
     build(b);
     return s;
   }
+  /** Docs sorted by trip: off unless switched on (remembered on this computer). */
+  function groupByTrip() { try { return localStorage.getItem('flex.docsGroupByTrip') === '1'; } catch (_) { return false; } }
   function render() {
     const root = $('pj-panel');
     if (!root) return;
     root.textContent = '';
     // 📄 Docs, ❓ Leads, ✓ Review have panels of their own (strip icons); the
     // 📁 panel keeps the rest. Without them (older page), all in one.
-    const docsRoot = $('pj-docs-panel') || root, leadsRoot = $('pj-leads-panel') || root, revRoot = $('pj-review-panel') || root, tripsRoot = $('pj-trips-panel');
-    [docsRoot, leadsRoot, revRoot, tripsRoot].forEach(r => { if (r && r !== root) r.textContent = ''; });
+    const docsRoot = $('pj-docs-panel') || root, leadsRoot = $('pj-leads-panel') || root, revRoot = $('pj-review-panel') || root;
+    [docsRoot, leadsRoot, revRoot].forEach(r => { if (r && r !== root) r.textContent = ''; });
     // The Projects list / the open project's overview (projects-panel.js).
     if (window._pjx) window._pjx.top(root, section);
     else section(root, 'Project', true, b => {
@@ -71,7 +73,6 @@
       b.appendChild(row);
     });
     if (window._pjSeg) window._pjSeg.section(revRoot, section);
-    if (window._pjTrips && tripsRoot) window._pjTrips.section(tripsRoot, section);
     section(leadsRoot, 'Leads', true, b => {
       const all = allLeads();
       const tabs = el('div', 'pj-tabs');
@@ -107,6 +108,12 @@
       [['inbox', `Inbox (${inbox.length})`], ['all', `All (${all.length})`], ['photos', ['image', `Photos (${photos.length})`]], ['videos', ['video', `Videos (${videos.length})`]]]
         .forEach(([k, l]) => tabs.appendChild(btn(l, () => { pj.docTab = k; render(); }, pj.docTab === k ? 'on' : '')));
       b.appendChild(tabs);
+      const gl = el('label', 'pj-row pj-sub'), gcb = el('input');
+      gcb.type = 'checkbox'; gcb.checked = groupByTrip(); gcb.dataset.f = 'groupByTrip';
+      gcb.addEventListener('change', () => { try { localStorage.setItem('flex.docsGroupByTrip', gcb.checked ? '1' : '0'); } catch (_) {} render(); });
+      gl.append(gcb, ' Group by trip');
+      gl.title = 'Put the documents of one trip together (trips come from survey dates; correct one with Trip… in a document\'s ⋯ menu)';
+      b.appendChild(gl);
       const add = btn(['plus', 'Add files (photos, scans, TIFF, PDF)…'], () => addPages({}), 'primary');
       b.appendChild(add);
       const drop = el('div', 'pj-drop', 'or drop files here');
@@ -118,7 +125,16 @@
       const list = pj.docTab === 'inbox' ? inbox : pj.docTab === 'photos' ? byDate(photos) : pj.docTab === 'videos' ? byDate(videos) : byDate(all);
       if (!list.length) b.appendChild(el('div', 'pj-note', pj.docTab === 'inbox' ? 'Inbox empty: every document is tagged to a cave, survey, station, surface point or lead.'
         : pj.docTab === 'photos' ? 'No photos yet.' : pj.docTab === 'videos' ? 'No videos yet.' : 'No documents yet.'));
-      list.slice(0, 300).forEach(d => b.appendChild(docEl(d)));
+      if (groupByTrip() && FL.tripGroups && window._pjTrips) {
+        const G = FL.tripGroups(pj.P, pj.D), rows = new Map(), none = [];
+        list.slice(0, 300).forEach(d => { const g = G.by.get('doc:' + d.id); if (g) (rows.get(g) || rows.set(g, []).get(g)).push(d); else none.push(d); });
+        const head = (t, n) => { const h = el('div', 'pj-h', t + ` (${n})`); h.dataset.tripHead = '1'; b.appendChild(h); };
+        [...rows.keys()].sort((x, y) => String(y.start).localeCompare(String(x.start))).forEach(g => {
+          head([window._pjTrips.range(g), g.name].filter(Boolean).join(' · '), rows.get(g).length);
+          rows.get(g).forEach(d => b.appendChild(docEl(d)));
+        });
+        if (none.length) { head('Not in a trip', none.length); none.forEach(d => b.appendChild(docEl(d))); }
+      } else list.slice(0, 300).forEach(d => b.appendChild(docEl(d)));
     });
     section(root, 'Field survey', false, b => {
       const svs = pj.P.order.map(id => pj.P.surveys[id]).filter(Boolean);

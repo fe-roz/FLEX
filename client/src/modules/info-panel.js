@@ -341,12 +341,18 @@
     if (pj.pid && pj.P) out.push(['Project', (pj.P.name || pj.pid) + (source === 'project' ? '' : source === 'mydata' ? ' (open; this point is in My data)' : ' (open)')]);
     return out;
   }
-  // Trips that visited a cave or hold one of its segments.
+  // "Same trip (12–13 Oct): surveys B, C · 3 documents" for a survey (segment), when others share its trip.
   function tripsRelated(cid, segIds) {
-    if (!cid || !pj.P || !FL.tripsOf) return [];
-    const ts = FL.tripsOf(pj.P).filter(t => (!segIds && t.caves.includes(cid)) || (segIds || []).some(id => t.links.includes('segment:' + id)));
-    const tx = ts.map(t => (window._pjTrips ? window._pjTrips.range(t) : t.start) + ' · ' + (t.name || 'Trip') + (t.planned ? ' (planned)' : ''));
-    return tx.length ? [['Trips', tx.join('\n')]] : [];
+    if (!cid || !pj.P || !segIds || !segIds.length || !window._pjTrips) return [];
+    const out = [], seen = new Set();
+    segIds.forEach(id => {
+      const g = window._pjTrips.group('segment:' + id);
+      if (!g || seen.has(g.id)) return;
+      seen.add(g.id);
+      const st = window._pjTrips.sameTrip('segment:' + id);
+      if (st) out.push([st.label, () => st.node]);
+    });
+    return out;
   }
   function stationRelated(c) {
     const out = [], imp = c.imp;
@@ -405,7 +411,6 @@
     const anchor = parts.map(p => p.imp.georef).find(g => g && g.mode === 'anchor' && g.station && g.station !== '__first__');
     if (!tags.length && anchor) out.push(['Placed at', 'station ' + anchor.station]);
     if (parts.length) out.push(['Survey files', parts.map(p => p.imp.name).join(', ')]);
-    out.push(...tripsRelated(c.cid));
     return out;
   }
 

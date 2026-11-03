@@ -7,7 +7,7 @@
 // row). This file adds what the strip shows on its own:
 //   - which panel is open (highlight),
 //   - the open project's name under the folder icon, in green,
-//   - the project-only icons (data-pj-only: Docs, Leads, Trips, Review)
+//   - the project-only icons (data-pj-only: Docs, Leads, Review)
 //     greyed with no project open, and their panels closed when it closes;
 //     (data-rail-later would grey one that is not built yet),
 //   - a dot on Review when suggestions are waiting,

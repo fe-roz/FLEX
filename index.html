@@ -836,7 +836,7 @@
       <div id="loadingOverlay"><h1>Loading...</h1></div>
       <!-- ── Icon strip: one panel per kind of thing (flex-rail.js). Each icon
            opens one of the panels in #toolbar, one at a time; the project-only
-           ones (Docs, Leads, Trips, Review) are greyed with no project open. -->
+           ones (Docs, Leads, Review) are greyed with no project open. -->
       <nav id="flex-rail" aria-label="Panels">
         <button type="button" data-target="#projectCollapsible" id="rail-pj" title="Projects"><svg class="ico"><use href="#i-folder"/></svg><small id="rail-pj-name">Project</small></button>
         <div class="rail-sep"></div>
@@ -848,7 +848,6 @@
         <div class="rail-sep"></div>
         <button type="button" data-target="#docsCollapsible" data-pj-only title="The project's folder and documents"><svg class="ico"><use href="#i-doc"/></svg><small>Docs</small></button>
         <button type="button" data-target="#leadsCollapsible" data-pj-only title="The project's leads"><svg class="ico"><use href="#i-help"/></svg><small>Leads</small></button>
-        <button type="button" data-target="#tripsCollapsible" data-pj-only title="The project's trips: who went, which caves, and that trip's surveys, notes and photos"><svg class="ico"><use href="#i-compass"/></svg><small>Trips</small></button>
         <button type="button" data-target="#reviewCollapsible" data-pj-only title="Suggestions to review, segments"><svg class="ico"><use href="#i-check"/></svg><small>Review</small><span class="rail-dot" id="rail-review-dot" hidden></span></button>
         <div class="rail-sep"></div>
         <button type="button" data-target="#exportCollapsible" title="Export an offline map"><svg class="ico"><use href="#i-pack"/></svg><small>Export</small></button>
@@ -1460,9 +1459,6 @@
         <div class="collapse" id="leadsCollapsible">
           <div class="lp-panel-wrap pj-side" id="pj-leads-panel"></div>
         </div>
-        <div class="collapse" id="tripsCollapsible">
-          <div class="lp-panel-wrap pj-side" id="pj-trips-panel"></div>
-        </div>
         <div class="collapse" id="reviewCollapsible">
           <div class="lp-panel-wrap pj-side" id="pj-review-panel"></div>
         </div>
@@ -2051,7 +2047,7 @@
 <script src="client/src/modules/projects-panel.js"></script>
 <!-- 📄 Docs: the project folder as on disk -->
 <script src="client/src/modules/docs-panel.js"></script>
-<!-- 🧭 Trips: dates, people, caves, and that trip's surveys, notes and photos -->
+<!-- Same trip, and the Trip… action (no panel) -->
 <script src="client/src/modules/trips.js"></script>
 <script src="client/src/modules/sketches.js"></script>  <!-- sketches (scans) on a cave, survey or station; the Files view (window._sketches) -->
 <!-- What a click on a cave selects (cave › survey › segment › station) -->
