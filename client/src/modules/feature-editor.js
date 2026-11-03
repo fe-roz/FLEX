@@ -216,13 +216,15 @@
   function tell(what, ref, res) {
     const nm = ref.name ? `“${ref.name}”` : 'it';
     let msg;
-    if (res && res.queued) msg = `${WHAT[what] || 'Saved'} here: ${nm} is waiting for CalTopo and goes when FLEX is online again`;
+    if (res && res.staged) msg = `${WHAT[what] || 'Saved'} here: ${nm} is held until you press Send to CalTopo`;
+    else if (res && res.queued) msg = `${WHAT[what] || 'Saved'} here: ${nm} is waiting for CalTopo and goes when FLEX is online again`;
     else if (res && res.conflict) msg = `${nm} was changed in CalTopo meanwhile: choose which version to keep`;
     else if (res && res.ok) msg = `${WHAT[what] || 'Saved'}: ${nm}${what === 'del' ? ' from ' : ' in '}${WHERE[ref.source] || 'its source'}`;
     else msg = `Not saved${ref.source === 'caltopo' ? ' to CalTopo' : ''}: ${(res && res.error) || 'it didn’t work'}`;
     E.last = { what, ref, result: res, message: msg };
     window.dispatchEvent(new CustomEvent('flex-feature-edited', { detail: E.last }));
-    if (res && (res.ok || res.queued)) toast(msg);
+    if (res && res.staged) { /* caltopo-write.js already said so */ }
+    else if (res && (res.ok || res.queued)) toast(msg);
     else if (res && res.conflict) { if (!res.shown && !(CT() && CT().showConflict)) conflict(ref, res); else toast(msg); }   // agent A's update shows its own dialog
     else {
       const ro = res && res.readOnly;

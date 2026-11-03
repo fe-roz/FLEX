@@ -28,9 +28,23 @@
 // Events on window: 'flex-caltopo-changed' {changes, seen} after a pull that brought changes (and after markSeen),
 //                   'flex-caltopo-queue' {pending} when the queue or the conflicts change.
 // flex.js hands every pull of a private map to _pulled(mapId, json) (null when none is loaded).
+//
+// MANUAL SYNC: nothing above reaches CalTopo by itself. update / remove (and the moves the Surface tree makes)
+// are HELD as pending local changes (the "stage") until the person presses Send (caltopo-send.js → flush()).
+//   .manual                              true (default): hold; false: write at once (tests, tools)
+//   .update(fid, patch, {toPath})        held; toPath = [folder names] moves it to a folder that is not in CalTopo yet
+//   .staged()                            [{k, fid, title, what:'edit'|'move'|'delete', op, at, toPath?}] oldest first
+//   .stagedMark(fid)                     null | 'edited' | 'moved' | 'deleted'      .stagedPath(fid) → names | null
+//   .drop(k)  .dropAll()                 forget a held change (the item goes back to CalTopo's version)
+//   .flush(k, {folderId})                send one held change now → the same answers as update; dropped when CalTopo
+//                                        took it, queued it or flagged a conflict, kept when it failed
+//   .view(json)                          the pulled map with the held changes applied (what the map draws: caltopo-map.js)
+//   .stageSig()                          changes when the held changes do
+// Kept per computer and map in localStorage `flex.ct.stage.<map id>`, so they survive a reload and work offline.
+// Events: 'flex-caltopo-stage' {staged}.
 (function () {
   'use strict';
-  const S = { map: null, json: null, idx: new Map(), offline: false, pending: [], pendKey: '', changes: [], seen: 0, newest: 0, poll: null, seq: 0, shown: new Set() };
+  const S = { map: null, json: null, idx: new Map(), offline: false, pending: [], pendKey: '', changes: [], seen: 0, newest: 0, poll: null, seq: 0, shown: new Set(), stage: [], manual: true };
   const toast = m => { if (window._pjApi && window._pjApi.toast) window._pjApi.toast(m); else console.log('[caltopo]', m); };
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   async function api(p, opts) {
@@ -51,15 +65,19 @@
   function _pulled(map, j) {
     if (!map) {
       const had = S.map || S.pending.length;
-      Object.assign(S, { map: null, json: null, idx: new Map(), offline: false, pending: [], pendKey: '', changes: [], seen: 0, newest: 0 });
+      Object.assign(S, { map: null, json: null, idx: new Map(), offline: false, pending: [], pendKey: '', changes: [], seen: 0, newest: 0, stage: [] });
       clearTimeout(S.poll);
       if (had) fire('flex-caltopo-queue', { pending: [] });
       return;
     }
-    if (map !== S.map) Object.assign(S, { pending: [], pendKey: '', changes: [], seen: 0, newest: 0 });
+    if (map !== S.map) { Object.assign(S, { pending: [], pendKey: '', changes: [], seen: 0, newest: 0 }); S.stage = loadStage(map); }
     S.map = map; S.json = j || {}; S.offline = !!(j && j.flexOffline);
     S.idx = new Map();
     ((S.json.state && S.json.state.features) || []).forEach(f => { if (f && f.id != null) S.idx.set(String(f.id), f); });
+    if (!S.offline && S.idx.size) {                // a held change for something that is gone from CalTopo: nothing to send it to
+      const gone = S.stage.filter(e => !S.idx.has(e.fid));
+      if (gone.length) { S.stage = S.stage.filter(e => S.idx.has(e.fid)); saveStage(); toast(gone.length === 1 ? `“${gone[0].title}” is gone from CalTopo: its held change was dropped` : `${gone.length} held changes were dropped: those items are gone from CalTopo`); }
+    }
     return state();
   }
   /** The queue and the changes, from the server. */
@@ -109,6 +127,62 @@
     return r;
   }
 
+  // ── The stage: changes held until Send ────────────────────────────────────
+  const stageKey = m => 'flex.ct.stage.' + m;
+  function loadStage(map) { try { const a = JSON.parse(localStorage.getItem(stageKey(map)) || '[]'); return Array.isArray(a) ? a.filter(e => e && e.fid && (e.op === 'update' || e.op === 'delete')) : []; } catch (_) { return []; } }
+  function saveStage() {
+    try { if (S.stage.length) localStorage.setItem(stageKey(S.map), JSON.stringify(S.stage)); else localStorage.removeItem(stageKey(S.map)); } catch (_) {}
+  }
+  const bare = fid => String(fid || '').replace(/^ct-/, '').replace(/^ctf-/, '');
+  const stagedFire = () => { saveStage(); fire('flex-caltopo-stage', { staged: staged() }); if (window._ctRedraw) { try { window._ctRedraw(); } catch (_) {} } };
+  const stageSig = () => S.stage.map(e => e.k + ':' + e.at).join(',');
+  function composeView(f, e) {
+    if (e.op === 'delete') return Object.assign({}, f, { properties: Object.assign({}, f.properties, { _flexDeleted: true }) });
+    const o = Object.assign({}, f, { properties: Object.assign({}, f.properties) });
+    Object.keys(e.patch || {}).forEach(k => { if (k === 'geometry') { if (e.patch.geometry) o.geometry = e.patch.geometry; } else if (e.patch[k] === null) delete o.properties[k]; else o.properties[k] = e.patch[k]; });
+    return o;
+  }
+  /** The pulled map with the held changes applied (a copy; the pulled one stays the base of edits). */
+  function view(j) {
+    if (!S.stage.length || !j || !j.state || !Array.isArray(j.state.features)) return j;
+    const m = new Map(S.stage.map(e => [e.fid, e]));
+    return Object.assign({}, j, { state: Object.assign({}, j.state, { features: j.state.features.map(f => { const e = f && m.get(String(f.id)); return e ? composeView(f, e) : f; }) }) });
+  }
+  const whatOf = e => (e.op === 'delete' ? 'delete' : (e.patch && Object.keys(e.patch).some(k => k !== 'folderId')) || !(e.toPath || (e.patch && 'folderId' in e.patch)) ? 'edit' : 'move');
+  function staged() { return S.stage.map(e => ({ k: e.k, fid: e.fid, title: e.title, what: whatOf(e), op: e.op, at: e.at, toPath: e.toPath ? e.toPath.slice() : undefined, cls: e.cls })); }
+  function stagedMark(fid) {
+    const e = S.stage.find(x => x.fid === bare(fid)); if (!e) return null;
+    const w = whatOf(e); return w === 'delete' ? 'deleted' : w === 'move' ? 'moved' : 'edited';
+  }
+  const stagedPath = fid => { const e = S.stage.find(x => x.fid === bare(fid)); return e && e.toPath ? e.toPath.slice() : null; };
+  const SAME = (a, b) => JSON.stringify(a == null ? null : a) === JSON.stringify(b == null ? null : b);
+  function stageUpdate(fid, patch, opts) {
+    const f = S.idx.get(fid), p = (f && f.properties) || {};
+    let e = S.stage.find(x => x.fid === fid);
+    if (e && e.op === 'delete') return { ok: true, staged: true };
+    if (!e) { e = { k: 'h' + Date.now().toString(36) + (S.hk = (S.hk || 0) + 1).toString(36), op: 'update', fid, cls: p.class, title: p.title || fid, patch: {}, base: p.updated, at: Date.now() }; S.stage.push(e); }
+    Object.keys(patch || {}).forEach(k => { e.patch[k] = patch[k]; });
+    if (patch && 'folderId' in patch) delete e.toPath;
+    if (opts && opts.toPath) { e.toPath = opts.toPath.slice(); delete e.patch.folderId; }
+    if (patch && patch.title) e.title = patch.title;
+    Object.keys(e.patch).forEach(k => { if (k !== 'geometry' && SAME(e.patch[k], p[k])) delete e.patch[k]; });   // put back as it was: nothing to send
+    if (e.patch.geometry && SAME(e.patch.geometry, f && f.geometry)) delete e.patch.geometry;
+    if (!Object.keys(e.patch).length && !e.toPath) S.stage = S.stage.filter(x => x !== e);
+    else e.at = Date.now();
+    stagedFire();
+    return { ok: true, staged: true };
+  }
+  function stageDelete(fid) {
+    const f = S.idx.get(fid), p = (f && f.properties) || {};
+    S.stage = S.stage.filter(x => x.fid !== fid);
+    S.stage.push({ k: 'h' + Date.now().toString(36) + (S.hk = (S.hk || 0) + 1).toString(36), op: 'delete', fid, cls: p.class, title: p.title || fid, base: p.updated, at: Date.now() });
+    stagedFire();
+    return { ok: true, staged: true };
+  }
+  function drop(k) { const n = S.stage.length; S.stage = S.stage.filter(e => e.k !== k); if (S.stage.length !== n) stagedFire(); }
+  function dropAll() { if (S.stage.length) { S.stage = []; stagedFire(); } }
+  const heldToast = (what, title) => toast(`${what} “${title}”: held until you press Send to CalTopo (${S.stage.length} waiting)`);
+
   // ── Edits ─────────────────────────────────────────────────────────────────
   async function answered(r, fid, title, opts) {
     opts = opts || {};
@@ -123,22 +197,45 @@
     return r;
   }
   const notLoaded = { ok: false, error: 'No private CalTopo map is loaded (it needs a CalTopo key).' };
+  const hold = opts => S.manual && !(opts && opts.now);
+  async function updateNow(fid, patch, opts, base) {
+    const f = S.idx.get(fid);
+    const r = await post('feature', { map: S.map, fid, cls: f && f.properties && f.properties.class, base: base !== undefined ? base : (f && f.properties ? f.properties.updated : undefined), patch: patch || {} });
+    return answered(r, fid, (patch && patch.title) || titleOf(f, fid), opts);
+  }
+  async function removeNow(fid, opts, base) {
+    const f = S.idx.get(fid), p = f && f.properties || {};
+    const q = new URLSearchParams({ map: S.map, fid });
+    if (p.class) q.set('cls', p.class);
+    const b = base !== undefined ? base : p.updated;
+    if (b != null) q.set('base', String(b));
+    const r = await api('feature?' + q, { method: 'DELETE' });
+    return answered(r, fid, titleOf(f, fid), Object.assign({ done: `Deleted in CalTopo: “${titleOf(f, fid)}”` }, opts));
+  }
   async function update(fid, patch, opts) {
     if (!S.map) return notLoaded;
-    fid = String(fid || '').replace(/^ct-/, '');
-    const f = feature(fid);
-    const r = await post('feature', { map: S.map, fid, cls: f && f.properties && f.properties.class, base: f && f.properties ? f.properties.updated : undefined, patch: patch || {} });
-    return answered(r, fid, (patch && patch.title) || titleOf(f, fid), opts);
+    fid = bare(fid);
+    if (hold(opts)) { const f = S.idx.get(fid), r = stageUpdate(fid, patch, opts); if (!(opts && opts.quiet)) heldToast('Changed', (patch && patch.title) || titleOf(f, fid)); return r; }
+    return updateNow(fid, patch, opts);
   }
   async function remove(fid, opts) {
     if (!S.map) return notLoaded;
-    fid = String(fid || '').replace(/^ct-/, '');
-    const f = feature(fid), p = f && f.properties || {};
-    const q = new URLSearchParams({ map: S.map, fid });
-    if (p.class) q.set('cls', p.class);
-    if (p.updated != null) q.set('base', String(p.updated));
-    const r = await api('feature?' + q, { method: 'DELETE' });
-    return answered(r, fid, titleOf(f, fid), Object.assign({ done: `Deleted in CalTopo: “${titleOf(f, fid)}”` }, opts));
+    fid = bare(fid);
+    if (hold(opts)) { const f = S.idx.get(fid), r = stageDelete(fid); if (!(opts && opts.quiet)) heldToast('Deleting', titleOf(f, fid)); return r; }
+    return removeNow(fid, opts);
+  }
+  /** Send one held change now (caltopo-send.js calls this for each, after creating the folders). */
+  async function flush(k, over) {
+    const e = S.stage.find(x => x.k === k);
+    if (!e || !S.map) return { ok: false, error: 'nothing held' };
+    let r;
+    if (e.op === 'delete') r = await removeNow(e.fid, { quiet: true }, e.base);
+    else {
+      const patch = Object.assign({}, e.patch, over || {});
+      r = await updateNow(e.fid, patch, { quiet: true }, e.base);
+    }
+    if (r && (r.ok || r.queued || r.conflict)) { S.stage = S.stage.filter(x => x.k !== k); stagedFire(); }
+    return r;
   }
   async function create(feat, opts) {
     if (!S.map) return notLoaded;
@@ -194,13 +291,21 @@
   }
 
   // ── Reading ───────────────────────────────────────────────────────────────
-  function feature(fid) { const f = S.idx.get(String(fid || '').replace(/^ct-/, '')); return f ? JSON.parse(JSON.stringify(f)) : null; }
+  /** The feature as it will be once the held changes are sent. */
+  function feature(fid) {
+    fid = String(fid || '').replace(/^ct-/, '');
+    let f = S.idx.get(fid); if (!f) return null;
+    const e = S.stage.find(x => x.fid === fid); if (e) f = composeView(f, e);
+    return JSON.parse(JSON.stringify(f));
+  }
   function folders() {
-    return [...S.idx.values()].filter(f => f.properties && f.properties.class === 'Folder')
+    return [...S.idx.values()].map(f => { const e = S.stage.find(x => x.fid === String(f.id)); return e ? composeView(f, e) : f; })
+      .filter(f => f.properties && f.properties.class === 'Folder' && !f.properties._flexDeleted)
       .map(f => ({ id: String(f.id), title: f.properties.title || 'Folder', folderId: f.properties.folderId || null }));
   }
   function status(fid) {
-    fid = String(fid || '').replace(/^ct-/, '');
+    fid = String(fid || '').replace(/^ct-/, '').replace(/^ctf-/, '');
+    const h = stagedMark(fid); if (h) return h;
     const p = S.pending.find(x => x.fid === fid);
     if (p) return p.state;
     return S.changes.some(c => c.fid === fid && c.at > S.seen) ? 'changed' : null;
@@ -217,6 +322,8 @@
   const interval = s => { s = +s; return s > 0 ? Math.max(30, s) : 0; };
   window._ctInterval = interval;
   window._ctWrite = {
+    get manual() { return S.manual; }, set manual(v) { S.manual = !!v; },
+    staged, stagedMark, stagedPath, drop, dropAll, flush, view, stageSig, held: () => S.stage.length,
     available: () => !!S.map, refresh: refreshMap, interval, has: fid => S.idx.has(String(fid || '').replace(/^ct-/, '')), mapId: () => S.map, feature, folders, update, remove, create, status, pending, resolve, showConflict,
     changes: () => S.changes.slice(), seen: () => S.seen, markSeen, offline: () => S.offline, retry, _pulled, _state: state,
   };

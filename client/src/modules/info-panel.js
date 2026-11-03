@@ -562,7 +562,8 @@
     if (r.source === 'caltopo' && r.fid) {
       const W = CT(); let st = null;
       try { st = W && W.status ? W.status(r.fid) : null; } catch (_) {}
-      if (st === 'waiting') out.push({ text: 'waiting for CalTopo', cls: 'wait', title: 'Saved here; it goes to CalTopo when FLEX is online again' });
+      if (st === 'edited' || st === 'moved' || st === 'deleted') out.push({ text: st + ' here, held', cls: 'wait', title: 'Held in FLEX until you press Send to CalTopo (☰ Review lists what will go)' });
+      else if (st === 'waiting') out.push({ text: 'waiting for CalTopo', cls: 'wait', title: 'Saved here; it goes to CalTopo when FLEX is online again' });
       else if (st === 'conflict') out.push({ text: 'changed in CalTopo: choose', cls: 'conf', title: 'Changed in CalTopo and here: choose which version stays', click: () => FE() && FE().resolve(r) });
       else if (st === 'failed') out.push({ text: 'not saved to CalTopo', cls: 'conf', title: 'CalTopo refused the last change' });
       else if (st === 'changed') out.push({ text: 'changed in CalTopo', cls: 'chg', title: 'Changed in CalTopo since FLEX last showed it' });

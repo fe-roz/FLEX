@@ -25,6 +25,13 @@
 // 📍 rail button): the list of what was added, changed or removed in CalTopo,
 // and the edits waiting for CalTopo, with their conflicts.
 //
+// MERGED TREE: with the project's CalTopo map loaded, the project's folders and items are not a tree of their own any
+// more: they are merged into the map's tree by folder name (surface-merge.js; mergedTree() here). CalTopo items show
+// as they are; what only the project has is marked "to send". Changes to CalTopo things are held (marks edited /
+// moved / deleted) until Send (caltopo-send.js). Rows are draggable (data-dnd) onto folders and the map row
+// (data-dpath = the target's folder names): project things move at once, CalTopo things are held, a My data point
+// queues the usual move into the project. Without a project CalTopo map the old project tree is shown.
+//
 // Every item and folder row has a ⋯ menu (row-menu.js: info, edit, rename,
 // colour, label, move, fly to, delete; a folder's display, names, rename, new
 // subfolder, move, delete); a feature's ✏️ opens the shared editor
@@ -178,7 +185,7 @@
       const x = { kind: 'file', id: l.id, name: l.name || url, url, loaded: !!f, shown: !!(f && f.show), items: f ? f.items : 0, dir: moving('file', l.id) };
       (x.dir === 'in' ? L : R).push(x);
     });
-    NICT = null;
+    NICT = null; CNT = null; MERGED = false;
     if (isOpen) {
       const FL = window.FlexLib;
       const ct = (FL.liveLayers(pj.P) || []).filter(l => l.kind === 'caltopo');
@@ -197,12 +204,15 @@
       const h = PF() ? PF().hidden() : {};
       const feats = FL.liveFeatures(pj.P), groups = FL.liveGroups(pj.P);
       NICT = notInCt(pj.P);
-      groups.filter(g => !g.parent).sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true })).forEach(g => {
+      // CalTopo is the master: with the project's map loaded, its folders and the project's are ONE tree under the map's row.
+      MERGED = !!(src && NICT && window._surfMerge && ct.some(isNow));
+      if (MERGED && window._ctSend) { try { CNT = window._ctSend.counts(NICT); } catch (e) { console.warn('[surface] counts', e); } }
+      if (!MERGED) groups.filter(g => !g.parent).sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true })).forEach(g => {
         const n = feats.filter(f => FL.groupPath(pj.P, f.group).some(x => x.id === g.id)).length;
         const nict = NICT ? feats.filter(f => NICT.has(f.id) && FL.groupPath(pj.P, f.group).some(x => x.id === g.id)).length : 0;
         L.push({ kind: 'folder', id: g.id, name: g.name || 'Folder', n, nict, shown: !h['root'] && !h['g:' + g.id] });
       });
-      const loose = feats.filter(f => !f.group).length;
+      const loose = MERGED ? 0 : feats.filter(f => !f.group).length;
       if (loose) L.push({ kind: 'loose', id: '', name: 'Not in a folder', n: loose, nict: NICT ? feats.filter(f => !f.group && NICT.has(f.id)).length : 0, shown: !h['root'] });
       (FL.liveLayers(pj.P) || []).filter(l => l.kind === 'file').forEach(l => {
         const f = loaded.get(l.url);
@@ -221,19 +231,20 @@
   // ── Marks ────────────────────────────────────────────────────────────────
   // Project features with no match in the loaded CalTopo map (ids), or null
   // with no CalTopo map loaded.
-  let NICT = null;
+  let NICT = null, CNT = null, MERGED = false, MROOT = null;
   function notInCt(P) {
     const src = ctSrc(), M = window._ctMatch;
     if (!src || !M || !P) return null;
     try { return window._ctSend ? window._ctSend.notInIds(P, src) : new Set(M.unmatched(P, src).map(f => f.id)); } catch (e) { console.warn('[surface] match', e); return null; }
   }
   const NICT_TIP = 'Not in the CalTopo map: it has no point, line or area of the same kind and name within 15 m';
-  const nictMark = () => `<b class="sc-st sc-nict" title="${NICT_TIP}">not in CalTopo</b>`;
+  const nictMark = () => `<b class="sc-st sc-nict" title="${NICT_TIP}">${MERGED ? 'to send' : 'not in CalTopo'}</b>`;
   // A CalTopo feature's edit state (caltopo-write.js).
   const CW = () => window._ctWrite;
   const ctStatus = id => { const W = CW(); if (!W || !W.status || !/^ct-/.test(String(id || ''))) return null; try { return W.status(id); } catch (_) { return null; } };
   const ST = { waiting: ['waiting', 'Your edit is waiting to go to CalTopo'], conflict: ['conflict', 'Changed in CalTopo while your edit waited: open the list (CalTopo map row) to choose'],
-    changed: ['changed', 'Changed in CalTopo since you last looked'], failed: ['failed', 'Your edit could not be sent to CalTopo'] };
+    changed: ['changed', 'Changed in CalTopo since you last looked'], failed: ['failed', 'Your edit could not be sent to CalTopo'],
+    edited: ['edited', 'Changed here, held until you press Send to CalTopo'], moved: ['moved', 'Moved here, held until you press Send to CalTopo'], deleted: ['deleted', 'Deleted here, held until you press Send to CalTopo'] };
   const stMark = st => (st && ST[st] ? `<b class="sc-st sc-st-${st}" title="${ST[st][1]}">${ST[st][0]}</b>` : '');
   /** The folder-style.js key of a top row. */
   function fkeyOf(x) {
@@ -300,7 +311,7 @@
     if (x.kind === 'pgroup') return x.n ? 'p:' + x.id : null;
     if (x.kind === 'folder') return 'g:' + x.id;
     if (x.kind === 'loose') return 'loose';
-    if ((x.kind === 'caltopo' || x.kind === 'file') && x.src && x.src.ds.entities.values.length) return 'o:' + (x.src.url || x.src.name);
+    if ((x.kind === 'caltopo' || x.kind === 'file') && x.src && (x.src.ds.entities.values.length || (MERGED && x.kind === 'caltopo' && x.inProject))) return 'o:' + (x.src.url || x.src.name);
     return null;
   }
   const isExp = k => (k.startsWith('g:') || k === 'loose' ? !!fOpen()[k] : open.has(k));
@@ -321,7 +332,7 @@
     const ftools = x.kind === 'folder' ? `<button type="button" data-gadd="${esc(x.id)}" title="Add to this folder">＋</button><button type="button" data-gdl="${esc(x.id)}" title="Download for CalTopo">⇩</button><button type="button" data-gedit="${esc(x.id)}" title="Rename, colour, move">✏️</button>` : '';
     const fk = !x.dir && fkeyOf(x);
     const marks = (x.nict ? `<b class="sc-st sc-nict" title="${NICT_TIP}">${x.nict} not in CalTopo</b>` : '') + (x.kind === 'caltopo' && x.src ? ctNewsBtn() : '');
-    let html = `<div class="cc-it${x.dir || x.wait ? ' cc-moving' : ''}" data-kind="${x.kind}" data-id="${esc(x.id)}"${fk ? ` data-fkey="${esc(fk)}"` : ''} draggable="${canMove ? 'true' : 'false'}">
+    let html = `<div class="cc-it${x.dir || x.wait ? ' cc-moving' : ''}" data-kind="${x.kind}" data-id="${esc(x.id)}"${fk ? ` data-fkey="${esc(fk)}"` : ''}${MERGED && x.kind === 'caltopo' && x.inProject ? ' data-dpath="[]"' : ''} draggable="${canMove ? 'true' : 'false'}">
       <button type="button" class="cc-eye ui-eye${eyeOn ? ' on' : eyeHalf ? ' half' : ''}" data-eye title="${(x.kind === 'file' || x.kind === 'caltopo') && !x.loaded ? 'Load' : eyeOn ? 'Hide' : 'Show'}"></button>
       <span class="cc-nm" title="${esc(x.name)}"${k ? ` data-expand="${esc(k)}"` : ''}>${k ? arrowOf(k, exp) : '<span class="sc-arrow"></span>'}${icon[x.kind] || ''} ${esc(x.name)}${x.dir || x.wait ? '<b class="cc-dot" title="Waiting: 💾 Save puts it in">•</b>' : ''}<small>${esc(sub)}${marks}</small></span>
       <span class="cc-tools">${ftools}${fsBtn(fk)}${forget}${arrow}${fk ? moreBtn() : ''}</span></div>`;
@@ -348,9 +359,10 @@
   function kids(x, isOpen) {
     const mh = (PF() ? PF().hidden() : {}), myEye = (f, a) => `<button type="button" class="cc-eye ui-eye ui-eye-sm${mh['m:' + f.id] ? ' half' : ' on'}" ${a} title="${mh['m:' + f.id] ? 'Show' : 'Hide'}"></button>`;
     if (x.kind === 'pgroup') return x.points.map(f => f.kind !== 'point' ? `<div class="sc-pt sc-wide sc-shape" data-pt="${esc(f.id)}" data-shape="1" data-rkey="my:${esc(f.id)}">${myEye(f, 'data-shpeye')}<span title="${esc(f.name)}">${fIcon[f.kind]} ${esc(f.name || (f.kind === 'area' ? 'Area' : 'Line'))}</span>
-        <span class="cc-tools">${moreBtn()}</span></div>` : `<div class="sc-pt sc-wide" data-pt="${esc(f.id)}" data-rkey="my:${esc(f.id)}">${myEye(f, 'data-pteye')}<span title="${esc(f.name)}">${esc(f.name || 'Point')}</span>
+        <span class="cc-tools">${moreBtn()}</span></div>` : `<div class="sc-pt sc-wide" data-pt="${esc(f.id)}" data-rkey="my:${esc(f.id)}"${MERGED && isOpen ? ` data-dnd="my:${esc(f.id)}" draggable="true"` : ''}>${myEye(f, 'data-pteye')}<span title="${esc(f.name)}">${esc(f.name || 'Point')}</span>
         <span class="cc-tools"><button type="button" data-ptfly title="Fly to">⌖</button>${isOpen ? '<button type="button" class="cc-mv" data-ptin title="Move this point into the project">←</button>' : ''}<button type="button" data-ptdel title="Delete the point">✕</button>${moreBtn()}</span></div>`).join('');
     if (x.kind === 'folder' || x.kind === 'loose') return projectTree(x.kind === 'loose' ? null : x.id, 0);
+    if (x.src && MERGED && x.kind === 'caltopo' && x.inProject) return mergedTree(x.src);
     if (x.src) return overlayTree(x.src);
     return '';
   }
@@ -416,6 +428,97 @@
     return out || '<div class="sc-sub sc-none">no folders</div>';
   }
 
+  // ── The merged tree: CalTopo's folders and items, the project's merged in ────────────────────────
+  // CalTopo is the master. A project folder is the CalTopo folder of the same name and path; a project item that CalTopo
+  // has (linked, or the same kind, name and place) shows once, as the CalTopo item. What only the project has is "to send".
+  // Changes to CalTopo things are held (edited / moved / deleted marks) until Send (caltopo-write.js, caltopo-send.js).
+  function ctNodes(src) {
+    const tree = PF().overlayTree(src);
+    const kidsOf = parent => (tree.get(parent) || []).map(e => {
+      const c = { id: e.id, name: e.name || e.id, folder: /^ctf-/.test(e.id), loose: !!e._ctLoose, e, kids: [] };
+      if (c.folder) c.kids = kidsOf(e);
+      return c;
+    });
+    return kidsOf(null);
+  }
+  const pathKey = (base, names) => base + '|' + names.map(n => '/' + n).join('');
+  const dpath = names => esc(JSON.stringify(names));
+  function mergedTree(src) {
+    const pj = PJ(), FL = window.FlexLib, P = PF(), h = P.hidden(), W = CW(), SM = window._surfMerge;
+    const base = 'o:' + (src.url || src.name);
+    const moved = {};
+    ((W && W.staged && W.staged()) || []).forEach(x => { if (x.toPath) moved[(x.cls === 'Folder' ? 'ctf-' : 'ct-') + x.fid] = x.toPath; });
+    const feats = FL.liveFeatures(pj.P).filter(f => NICT && NICT.has(f.id));
+    MROOT = SM.build({ ct: ctNodes(src), groups: FL.liveGroups(pj.P).map(g => ({ id: g.id, name: g.name || 'Folder', parent: g.parent || '' })), feats, moved });
+    const stIn = new Map();
+    src.ds.entities.values.forEach(e => {
+      const st = /^ct-/.test(e.id) ? ctStatus(e.id) : (W && W.stagedMark ? W.stagedMark(e.id) : null); if (!st) return;
+      for (let a = e.parent, n = 0; a && n < 50; a = a.parent, n++) stIn.set(a, (stIn.get(a) || 0) + 1);
+    });
+    const total = n => n.items.length + n.kids.reduce((a, k) => a + total(k), 0);
+    const pad = d => `style="padding-left:${4 + d * 12}px"`;
+    let out = '';
+    const ctLeaf = (it, depth, path) => {
+      const e = it.ct.e, p = path.concat(it.ct.name), hk = P.srcKey(src, '/' + p.join('/')), st = ctStatus(e.id);
+      ov.set(hk, e);
+      const where = it.moved ? ` title="Will move to ${esc((W.stagedPath(e.id) || []).join(' / '))} (held until Send)"` : '';
+      return `<div class="sc-sub sc-feat${st === 'deleted' ? ' sc-deleted' : ''}${st === 'edited' || st === 'moved' ? ' sc-held' : ''}" data-ov="${esc(hk)}" data-hk="${esc(hk)}" data-rkey="${esc(e.id)}" data-dnd="ct:${esc(e.id)}" draggable="true" ${pad(depth)}${where || ' title="Click: highlight · double-click: fly there · drag onto a folder to move it"'}><button type="button" class="cc-eye ui-eye ui-eye-sm${h[hk] ? ' half' : ' on'}" data-oeye="${esc(hk)}" title="${h[hk] ? 'Show' : 'Hide'}"></button>
+          <span class="sc-nm">${esc(it.ct.name || '(no name)')}${stMark(st)}</span><span class="cc-tools">${moreBtn()}</span></div>`;
+    };
+    const featRow = (f, depth) => {
+      const fm = featWaits(f);
+      return `<div class="sc-sub sc-feat sc-is-nict${window._ctSend && window._ctSend.hlOn() ? ' sc-hl' : ''}${fm ? ' cc-moving' : ''}" data-feat="${esc(f.id)}" data-rkey="f:${esc(f.id)}" data-dnd="f:${esc(f.id)}" draggable="true" ${pad(depth)} title="Not in CalTopo yet. Click: highlight · double-click: fly there · drag onto a folder to move it"><button type="button" class="cc-eye ui-eye ui-eye-sm${h['f:' + f.id] ? ' half' : ' on'}" data-feye="${esc(f.id)}" title="${h['f:' + f.id] ? 'Show' : 'Hide'}"></button>
+        <span class="sc-nm"><span class="sc-ic" style="color:${esc(P.colorOf(f))}">${fIcon[f.kind] || '•'}</span> ${esc(f.name || '(no name)')}${FL.flexTag(f.desc) ? ' <small>🕳</small>' : ''}${fm ? ` <small class="sc-wait">${WAIT}</small>` : ''} ${nictMark()}</span>
+        <span class="cc-tools"><button type="button" data-fedit="${esc(f.id)}" title="Edit">✏️</button>${moreBtn()}</span></div>`;
+    };
+    const visit = (node, depth) => {
+      node.kids.forEach(n => {
+        const key = pathKey(base, n.path), exp = open.has(key), ce = n.ct, gid = n.gid;
+        const fk = ce ? 'caltopo:' + ce.id.slice(4) : 'project:' + gid, dnd = ce ? 'ct:' + ce.id : 'g:' + gid;
+        const sc = SM.sendCount(n), nst = ce ? (stIn.get(ce.e) || 0) : 0, hk = ce ? P.srcKey(src, '/' + n.path.join('/')) : '';
+        if (ce) ov.set(hk, ce.e);
+        const hid = ce ? !!h[hk] : !!h['g:' + gid];
+        const mark = (!ce ? ` <b class="sc-st sc-nict" title="Not in CalTopo yet: Send creates it">to send</b>` : sc.items ? ` <b class="sc-st sc-nict" title="${sc.items} item${sc.items === 1 ? '' : 's'} inside not in CalTopo yet">${sc.items} to send</b>` : '')
+          + (n.moved || (ce && W && W.stagedMark && W.stagedMark(ce.id) === 'moved') ? stMark('moved') : '') + (ce && W && W.stagedMark && W.stagedMark(ce.id) === 'edited' ? stMark('edited') : '') + (ce && W && W.stagedMark && W.stagedMark(ce.id) === 'deleted' ? stMark('deleted') : '');
+        const eye = ce ? `data-oeye="${esc(hk)}"` : `data-geye="${esc(gid)}"`;
+        const tools = ce && !n.gids.length ? `${fsBtn(fk)}${moreBtn()}`
+          : `${gid ? `<button type="button" data-gadd="${esc(gid)}" title="Add to this folder">＋</button><button type="button" data-gdl="${esc(gid)}" title="Download for CalTopo">⇩</button><button type="button" data-gedit="${esc(gid)}" title="Rename, colour, move">✏️</button>` : ''}${fsBtn(fk)}${moreBtn()}`;
+        out += `<div class="sc-sub sc-fold sc-mf${ce && ce.loose ? ' sc-loose' : ''}${!ce ? ' sc-tosend' : ''}${ce && W && W.stagedMark && W.stagedMark(ce.id) === 'deleted' ? ' sc-deleted' : ''}" data-fkey="${esc(fk)}" data-dpath="${dpath(n.path)}"${ce && ce.loose ? '' : ` data-dnd="${esc(dnd)}" draggable="true"`}${n.gids.length ? ` data-gid="${esc(gid)}" data-gids="${esc(n.gids.join(','))}"` : ''}${ce ? ` data-hk="${esc(hk)}"` : ''} ${pad(depth)}><button type="button" class="cc-eye ui-eye ui-eye-sm${hid ? ' half' : ' on'}" ${eye} title="${hid ? 'Show' : 'Hide'}"></button>
+          <span class="sc-nm" data-expand="${esc(key)}"${ce && ce.loose ? ' title="Not in a CalTopo folder (listed as CalTopo lists them)"' : ''}>${arrowOf(key, exp)}${!ce && gid ? `<span class="pjs-sw" style="background:${esc(P.groupColor(gid))}"></span>` : ''}📁 ${esc(n.name || '(folder)')} <small>${total(n)}</small>${mark}${nst ? ` <b class="sc-st sc-st-in" title="${nst} inside held, waiting, in conflict or changed">${nst}</b>` : ''}</span>
+          <span class="cc-tools">${tools}</span></div>`;
+        if (exp) visit(n, depth + 1);
+      });
+      const cts = node.items.filter(i => i.ct), fts = node.items.filter(i => i.feat);
+      const shown = cts.length > 200 ? cts.filter((i, k) => k < 200 || FORCE.has(i.ct.id)) : cts;
+      shown.forEach(i => { out += ctLeaf(i, depth, node.path); });
+      if (cts.length > shown.length) out += `<div class="sc-sub sc-none" style="padding-left:${4 + depth * 12}px">… and ${cts.length - shown.length} more</div>`;
+      fts.forEach(i => { out += featRow(i.feat, depth); });
+    };
+    visit(MROOT, 0);
+    return out || '<div class="sc-sub sc-none">no folders</div>';
+  }
+  /** The names from the top to a CalTopo folder (by its id, with or without 'ctf-'), or null. */
+  function ctFolderPath(fid) {
+    const id = 'ctf-' + String(fid || '').replace(/^ctf-/, '');
+    const walk = n => { if (n.ct && n.ct.id === id) return n.path; for (const k of n.kids) { const r = walk(k); if (r) return r; } return null; };
+    return MROOT ? walk(MROOT) : null;
+  }
+  /** New folder… in the merged tree: a project folder, "to send" until Send makes it in CalTopo. path: the parent's names. */
+  async function newFolder(path) {
+    const A = window._pjApi, SM = window._surfMerge;
+    path = path || [];
+    if (!A || !SM || !PJ().pid || !MERGED) { if (A) A.toast('Open the project with its CalTopo map first'); return null; }
+    const r = await A.dialog({ title: path.length ? `A new folder in “${path[path.length - 1]}”` : 'A new folder in the CalTopo map', input: { value: '', placeholder: 'Folder name' }, buttons: [{ label: 'Cancel', value: null }, { label: 'Add', value: 'ok', primary: true }] });
+    const nm = r && r.button === 'ok' ? String(r.value || '').trim() : '';
+    if (!nm) return null;
+    if (SM.find(MROOT, path.concat(nm))) { A.toast(`“${nm}” is already there`); return null; }
+    const gid = await SM.ensureGroupPath(path.concat(nm));
+    const src = ctSrc(); if (src) { const base = 'o:' + (src.url || src.name); open.add(base); path.forEach((_, i) => open.add(pathKey(base, path.slice(0, i + 1)))); }
+    last = ''; await render();
+    A.toast(`Folder “${nm}” added: it is created in CalTopo when you press Send`);
+    return gid;
+  }
+
   // The CalTopo map loaded now (it is the source of truth when connected).
   const ctSrc = () => { const w = ws(); return (w && w.vectorSources && w.vectorSources().find(s => s.kind === 'caltopo')) || null; };
   // ⧉ Duplicates of CalTopo: the project's features that the loaded CalTopo
@@ -454,7 +557,7 @@
   function bar(isOpen) {
     const on = !MS.off;
     const tools = isOpen
-      ? `<button type="button" data-draw="point" title="Draw a point in the project">＋ Point</button><button type="button" data-draw="line" title="Draw a line">＋ Line</button><button type="button" data-draw="area" title="Draw an area">＋ Area</button><button type="button" data-tool="folder" title="A new folder">＋ Folder</button><button type="button" data-tool="import" title="GPX / KML / KMZ / GeoJSON into the project's features">⇪ Import</button><button type="button" data-tool="download" title="All the project's features, for CalTopo">⇩ Download</button><button type="button" data-tool="file" title="Show a KMZ / GeoJSON / GPX file as it is (a data file)">📄 Add file</button>${NICT && NICT.size && window._ctSend ? `<button type="button" data-tool="ctsend" title="Add the items that are not in the CalTopo map to it (you see the list first)">⇪ Send ${NICT.size} to CalTopo</button>` : ''}${ctSrc() && window._ctMatch ? '<button type="button" data-tool="dups" title="The project’s features that the loaded CalTopo map already has (same name, within 15 m)">⧉ Duplicates of CalTopo</button>' : ''}`
+      ? `<button type="button" data-draw="point" title="Draw a point in the project">＋ Point</button><button type="button" data-draw="line" title="Draw a line">＋ Line</button><button type="button" data-draw="area" title="Draw an area">＋ Area</button><button type="button" data-tool="folder" title="A new folder">＋ Folder</button><button type="button" data-tool="import" title="GPX / KML / KMZ / GeoJSON into the project's features">⇪ Import</button><button type="button" data-tool="download" title="All the project's features, for CalTopo">⇩ Download</button><button type="button" data-tool="file" title="Show a KMZ / GeoJSON / GPX file as it is (a data file)">📄 Add file</button>${window._ctSend && (CNT ? CNT.total : NICT && NICT.size) ? `<button type="button" data-tool="ctsend" title="Send everything that waits for CalTopo: new items and folders, and the changes held to its items (you see the list first)">⇪ Send ${CNT ? CNT.total : NICT.size} to CalTopo</button>${CNT ? '<button type="button" data-tool="ctreview" title="What will be sent; drop a held change here">☰ Review</button>' : ''}` : ''}${ctSrc() && window._ctMatch ? '<button type="button" data-tool="dups" title="The project’s features that the loaded CalTopo map already has (same name, within 15 m)">⧉ Duplicates of CalTopo</button>' : ''}`
       : `<button type="button" data-tool="file" title="Show a KMZ / GeoJSON / GPX file">📄 Add KMZ / GeoJSON / GPX</button>`;
     const lab = labelsOn();
     return `<div class="sc-bar"><button type="button" class="sc-master${on ? ' on' : ''}" data-master role="switch" aria-checked="${!!on}" title="${on ? 'Hide every feature on the surface (each keeps its own setting)' : 'Show the features again, as each was set'}"><span class="ui-sw ui-sw-sm"></span>Show features</button><button type="button" class="sc-master sc-lab${lab ? ' on' : ''}" data-labels role="switch" aria-checked="${!!lab}" title="${lab ? 'Hide the names on the map' : 'Show the names on the map'}"><span class="ui-sw ui-sw-sm"></span>Labels</button><span class="sc-tools">${tools}</span></div>${isOpen && window._ctSend && (window._ctSend.hlSync(), window._ctSend.reminder()) ? window._ctSend.reminder().html : ''}`;
@@ -537,6 +640,7 @@
     if (/^ctf?-/.test(key)) { const src = srcs.find(s => s.kind === 'caltopo'); const e = src && src.ds.entities.getById(key); return e ? { e, src } : null; }
     return null;
   }
+  const mExp = names => { const s0 = ctSrc(); if (!s0) return []; const b = 'o:' + (s0.url || s0.name); return [b].concat(names.map((_, i) => pathKey(b, names.slice(0, i + 1)))); };
   /** What to open and which row to look for. */
   function target(key) {
     const pj = PJ(), FL = window.FlexLib, P = pj.P, w = ws();
@@ -585,10 +689,12 @@
     if ((m = key.match(/^g:(.+)$/)) && P) {
       const g = P.groups[m[1]]; if (!g || g.removed) return null;
       const path = FL.groupPath(P, g.id);
+      if (MERGED) return { exp: mExp(path.map(x => x.name || 'Folder')), sel: `[data-fkey="project:${cssq(g.id)}"],[data-gid="${cssq(g.id)}"]` };
       return { exp: path.map(x => 'g:' + x.id), sel: `[data-fkey="project:${cssq(g.id)}"]` };
     }
     if ((m = key.match(/^f:(.+)$/)) || (P && P.features && P.features[key] && (m = [0, key]))) {
       const f = P && P.features[m[1]]; if (!f || f.removed) return null;
+      if (MERGED) return NICT && NICT.has(f.id) ? { exp: mExp(f.group ? FL.groupPath(P, f.group).map(x => x.name || 'Folder') : []), sel: `[data-rkey="f:${cssq(f.id)}"]` } : null;   // the ones CalTopo has show as CalTopo's
       const exp = f.group ? FL.groupPath(P, f.group).map(x => 'g:' + x.id) : ['loose'];
       return { exp, sel: `[data-rkey="f:${cssq(f.id)}"]` };
     }
@@ -735,12 +841,17 @@
       else if (t === 'download' && P) P.downloadMenu('');
       else if (t === 'dups') dupsDialog();
       else if (t === 'ctsend') window._ctSend.send({ all: true });
+      else if (t === 'ctreview') window._ctSend.review();
       else if (t === 'ctretry') { if (window._ctWrite) window._ctWrite.retry(); }
       else if (t === 'cthl') {
         const on = window._ctSend.highlight();
         if (on && PJ().P) {                     // the folders holding them open, so the marked rows show
           const FL = window.FlexLib, o = fOpen(), ids = window._ctSend.notInIds(PJ().P);
-          FL.liveFeatures(PJ().P).filter(f => ids && ids.has(f.id)).forEach(f => { if (!f.group) o.loose = true; else FL.groupPath(PJ().P, f.group).forEach(g => { o['g:' + g.id] = true; }); });
+          const srcC = ctSrc(), baseC = srcC && 'o:' + (srcC.url || srcC.name);
+          FL.liveFeatures(PJ().P).filter(f => ids && ids.has(f.id)).forEach(f => {
+            if (MERGED && baseC) { open.add(baseC); FL.groupPath(PJ().P, f.group).forEach((g, i, a) => open.add(pathKey(baseC, a.slice(0, i + 1).map(x => x.name || 'Folder')))); }
+            else if (!f.group) o.loose = true; else FL.groupPath(PJ().P, f.group).forEach(g => { o['g:' + g.id] = true; });
+          });
         }
         last = ''; render();
       }
@@ -753,7 +864,11 @@
       const d = gb.dataset, A = window._pjApi;
       if (d.feye) { masterOnFirst(); const h = P.hidden(); P.setHidden('f:' + d.feye, !h['f:' + d.feye]); P.draw(); last = ''; render(); }
       else if (d.geye) { masterOnFirst(); const h = P.hidden(); P.setHidden('g:' + d.geye, !h['g:' + d.geye]); P.draw(); last = ''; render(); }
-      else if (d.oeye) { masterOnFirst(); const h = P.hidden(); P.setHidden(d.oeye, !h[d.oeye]); P.applyOverlayHidden(); last = ''; render(); }
+      else if (d.oeye) {
+        masterOnFirst(); const h = P.hidden(), to = !h[d.oeye]; P.setHidden(d.oeye, to);
+        ((gb.closest('[data-gids]') || { dataset: {} }).dataset.gids || '').split(',').filter(Boolean).forEach(g => P.setHidden('g:' + g, to));   // a merged folder: its project folders go with it
+        P.applyOverlayHidden(); if (P.draw) P.draw(); last = ''; render();
+      }
       else if (d.fedit) { if (window._featEdit) window._featEdit.open({ source: 'project', id: d.fedit }); else P.editFeature(d.fedit); }   // the shared editor, as from ⋯ and the info panel
       else if (d.gdl) P.downloadMenu(d.gdl);
       else if (d.gedit) P.editGroup(d.gedit);
@@ -792,6 +907,41 @@
   host.addEventListener('dragleave', e => { const c = e.target.closest('[data-col]'); if (c && !c.contains(e.relatedTarget)) c.classList.remove('cc-drop'); });
   host.addEventListener('drop', e => { const c = e.target.closest('[data-col]'); if (!c || !drag) return; e.preventDefault(); c.classList.remove('cc-drop'); if (c.dataset.col !== drag.from) move(drag.kind, drag.id, c.dataset.col === 'p' ? 'in' : 'out'); drag = null; });
   host.addEventListener('dragend', () => { drag = null; host.querySelectorAll('.cc-drop').forEach(c => c.classList.remove('cc-drop')); });
+
+  // Drag and drop in the merged tree: a point, line, area or folder onto a folder (or the map row = the top level).
+  // Project things move at once; CalTopo things are held until Send; a My data point waits for 💾 Save (the usual move).
+  let dnd = null;
+  const dropRow = el => el && el.closest('[data-dpath]');
+  const clearDrop = () => host.querySelectorAll('.sc-drop').forEach(r => r.classList.remove('sc-drop'));
+  host.addEventListener('dragstart', e => {
+    const r = e.target.closest ? e.target.closest('[data-dnd]') : null; if (!r || !MERGED) return;
+    dnd = r.dataset.dnd; r.classList.add('sc-dragging');
+    try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dnd); } catch (_) {}
+    e.stopPropagation();
+  });
+  host.addEventListener('dragover', e => {
+    const t = dropRow(e.target); if (!dnd || !t) return;
+    e.preventDefault(); try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
+    if (!t.classList.contains('sc-drop')) { clearDrop(); t.classList.add('sc-drop'); }
+  });
+  host.addEventListener('dragleave', e => { const t = dropRow(e.target); if (t && !t.contains(e.relatedTarget)) t.classList.remove('sc-drop'); });
+  host.addEventListener('drop', async e => {
+    const t = dropRow(e.target); if (!dnd || !t) return;
+    e.preventDefault(); clearDrop();
+    const tok = dnd; dnd = null;
+    let path; try { path = JSON.parse(t.dataset.dpath); } catch (_) { return; }
+    try {
+      const msg = await window._surfMerge.drop(tok, path, MROOT);
+      const A = window._pjApi;
+      if (A && msg && !['held', 'moved', 'queued'].includes(msg)) A.toast(msg);
+      else if (A && msg === 'queued') A.toast('It moves into the project when you 💾 Save, then waits to be sent');
+      const src = ctSrc(); if (src) open.add('o:' + (src.url || src.name));
+      if (path.length && src) open.add(pathKey('o:' + (src.url || src.name), path));
+      if (msg === 'queued') my = null;
+    } catch (err) { console.warn('[surface] drop', err); if (window._pjApi) window._pjApi.toast('That didn’t work: ' + (err.message || err)); }
+    last = ''; soon(true);
+  });
+  host.addEventListener('dragend', () => { dnd = null; clearDrop(); host.querySelectorAll('.sc-dragging').forEach(r => r.classList.remove('sc-dragging')); });
 
   // My data changes (a point made or deleted, a file loaded or forgotten).
   const hook = setInterval(() => {
@@ -901,6 +1051,14 @@
   .sc-news-pop .sc-pq { display: grid; grid-template-columns: 58px 1fr auto; gap: 6px; align-items: center; padding: 3px 8px; font-size: 12px; color: #e8ece9; }
   .sc-news-pop .sc-pq b { font-size: 10px; text-transform: uppercase; color: #8ab4ec; } .sc-news-pop .sc-pq-conflict b, .sc-news-pop .sc-pq-failed b { color: #ff8a7a; }
   .sc-news-pop .sc-pq button { border: 1px solid rgba(255,255,255,.2); padding: 1px 8px; }
+  /* held changes, to send, drag and drop */
+  #surf-cols .sc-st-edited, #surf-cols .sc-st-moved { color: #f2c24e; background: rgba(242,194,78,.12); border: 1px solid rgba(242,194,78,.4); }
+  #surf-cols .sc-st-deleted { color: #ff8a7a; background: rgba(255,120,100,.12); border: 1px solid rgba(255,120,100,.45); }
+  #surf-cols .sc-deleted .sc-nm { text-decoration: line-through; opacity: .6; }
+  #surf-cols .sc-tosend > .sc-nm { font-style: italic; }
+  #surf-cols .sc-sub[draggable="true"], #surf-cols .sc-pt[draggable="true"] { cursor: grab; }
+  #surf-cols .sc-dragging { opacity: .45; }
+  #surf-cols .sc-drop { outline: 2px dashed #ff9a62; outline-offset: -2px; background: rgba(255,154,98,.12); }
   /* reveal: the row flashes */
   @keyframes row-flash { 0%, 40% { background: rgba(255,230,0,.35); box-shadow: inset 0 0 0 1px #ffe600; } 100% { background: transparent; box-shadow: none; } }
   #surf-cols .row-flash { animation: row-flash 1.8s ease-out; }
@@ -910,6 +1068,7 @@
 
   window.addEventListener('flex-caltopo-changed', soonNews);
   window.addEventListener('flex-caltopo-queue', soonNews);
+  window.addEventListener('flex-caltopo-stage', soonNews);
   window.addEventListener('flex-folder-style', () => { last = ''; soon(); });
   window.addEventListener('flex-feature-edited', () => { last = ''; soon(true); });
   // The CalTopo map row, for its ⋯ menu (row-menu.js): what it is and what can be done with it.
@@ -927,5 +1086,5 @@
     last = ''; soon();
   }
   function ctUnload() { const w = ws(); if (w && w.clearCaltopo) w.clearCaltopo(); last = ''; soon(true); }   // a map in My data: Remove
-  window._surfCols = { ctMap, ctRename, ctLeave, ctUnload, reveal, news: a => newsPop(a || host.querySelector('[data-ctnews]') || host), labels: on => (on === undefined ? LB : setLabels(on)), render: async () => { while (busy) await new Promise(r => setTimeout(r, 20)); last = ''; return render(); }, refresh: () => soon(true), master: on => (on === undefined ? !MS.off : setMaster(on)) };
+  window._surfCols = { newFolder, ctFolderPath, merged: () => MERGED, ctMap, ctRename, ctLeave, ctUnload, reveal, news: a => newsPop(a || host.querySelector('[data-ctnews]') || host), labels: on => (on === undefined ? LB : setLabels(on)), render: async () => { while (busy) await new Promise(r => setTimeout(r, 20)); last = ''; return render(); }, refresh: () => soon(true), master: on => (on === undefined ? !MS.off : setMaster(on)) };
 })();

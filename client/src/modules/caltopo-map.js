@@ -15,7 +15,7 @@
 //     -> { caltopoState, loadCaltopoKml, clearCaltopo, renderCaltopoStatus,
 //          _fetchCaltopoKml, _showCaltopoLoggedIn }
 //
-// Hooks defined here (unchanged): window._ctApplyJson, window._ctRefresh,
+// Hooks defined here (unchanged): window._ctApplyJson, window._ctRefresh, window._ctRedraw (draws the held changes),
 // window._loadCaltopo, window._clearCaltopo, window._caltopoKeyDialog,
 // window._caltopoKeyClear, window._caltopoPickMap, window._caltopoLogout.
 // The key-section render (500 ms) and the bookmarklet link are set up when this runs.
@@ -117,7 +117,7 @@ function _caltopoJsonToDataSource(result, ds) {
       const p = f.properties || {}, g = f.geometry;
       if (!g || p.class === 'Folder' || !g.coordinates) return;
       const id = 'ct-' + f.id;
-      const sig = caltopoFeatureSig(g, p);
+      const sig = caltopoFeatureSig(g, p) + (p._flexDeleted ? '~del' : '');     // a held delete (caltopo-write.js): in the list, not on the map
       const had = E.getById(id);
       if (had && had._ctSig === sig) { keep.add(id); n++; const par = parentOf(f); if (had.parent !== par) had.parent = par; return; }
       if (had) E.remove(had);
@@ -125,7 +125,8 @@ function _caltopoJsonToDataSource(result, ds) {
       const P = c => Cesium.Cartesian3.fromDegrees(c[0], c[1], 0);
       let ent = null;
       try {
-        if (g.type === 'Point') {
+        if (p._flexDeleted) ent = E.add(base);
+        else if (g.type === 'Point') {
           const col = _ctColor(p['marker-color'], '#ff8800');
           ent = E.add(Object.assign(base, { position: P(g.coordinates),
             point: { pixelSize: 9, color: col, outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5, heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN, disableDepthTestDistance: 5000 },
@@ -150,6 +151,7 @@ function _caltopoJsonToDataSource(result, ds) {
 }
 window._ctApplyJson = _caltopoJsonToDataSource;                // tests
 window._ctRefresh = () => _fetchCaltopoKml();                   // re-read the map now (caltopo-write.js, after an edit)
+window._ctRedraw = () => (caltopoState.url ? _fetchCaltopoKml() : null);   // draw the held changes (the server answers from its fresh copy)
 // Long KML lines (public maps, no key): simplified once after loading.
 function _ctSimplifyKml(ds) {
   const now = Cesium.JulianDate.now();
@@ -177,15 +179,16 @@ async function _fetchCaltopoKml() {
       if (window._ctLayers) window._ctLayers.apply(mapId, j);           // the map's custom layers → 🗺 Layers (caltopo-layers.js)
       const offl = j.flexOffline ? `⚠ CalTopo not reachable: FLEX’s copy from ${new Date(j.flexPulled).toLocaleString()}, ` : '';
       const ds0 = caltopoState.dataSource;
-      if (ds0 && ds0._ctJson && caltopoState._ctText === txt && caltopoState._ctMapId === mapId) {       // nothing changed: nothing to do
+      const W = window._ctWrite, key = txt + '|' + (W && W.stageSig ? W.stageSig() : '');       // the held changes are drawn too (caltopo-write.js)
+      if (ds0 && ds0._ctJson && caltopoState._ctText === key && caltopoState._ctMapId === mapId) {       // nothing changed: nothing to do
         _setCaltopoStatus(offl ? offl + `${ds0._ctCount} feature(s)` : `✓ private map, ${ds0._ctCount} feature(s), checked ${new Date().toLocaleTimeString()}`, offl ? '#fc6' : '#8f8');
         renderCaltopoStatus();
         return;
       }
       const same = ds0 && ds0._ctJson && caltopoState._ctMapId === mapId;
-      const ds = _caltopoJsonToDataSource(j, same ? ds0 : null);
+      const ds = _caltopoJsonToDataSource(W && W.view ? W.view(j) : j, same ? ds0 : null);
       ds._ctJson = true;
-      caltopoState._ctText = txt; caltopoState._ctMapId = mapId;
+      caltopoState._ctText = key; caltopoState._ctMapId = mapId;
       if (!same) {
         if (ds0) cesiumViewer.dataSources.remove(ds0, true);
         cesiumViewer.dataSources.add(ds);

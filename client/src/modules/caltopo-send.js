@@ -2,7 +2,11 @@
 //
 //   window._ctSend (and module.exports under Node, for tools/test_caltopo_send.js: the pure part)
 //
-//   send({ feature: id } | { group: gid } | { all: true })   preview → confirm → send → summary
+//   send({ feature: id } | { group: gid } | { all: true } [, confirmed])   preview → confirm → send → summary.
+//        { all } sends EVERYTHING that waits for CalTopo: the project's items that are not in CalTopo, its folders that
+//        CalTopo doesn't have (also empty ones), and the held changes to CalTopo items (caltopo-write.js: edits, moves, deletes).
+//   counts()   { items, folders, edits, total } — what { all } would send (the number on the Send button)
+//   review()   the list of what will be sent, each held change with a Drop button; its Send button sends it all
 //   notIn(P, src)        the project's features that are not in CalTopo (caltopo-match.js, minus the ones
 //                        already sent: see "The link")
 //   notInIds(P, src)     the same as a Set of ids, or null with no CalTopo map loaded
@@ -89,12 +93,11 @@
    *   pathOf(groupId) → [names] from the top.
    * → { folders: [{ key, name, parent: key|null, id: existing id | null }], items: [{ f, folder: key|null }] }
    */
-  function plan(feats, ctFolders, pathOf) {
+  function plan(feats, ctFolders, pathOf, extra) {
     const norm = s => String(s || '').trim().toLowerCase();
     const folders = [], byKey = new Map(), items = [];
     const find = (parentId, name) => (ctFolders || []).find(x => String(x.folderId || '') === String(parentId || '') && norm(x.title) === norm(name));
-    feats.forEach(f => {
-      const names = f.group ? pathOf(f.group) : [];
+    const walk = names => {
       let parentKey = null, parentId = null, known = true;
       names.forEach(nm => {
         const key = (parentKey || '') + '\u0001' + norm(nm);
@@ -106,9 +109,11 @@
         const fo = byKey.get(key);
         known = known && !!fo.id; parentId = fo.id; parentKey = key;
       });
-      items.push({ f, folder: parentKey });
-    });
-    return { folders, items };
+      return parentKey;
+    };
+    feats.forEach(f => { items.push({ f, folder: walk(f.group ? pathOf(f.group) : []) }); });
+    (extra || []).forEach(names => { walk(names); });          // folders wanted with nothing of ours in them yet
+    return { folders, items, keyOf: names => walk(names) };
   }
 
   if (!BROWSER) return { parseTag, makeTag, toCalTopo, plan, hex };
@@ -182,9 +187,62 @@
     const old = w.pending().filter(p => p.state === 'waiting' && Date.now() - (p.at || 0) > 86400000).length;
     const bits = [];
     if (n >= 1) bits.push(`${n} item${n === 1 ? '' : 's'} not in CalTopo — <button type="button" class="sc-link" data-tool="ctsend">Send…</button> · <button type="button" class="sc-link${hlFlag ? ' sc-on' : ''}" data-tool="cthl" title="${hlFlag ? 'Remove the marks' : 'Mark them on the map and in the list'}">${hlFlag ? 'Clear highlight' : 'Highlight'}</button>`);
+    const c = counts(), extras = c.edits + c.folders;
+    if (extras) bits.push(`${c.edits ? `${c.edits} change${c.edits === 1 ? '' : 's'} to CalTopo items` : ''}${c.edits && c.folders ? ' and ' : ''}${c.folders ? `${c.folders} new folder${c.folders === 1 ? '' : 's'}` : ''} held — <button type="button" class="sc-link" data-tool="ctreview">Review…</button>${n < 1 ? ' · <button type="button" class="sc-link" data-tool="ctsend">Send</button>' : ''}`);
     if (old) bits.push(`${old} edit${old === 1 ? '' : 's'} waiting for CalTopo for over a day — <button type="button" class="sc-link" data-tool="ctretry">Try now</button>`);
     if (!bits.length) return null;
     return { n, old, html: `<div class="sc-remind" data-ctremind>${ic('info', 13)} <span>${bits.join(' · ')}</span></div>` };
+  }
+
+  // ── Everything that waits for CalTopo ─────────────────────────────────────
+  /** Names of every live project folder, from the top: [[names]…] */
+  function groupPaths(P) {
+    const L = FL();
+    return L.liveGroups(P).map(g => L.groupPath(P, g.id).map(x => x.name || 'Folder'));
+  }
+  const stagedList = () => { const w = W(); return w && w.staged ? w.staged() : []; };
+  /** The plan for { all }: items, folders (also empty ones), the held moves' folders. */
+  function planAll(P, feats) {
+    const w = W();
+    const held = stagedList(), extra = groupPaths(P).concat(held.filter(h => h.toPath).map(h => h.toPath));
+    const pl = plan(feats, w.folders(), g => pathOf(P, g), extra);
+    // folders to create that nothing of ours goes through: counted on their own
+    const used = new Set();
+    const mark = key => { for (let k = key; k; k = (pl.folders.find(x => x.key === k) || {}).parent) used.add(k); };
+    pl.items.forEach(it => it.folder && mark(it.folder));
+    held.filter(h => h.toPath).forEach(h => mark(pl.keyOf(h.toPath)));
+    pl.lone = pl.folders.filter(x => !x.id && !used.has(x.key));
+    return pl;
+  }
+  function counts(ids) {          // ids: the Set of not-in-CalTopo item ids when the caller has it already
+    const w = W(), pj = PJ();
+    if (!w || !w.available() || !pj.P || !ctSrc()) return { items: 0, folders: 0, edits: 0, total: 0 };
+    const feats = ids ? FL().liveFeatures(pj.P).filter(f => ids.has(f.id)) : notIn(pj.P), pl = planAll(pj.P, feats), edits = stagedList().length;
+    return { items: feats.length, folders: pl.lone.length, edits, total: feats.length + pl.lone.length + edits };
+  }
+  const WHATW = { edit: 'changed', move: 'moved', delete: 'deleted' };
+  /** The list of what will be sent. Each held change can be dropped here. → true when the person pressed Send. */
+  async function review() {
+    const a = A(), w = W(), pj = PJ();
+    if (!w || !w.available() || !pj.P) { toast(can() || 'Open the project first.'); return false; }
+    const body = a.el('div', 'cts-review');
+    const draw = () => {
+      const feats = notIn(pj.P), pl = planAll(pj.P, feats), held = stagedList(), P = pj.P;
+      const row = (k, t, extra) => `<div class="cts-row"><span class="cts-k">${esc(k)}</span> <b>${esc(t)}</b>${extra || ''}</div>`;
+      let h = '<style>.cts-review{max-height:46vh;overflow:auto;font-size:12px}.cts-h{margin:8px 0 2px;font-weight:600;opacity:.8}.cts-row{padding:2px 0;display:flex;gap:6px;align-items:center}.cts-row b{font-weight:500}.cts-k{display:inline-block;min-width:44px;opacity:.6;font-size:10.5px;text-transform:uppercase}.cts-p{opacity:.65}.cts-drop{margin-left:auto;background:none;border:1px solid rgba(255,255,255,.25);color:inherit;border-radius:4px;padding:0 7px;cursor:pointer;font-size:11px}</style>';
+      if (held.length) h += `<div class="cts-h">Changes to CalTopo items (${held.length})</div>` + held.map(x => row(WHATW[x.what] || x.what, x.title, `${x.toPath ? ` <span class="cts-p">→ ${esc(x.toPath.join(' / '))}</span>` : ''}<button type="button" class="cts-drop" data-drop="${esc(x.k)}" title="Forget this change: the item stays as CalTopo has it">Drop</button>`)).join('');
+      if (feats.length) h += `<div class="cts-h">Items to add (${feats.length})</div>` + feats.slice(0, 200).map(f => row(KIND[f.kind] || '', titleOf(f), f.group ? ` <span class="cts-p">→ ${esc(pathOf(P, f.group).join(' / '))}</span>` : '')).join('') + (feats.length > 200 ? `<div class="cts-p">… and ${feats.length - 200} more</div>` : '');
+      if (pl.lone.length) h += `<div class="cts-h">Folders to create (${pl.lone.length})</div>` + pl.lone.map(x => row('folder', x.name)).join('');
+      if (!held.length && !feats.length && !pl.lone.length) h += '<div class="cts-p">Nothing is waiting for CalTopo.</div>';
+      body.innerHTML = h;
+    };
+    draw();
+    body.addEventListener('click', e => { const b = e.target.closest('[data-drop]'); if (!b) return; w.drop(b.dataset.drop); draw(); });
+    const n = counts().total;
+    const r = await a.dialog({ title: 'Waiting for CalTopo', body, wide: true, buttons: [{ label: 'Close', value: null }, { label: 'Send to CalTopo', value: 'go', primary: true }] });
+    if (!r || r.button !== 'go') return false;
+    send({ all: true }, true);
+    return n > 0;
   }
 
   // ── Sending ───────────────────────────────────────────────────────────────
@@ -197,16 +255,19 @@
   const pathOf = (P, gid) => FL().groupPath(P, gid).map(g => g.name || 'Folder');
   const colourOf = f => (window._pjf && window._pjf.colorOf ? window._pjf.colorOf(f) : (f.style && f.style.color)) || '#ffb020';
 
-  function preview(P, pl, single) {
+  function preview(P, pl, single, held) {
     const a = A();
+    held = held || [];
     const folderNew = pl.folders.filter(x => !x.id);
     const rows = pl.items.slice(0, 200).map(it => {
       const p = it.f.group ? pathOf(P, it.f.group).join(' / ') : '';
       return `<div class="cts-row"><span class="cts-k">${KIND[it.f.kind] || ''}</span> <b>${esc(titleOf(it.f))}</b>${p ? ` <span class="cts-p">→ ${esc(p)}</span>` : ''}</div>`;
-    }).join('') + (pl.items.length > 200 ? `<div class="cts-p">… and ${pl.items.length - 200} more</div>` : '');
-    const n = pl.items.length;
+    }).join('') + (pl.items.length > 200 ? `<div class="cts-p">… and ${pl.items.length - 200} more</div>` : '')
+      + held.map(x => `<div class="cts-row"><span class="cts-k">${esc(WHATW[x.what] || x.what)}</span> <b>${esc(x.title)}</b>${x.toPath ? ` <span class="cts-p">→ ${esc(x.toPath.join(' / '))}</span>` : ''}</div>`).join('');
+    const n = pl.items.length + held.length + (pl.lone ? pl.lone.length : 0);
+    const nIt = pl.items.length;
     const html = `<style>.cts-list{max-height:34vh;overflow:auto;margin:6px 0;font-size:12px}.cts-row{padding:2px 0}.cts-k{display:inline-block;min-width:34px;opacity:.6;font-size:10.5px;text-transform:uppercase}.cts-p{opacity:.65}.cts-set{margin-top:8px;font-size:11.5px;opacity:.8}.cts-set input{width:48px}</style>
-      <div>${n} item${n === 1 ? '' : 's'} will be added to the CalTopo map${folderNew.length ? `, and ${folderNew.length} folder${folderNew.length === 1 ? '' : 's'} created there (${folderNew.map(x => esc(x.name)).join(', ')})` : ''}. The project keeps its copies; they stop being marked “not in CalTopo”.${n > 20 ? ' CalTopo is asked gently, about one item a second.' : ''}</div>
+      <div>${nIt ? `${nIt} item${nIt === 1 ? '' : 's'} will be added to the CalTopo map` : 'CalTopo will get'}${held.length ? `${nIt ? ', ' : ' '}${held.length} change${held.length === 1 ? '' : 's'} to its items` : ''}${folderNew.length ? `, and ${folderNew.length} folder${folderNew.length === 1 ? '' : 's'} created there (${folderNew.map(x => esc(x.name)).join(', ')})` : ''}. ${nIt ? 'The project keeps its copies; they stop being marked “to send”.' : ''}${n > 20 ? ' CalTopo is asked gently, about one item a second.' : ''}</div>
       <div class="cts-list">${rows}</div>`;
     return a.dialog({ title: 'Send to CalTopo', html, wide: true, buttons: [{ label: 'Cancel', value: null }, { label: `Send ${n} to CalTopo`, value: 'go', primary: true }] })
       .then(r => !!(r && r.button === 'go'));
@@ -226,19 +287,21 @@
     return { stop, set(done, total, text) { fill.style.width = (total ? Math.round(100 * done / total) : 0) + '%'; msg.textContent = text; }, box, btns, msg, title, bar, close: () => wrap.remove() };
   }
 
-  /** The whole thing. target: { feature } | { group } | { all }. → the summary, or null. */
-  async function send(target) {
+  /** The whole thing. target: { feature } | { group } | { all }. confirmed: no preview (review() asked already). → the summary, or null. */
+  async function send(target, confirmed) {
     const a = A(), w = W(), pj = PJ();
     const why = can();
     if (why) { toast(why); return null; }
     if (busy) { toast('Already sending to CalTopo'); return null; }
-    const P = pj.P, feats = pick(target || { all: true }, P);
-    if (!feats.length) { toast('Everything here is already in CalTopo'); return null; }
-    const pl = plan(feats, w.folders(), g => pathOf(P, g));
-    if (!(await preview(P, pl, !!(target && target.feature)))) return null;
+    const P = pj.P, all = !target || !!target.all;
+    const feats = pick(target || { all: true }, P);
+    const held = all ? stagedList() : [];
+    const pl = all ? planAll(P, feats) : plan(feats, w.folders(), g => pathOf(P, g));
+    if (!feats.length && !held.length && !(pl.lone && pl.lone.length)) { toast('Everything here is already in CalTopo'); return null; }
+    if (!confirmed && !(await preview(P, pl, !!(target && target.feature), held))) return null;
     busy = true;
-    const ui = progressBox(), total = pl.folders.filter(x => !x.id).length + pl.items.length;
-    const sum = { sent: [], queued: [], failed: [], skipped: [], readOnly: '' };
+    const ui = progressBox(), total = pl.folders.filter(x => !x.id).length + pl.items.length + held.length;
+    const sum = { sent: [], queued: [], failed: [], skipped: [], readOnly: '', edits: { sent: 0, queued: 0, conflict: [], failed: [] } };
     let done = 0;
     const tick = text => ui.set(done, total, text);
     try {
@@ -269,6 +332,26 @@
         else if (r && r.queued) sum.queued.push({ f });
         else { if (r && r.readOnly) sum.readOnly = r.error; sum.failed.push({ f, why: (r && r.error) || 'CalTopo refused it' }); }
       }
+      // The held changes to CalTopo items: updates (moves into the folders made above), then deletes.
+      const order = held.slice().sort((x, y) => (x.op === 'delete' ? 1 : 0) - (y.op === 'delete' ? 1 : 0) || x.at - y.at);
+      let j = 0;
+      for (const h of order) {
+        j++;
+        if (ui.stop.v || sum.readOnly) { sum.edits.failed.push({ h, why: sum.readOnly ? 'the key can only read' : 'stopped' }); continue; }
+        let over;
+        if (h.toPath) {
+          const fid = ids.get(pl.keyOf(h.toPath));
+          if (!fid) { sum.edits.failed.push({ h, why: 'its new folder could not be created' }); done++; continue; }
+          over = { folderId: fid };
+        }
+        tick(`${j} of ${order.length}: ${h.title}`);
+        const r = await w.flush(h.k, over);
+        done++;
+        if (r && r.ok) sum.edits.sent++;
+        else if (r && r.queued) sum.edits.queued++;
+        else if (r && r.conflict) sum.edits.conflict.push(h);
+        else { if (r && r.readOnly) sum.readOnly = r.error; sum.edits.failed.push({ h, why: (r && r.error) || 'CalTopo refused it' }); }
+      }
       // The links, all at once, then one re-read of the map.
       const map = w.mapId(), quiet = { quiet: true };
       for (const s of sum.sent.concat(sum.queued)) {
@@ -291,6 +374,11 @@
     if (sum.queued.length) lines.push(`<div><b>${sum.queued.length}</b> waiting: CalTopo could not be reached, they go when it is back (nothing to do).</div>`);
     if (sum.failed.length) lines.push(`<div><b>${sum.failed.length}</b> not sent:</div>` + sum.failed.slice(0, 8).map(x => `<div class="cts-p">· ${esc(titleOf(x.f))}: ${esc(x.why)}</div>`).join(''));
     if (sum.skipped.length) lines.push(`<div><b>${sum.skipped.length}</b> not sent yet (${esc(sum.skipped[0].why)}). Run Send again for them.</div>`);
+    const E = sum.edits || { sent: 0, queued: 0, conflict: [], failed: [] };
+    if (E.sent) lines.push(`<div><b>${E.sent}</b> change${E.sent === 1 ? '' : 's'} to CalTopo items sent.</div>`);
+    if (E.queued) lines.push(`<div><b>${E.queued}</b> change${E.queued === 1 ? '' : 's'} waiting: CalTopo could not be reached, they go when it is back (nothing to do).</div>`);
+    if (E.conflict.length) lines.push(`<div><b>${E.conflict.length}</b> changed in CalTopo meanwhile (${E.conflict.slice(0, 5).map(h => esc(h.title)).join(', ')}): open the changes list on the CalTopo map row to choose a version.</div>`);
+    if (E.failed.length) lines.push(`<div><b>${E.failed.length}</b> change${E.failed.length === 1 ? '' : 's'} not sent, kept:</div>` + E.failed.slice(0, 8).map(x => `<div class="cts-p">· ${esc(x.h.title)}: ${esc(x.why)}</div>`).join(''));
     if (sum.readOnly) lines.push(`<div class="cts-p" style="margin-top:6px">${esc(sum.readOnly)}</div>`);
     ui.title.textContent = 'Sent to CalTopo';
     ui.msg.innerHTML = lines.join('') || 'Nothing was sent.';
@@ -317,5 +405,5 @@
     return n;
   }
 
-  return { send, notIn, notInIds, isNotIn, can, reminder, highlight, hlSync, hlOn: () => hlFlag, removeCopies, parseTag, makeTag, toCalTopo, plan, hex, _linked: linked };
+  return { send, review, counts, notIn, notInIds, isNotIn, can, reminder, highlight, hlSync, hlOn: () => hlFlag, removeCopies, parseTag, makeTag, toCalTopo, plan, hex, _linked: linked };
 });
