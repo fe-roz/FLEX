@@ -168,6 +168,56 @@ export function frameShot(t, d) {
   return { L, U, F: t };
 }
 
+// Minimal-rotation ("parallel transport") step: carry side vector L from a
+// tangent to the next one without spinning about it.
+function transportL(L, tb) {
+  const k = L.e * tb.e + L.n * tb.n + L.v * tb.v;
+  const x = L.e - tb.e * k, y = L.n - tb.n * k, z = L.v - tb.v * k, m = Math.hypot(x, y, z);
+  return m > 1e-9 ? { e: x / m, n: y / m, v: z / m } : L;
+}
+function rotAbout(L, t, ang) {            // Rodrigues, L perpendicular to t
+  const c = Math.cos(ang), s = Math.sin(ang);
+  const cx = t.n * L.v - t.v * L.n, cy = t.v * L.e - t.e * L.v, cz = t.e * L.n - t.n * L.e;
+  return { e: L.e * c + cx * s, n: L.n * c + cy * s, v: L.v * c + cz * s };
+}
+export const PASSAGE_STEEP = 0.85;        // |t.v| above this: the horizontal-L frame is ill-conditioned
+
+// Frames for a sampled 3D path in perpendicular-U mode. Away from vertical
+// the frame is frameShot (L horizontal). Through a steep stretch the frame is
+// carried along by parallel transport from the last non-steep sample, and the
+// twist that built up is spread evenly over the stretch, so the tube never
+// spins where the heading turns through vertical. ts[j]: unit tangents (null
+// = unknown), ds[j]: horizontal heading fallbacks.
+export function transportFrames(ts, ds) {
+  const n = ts.length, fr = new Array(n);
+  const steep = j => Math.abs(ts[j].v) > PASSAGE_STEEP;
+  for (let j = 0; j < n; j++) if (!steep(j)) fr[j] = frameShot(ts[j], ds[j]);
+  for (let s = 0; s < n; ) {
+    if (fr[s]) { s++; continue; }
+    let e = s; while (e + 1 < n && !fr[e + 1]) e++;
+    const before = s > 0 ? fr[s - 1] : null, after = e + 1 < n ? fr[e + 1] : null;
+    if (!before && !after) { for (let j = s; j <= e; j++) fr[j] = frameShot(ts[j], ds[j]); s = e + 1; continue; }
+    const fwdPass = !!before;                    // carry from `before` (else backwards from `after`)
+    const idx = []; for (let j = s; j <= e; j++) idx.push(j);
+    if (!fwdPass) idx.reverse();
+    let L = (fwdPass ? before : after).L;
+    const Ls = {};
+    for (const j of idx) { L = transportL(L, ts[j]); Ls[j] = L; }
+    if (before && after) {                       // spread the leftover twist
+      const tb = ts[e + 1], Lt = transportL(Ls[e], tb), H = after.L;
+      const cr = Lt.n * H.v - Lt.v * H.n, cn = Lt.v * H.e - Lt.e * H.v, cv = Lt.e * H.n - Lt.n * H.e;
+      const ang = Math.atan2(cr * tb.e + cn * tb.n + cv * tb.v, Lt.e * H.e + Lt.n * H.n + Lt.v * H.v);
+      for (let j = s; j <= e; j++) Ls[j] = rotAbout(Ls[j], ts[j], ang * (j - s + 1) / (e - s + 2));
+    }
+    for (let j = s; j <= e; j++) {
+      const t = ts[j], l = Ls[j];
+      fr[j] = { L: l, U: { e: t.n * l.v - t.v * l.n, n: t.v * l.e - t.e * l.v, v: t.e * l.n - t.n * l.e }, F: t };
+    }
+    s = e + 1;
+  }
+  return fr;
+}
+
 export function unit3(a, b) {
   const x = b.e - a.e, y = b.n - a.n, z = b.v - a.v, m = Math.hypot(x, y, z);
   return m > 1e-6 ? { e: x / m, n: y / m, v: z / m } : null;
@@ -218,7 +268,7 @@ export function buildShaft(g, A, B, wA, wB, d, smooth) {
     : [[r, depth], [-l, depth], [-l, -depth], [r, -depth]];
   const at = ([side, fwd], z, cf) =>
     cf(cy - d.x * side + d.y * fwd, cx + d.y * side + d.x * fwd, z);
-  return { prof, at, zBot, zTop, tBot: A.v <= B.v ? 0 : 1 };   // tBot: the bottom's end of the shot
+  return { prof, at, cx, cy, zBot, zTop, tBot: A.v <= B.v ? 0 : 1 };   // tBot: the bottom's end of the shot
 }
 
 export function emitShaft(g, sh, convertFn, smooth) {
@@ -233,17 +283,35 @@ export function emitShaft(g, sh, convertFn, smooth) {
     pushQuad(g, bot[3], bot[2], bot[1], bot[0]);
     return;
   }
-  const b = bot.map(c => pushVert(g, c)), t = top.map(c => pushVert(g, c));
-  for (let k = 0; k < N; k++) {
-    const k1 = (k + 1) % N;
-    g.idx.push(b[k], b[k1], t[k1], b[k], t[k1], t[k]);
+  // Rounded ends: rings shrink along a quarter ellipse so the shaft closes on a
+  // dome inside its own extent (not past the floor or ceiling).
+  const { cx, cy } = sh;
+  const H = zTop - zBot, len = Math.min(Math.max(Math.min(...prof.map(q => Math.hypot(q[0], q[1]))) * 0.7, 0.1), H / 2);
+  const ringAt = (z, scale, tt) => prof.map(q => {
+    const c = at([q[0] * scale, q[1] * scale], z, convertFn);
+    if (c) c._t = tt;
+    return c && pushVert(g, c);
+  });
+  const rings = [];
+  for (let m = 0; m < PASSAGE_CAP_RINGS; m++) {                       // bottom dome, apex excluded
+    const phi = (m / PASSAGE_CAP_RINGS) * Math.PI / 2;
+    rings.push(ringAt(zBot + len * (1 - Math.sin(phi)), Math.cos(phi), sh.tBot));
   }
-  for (const [ring, z] of [[top, zTop], [bot, zBot]]) {       // flat caps, own rim
+  for (let m = PASSAGE_CAP_RINGS - 1; m >= 0; m--) {                  // top dome
+    const phi = (m / PASSAGE_CAP_RINGS) * Math.PI / 2;
+    rings.push(ringAt(zTop - len * (1 - Math.sin(phi)), Math.cos(phi), 1 - sh.tBot));
+  }
+  if (rings.some(r => r.some(v => v == null))) return;
+  for (let j = 0; j + 1 < rings.length; j++) stitchRings(g, rings[j], rings[j + 1]);
+  for (const [ring, z, tt, up] of [[rings[0], zBot, sh.tBot, false], [rings[rings.length - 1], zTop, 1 - sh.tBot, true]]) {
     const c = at([0, 0], z, convertFn);
     if (!c) continue;
-    c._t = z === zTop ? 1 - sh.tBot : sh.tBot;
-    const ci = pushVert(g, c), rim = ring.map(v => pushVert(g, v));
-    for (let k = 0; k < N; k++) g.idx.push(ci, rim[k], rim[(k + 1) % N]);
+    c._t = tt;
+    const ci = pushVert(g, c);
+    for (let k = 0; k < N; k++) {
+      const k1 = (k + 1) % N;
+      if (up) g.idx.push(ring[k1], ring[k], ci); else g.idx.push(ring[k], ring[k1], ci);
+    }
   }
 }
 
@@ -343,13 +411,23 @@ export function stitchRings(g, a, b) {
   const N = a.length;
   for (let k = 0; k < N; k++) {
     const k1 = (k + 1) % N;
-    g.idx.push(a[k], a[k1], b[k1], a[k], b[k1], b[k]);
+    g.idx.push(a[k], b[k1], a[k1], a[k], b[k], b[k1]);   // outward-facing
   }
 }
 
 // Rounded end: rings shrink along a quarter circle and close on an apex that
 // sits a little past the station, so a dead end reads as rock, not a cut.
-export function roundCap(g, convertFn, c, fr, w, rim, outward) {
+export function roundCap(g, convertFn, c, fr, w, rim, outward, flush) {
+  if (flush) {                       // station shared with another leg: close on the station itself, no dome past it
+    const ax = framePoint(convertFn, c, fr, 0, 0, 0);
+    if (!ax) return;
+    const ai = pushVert(g, ax), N = rim.length;
+    for (let k = 0; k < N; k++) {
+      const k1 = (k + 1) % N;
+      if (outward) g.idx.push(rim[k1], rim[k], ai); else g.idx.push(rim[k], rim[k1], ai);
+    }
+    return;
+  }
   const len = Math.max(Math.min(w.l + w.r, w.u + w.d) / 2, 0.1);
   const sgn = outward ? 1 : -1;
   let prev = rim;
@@ -366,11 +444,15 @@ export function roundCap(g, convertFn, c, fr, w, rim, outward) {
   const ai = pushVert(g, ax), N = prev.length;
   for (let k = 0; k < N; k++) {
     const k1 = (k + 1) % N;
-    if (outward) g.idx.push(prev[k], prev[k1], ai); else g.idx.push(prev[k1], prev[k], ai);
+    if (outward) g.idx.push(prev[k1], prev[k], ai); else g.idx.push(prev[k], prev[k1], ai);
   }
 }
 
-export function buildSmooth(g, pts, lr, convertFn, perp) {
+// Key of a station position (1 mm), for finding stations several legs share.
+export function stationKey(p) { return Math.round(p.e * 1000) + ',' + Math.round(p.n * 1000) + ',' + Math.round(p.v * 1000); }
+
+export function buildSmooth(g, pts, lr, convertFn, perp, joints) {
+  const isJoint = p => !!joints && joints.has(stationKey(p));
   const n = pts.length;
   // Runs of shots to spline. Vertical-U mode splits at vertical shots and
   // draws those as shafts; perpendicular mode keeps the whole leg as one run.
@@ -412,13 +494,16 @@ export function buildSmooth(g, pts, lr, convertFn, perp) {
 
     // Frame at each sample from the tangent through its neighbours.
     let prevD = null;
+    const ts = [], ds = [];
     for (let j = 0; j < S.length; j++) {
       const a = S[Math.max(0, j - 1)].c, b = S[Math.min(S.length - 1, j + 1)].c;
       const d = hdir(a, b) || prevD || { x: 0, y: 1 };
       prevD = d;
-      const t = perp ? unit3(a, b) : null;
-      S[j].fr = t ? frameShot(t, d) : frameVertical(d);
+      ts.push(perp ? (unit3(a, b) || (ts[j - 1]) || { e: d.x, n: d.y, v: 0 }) : null);
+      ds.push(d);
     }
+    if (perp) { const fs = transportFrames(ts, ds); for (let j = 0; j < S.length; j++) S[j].fr = fs[j]; }
+    else for (let j = 0; j < S.length; j++) S[j].fr = frameVertical(ds[j]);
 
     const rings = [];
     for (const s of S) {
@@ -430,9 +515,9 @@ export function buildSmooth(g, pts, lr, convertFn, perp) {
     for (let j = 0; j + 1 < rings.length; j++) stitchRings(g, rings[j], rings[j + 1]);
     const first = S[0], last = S[S.length - 1];
     along(first);
-    roundCap(g, convertFn, first.c, first.fr, first.w, rings[0], false);
+    roundCap(g, convertFn, first.c, first.fr, first.w, rings[0], false, isJoint(P(0)));
     along(last);
-    roundCap(g, convertFn, last.c, last.fr, last.w, rings[rings.length - 1], true);
+    roundCap(g, convertFn, last.c, last.fr, last.w, rings[rings.length - 1], true, isJoint(P(ids.length - 1)));
   }
 }
 
@@ -473,6 +558,8 @@ export function setupCavePassages({
     // steepness; wall vertices point into these (see _pushVert).
     const hard = state.colourMode === 'hard' ? { WA: [], HA: [], WB: [], HB: [], st: [] } : null;
     const groups = new Map();
+    // Pass 1: the legs that get walls, and the stations more than one of them touches.
+    const legs = [], seen = new Map(), joints = new Set();
     for (const seg of imp.parsed.segments) {
       if (dopt.hiddenSurveys && dopt.hiddenSurveys[seg.survey]) continue;
       const surface = seg.isSurface || !!(dopt.surfaceSurveys && dopt.surfaceSurveys[seg.survey]);
@@ -482,6 +569,11 @@ export function setupCavePassages({
         : seg.points;
       const pts = raw.filter(p => !p.excluded);
       if (pts.length < 2) continue;
+      legs.push({ seg, pts });
+      const mine = new Set(pts.map(stationKey));
+      for (const k of mine) { if (seen.has(k)) joints.add(k); else seen.set(k, 1); }
+    }
+    for (const { seg, pts } of legs) {
       const lr = segmentLruds(pts);
       const hex = dopt.surveyColors[seg.survey] || dopt.surveyColors[''] || '#00e5ff';
       const g = passageGroup(groups, hex);
@@ -497,7 +589,7 @@ export function setupCavePassages({
         }
       }
       const perp = dopt.passageUpAxis === 'shot';
-      if (mode === 'smooth') buildSmooth(g, pts, lr, convertFn, perp);
+      if (mode === 'smooth') buildSmooth(g, pts, lr, convertFn, perp, joints);
       else buildBlocky(g, pts, lr, convertFn, perp);
     }
     const instances = [];
