@@ -89,6 +89,21 @@ const PLT = [
   ok('southern false northing', near(eqS.lat, 0, 1e-9) && near(eqS.lon, 153, 1e-12), eqS);
 })();
 
+// ── Survey codes that contain the letter C ──────────────────────────────────
+(function codes() {
+  const P = parsePLT(['NCR D 7 15 94 CMain passage', 'M 0 0 0 SA1', 'D 10 0 0 SA2',
+    'NAC1 D 3 4 2001 Cwith C in it', 'M 0 0 0 SA2', 'D 10 0 0 SA3',
+    'NC D 1 2 99 CEntrance', 'M 0 0 0 SA3', 'D 10 0 0 SA4',
+    'NCR2 D 7 15 94', 'M 0 0 0 SA4', 'D 10 0 0 SA5',
+    'NC D 1 2 99 C', 'M 0 0 0 SA5', 'D 10 0 0 SA6', 'X 0 0 0 0 0 0'].join('\r\n'));
+  const s = P.surveys.map(x => x.code + '|' + x.desc + '|' + (x.date || ''));
+  ok('code CR: description starts at the C marker', s[0] === 'CR|Main passage|1994-07-15', s);
+  ok('code AC1: the description keeps a C of its own', s[1] === 'AC1|with C in it|2001-03-04', s);
+  ok('code C alone', s[2] === 'C|Entrance|1999-01-02', s);
+  ok('code with a C and no description: empty, not swallowed', s[3] === 'CR2||1994-07-15', s);
+  ok('code C with an empty description', s[4] === 'C||1999-01-02', s);
+})();
+
 // ── setupCompassPlt (stand-in Cesium) ────────────────────────────────────────
 (function placing() {
   const Cesium = { Cartesian3: { fromDegrees: (lon, lat, h) => ({ lon, lat, h }) } };

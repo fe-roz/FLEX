@@ -54,7 +54,7 @@ file in its own folder. The ones desktop FLEX loads (`index.html`):
 | Popper.js | 1.12.9 | MIT | https://cdn.jsdelivr.net/npm/popper.js@1.12.9/ | `index.html` (for Bootstrap) |
 | jQuery (slim) | 3.2.1 | MIT | https://code.jquery.com/ | `index.html` (for Bootstrap) |
 | egm96-universal | 1.1.1 | MIT | https://esm.sh/egm96-universal@1.1.1 (https://github.com/nicolas-van/egm96-universal) | `flex.js` (EGM96 geoid heights) |
-| PDF.js | 3.11.174 | Apache-2.0 | https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/ | `project.js` (document pages) |
+| PDF.js (`pdf.min.js`, `pdf.worker.min.js`, with its `LICENSE`) | 3.11.174 | Apache-2.0 | npm `pdfjs-dist@3.11.174` (https://github.com/mozilla/pdf.js); vendored in `client/libs/pdfjs/`, the cdnjs copy (https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/) is only the fallback | `client/src/modules/project-docs.js` (document and sketch page thumbnails) |
 | JSZip | 3.10.1 | MIT or GPL-3.0 | https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/ | `project.js` (fallback when the vendored copy is missing); `export_terrain.py` fetches it into `viewer_build/libs/` if absent |
 
 `export_terrain.py` likewise fetches three.js r128, OrbitControls and

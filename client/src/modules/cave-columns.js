@@ -60,11 +60,12 @@
   }
   function item(x, side, open) {
     const w = ws(), vis = x.loaded && w.caveVisible(x.name);
-    const what = x.dir ? (x.dir === 'in' ? 'moving into the project' : 'moving to My data') : waiting.get(x.name) || '';
+    const cm = (((window._pjWsState || {}).moves) || []).find(m => m.kind === 'cavemove' && (m.files || []).includes(x.name));
+    const what = x.dir ? (x.dir === 'in' ? 'moving into the project' : 'moving to My data') : cm ? 'moving to ' + (cm.toName || 'another project') : waiting.get(x.name) || '';
     const arrow = !open ? '' : side === 'p'
       ? `<button type="button" class="cc-mv" data-mv="out" title="${x.dir === 'in' ? 'Back to My data (cancel the move)' : 'Move to My data'}">→</button>`
       : `<button type="button" class="cc-mv" data-mv="in" title="${x.dir === 'out' ? 'Back into the project (cancel the move)' : 'Move into the project'}">←</button>`;
-    return `<div class="cc-it${x.dir ? ' cc-moving' : ''}" data-name="${esc(x.name)}" draggable="${open ? 'true' : 'false'}">
+    return `<div class="cc-it${x.dir || cm ? ' cc-moving' : ''}" data-name="${esc(x.name)}" draggable="${open ? 'true' : 'false'}">
       <button type="button" class="cc-eye ui-eye${vis ? ' on' : x.loaded ? ' half' : ''}" data-eye title="${!x.loaded ? 'Load' : vis ? 'Hide' : 'Show'}" aria-label="${!x.loaded ? 'Load' : vis ? 'Hide' : 'Show'} ${esc(x.name)}"></button>
       <span class="cc-nm" title="${esc(x.name)} — double-click to fly there">${esc(x.name.replace(/\.(plt|json)$/i, ''))}${what ? '<b class="cc-dot" title="' + esc(what) + ' — 💾 Save puts it in">•</b>' : ''}<small>${esc(what || (x.loaded ? '' : placeText(x.place)))}</small></span>
       <span class="cc-tools"><button type="button" data-more title="More">⋯</button>${arrow}</span>

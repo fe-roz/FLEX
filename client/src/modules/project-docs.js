@@ -48,21 +48,27 @@
     const o = await storeBytes(await blob.arrayBuffer(), 'jpg');
     return { h: o.h, ext: 'jpg', w: cv.width, ht: cv.height, name };
   }
+  // pdf.js 3.11.174 is vendored in client/libs/pdfjs/ (works offline); the CDN is the fallback if that copy is missing.
+  const PDFJS_LOCAL = '/client/libs/pdfjs/';
   let _pdfjs = null;
-  function loadPdfJs() {
-    if (_pdfjs) return _pdfjs;
-    _pdfjs = new Promise((res, rej) => {
-      if (window.pdfjsLib) return res(window.pdfjsLib);
-      const s = document.createElement('script');
-      s.src = PDFJS + 'pdf.min.js';
-      // A worker can't load from another origin: fetch it and start it from a blob.
-      s.onload = () => fetch(PDFJS + 'pdf.worker.min.js').then(r => r.text()).then(t => {
+  function pdfJsFrom(base) {
+    return new Promise((res, rej) => {
+      const fail = () => rej(new Error('PDF reader could not load'));
+      const go = () => fetch(base + 'pdf.worker.min.js').then(r => { if (!r.ok) throw new Error(); return r.text(); }).then(t => {
+        // A worker can't load from another origin: fetch it and start it from a blob.
         window.pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([t], { type: 'application/javascript' }));
         res(window.pdfjsLib);
-      }).catch(e => { _pdfjs = null; rej(new Error('PDF reader could not load (offline?)')); });
-      s.onerror = () => { _pdfjs = null; rej(new Error('PDF reader could not load (offline?)')); };
+      }).catch(fail);
+      if (window.pdfjsLib) return go();
+      const s = document.createElement('script');
+      s.src = base + 'pdf.min.js';
+      s.onload = go; s.onerror = () => { s.remove(); fail(); };
       document.head.appendChild(s);
     });
+  }
+  function loadPdfJs() {
+    if (_pdfjs) return _pdfjs;
+    _pdfjs = pdfJsFrom(PDFJS_LOCAL).catch(() => pdfJsFrom(PDFJS)).catch(() => { _pdfjs = null; throw new Error('PDF reader could not load (offline?)'); });
     return _pdfjs;
   }
   /** Files → pages: photos and scans ≤ 2400 px JPEG, TIFF and PDF one page per sheet. */
