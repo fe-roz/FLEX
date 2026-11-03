@@ -905,13 +905,16 @@
     bar.style.width = '5%';
     txt.textContent = 'Starting…';
 
-    fetch('/api/lidar/derive', {
+    const startDerive = () => fetch('/api/lidar/derive', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }).then(r => r.json()).then(j => {
       if (!j.ok) throw new Error(j.error || 'failed to start');
       _lidarJobId = j.jobId;
+      // The Jobs panel (jobs-panel.js): Cancel and Log go to the server; Retry sends the same request again
+      if (window._jobs) window._jobs.add({ id: 'analyze.' + j.jobId, kind: 'analyze', name: 'Analyze: vegetation and voids', server: true,
+        retry: () => { btn.disabled = true; wrap.style.display = 'block'; bar.style.width = '5%'; txt.textContent = 'Starting…'; startDerive(); } });
       const poll = setInterval(() => {
         fetch('/api/lidar/status/' + _lidarJobId).then(r => r.json()).then(st => {
           bar.style.width = (st.progress || 5) + '%';
@@ -934,6 +937,7 @@
       btn.disabled = false;
       txt.textContent = 'Error: ' + err.message;
     });
+    startDerive();
   };
 
   async function _lidarShowResults(jobId, meta) {
@@ -1147,21 +1151,26 @@
     const ready = ready0.then(b => window._customLayers && window._customLayers.exportExtras
       ? window._customLayers.exportExtras(b, { w, s, e, n, mapTerrain, satelliteSource, hillshadeMode: document.getElementById('export_hillshade_mode').value }) : b);
 
-    ready.then(b => fetch('/api/export/terrain', {
+    const submit = b => fetch('/api/export/terrain', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(b)
-    }))
+    })
     .then(r => r.json())
     .then(data => {
       if (data.error) throw new Error(data.error);
       _exportJobId = data.jobId;
       _pollProgress();
-    })
-    .catch(err => {
+      // The Jobs panel (jobs-panel.js): Cancel and Log go to the server; Retry sends the same request again
+      if (window._jobs) window._jobs.add({ id: 'export.' + data.jobId, kind: 'export', name: 'Offline map: ' + mapName, server: true,
+        retry: () => { document.getElementById('export_run_btn').disabled = true; document.getElementById('export_progress_wrap').style.display = 'block';
+                       document.getElementById('export_download_wrap').style.display = 'none'; _setProgress(0, 'Submitting…'); submit(b).catch(failed); } });
+    });
+    const failed = err => {
       _setProgress(0, '✗ ' + err.message);
       document.getElementById('export_run_btn').disabled = false;
-    });
+    };
+    ready.then(submit).catch(failed);
   };
 
   function _setProgress(pct, msg) {

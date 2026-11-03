@@ -576,14 +576,18 @@
       const lat = (a.bbox[1] + a.bbox[3]) / 2, lon = (a.bbox[0] + a.bbox[2]) / 2;
       const dz = typeof window._pcDatumDz === 'function' ? window._pcDatumDz(lat, lon) : null;
       const name = ($('clg-name').value || '').trim() || 'LiDAR terrain';
+      send({ project: pj.pid, bbox: a.bbox, polygon: a.polygon, ept, resolution: +$('clg-cell').value || 0.5, z_offset: dz, name });
+    }
+    async function send(body) {
       busy = true; refresh(); say('Starting…', 2);
       try {
-        const r = await fetch('/api/terrain/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ project: pj.pid, bbox: a.bbox, polygon: a.polygon, ept, resolution: +$('clg-cell').value || 0.5, z_offset: dz, name }) });
+        const r = await fetch('/api/terrain/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const j = await r.json().catch(() => ({}));
         if (!r.ok || !j.jobId) throw new Error(j.error || 'the server did not take the job');
-        try { localStorage.setItem(JK, JSON.stringify({ jobId: j.jobId, pid: pj.pid, name })); } catch (_) {}
-        watch(j.jobId, pj.pid, name);
+        try { localStorage.setItem(JK, JSON.stringify({ jobId: j.jobId, pid: body.project, name: body.name })); } catch (_) {}
+        // The Jobs panel (jobs-panel.js): Cancel and Log go to the server; Retry sends the same request again
+        if (window._jobs) window._jobs.add({ id: 'terrain.' + j.jobId, kind: 'terrain', name: 'Terrain and hillshade: ' + body.name, server: true, retry: () => { if (!busy) send(body); } });
+        watch(j.jobId, body.project, body.name);
       } catch (e) { busy = false; refresh(); say('❌ ' + e.message, null, true); }
     }
     function watch(jobId, pid, name) {

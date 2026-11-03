@@ -215,8 +215,11 @@
     file = file || (await pickFiles('.zip,application/zip', false))[0];
     if (!file) return;
     if (!(await zipLib())) return;
+    // The Jobs panel (jobs-panel.js): this import as a job; Retry reads the same file again
+    const job = window._jobs ? window._jobs.add({ id: 'sync.' + Date.now().toString(36), kind: 'sync', name: 'Import sync file: ' + (file.name || 'sync.zip'), retry: () => importSync(file) }) : null;
     try {
       const z = await JSZip.loadAsync(file);
+      if (job) job.progress(0.15, 'reading the file');
       const mf = z.file('manifest.json');
       if (!mf) throw new Error('not a FLEX sync file (no manifest.json)');
       const man = JSON.parse(await mf.async('string'));
@@ -235,19 +238,24 @@
       const names = Object.keys(z.files).map(n => /^blobs\/([0-9a-f]{64}\.[a-z]{2,4})$/.exec(n)).filter(Boolean).map(m => m[1]);
       const { missing } = names.length ? await post('blobs-missing?x=1' + into, { names }) : { missing: [] };
       let pages = 0;
+      if (job) job.progress(0.3, 'pages 0/' + missing.length);
       for (const n of missing) {
+        if (job) job.progress(0.3 + 0.55 * pages / missing.length, 'pages ' + pages + '/' + missing.length);
         const [h, ext] = n.split('.');
         await api(`blob?ext=${ext}&h=${h}${into}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: await z.file('blobs/' + n).async('arraybuffer') });
         pages++;
       }
       let added = 0;
+      if (job) job.progress(0.9, 'merging the changes');
       for (const [sc, list] of Object.entries(scopes)) added += (await post('merge?scope=' + sc + into, list)).added;
       const other = man.project && man.project.id && man.project.id !== pj.pid;
       if (!pj.pid && man.project && man.project.id) await setProject(man.project.id); else await loadAll();
       render(); refreshCard(); drawField(); drawLeads();
+      if (job) job.done(`${added} new change(s), ${pages} new page(s)`);
       dialog({ title: 'Sync file imported', text: `${added} new change(s) and ${pages} new page(s)` + (man.from && man.from.who ? ` from ${man.from.who}` : '') +
         (man.project ? ` for project “${man.project.name || man.project.id}”` : '') + '.' + (other ? ' That isn’t the open project; choose it in Project to see it.' : '') });
     } catch (e) {
+      if (job) job.fail(e.message || String(e));
       dialog({ title: 'Sync file not imported', text: e.message || String(e) });
     }
   }

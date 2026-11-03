@@ -167,7 +167,7 @@ module.exports = function terrainGenerate({ python, script, library }) {
     const jobId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const outDir = path.join(outRoot, jobId);
     fs.mkdirSync(outDir, { recursive: true });
-    const job = jobs[jobId] = { status: 'running', progress: [], outDir, pid, name, error: null, result: null };
+    const job = jobs[jobId] = { status: 'running', progress: [], outDir, pid, name, label: name || 'LiDAR terrain', error: null, result: null, started: Date.now(), ended: null, cancelled: false, proc: null };   // the Jobs panel (jobs_api.js) lists these, cancels via .proc
     const args = [script, '--ept', ept[0], ...ept.slice(1).flatMap(u => ['--also-ept', u]),
       '--bbox', ...bbox.map(String), '--resolution', String(resolution), '--project-terrain', outDir];
     if (name) args.push('--name', name);
@@ -177,17 +177,20 @@ module.exports = function terrainGenerate({ python, script, library }) {
 
     let proc;
     try { proc = spawn(python, args, { cwd: path.dirname(script) }); }
-    catch (e) { job.status = 'error'; job.error = 'could not start Python: ' + e.message; return; }
+    catch (e) { job.status = 'error'; job.error = 'could not start Python: ' + e.message; job.ended = Date.now(); return; }
+    job.proc = proc;
     const take = pre => d => d.toString().split('\n').forEach(l => { l = l.trim(); if (l) { job.progress.push(pre + l); console.log('[terrain]', l); } });
     proc.stdout.on('data', take(''));
     proc.stderr.on('data', take('⚠ '));
     proc.on('error', e => {
-      job.status = 'error'; job.error = `could not run ${python} (${e.code || e.message}): set FLEX_PYTHON to the Python that has PDAL`;
+      job.status = 'error'; job.ended = Date.now(); job.error = `could not run ${python} (${e.code || e.message}): set FLEX_PYTHON to the Python that has PDAL`;
       try { fs.rmSync(outDir, { recursive: true, force: true }); } catch (_) {}
     });
     proc.on('close', code => {
+      job.proc = null;
       if (job.status === 'error') return;
       try {
+        if (job.cancelled) throw new Error('Cancelled');
         if (code !== 0 || !fs.existsSync(path.join(outDir, 'result.json'))) {
           const last = job.progress.filter(l => /ERROR|Error/.test(l)).pop();
           throw new Error(last ? last.replace(/^⚠ /, '') : `the terrain job stopped (code ${code})`);
@@ -195,17 +198,22 @@ module.exports = function terrainGenerate({ python, script, library }) {
         job.result = finish(job);
         job.status = 'done';
       } catch (e) { job.status = 'error'; job.error = e.message || String(e); }
+      job.ended = Date.now();
       try { fs.rmSync(outDir, { recursive: true, force: true }); } catch (_) {}
     });
   }
 
+  function pctOf(job) {
+    const last = job.progress[job.progress.length - 1] || '';
+    const PCT = { 1: 10, 2: 40, 3: 65, 4: 85 };
+    const step = /\[(\d)\/4\]/.exec(last);
+    return job.status === 'done' ? 100 : step ? PCT[step[1]] : 5;
+  }
   function status(res, jobId) {
     const job = jobs[jobId];
     if (!job) return json(res, { ok: false, error: 'Unknown job' }, 404);
     const last = job.progress[job.progress.length - 1] || '';
-    const PCT = { 1: 10, 2: 40, 3: 65, 4: 85 };
-    const step = /\[(\d)\/4\]/.exec(last);
-    const pct = job.status === 'done' ? 100 : step ? PCT[step[1]] : 5;
+    const pct = pctOf(job);
     json(res, { status: job.status, progress: pct, message: last, error: job.error, result: job.result });
   }
 
@@ -286,5 +294,5 @@ module.exports = function terrainGenerate({ python, script, library }) {
     }
     return null;
   }
-  return { handle, jobs, finish, hillshadeTile, readPatch, exportPatchFiles, exportLayerArgs };
+  return { handle, jobs, pctOf, finish, hillshadeTile, readPatch, exportPatchFiles, exportLayerArgs };
 };
