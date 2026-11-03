@@ -97,6 +97,50 @@ const L4 = (l, r, u, d) => ({ l, r, u, d });
   // a convertFn that fails (no placement) leaves nothing half-built
   const gn = mk(); P.buildBlocky(gn, P3, lr, () => null, false);
   ok('convertFn null: nothing drawn', gn.pos.length === 0 && gn.idx.length === 0);
+  // ── passage wall fixes: junctions, shaft ends, twist ──
+  const volume = g => { let V = 0; const q = i => g.pos.slice(3 * i, 3 * i + 3);
+    for (let i = 0; i < g.idx.length; i += 3) { const a = q(g.idx[i]), b = q(g.idx[i + 1]), c = q(g.idx[i + 2]);
+      V += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6; }
+    return V; };
+  const boundaryEdges = g => { const key = i => g.pos.slice(3 * i, 3 * i + 3).map(x => Math.round(x * 1000)).join(','); // weld at 1 mm
+    const m = new Map(); const add = (a, b) => { const k = key(a) + '|' + key(b); m.set(k, (m.get(k) || 0) + 1); };
+    for (let i = 0; i < g.idx.length; i += 3) { const [a, b, c] = [g.idx[i], g.idx[i + 1], g.idx[i + 2]]; add(a, b); add(b, c); add(c, a); }
+    let open = 0; for (const [k, n] of m) { const [a, b] = k.split('|'); if (m.get(b + '|' + a) !== n) open++; } return open; };
+  // 4 legs meeting at one station (a cross junction)
+  const S0 = { n: 0, e: 0, v: 0 };
+  const arms = [[0, 8, 0], [8, 0, 0], [0, -8, 0], [-8, 0, 0.5]].map(([e, n, v]) => [S0, { n, e, v }]);
+  const gj = mk(), joints = new Set([P.stationKey(S0)]);
+  for (const a of arms) P.buildSmooth(gj, a, P.segmentLruds(a), flat, false, joints);
+  sane(gj, 'junction');
+  ok('junction: every leg is watertight (no gap)', boundaryEdges(gj) === 0, boundaryEdges(gj));
+  ok('junction: no cap dome past the station (all faces outward, positive volume)', volume(gj) > 0, volume(gj));
+  const gj1 = mk(); P.buildSmooth(gj1, arms[0], P.segmentLruds(arms[0]), flat, false, joints);
+  const ys = gj1.pos.filter((_, i) => i % 3 === 1);
+  ok('junction end: nothing behind the shared station but the ring', Math.min(...ys) > -0.3 - 1e-6, Math.min(...ys));
+  const gj0 = mk(); P.buildSmooth(gj0, arms[0], P.segmentLruds(arms[0]), flat, false);
+  ok('a dead end still gets its dome past the station', Math.min(...gj0.pos.filter((_, i) => i % 3 === 1)) < -0.2 && volume(gj0) > 0);
+  // a shaft between two horizontal legs: rounded, closed, outward-facing
+  const gsh = mk(); P.buildSmooth(gsh, Pv, lrv, flat, false);
+  ok('smooth shaft: watertight shaft and outward faces', volume(gsh) > 0, volume(gsh));
+  const zs = gsh.pos.filter((_, i) => i % 3 === 2);
+  ok('smooth shaft: dome stays inside floor/ceiling', Math.min(...zs) >= -20.3048 - 1e-9 && Math.max(...zs) <= 0.3048 + 1e-9);
+  // twist: a drop between horizontal legs that turn 90 degrees
+  const Pd = [{ n: 0, e: 0, v: 0 }, { n: 10, e: 0, v: 0 }, { n: 10, e: 0, v: -12 }, { n: 10, e: 10, v: -12 }];
+  const ts = [], ds = [];
+  const path = []; for (let i = 0; i < Pd.length - 1; i++) for (let k = 0; k < 6; k++) { const t = k / 6; path.push({ e: Pd[i].e + (Pd[i + 1].e - Pd[i].e) * t, n: Pd[i].n + (Pd[i + 1].n - Pd[i].n) * t, v: Pd[i].v + (Pd[i + 1].v - Pd[i].v) * t }); }
+  path.push(Pd[3]);
+  let pd = null; path.forEach((q, j) => { const a = path[Math.max(0, j - 1)], b = path[Math.min(path.length - 1, j + 1)]; const d = P.hdir(a, b) || pd || { x: 0, y: 1 }; pd = d; ts.push(P.unit3(a, b)); ds.push(d); });
+  const fr = P.transportFrames(ts, ds);
+  let maxTwist = 0, orth = true;
+  for (let j = 0; j + 1 < fr.length; j++) {
+    const a = fr[j].L, b = fr[j + 1].L; maxTwist = Math.max(maxTwist, Math.acos(Math.min(1, a.e * b.e + a.n * b.n + a.v * b.v)));
+    const t = ts[j]; if (Math.abs(a.e * t.e + a.n * t.n + a.v * t.v) > 1e-6) orth = false;
+  }
+  ok('transport frames: side vector stays perpendicular to the path', orth);
+  ok('transport frames: no spin between samples through the drop (< 1.1 rad, i.e. only the real 90-degree turn)', maxTwist < 1.1, maxTwist);
+  ok('transport frames: horizontal ends keep L level', Math.abs(fr[0].L.v) < 1e-9 && Math.abs(fr[fr.length - 1].L.v) < 1e-9);
+  const gdp = mk(); P.buildSmooth(gdp, Pd, P.segmentLruds(Pd), flat, true); sane(gdp, 'drop perp');
+  ok('perp drop: outward faces, closed', volume(gdp) > 0 && boundaryEdges(gdp) === 0, [volume(gdp), boundaryEdges(gdp)]);
   // group by colour
   const groups = new Map(); P.passageGroup(groups, '#fff').pos.push(1); P.passageGroup(groups, '#fff');
   ok('passageGroup reuses a colour group', groups.size === 1 && groups.get('#fff').pos.length === 1);
