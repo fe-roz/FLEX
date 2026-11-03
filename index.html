@@ -1422,6 +1422,20 @@
               </div>
             </div>
 
+            <!-- Units (units.js): metric by default, imperial option; kept on this computer -->
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▸</span> Units
+              </div>
+              <div class="lp-section-body" id="units-body">
+                <div style="padding:2px 0; font-size:11px;">
+                  <label style="display:block;"><input type="radio" name="units-sys" id="units-metric" checked> Metric (m, km)</label>
+                  <label style="display:block; margin-top:4px;"><input type="radio" name="units-sys" id="units-imperial"> Imperial (ft, mi, ft of climb)</label>
+                  <div style="margin-top:4px; color:rgba(255,255,255,0.4);">Used for distances, heights and depths in the details panel and the route graph.</div>
+                </div>
+              </div>
+            </div>
+
             <!-- Offline cache (offline-cache.js): saves tiles and point-cloud data as they load -->
             <div class="lp-section">
               <div class="lp-section-header" onclick="window._lpToggle(this)">
@@ -2045,6 +2059,8 @@
 <script src="client/src/modules/project-features.js"></script>
 <!-- One details panel on the right: card, segment panel, map feature info -->
 <script src="client/src/modules/inspector.js"></script>
+<script src="client/src/modules/units.js"></script>  <!-- metric / imperial, Settings → Units (window._units) -->
+<script src="client/src/modules/route-stats.js"></script>  <!-- height graph, stats and walking times of a line; nearest things to a point (window._routeStats) -->
 <script src="client/src/modules/feature-editor.js"></script>  <!-- one editor for surface points, lines, areas (project, My data, CalTopo) -->
 <script src="client/src/modules/info-panel.js"></script>
 <!-- The icon strip down the left -->
