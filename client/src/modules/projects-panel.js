@@ -185,7 +185,8 @@
   }
   function switchMenu() {
     const opts = (pj.projects || []).filter(p => p.id !== pj.pid && (!isArch(p) || showArchived())).map(p => ({ label: ['folder', p.name || p.id], sub: X.info[p.id] ? short(X.info[p.id]) : '', value: p.id }));
-    opts.push({ label: 'No project', sub: 'close this one: its things are put away, My data stays', value: '__none' }, { label: ['plus', 'New project…'], value: '__new' });
+    opts.unshift({ label: 'No project', sub: 'close this one: its things are put away, My data stays', value: '__none' });        // first
+    opts.push({ label: ['plus', 'New project…'], value: '__new' });
     choose('Switch project', '', opts).then(v => { if (!v) return; if (v === '__new') A.newProject(); else A.setProject(v === '__none' ? null : v); });
   }
   function author(root) {
