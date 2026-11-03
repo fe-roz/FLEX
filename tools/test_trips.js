@@ -157,5 +157,65 @@ const make = (D, id, cur, next, extra) => D('trip.set', Object.assign({ trip: id
   ok('tripsFor: by cave and by link', L.tripsFor(linked, { cave: cid }).length === 1 && L.tripsFor(linked, { cave: cid2 }).length === 0 && L.tripsFor(linked, { link: 'segment:g1' }).length === 1);
 }
 
+// 6) Planned trips: objectives, leads, start/done, merge, undo, old readers
+{
+  const A = device('pcA', 'Ana'), B = device('pcB', 'Bo');
+  const e1 = make(A, 'p1', null, { name: 'Next ridge trip', start: '2026-12-05', end: '2026-12-06', people: ['A. Tester', 'B. Tester'], caves: [cid], leads: ['lead1'], planned: true,
+    objectives: [{ text: 'Push the north lead' }, { text: 'Photograph the main room' }] });
+  const e2 = make(A, 'p2', null, { name: 'Earlier plan', start: '2026-11-20', planned: true });
+  const e3 = make(A, 'p3', null, { name: 'Done trip', start: '2026-10-01' });
+  let S = L.replayProject(base(A).concat([e1, e2, e3]), pid);
+  let t = S.trips.p1;
+  const objs = x => x.objectives.filter(o => !o.removed);
+  ok('planned: fields replay', t.planned === true && t.leads.join() === 'lead1' && objs(t).map(o => o.text).join('|') === 'Push the north lead|Photograph the main room' && objs(t).every(o => !o.done && o.id), t);
+  ok('planned: old-style trips are not planned, with empty new fields', S.trips.p3.planned === false && S.trips.p3.leads.length === 0 && S.trips.p3.objectives.length === 0);
+  ok('planned: soonest first, then past', L.tripsPlanned(S).map(x => x.name).join('|') === 'Earlier plan|Next ridge trip' && L.tripsPast(S).map(x => x.name).join('|') === 'Done trip');
+  // tick an objective
+  const o0 = objs(t)[0].id;
+  const tick = make(A, 'p1', t, { objectives: objs(t).map(o => ({ id: o.id, text: o.text, done: o.id === o0 })) });
+  ok('tick: only that objective in the entry, with prev', JSON.stringify(Object.keys(tick.obj)) === JSON.stringify([o0]) && tick.obj[o0].done === true && tick.prev.obj[o0].done === false, tick);
+  S = L.replayProject(base(A).concat([e1, tick]), pid);
+  ok('tick: replayed', objs(S.trips.p1)[0].done === true && objs(S.trips.p1)[1].done === false);
+  ok('tick: no change, no entry', L.tripEdit(S.trips.p1, { objectives: objs(S.trips.p1) }) === null);
+  // two devices: A ticks one, B adds one and ticks the other
+  const second = objs(t)[1].id;
+  const bAdd = make(B, 'p1', t, { objectives: objs(t).map(o => ({ id: o.id, text: o.text, done: o.id === second })).concat([{ text: 'Survey the side passage' }]) }, { base: [e1.id] });
+  const m = L.replayProject(base(A).concat([e1, tick, bAdd]), pid).trips.p1, m2 = L.replayProject(base(A).concat([bAdd, tick, e1]), pid).trips.p1;
+  ok('merge: ticks from both devices and the new objective kept', objs(m).length === 3 && objs(m).filter(o => o.done).length === 2 && objs(m)[2].text === 'Survey the side passage', m.objectives);
+  ok('merge: same whichever log is read first', JSON.stringify(m.objectives) === JSON.stringify(m2.objectives));
+  // lead merge
+  const aLead = make(A, 'p1', t, { leads: ['lead1', 'lead2'] }, { base: [e1.id] }), bLead = make(B, 'p1', t, { leads: ['lead1', 'lead3'] }, { base: [e1.id] });
+  ok('merge: leads from both devices', L.replayProject([e1, aLead, bLead], pid).trips.p1.leads.slice().sort().join() === 'lead1,lead2,lead3');
+  // remove an objective, undo
+  const rmO = make(A, 'p1', t, { objectives: [{ id: o0, text: 'Push the north lead' }] });
+  S = L.replayProject([e1, rmO], pid);
+  ok('objective removed', objs(S.trips.p1).length === 1 && objs(S.trips.p1)[0].id === o0);
+  const unRm = Object.assign(A('x', {}), L.tripUndo(rmO));
+  ok('undo of removing an objective brings it back', objs(L.replayProject([e1, rmO, unRm], pid).trips.p1).length === 2);
+  const unTick = Object.assign(A('x', {}), L.tripUndo(tick));
+  ok('undo of a tick unticks', objs(L.replayProject([e1, tick, unTick], pid).trips.p1)[0].done === false);
+  const unNew = Object.assign(A('x', {}), L.tripUndo(bAdd));
+  ok('undo of adding an objective removes it', objs(L.replayProject([e1, bAdd, unNew], pid).trips.p1).length === 2);
+  ok('undo of an undo (redo) of a tick', objs(L.replayProject([e1, tick, unTick, Object.assign(A('x', {}), L.tripUndo(unTick))], pid).trips.p1)[0].done === true);
+  // edit objective text
+  const rn = make(A, 'p1', t, { objectives: [{ id: o0, text: 'Push the far north lead' }, { id: second, text: 'Photograph the main room' }] });
+  ok('objective text edit', objs(L.replayProject([e1, rn], pid).trips.p1)[0].text === 'Push the far north lead' && Object.keys(rn.obj).length === 1);
+  // start: planned -> normal, keeps links, ticks, objectives
+  const withLink = make(A, 'p1', S.trips.p1, { links: ['segment:g1'] });
+  const T1 = L.replayProject([e1, tick, withLink], pid).trips.p1;
+  const go = make(A, 'p1', T1, { planned: false, start: '2026-11-03' });
+  const S2 = L.replayProject([e1, tick, withLink, go], pid), g = S2.trips.p1;
+  ok('start: not planned, same record, links and ticks kept', g.planned === false && g.start === '2026-11-03' && g.links.join() === 'segment:g1' && objs(g)[0].done && g.leads.join() === 'lead1' && g.history.length === 4, g);
+  ok('start: moves to the past list', L.tripsPlanned(S2).length === 0 && L.tripsPast(S2).length === 1);
+  const unGo = Object.assign(A('x', {}), L.tripUndo(go));
+  const S3 = L.replayProject([e1, tick, withLink, go, unGo], pid).trips.p1;
+  ok('undo of start: planned again with its old date', S3.planned === true && S3.start === '2026-12-05');
+  // old reader: ignores planned/obj/leads but reads the rest
+  const oldReplay = entries => L.replayProject(entries.map(e => { const c = JSON.parse(JSON.stringify(e)); delete c.planned; delete c.obj; if (c.add) delete c.add.leads; return c; }), pid);
+  const o = oldReplay([e1, tick]).trips.p1;
+  ok('old reader: shows the trip with name, dates, people', o.name === 'Next ridge trip' && o.start === '2026-12-05' && o.people.length === 2 && !o.planned);
+  ok('unknown extra keys in obj are tolerated', L.replayProject([A('trip.set', { trip: 'z', name: 'Z', start: '2026-12-01', planned: true, obj: { a: null, b: { text: 'x', weird: 1 } } })], pid).trips.z.objectives.length === 2);
+}
+
 console.log((fail ? 'FAILED ' : 'ok ') + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

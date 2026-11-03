@@ -345,7 +345,7 @@
   function tripsRelated(cid, segIds) {
     if (!cid || !pj.P || !FL.tripsOf) return [];
     const ts = FL.tripsOf(pj.P).filter(t => (!segIds && t.caves.includes(cid)) || (segIds || []).some(id => t.links.includes('segment:' + id)));
-    const tx = ts.map(t => (window._pjTrips ? window._pjTrips.range(t) : t.start) + ' · ' + (t.name || 'Trip'));
+    const tx = ts.map(t => (window._pjTrips ? window._pjTrips.range(t) : t.start) + ' · ' + (t.name || 'Trip') + (t.planned ? ' (planned)' : ''));
     return tx.length ? [['Trips', tx.join('\n')]] : [];
   }
   function stationRelated(c) {

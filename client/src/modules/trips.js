@@ -26,6 +26,18 @@
     if (b.m !== a.m) return `${a.d} ${MONTHS[a.m]} – ${b.d} ${MONTHS[b.m]} ${b.y}`;
     return `${a.d}–${b.d} ${MONTHS[a.m]} ${a.y}`;
   }
+  const liveObj = t => (t.objectives || []).filter(o => !o.removed);
+  const today = () => { const d = new Date(), z = n => String(n).padStart(2, '0'); return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()); };
+  /** Objective list for a save: the typed lines, keeping the id and tick of a line that already exists. */
+  function objFrom(t, lines) {
+    const have = t ? liveObj(t).slice() : [];
+    return lines.map(x => x.trim()).filter(Boolean).map(text => {
+      const i = have.findIndex(o => o.text === text);
+      if (i < 0) return { text, done: false };
+      return have.splice(i, 1)[0];
+    });
+  }
+  const leadItems = () => Object.values((pj.P && pj.P.leads) || {}).filter(L => !L.deleted).map(L => ({ id: L.id, rec: L, fields: L.fields || {}, active: FL.leadActive(L), target: L.target }));
   const caveNames = t => t.caves.map(c => A.caveName(c)).filter(Boolean);
   const live = () => FL.tripsOf(pj.P);
 
@@ -69,7 +81,8 @@
   }
   async function edit(t, draft) {
     const v = Object.assign({ name: t ? t.name : '', start: t ? t.start : '', end: t ? t.end : '', desc: t ? t.desc : '',
-      people: t ? t.people : [], caves: t ? t.caves : [] }, draft || {});
+      people: t ? t.people : [], caves: t ? t.caves : [], planned: t ? !!t.planned : false,
+      objectives: t ? liveObj(t).map(o => o.text) : [], leads: t ? t.leads : [] }, draft || {});
     if (!(await A.ensureAuthor())) return;
     const body = el('div', 'tr-form');
     const field = (label, node) => { const r = el('div', 'pj-f'); r.appendChild(el('div', 'pj-f-l', label)); r.appendChild(node); body.appendChild(r); return node; };
@@ -87,7 +100,11 @@
     const dl = document.createElement('datalist'); dl.id = 'tr-people-list';
     knownPeople().forEach(p => dl.appendChild(new Option(p)));
     body.appendChild(dl);
-    const cr = el('div', 'pj-f'); cr.appendChild(el('div', 'pj-f-l', 'Caves visited'));
+    const pl = el('label', 'tr-plan'), plc = document.createElement('input');
+    plc.type = 'checkbox'; plc.className = 'keep-box'; plc.checked = !!v.planned; plc.dataset.f = 'planned';
+    pl.append(plc, document.createTextNode(' Planned (a future trip: add objectives and leads to push; start it when you go)'));
+    body.appendChild(pl);
+    const cr = el('div', 'pj-f'); cr.appendChild(el('div', 'pj-f-l', 'Caves to visit / visited'));
     const box = el('div', 'tr-caves');
     const caves = FL.liveCaves(pj.P);
     if (!caves.length) box.appendChild(el('div', 'pj-sub', 'The project has no caves yet.'));
@@ -97,17 +114,33 @@
       l.append(cb, document.createTextNode(' ' + c.name)); box.appendChild(l);
     });
     cr.appendChild(box); body.appendChild(cr);
+    const objs = field('Objectives (one per line)', Object.assign(el('textarea', 'pj-input'), { rows: 3, value: v.objectives.join('\n'), placeholder: 'e.g. Push the north lead\nPhotograph the main room' }));
+    objs.dataset.f = 'objectives';
+    const lr = el('div', 'pj-f'); lr.appendChild(el('div', 'pj-f-l', 'Leads to push'));
+    const lbox = el('div', 'tr-caves tr-leads');
+    const lits = leadItems().filter(x => x.active || v.leads.includes(x.id));
+    if (!lits.length) lbox.appendChild(el('div', 'pj-sub', 'The project has no open leads.'));
+    lits.forEach(x => {
+      const l = el('label', 'tr-cave'), cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.className = 'keep-box'; cb.value = x.id; cb.checked = v.leads.includes(x.id);
+      l.append(cb, document.createTextNode(' ' + leadLabel(x))); lbox.appendChild(l);
+    });
+    lr.appendChild(lbox); body.appendChild(lr);
     const desc = field('Notes about the trip', Object.assign(el('textarea', 'pj-input'), { rows: 3, value: v.desc }));
     desc.dataset.f = 'desc';
     const r = await dialog({ title: t ? 'Edit trip' : 'New trip', body, wide: true,
       buttons: [{ label: 'Cancel', value: null }, { label: t ? 'Save' : 'Create trip', value: 'ok', primary: true }] });
     if (!r) return;
     const a = start.value, b = end.value;
-    const typed = () => ({ name: name.value, start: a, end: b, desc: desc.value, people: people.value.split(',').map(x => x.trim()).filter(Boolean), caves: [...box.querySelectorAll('input:checked')].map(i => i.value) });
+    const typed = () => ({ name: name.value, start: a, end: b, desc: desc.value, people: people.value.split(',').map(x => x.trim()).filter(Boolean), caves: [...box.querySelectorAll('input:checked')].map(i => i.value),
+      planned: plc.checked, objectives: objs.value.split('\n'), leads: [...lbox.querySelectorAll('input:checked')].map(i => i.value) });
     if (!a) { toast('A trip needs a date'); return edit(t, typed()); }
     if (b && b < a) { toast('The last day is before the first'); return edit(t, typed()); }
     const next = { name: name.value.trim() || ('Trip ' + a), start: a, end: b && b !== a ? b : '', desc: desc.value.trim(),
-      people: people.value.split(',').map(x => x.trim()).filter(Boolean), caves: [...box.querySelectorAll('input:checked')].map(i => i.value) };
+      people: people.value.split(',').map(x => x.trim()).filter(Boolean), caves: [...box.querySelectorAll('input:checked')].map(i => i.value),
+      planned: plc.checked, objectives: objFrom(t, objs.value.split('\n')), leads: [...lbox.querySelectorAll('input:checked')].map(i => i.value) };
+    // leads hidden from the box (closed) stay on the trip
+    if (t) t.leads.forEach(id => { if (!lits.some(x => x.id === id) && !next.leads.includes(id)) next.leads.push(id); });
     const e = await save(t && t.id, next);
     if (e && !t) { st.open = e.trip; st.picked = new Set(); A.render(); }
   }
@@ -121,8 +154,8 @@
 
   // ── The card ───────────────────────────────────────────────────────────────
   function sub(card, title, n) { const h = el('div', 'tr-h', title + (n != null ? ` (${n})` : '')); card.appendChild(h); return h; }
-  function removeX(t, key, what) {
-    const b = btn(['x'], () => setLinks(t, l => l.filter(k => k !== key)), 'small tr-x'); b.title = 'Take ' + what + ' off this trip (it stays in the project)'; return b;
+  function removeX(t, key, what, leadId) {
+    const b = btn(['x'], () => leadId ? save(t.id, { leads: t.leads.filter(k => k !== leadId) }) : setLinks(t, l => l.filter(k => k !== key)), 'small tr-x'); b.title = 'Take ' + what + ' off this trip (it stays in the project)'; return b;
   }
   function segRow(t, g) {
     const r = el('div', 'pj-item tr-row'), len = segLength(g);
@@ -173,9 +206,48 @@
     box.appendChild(bar);
     card.appendChild(box);
   }
+  function leadLabel(x) { return [A.leadSummary(x.fields) || 'Lead', A.targetLabel(x.target)].filter(Boolean).join(' · '); }
+  /** Start (planned -> a trip under way: a future first day becomes today) or mark done (dates as planned). */
+  async function finish(t, start) {
+    const next = { planned: false };
+    if (start && t.start > today()) { next.start = today(); if (t.end && t.end < next.start) next.end = ''; }
+    await save(t.id, next);
+  }
+  function objectives(c, t) {
+    const os = liveObj(t);
+    if (!os.length && !t.planned) return;
+    sub(c, 'Objectives', os.length ? `${os.filter(o => o.done).length}/${os.length} done` : 0);
+    if (!os.length) c.appendChild(el('div', 'pj-sub', 'None (Edit to add them).'));
+    os.forEach(o => {
+      const l = el('label', 'tr-sug-i tr-obj' + (o.done ? ' done' : '')), cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.className = 'keep-box'; cb.checked = o.done; cb.dataset.obj = o.id;
+      cb.addEventListener('change', () => save(t.id, { objectives: os.map(x => ({ id: x.id, text: x.text, done: x.id === o.id ? cb.checked : x.done })) }));
+      l.append(cb, el('span', '', o.text)); c.appendChild(l);
+    });
+  }
+  function leadsCard(c, t) {
+    if (!t.leads.length) return;
+    sub(c, 'Leads to push', t.leads.length);
+    const all = leadItems();
+    t.leads.forEach(id => {
+      const x = all.find(y => y.id === id), r = el('div', 'tr-row'), m = el('div', 'tr-main');
+      if (!x) { m.appendChild(el('div', 'pj-sub', 'A lead that is no longer in the project.')); r.append(m, removeX(t, null, 'this lead', id)); c.appendChild(r); return; }
+      const d = el('div', 'pj-item' + (x.active ? '' : ' closed'));
+      d.dataset.lead = id;
+      d.appendChild(el('div', 'pj-item-t', ['help', leadLabel(x)]));
+      d.appendChild(el('div', 'pj-sub', 'Status: ' + FL.statusLabel((x.fields && x.fields.status) || 'open') + (x.active ? '' : ' (closed)') + ' · click to open the lead'));
+      d.addEventListener('click', () => A.editLead(null, A.targetLabel(x.target), x));
+      m.appendChild(d);
+      r.append(m, removeX(t, null, 'this lead', id)); c.appendChild(r);
+    });
+  }
   function card(t) {
     const c = el('div', 'tr-card'), L = linked(t);
     const top = el('div', 'pj-row');
+    if (t.planned) {
+      top.appendChild(btn(['play', 'Start this trip'], () => finish(t, true), 'small primary'));
+      top.appendChild(btn(['check', 'Mark as done'], () => finish(t, false), 'small'));
+    }
     top.appendChild(btn(['pencil', 'Edit'], () => edit(t), 'small'));
     top.appendChild(btn(['trash', 'Delete'], () => remove(t), 'small'));
     c.appendChild(top);
@@ -190,7 +262,9 @@
     if (!t.caves.length) cr.appendChild(el('span', 'pj-sub', 'None picked (Edit to pick them).'));
     t.caves.forEach(id => cr.appendChild(el('span', 'tr-chip', ['cave', A.caveName(id) || id])));
     c.appendChild(cr);
-    suggestions(c, t);
+    objectives(c, t);
+    leadsCard(c, t);
+    if (!t.planned) suggestions(c, t);
     const total = L.segs.reduce((s, g) => s + segLength(g), 0);
     sub(c, 'Surveys', L.segs.length);
     if (!L.segs.length) c.appendChild(el('div', 'pj-sub', 'None linked.'));
@@ -212,13 +286,18 @@
     sectionFn(parent, `Trips (${all.length})`, true, b => {
       b.appendChild(el('div', 'pj-row')).appendChild(btn(['plus', 'New trip'], () => edit(null), 'small primary'));
       if (!all.length) { b.appendChild(el('div', 'pj-note', 'A trip is a day or a few days in the field: who went, which caves, and that trip’s surveys, notes and photos. Make one with New trip; FLEX suggests the surveys, notes and photos from its dates.')); return; }
-      all.forEach(t => {
+      const planned = all.filter(t => t.planned).sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : a.name.localeCompare(b.name)));
+      const past = all.filter(t => !t.planned);
+      if (planned.length) b.appendChild(el('div', 'tr-h tr-planned-h', `Planned (${planned.length})`));
+      planned.concat(past).forEach((t, i) => {
+        if (planned.length && i === planned.length && past.length) b.appendChild(el('div', 'tr-h tr-past-h', `Past trips (${past.length})`));
         const open = st.open === t.id;
         const r = el('div', 'pj-item tr-item' + (open ? ' open' : ''));
         r.dataset.trip = t.id;
-        r.appendChild(el('div', 'pj-item-t', ['compass', t.name || 'Trip']));
+        r.appendChild(el('div', 'pj-item-t', ['compass', (t.name || 'Trip') + (t.planned ? ' (planned)' : '')]));
         const cv = caveNames(t);
         r.appendChild(el('div', 'pj-sub', [range(t), t.people.length ? t.people.length + (t.people.length === 1 ? ' person' : ' people') : '',
+          liveObj(t).length ? `${liveObj(t).filter(o => o.done).length}/${liveObj(t).length} objectives` : '', t.leads.length ? t.leads.length + (t.leads.length === 1 ? ' lead' : ' leads') : '',
           cv.length ? cv.slice(0, 3).join(', ') + (cv.length > 3 ? ` +${cv.length - 3}` : '') : ''].filter(Boolean).join(' · ')));
         r.addEventListener('click', () => { st.open = open ? null : t.id; st.picked = new Set(); A.render(); });
         b.appendChild(r);
@@ -241,7 +320,8 @@
   .tr-sug { border: 1px dashed rgba(255,255,255,.25); border-radius: 6px; padding: 4px 8px 6px; margin: 6px 0; }
   .tr-sug-i { display: flex; gap: 6px; align-items: flex-start; font-size: 12px; margin: 2px 0; cursor: pointer; }
   .tr-dates { display: flex; gap: 6px; align-items: center; } .tr-caves { max-height: 140px; overflow: auto; }
-  .tr-cave { display: block; margin: 1px 0; cursor: pointer; } .tr-total { margin-top: 3px; }
+  .tr-plan { display: block; margin: 6px 0; cursor: pointer; } .tr-cave { display: block; margin: 1px 0; cursor: pointer; } .tr-total { margin-top: 3px; }
+  .tr-obj.done span { text-decoration: line-through; opacity: .6; }
   .tr-desc { white-space: pre-wrap; margin: 4px 0; }`;
   document.head.appendChild(css);
 

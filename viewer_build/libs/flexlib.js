@@ -309,7 +309,7 @@
   }
 
   // ── Project replay ────────────────────────────────────────────────────────
-  const TRIP_LISTS = ['people', 'caves', 'links'];
+  const TRIP_LISTS = ['people', 'caves', 'links', 'leads'];
   function emptyProject(pid) {
     return { id: pid, name: '', desc: '', lists: {}, caves: {}, aliases: {}, notes: {}, leads: {},
              surveys: {}, order: [], caveUpdates: {}, surveyVersions: {}, segments: {}, cavefiles: {}, systems: {}, layers: {}, features: {}, groups: {}, arealabels: {}, trips: {}, proposals: {}, archived: null, footprint: null, moves: {}, log: [], byId: new Map() };
@@ -504,9 +504,21 @@
         // Older readers fall through to `default` and ignore the op.
         case 'trip.set': {
           if (e.trip == null || e.trip === '') break;
-          const t = S.trips[e.trip] || (S.trips[e.trip] = { id: String(e.trip), name: '', start: '', end: '', desc: '', people: [], caves: [], links: [], created: { t: e.t, who: e.who }, history: [] });
+          const t = S.trips[e.trip] || (S.trips[e.trip] = { id: String(e.trip), name: '', start: '', end: '', desc: '', people: [], caves: [], links: [], leads: [], objectives: [], planned: false, created: { t: e.t, who: e.who }, history: [] });
           ['name', 'start', 'end', 'desc'].forEach(k => { if (e[k] != null) t[k] = String(e[k]); });
           if (e.removed != null) t.removed = !!e.removed;
+          // Planned trips (optional, older readers ignore them): `planned` true
+          // until the trip is started / done; `obj` { <id>: { text, done, removed } }
+          // merges per objective and per field, in the order objectives first appear.
+          if (e.planned != null) t.planned = !!e.planned;
+          if (e.obj && typeof e.obj === 'object') Object.keys(e.obj).forEach(oid => {
+            const f = e.obj[oid] || {};
+            let o = t.objectives.find(x => x.id === oid);
+            if (!o) t.objectives.push(o = { id: oid, text: '', done: false, removed: false });
+            if (f.text != null) o.text = String(f.text);
+            if (f.done != null) o.done = !!f.done;
+            if (f.removed != null) o.removed = !!f.removed;
+          });
           TRIP_LISTS.forEach(k => {
             ((e.drop && e.drop[k]) || []).forEach(v => { t[k] = t[k].filter(x => x !== String(v)); });
             ((e.add && e.add[k]) || []).forEach(v => { v = String(v).trim(); if (v && !t[k].includes(v)) t[k].push(v); });
@@ -823,7 +835,7 @@
   // { id, name, start, end ('' = a one-day trip), desc, people: [names as
   // entered], caves: [project cave ids], links: ['segment:<id>' | 'note:<id>'
   // | 'doc:<id>'] }. Links are kept on the trip; tripSuggest only proposes.
-  const tripState = t => (t ? { name: t.name, start: t.start, end: t.end, desc: t.desc, removed: !!t.removed } : null);
+  const tripState = t => (t ? { name: t.name, start: t.start, end: t.end, desc: t.desc, removed: !!t.removed, planned: !!t.planned } : null);
   // The body of the entry that turns trip `cur` (null: a new one) into `next`
   // ({ name, start, end, desc, people, caves, links }, any subset); null when
   // nothing changes. Carries `prev` so History can undo it (tripUndo).
@@ -836,6 +848,28 @@
     });
     if (cur && cur.removed && next.removed !== true) { body.removed = false; prev.removed = true; }
     if (next.removed === true && (!cur || !cur.removed)) { body.removed = true; prev.removed = false; }
+    if (next.planned != null && !!next.planned !== !!(cur && cur.planned)) { body.planned = !!next.planned; prev.planned = !!(cur && cur.planned); }
+    // objectives: [{ id?, text, done }] = the whole live list; changes go as a per-id map.
+    if (Array.isArray(next.objectives)) {
+      const have = ((cur && cur.objectives) || []).filter(o => !o.removed), keep = new Set();
+      const obj = {}, po = {};
+      next.objectives.forEach(o => {
+        const text = String(o.text == null ? '' : o.text).trim(), done = !!o.done, old = o.id && have.find(x => x.id === o.id);
+        if (!text && !old) return;
+        if (old) {
+          keep.add(old.id);
+          const f = {}, pf = {};
+          if (text && text !== old.text) { f.text = text; pf.text = old.text; }
+          if (done !== old.done) { f.done = done; pf.done = old.done; }
+          if (Object.keys(f).length) { obj[old.id] = f; po[old.id] = pf; }
+        } else {
+          const id = o.id || uid(6);
+          keep.add(id); obj[id] = { text, done }; po[id] = { removed: true };
+        }
+      });
+      have.forEach(o => { if (!keep.has(o.id)) { obj[o.id] = { removed: true }; po[o.id] = { removed: false }; } });
+      if (Object.keys(obj).length) { body.obj = obj; prev.obj = po; }
+    }
     TRIP_LISTS.forEach(k => {
       if (!Array.isArray(next[k])) return;
       const want = [...new Set(next[k].map(x => String(x).trim()).filter(Boolean))], have = cur ? cur[k] : [];
@@ -857,7 +891,15 @@
     const back = {};
     Object.keys(e.prev).forEach(k => { back[k] = e.prev[k]; });
     const now = {};
-    ['name', 'start', 'end', 'desc', 'removed'].forEach(k => { if (e[k] != null) now[k] = e[k]; });
+    ['name', 'start', 'end', 'desc', 'removed', 'planned'].forEach(k => { if (e[k] != null) now[k] = e[k]; });
+    delete back.obj;
+    if (e.prev.obj) {
+      out.obj = e.prev.obj; now.obj = {};
+      Object.keys(e.prev.obj).forEach(oid => {
+        const g = {}; Object.keys(e.prev.obj[oid]).forEach(k => { g[k] = e.obj && e.obj[oid] && e.obj[oid][k] != null ? e.obj[oid][k] : (k === 'removed' ? false : e.prev.obj[oid][k]); });
+        now.obj[oid] = g;
+      });
+    }
     Object.assign(out, back, { prev: now });
     if (e.add) out.drop = e.add;
     if (e.drop) out.add = e.drop;
@@ -866,6 +908,9 @@
   // Live trips, newest first (by start, then end, then name).
   const tripsOf = (S, opts) => Object.values((S && S.trips) || {}).filter(t => (opts && opts.removed ? t.removed : !t.removed))
     .sort((a, b) => (a.start < b.start ? 1 : a.start > b.start ? -1 : (a.end || a.start) < (b.end || b.start) ? 1 : (a.end || a.start) > (b.end || b.start) ? -1 : a.name.localeCompare(b.name)));
+  // Planned trips (soonest first) and past ones (newest first, as tripsOf).
+  const tripsPlanned = S => tripsOf(S).filter(t => t.planned).sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : a.name.localeCompare(b.name)));
+  const tripsPast = S => tripsOf(S).filter(t => !t.planned);
   // Trips that visited a cave, or hold a link ('segment:<id>' …).
   const tripsFor = (S, o) => tripsOf(S).filter(t => (o.cave && t.caves.includes(o.cave)) || (o.link && t.links.includes(o.link)));
   // A day "YYYY-MM-DD" from a date text (approximate dates have none), and from an ISO time (this device's day).
@@ -1356,7 +1401,7 @@
     replayProject, replayDocs, caveForName, liveCaves, notesOn, leadsOn,
     docInProject, docInbox, docsOf, docsForStation, docsForTarget, pageFor,
     segmentsOf, segmentIndex, segmentsAt, proposalTarget, segmentStates, liveCavefiles, liveLayers, areaLabelsOf, areaLabelId, areaLabelState, areaLabelUndo,
-    tripState, tripEdit, tripUndo, tripsOf, tripsFor, tripSuggest, tripDays, fullDay,
+    tripState, tripEdit, tripUndo, tripsOf, tripsPlanned, tripsPast, tripsFor, tripSuggest, tripDays, fullDay,
     snapshotTime, entriesAt, replayProjectAt, replayDocsAt, changeDays, caveBundle, moveRenames, caveMoveEntries, caveMoveClear, moveRecord, movesOf,
     liveFeatures, liveGroups, groupPath, featuresGeoJSON, featuresKML, featuresGPX, flexTag, makeFlexTag,
     selectForSync, syncManifest, newEntries,
