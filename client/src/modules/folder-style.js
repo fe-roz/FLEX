@@ -237,7 +237,7 @@
       else {
         const img = symbolImage(s.symbol, c.withAlpha(1).toCssColorString());
         if (o.hadBillboard) { e.billboard.image = img; e.billboard.scale = 1; e.billboard.color = Cesium.Color.WHITE.withAlpha(op); }
-        else e.billboard = { image: img, color: Cesium.Color.WHITE.withAlpha(op), heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN, disableDepthTestDistance: 5000, verticalOrigin: Cesium.VerticalOrigin.CENTER };
+        else e.billboard = { image: img, color: Cesium.Color.WHITE.withAlpha(op), disableDepthTestDistance: 5000, verticalOrigin: Cesium.VerticalOrigin.CENTER };
         if (e.point) { e.point.show = false; e._fsNoPoint = true; }
         e._fsSym = s.symbol;
       }

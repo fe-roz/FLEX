@@ -129,10 +129,11 @@ function _caltopoJsonToDataSource(result, ds) {
         else if (g.type === 'Point') {
           const col = _ctColor(p['marker-color'], '#ff8800');
           ent = E.add(Object.assign(base, { position: P(g.coordinates),
-            point: { pixelSize: 9, color: col, outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5, heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN, disableDepthTestDistance: 5000 },
+            point: { pixelSize: 9, color: col, outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5, disableDepthTestDistance: 5000 },
             label: window._pjfLabel ? window._pjfLabel(p.title || '') : { text: p.title || '', font: '15px sans-serif', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
                      style: Cesium.LabelStyle.FILL_AND_OUTLINE, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -10),
-                     heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN, distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 8000), disableDepthTestDistance: 5000 } }));
+                     distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 8000), disableDepthTestDistance: 5000 } }));
+          if (window._groundH) window._groundH.track(ent, g.coordinates[0], g.coordinates[1]);     // ground height sampled once, kept (ground-height.js)
         } else if (g.type === 'LineString') {
           ent = E.add(Object.assign(base, { polyline: { positions: _ctSimplify(g.coordinates).map(P), width: Math.max(1, +p['stroke-width'] || 2), material: _ctColor(p.stroke, '#ff0000'), clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN } }));
         } else if (g.type === 'Polygon') {
@@ -146,6 +147,7 @@ function _caltopoJsonToDataSource(result, ds) {
     });
     E.values.slice().forEach(e => { if (!keep.has(e.id)) E.remove(e); });      // gone from the map
     ds._ctCount = n;
+    if (window._labelCull) window._labelCull.soon(150);
   } finally { ds.entities.resumeEvents(); }
   return ds;
 }

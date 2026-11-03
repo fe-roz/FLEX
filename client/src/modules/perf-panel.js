@@ -2,8 +2,8 @@
 //
 //   - Always on, in perf-probe.js: frame times (fps, percentiles) and the CPU time of each stage of the frame,
 //     measured inside render-loop.js. This file only reads it (once a second, and only while the panel is open).
-//   - A stacked bar of one frame by category: Point clouds, Terrain & globe, Map layers, Features & labels,
-//     FLEX's own work, GPU. GPU is the frame time minus the measured work, unless the browser has the GPU timer
+//   - A stacked bar of one frame by category: Point clouds, Terrain & globe, Map layers, Features & lines,
+//     Labels & points (the cost of drawing many names and point markers, measured in perf-probe.js), FLEX's own work, GPU. GPU is the frame time minus the measured work, unless the browser has the GPU timer
 //     (EXT_disjoint_timer_query_webgl2): then it is measured, and the panel says which.
 //   - Counts beside it: points on screen against the budget, terrain tiles, features by source, map layers, Google 3D, shading.
 //   - "Run tests" (only on a click: the view flickers): switches one thing off for about a second, measures the
@@ -28,7 +28,7 @@
 
   // The look of each category (colour + words; the legend has both)
   const CATS = {
-    cloud: '#5aa9ff', terrain: '#6fd39a', layers: '#e0b84e', features: '#e88fb4', own: '#b79cf0', gpu: '#8f9aa3',
+    cloud: '#5aa9ff', terrain: '#6fd39a', layers: '#e0b84e', features: '#e88fb4', pts: '#f08a4b', own: '#b79cf0', gpu: '#8f9aa3',
   };
 
   // ── Hooking into the page ───────────────────────────────────────────────
@@ -102,11 +102,38 @@
       set: on => { if (el.checked !== !!on) { el.checked = !!on; el.dispatchEvent(new Event('change', { bubbles: true })); } },
     }, extra || {});
   };
+  // "Points off": show = false on each point / billboard / label that is on, remembered per entity, restored exactly.
+  let ptsOff = false; const ptsSaved = new Map();
+  function pointEntities() {
+    const out = [], F = window._pjfState, w = window._ws, v = V();
+    if (F && F.src) F.src.entities.values.forEach(e => { if (e.point || e.billboard || e.label) out.push(e); });
+    if (w && w.vectorSources) w.vectorSources().forEach(s => s.ds.entities.values.forEach(e => { if (e.point || e.billboard || e.label) out.push(e); }));
+    if (v) v.entities.values.forEach(e => { if (e.point || e.billboard || e.label) out.push(e); });
+    return out;
+  }
+  const flagOf = g => { const x = g && g.show; return x == null ? true : x.getValue ? x.getValue() : x; };
+  function setPointsOff(off) {
+    if (off === ptsOff) return;
+    ptsOff = off;
+    if (off) pointEntities().forEach(e => {
+      const o = { p: e.point && flagOf(e.point), b: e.billboard && flagOf(e.billboard), l: e.label && flagOf(e.label) };
+      ptsSaved.set(e, o);
+      if (e.point) e.point.show = false; if (e.billboard) e.billboard.show = false; if (e.label) e.label.show = false;
+    });
+    else { ptsSaved.forEach((o, e) => { if (e.point && o.p != null) e.point.show = o.p; if (e.billboard && o.b != null) e.billboard.show = o.b; if (e.label && o.l != null) e.label.show = o.l; }); ptsSaved.clear(); }
+    const v = V(); if (v && v.scene.requestRender) v.scene.requestRender();
+  }
   function acts(c) {
     const out = [], po = PO(), v = V();
     c = c || counts();
     const SC = window._surfCols;
     if (SC && SC.labels) out.push({ id: 'labels', group: 'names', label: 'Names (labels)', text: 'Hide names', off: false, get: () => !!SC.labels(), set: on => SC.labels(!!on) });
+    // Points off: every point marker and its name hidden (a what-if for the cost of many points); put back exactly
+    try {
+      const ents = pointEntities();
+      if (ents.length >= T.minItems) out.push({ id: 'points', group: 'points', label: 'Points and names', text: 'Hide the points and names on the map', off: false,
+        get: () => !ptsOff, set: on => setPointsOff(!on) });
+    } catch (_) {}
     // Project feature folders (top level), CalTopo map, data files
     try {
       const pj = window._pj || {}, F = window._pjf, FL = window.FlexLib;
@@ -240,7 +267,7 @@
       else if (!r) {
         // an estimate from the stage timings, only for things the probe times directly
         let ms = 0;
-        if (a.id === 'labels') ms = st.avg.labels; else if (a.id === 'minimap') ms = st.avg.minimap; else if (a.id === 'incidence') ms = st.avg.incidence;
+        if (a.id === 'labels' || a.id === 'points') ms = (a.id === 'labels' ? st.avg.labels : 0) + st.avg.ptsEnt + st.avg.ptsPrim + st.avg.ptsGlobe; else if (a.id === 'minimap') ms = st.avg.minimap; else if (a.id === 'incidence') ms = st.avg.incidence;
         else if (a.id === 'budget') ms = 0.4 * (st.avg.potreeUpdate + st.avg.potreeRender);
         const g = PU.estGainFps(st.frameMs, ms);
         if (g > 0) out.push({ id: a.id, text: a.text, act: a, gainFps: g, measured: false });
@@ -272,11 +299,12 @@
       <div class="lp-section-header" onclick="window._lpToggle(this)"><span class="lp-section-arrow">▾</span> Performance</div>
       <div class="lp-section-body open">
         <div class="pf-top"><span class="pf-fps"><b id="pf-fps">–</b> fps</span><span class="pf-pct" id="pf-pct"></span></div>
+        <div class="pf-verdict" id="pf-verdict"></div>
         <div class="pf-bar" id="pf-bar" role="img" aria-label="One frame, in milliseconds, by kind of work"></div>
         <div class="pf-scale"><span>0</span><span id="pf-scale-end"></span></div>
         <div id="pf-legend" class="pf-legend"></div>
         <div class="pf-sub" id="pf-own"></div>
-        <canvas id="pf-hist" width="320" height="46" title="The last minute, one column a second (the same colours)"></canvas>
+        <canvas id="pf-hist" width="320" height="46" title="The last minute, one column a second (the same colours); a red mark on top = a second with hitches (jerky frames)"></canvas>
         <div class="pf-note" id="pf-gpu"></div>
         <div class="pf-h">On screen now</div>
         <div id="pf-counts" class="pf-counts"></div>
@@ -301,6 +329,8 @@
     const st = PR.stats(300), s = st.summary;
     q('pf-fps').textContent = fmtFps(s.fps);
     q('pf-pct').textContent = s.n ? `median ${PU.fmtMs(s.p50)} · 95% under ${PU.fmtMs(s.p95)} · worst ${PU.fmtMs(s.max)}` : 'waiting for frames';
+    const hits = PR.hitchCount(10000), vd = PU.verdict(hits, s.n ? s.fps : NaN);
+    const vEl = q('pf-verdict'); vEl.textContent = s.n ? vd.text + (isFinite(s.low1) ? ` · 1% low ${fmtFps(s.low1)} fps` : '') : ''; vEl.dataset.v = vd.id;
     const st2 = PR.stats(120), frameMs = st2.frameMs;
     const gpuMs = PR.gpu.mode === 'measured' ? PR.gpu.ms : null;
     const cats = PU.categories(st2.avg, frameMs, { gpuMs });
@@ -321,7 +351,8 @@
   function pushHist() {
     const st = PR.stats(60); if (!st.n) return;
     const cats = PU.categories(st.avg, st.frameMs, { gpuMs: PR.gpu.mode === 'measured' ? PR.gpu.ms : null });
-    hist.push(cats.rows.map(r => ({ id: r.id, ms: r.ms })));
+    const h = cats.rows.map(r => ({ id: r.id, ms: r.ms })); h.hits = PR.hitchCount(1000);
+    hist.push(h);
     if (hist.length > 60) hist.shift();
   }
   function paintHist() {
@@ -331,6 +362,7 @@
     const max = Math.max(33.4, ...hist.map(c => c.reduce((a, r) => a + r.ms, 0)));
     hist.forEach((c, i) => { let y = h; c.forEach(r => { const hh = h * r.ms / max; g.fillStyle = CATS[r.id]; g.fillRect((60 - hist.length + i) * bw, y - hh, bw - 0.5, hh); y -= hh; }); });
     g.fillStyle = 'rgba(255,255,255,.35)'; g.fillRect(0, h - h * 16.7 / max, w, 1);
+    g.fillStyle = '#ff4d4d'; hist.forEach((c, i) => { if (c.hits) g.fillRect((60 - hist.length + i) * bw, 0, bw - 0.5, 3); });      // a second with hitches
   }
   function paintCounts() {
     const c = counts(), rows = [];
@@ -404,7 +436,8 @@
   function showPill() {
     try { sessionStorage.setItem('flex.perf.pill', '1'); } catch (_) {}
     const b = document.createElement('div'); b.id = 'perf-pill'; b.setAttribute('role', 'status');
-    b.innerHTML = '<button type="button" class="pp-go">Running slowly — see why</button><button type="button" class="pp-x" title="Dismiss" aria-label="Dismiss">×</button>';
+    const fps = P.fpsSource ? P.fpsSource() : PR.recentFps(1000), jerky = !(fps < PR.cfg.lowFps), hs = PR.hitchCount(10000);
+    b.innerHTML = '<button type="button" class="pp-go">' + (jerky ? 'Running jerkily — see why (' + hs + ' hitches in 10 s)' : 'Running slowly — see why (' + (fps < 10 ? fps.toFixed(1) : Math.round(fps)) + ' fps)') + '</button><button type="button" class="pp-x" title="Dismiss" aria-label="Dismiss">×</button>';
     b.querySelector('.pp-go').addEventListener('click', () => { b.remove(); open(); });
     b.querySelector('.pp-x').addEventListener('click', () => b.remove());
     document.body.appendChild(b);
@@ -419,7 +452,9 @@
   function pillStep(fps, loading) {
     if (document.hidden) { sinceShow = performance.now(); pst.lowSince = null; return false; }
     if (sinceShow != null && performance.now() - sinceShow < 3000) { pst.lowSince = null; return false; }   // just back from a hidden tab
-    return PU.pillStep(pst, performance.now(), fps, { hidden: false, loading, sinceLoadMs: performance.now() }, PR.cfg);
+    // Jerky counts too: many hitches in the last 10 s stand in for a low frame rate
+    const eff = PR.hitchCount(10000) >= PR.cfg.jerkyHits ? Math.min(isFinite(fps) ? fps : 0, PR.cfg.lowFps - 1) : fps;
+    return PU.pillStep(pst, performance.now(), eff, { hidden: false, loading, sinceLoadMs: performance.now() }, PR.cfg);
   }
 
   const style = document.createElement('style');
@@ -435,6 +470,7 @@
   #perf-panel .pf-legend .pf-row { display: grid; grid-template-columns: 12px 1fr auto; gap: 7px; align-items: center; padding: 1.5px 0; }
   #perf-panel .pf-row .sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; border: 1px solid rgba(255,255,255,.25); }
   #perf-panel .pf-row .ms { font-variant-numeric: tabular-nums; color: #e8ece9; } #perf-panel .pf-row.dim { color: rgba(255,255,255,.5); }
+  #perf-panel .pf-verdict { font-size: 11.5px; margin: -2px 0 6px; color: #6fd39a; } #perf-panel .pf-verdict[data-v=jerky] { color: #f2c24e; } #perf-panel .pf-verdict[data-v=slow] { color: #ff7b6b; }
   #perf-panel .pf-sub, #perf-panel .pf-note { color: rgba(255,255,255,.5); font-size: 10.5px; margin: 4px 0; }
   #perf-panel canvas { width: 100%; height: 46px; margin-top: 6px; background: rgba(255,255,255,.04); border-radius: 4px; }
   #perf-panel .pf-h { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: rgba(255,255,255,.5); font-weight: 700; margin: 10px 0 4px; }
@@ -455,7 +491,7 @@
 
   Object.assign(P, {
     counts, acts: () => acts(), runTests, stop, apply, undo, refresh, open, tune: o => Object.assign(T, o),
-    buildSuggestions: () => { buildSuggestions(true); paintSuggestions(); }, refreshTerrain, pill: pst, sampleMs,
+    buildSuggestions: () => { buildSuggestions(true); paintSuggestions(); }, refreshTerrain, setPointsOff, pill: pst, sampleMs,
   });
   Object.defineProperties(P, { results: { get: () => results }, suggestions: { get: () => S }, running: { get: () => running } });
   window._perfPanel = P;

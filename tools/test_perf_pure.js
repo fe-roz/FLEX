@@ -21,8 +21,11 @@ const s = M.summarize(frames);
 ok('summary: n, p50, max', s.n === 100 && near(s.p50, 16.7) && s.max === 90, s);
 ok('summary: p99 sees the hiccup, p95 does not', s.p99 > 16.7 && near(s.p95, 16.7), s);
 ok('summary: fps = 1000 / mean', near(s.fps, 1000 / s.mean));
-const sh = M.summarize([16, 16, 5000, 0, -3, 16]);
-ok('a hidden tab (5 s gap), zeros and negatives are not frames', sh.n === 3 && sh.max === 16, sh);
+const sh = M.summarize([16, 16, 5000, 0, -3, 16, 90000]);
+ok('a visible page\'s long frames count (5 s), zeros / negatives / a suspended machine\'s 90 s gap do not', sh.n === 4 && sh.max === 5000, sh);
+const one = M.summarize([16.7, 16.7, 16.7, 1000, 16.7]);
+ok('a 1000 ms frame is the worst frame, fps sees it', one.max === 1000 && one.fps < 1000 / 16.7 - 5 && one.low1 === 1, one);
+ok('1% low and jitter', near(M.summarize(Array.from({ length: 200 }, (_, i) => (i < 2 ? 100 : 10))).low1, 10) && near(M.summarize([10, 10, 10, 20]).jitter, M.percentile([10, 10, 10, 20], 0.95) / 10));
 ok('no frames → n 0', M.summarize([]).n === 0);
 
 // trimmed mean
@@ -73,7 +76,7 @@ ok('an unknown fps (NaN) counts as nothing', !M.pillStep(st, 0, NaN, ctx(), cfg)
 const avg = { own: 1, cesium: 10, minimap: 0.5, potreeUpdate: 2, potreeRender: 3, incidence: 0.2, compass: 0.3, labels: 1.5, measure: 0, entities: 3, globe: 4, imagery: 1 };
 const c = M.categories(avg, 60, {});
 const row = id => c.rows.find(x => x.id === id).ms;
-ok('categories in stacking order', c.rows.map(x => x.id).join() === 'cloud,terrain,layers,features,own,gpu');
+ok('categories in stacking order', c.rows.map(x => x.id).join() === 'cloud,terrain,layers,features,pts,own,gpu');
 ok('point clouds = update + render', near(row('cloud'), 5));
 ok('map layers = the imagery part of the globe', near(row('layers'), 1));
 ok('terrain = globe minus imagery, plus the rest of the scene', near(row('terrain'), 3 + (10 - 3 - 3 - 1)), row('terrain'));
@@ -88,6 +91,28 @@ const z = M.categories({}, 20, {});
 ok('empty averages do not break', z.rows.every(x => x.ms >= 0 || x.id === 'gpu') && isFinite(z.cpu));
 const big = M.categories({ cesium: 2, entities: 9, globe: 9, imagery: 9 }, 30, {});
 ok('sub-timers larger than the stage never make a negative bar', big.rows.every(x => x.ms >= 0), big.rows);
+
+// labels & points are taken out of the timer they ran inside
+const lp = M.categories(Object.assign({}, avg, { ptsEnt: 1, ptsGlobe: 2, ptsPrim: 1.5 }), 60, {});
+const lrow = id => lp.rows.find(x => x.id === id).ms;
+ok('labels & points = what ran in entities + globe + scene', near(lrow('pts'), 4.5), lrow('pts'));
+ok('…and left those timers: entities 3→2, terrain 3+(3)→ (4-1-2... globe 3 net) minus 2, minus 1.5 from the scene', near(lrow('features'), 2 + 1.5) && near(lrow('terrain'), (3 - 2) + (10 - 3 - 3 - 1 - 1.5)), [lrow('features'), lrow('terrain')]);
+ok('the total CPU is unchanged by the split', near(lp.cpu, c.cpu), [lp.cpu, c.cpu]);
+const lbig = M.categories({ cesium: 2, ptsEnt: 9, ptsGlobe: 9, ptsPrim: 9 }, 30, {});
+ok('labels & points larger than the stage never make a negative bar', lbig.rows.every(x => x.ms >= 0) && lbig.rows.find(x => x.id === 'pts').ms <= 2, lbig.rows);
+
+// hitches (jerkiness)
+let hs = { ema: 0, hits: [] }, t = 0;
+for (let i = 0; i < 300; i++) { t += 5; M.hitchStep(hs, i % 50 === 49 ? 120 : 5, t); }
+ok('periodic long frames are hitches even when the mean fps is high', hs.hits.length >= 5 && 1000 / ((300 * 5 + 6 * 115) / 300) > 100, hs.hits.length);
+hs = { ema: 0, hits: [] }; for (let i = 0; i < 300; i++) M.hitchStep(hs, 16.7 + (i % 3), i * 17);
+ok('a steady 60 fps has none', hs.hits.length === 0);
+hs = { ema: 0, hits: [] }; for (let i = 0; i < 100; i++) M.hitchStep(hs, 2, i * 2); M.hitchStep(hs, 12, 300);
+ok('a frame over twice the average but still quick (12 ms) is not a hitch (under 33 ms)', hs.hits.length === 0);
+hs = { ema: 0, hits: [] }; for (let i = 0; i < 100; i++) M.hitchStep(hs, 16.7, i * 17); M.hitchStep(hs, 1000, 2000);
+ok('a 1 s frame is a hitch and is counted within 10 s only', M.hitchesIn(hs, 2100, 10000) === 1 && M.hitchesIn(hs, 13000, 10000) === 0);
+ok('the average is not dragged up by hitches', hs.ema < 20, hs.ema);
+ok('verdicts in plain words', M.verdict(0, 60).text === 'smooth' && /^jerky: 4 hitches in 10 s$/.test(M.verdict(4, 60).text) && /^slow: 1\.0 fps/.test(M.verdict(0, 1).text) && /^slow: 15 fps, and jerky/.test(M.verdict(5, 15).text));
 
 // formatting
 ok('fmtMs', M.fmtMs(3.14159) === '3.1 ms' && M.fmtMs(42.4) === '42 ms' && M.fmtMs(NaN) === '–');

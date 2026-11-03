@@ -90,9 +90,12 @@
       const base = { name: f.name || ({ point: 'Point', line: 'Line', area: 'Area' }[f.kind]), description: esc(f.desc || '').replace(/\n/g, '<br>'), properties: props };
       const ents = [];
       if (f.kind === 'point') {
-        ents.push(F.src.entities.add(Object.assign(base, { position: pos[0],
-          point: { pixelSize: 9, color: c, outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5, heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN, disableDepthTestDistance: 5000 },
-          label: f.style && f.style.label === false ? undefined : window._pjfLabel(f.name || '') })));          // name off: feature-editor.js
+        // On the ground without Cesium's per-frame clamping: the height is sampled once and kept (ground-height.js)
+        const pe = F.src.entities.add(Object.assign(base, { position: pos[0],
+          point: { pixelSize: 9, color: c, outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5, disableDepthTestDistance: 5000 },
+          label: f.style && f.style.label === false ? undefined : window._pjfLabel(f.name || '') }));          // name off: feature-editor.js
+        if (window._groundH) window._groundH.track(pe, f.coords[0][0], f.coords[0][1]);
+        ents.push(pe);
       } else if (f.kind === 'line') {
         ents.push(F.src.entities.add(Object.assign(base, { polyline: { positions: pos, width: 3, material: c, clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN } })));
       } else {
@@ -103,6 +106,7 @@
     });
     for (const [id, d] of drawn) if (!want.has(id)) { d.ents.forEach(e => F.src.entities.remove(e)); drawn.delete(id); }
     if (window._folderStyle) window._folderStyle.apply();           // folders' display settings (folder-style.js)
+    if (window._labelCull) window._labelCull.soon(150);               // new entities start with their label shown: keep only the readable ones (label-cull.js)
     v.scene.requestRender && v.scene.requestRender();
   }
 
@@ -573,7 +577,7 @@
   window._pjfLabel = text => ({
     text, font: '15px sans-serif', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
     style: Cesium.LabelStyle.FILL_AND_OUTLINE, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -10),
-    heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN, distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 8000),
+    distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, window._labelCull ? window._labelCull.far() : 8000),   // label-cull.js scales it with how many there are
     disableDepthTestDistance: 5000,
   });
   // Point cloud drawn over the map: a visible cloud with at least one class of
@@ -620,6 +624,7 @@
     for (const e of ents) {
       if (!e._pjfHid) { e.label.show = false; if (e.point) e.point.show = false; if (e.billboard) e.billboard.show = false; e._pjfHid = true; }
       if (!e.isShowing) continue;
+      if (e._lcHide) { const d0 = HL.divs.get(e.id); if (d0) d0.style.display = 'none'; continue; }       // not among the readable ones (label-cull.js)
       const p = e.position.getValue(now); if (!p) continue;
       let h = HL.heights.get(e.id);
       const k = Cesium.Cartographic.fromCartesian(p);
@@ -666,7 +671,7 @@
     const v = V();
     if (!v || !v.selectedEntityChanged) return;
     clearInterval(hook);
-    v.scene.postRender.addEventListener(updateHtml);
+    v.scene.postRender.addEventListener(window._perfProbe && window._perfProbe.timed ? window._perfProbe.timed(updateHtml) : updateHtml);    // timed: counts as Labels & points in the Speed panel
     // New terrain under the points: forget the ground heights the labels sat
     // on (again once its tiles have arrived).
     window.addEventListener('flex-terrain-changed', () => {
@@ -697,5 +702,5 @@
   .pjf-item { user-select: none; }`;
   document.head.appendChild(st);
 
-  window._pjf = { hidden, setHidden, groupColor, colorOf, downloadMenu, overlayTree, srcKey, entCoords, adoptPoints, highlight, clearHighlight, updateHtml, changed, render, draw, startDraw, stopDraw, editFeature, editGroup, importFile, download, scanTags, placeAtTag, copyTag, applyOverlayHidden, walk };
+  window._pjf = { labelled, hidden, setHidden, groupColor, colorOf, downloadMenu, overlayTree, srcKey, entCoords, adoptPoints, highlight, clearHighlight, updateHtml, changed, render, draw, startDraw, stopDraw, editFeature, editGroup, importFile, download, scanTags, placeAtTag, copyTag, applyOverlayHidden, walk };
 })();
