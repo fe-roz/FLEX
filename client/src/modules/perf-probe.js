@@ -16,8 +16,31 @@
 // the part of the globe's work spent on imagery layers). attachCesium() installs them; every wrapper is
 // guarded, so a different Cesium version just leaves them at 0.
 //
+// Labels & points (stage 'pts'): the cost of drawing many labels / point billboards used to be filed under Terrain &
+// globe (Cesium registers a height callback per clamped point, run inside the globe's endFrame) and Cesium (the
+// primitive collections' update). attachCesium() now times, by wrapping the functions (each is guarded and skipped
+// when Cesium lacks it), the work that belongs to labels and points, and files it where it ran so nothing is counted
+// twice:  ptsEnt   LabelVisualizer / BillboardVisualizer / PointVisualizer .update (inside the clock tick, i.e. inside
+//                  the 'entities' timer),
+//         ptsPrim  LabelCollection / BillboardCollection / PointPrimitiveCollection .update (building the draw commands,
+//                  inside Cesium's scene render) and the page's own per-frame label code (timed(), e.g. the LiDAR
+//                  HTML names), via the nesting depth so a LabelCollection's inner BillboardCollection counts once,
+//         ptsGlobe the callbacks Cesium runs when a clamped point's height arrives (Scene.updateHeight's callback),
+//                  inside the globe's endFrame (the 'globe' timer).
+// categories() subtracts each from the timer it ran inside. Not measured: the terrain search that finds a clamped
+// point's height (time-sliced to 2 ms a frame inside the globe's endFrame) and the draw calls themselves (GPU); the
+// panel's what-if tests (labels off, points off) show the whole cost.
+//
+// Long frames are real: a frame is the gap between two animation frames. A hidden tab (visibilitychange, or a
+// document that is hidden) does not run frames, so the first frame after it is not a frame at all (its gap is
+// dropped); every other gap counts, however long, up to 30 s (a suspended laptop). FLEX renders on every animation
+// frame (render-loop.js calls viewer.render() itself), so a long gap on a visible page is a slow frame, never idle.
+// P.renders counts Cesium postRender events (a render that really finished).
+// Jerkiness: hitchStep() keeps a slow running average of the frame time and counts a frame as a hitch when it is
+// over twice that average and over 33 ms (the eye sees it); hitchCount(ms) = hitches in the last ms.
+//
 // window._perfProbe = { enabled, count, frame, lap, end, wrapBegin, wrapEnd, attachCesium, attachGpu, gpu,
-//                       stats(n), dtsSince(count), recentFps(ms), cfg }
+//                       stats(n), dtsSince(count), recentFps(ms), hitchCount(ms), hitchTimes, timed(fn), renders, cfg }
 (function (root, factory) {
   'use strict';
   const m = factory();
@@ -35,19 +58,38 @@
     const x = Math.min(1, Math.max(0, p)) * (n - 1), i = Math.floor(x), f = x - i;
     return i + 1 < n ? sorted[i] * (1 - f) + sorted[i + 1] * f : sorted[i];
   }
-  /** Frame times in ms (a stalled tab's multi-second gaps are not frames: dropped above `cap`). */
+  /** Frame times in ms. Every real frame counts, long ones too (the probe already dropped hidden-tab gaps); `cap` (30 s) only drops a suspended machine's gap. */
   function summarize(dts, cap) {
-    const lim = cap || 1000, a = [];
+    const lim = cap || 30000, a = [];
     for (let i = 0; i < dts.length; i++) { const v = dts[i]; if (v > 0 && v <= lim) a.push(v); }
     if (!a.length) return { n: 0, mean: NaN, fps: NaN, p50: NaN, p95: NaN, p99: NaN, max: NaN };
     a.sort((x, y) => x - y);
     let s = 0; for (const v of a) s += v;
     const mean = s / a.length;
-    return { n: a.length, mean, fps: 1000 / mean, p50: percentile(a, 0.5), p95: percentile(a, 0.95), p99: percentile(a, 0.99), max: a[a.length - 1] };
+    // 1% low: the frame rate of the slowest hundredth of the frames (at least one frame)
+    const k = Math.max(1, Math.round(a.length * 0.01)); let w = 0; for (let i = a.length - k; i < a.length; i++) w += a[i];
+    const p50 = percentile(a, 0.5), p95 = percentile(a, 0.95);
+    return { n: a.length, mean, fps: 1000 / mean, p50, p95, p99: percentile(a, 0.99), max: a[a.length - 1], low1: 1000 / (w / k), jitter: p50 > 0 ? p95 / p50 : NaN };
+  }
+  /** One frame into the hitch counter. st = { ema, hits: [times] }; a hitch is a frame over 2 x the running average and over `minMs`. Returns true on a hitch. */
+  function hitchStep(st, dt, now, minMs) {
+    if (!(dt > 0)) return false;
+    const lim = minMs == null ? 33.4 : minMs;
+    const hit = st.ema > 0 && dt > 2 * st.ema && dt > lim;
+    if (hit) { st.hits.push(now); if (st.hits.length > 400) st.hits.shift(); }
+    else st.ema = st.ema > 0 ? st.ema * 0.97 + dt * 0.03 : dt;      // hitches do not drag the average up
+    return hit;
+  }
+  const hitchesIn = (st, now, ms) => { let n = 0; for (let i = st.hits.length - 1; i >= 0 && now - st.hits[i] <= ms; i--) n++; return n; };
+  /** Plain words for the jerkiness. hits = hitches in the last 10 s. */
+  function verdict(hits, fps) {
+    if (isFinite(fps) && fps < 20) return { id: 'slow', text: 'slow: ' + (fps < 10 ? fps.toFixed(1) : Math.round(fps)) + ' fps' + (hits >= 3 ? ', and jerky' : '') };
+    if (hits >= 3) return { id: 'jerky', text: 'jerky: ' + hits + ' hitches in 10 s' };
+    return { id: 'smooth', text: hits ? 'smooth (' + hits + ' hitch' + (hits > 1 ? 'es' : '') + ' in 10 s)' : 'smooth' };
   }
   /** Mean after dropping the slowest `drop` share (one long hiccup should not decide a what-if test). */
   function trimmedMean(arr, drop) {
-    const a = Array.from(arr).filter(v => v > 0 && v <= 1000).sort((x, y) => x - y);
+    const a = Array.from(arr).filter(v => v > 0 && v <= 30000).sort((x, y) => x - y);
     if (!a.length) return NaN;
     const keep = Math.max(1, Math.round(a.length * (1 - (drop == null ? 0.1 : drop))));
     let s = 0; for (let i = 0; i < keep; i++) s += a[i];
@@ -85,13 +127,18 @@
     const o = opts || {}, g = k => Math.max(0, avg[k] || 0);
     const imagery = Math.min(g('imagery'), g('cesium'));
     const globeNet = Math.max(0, Math.min(g('globe'), g('cesium')) - imagery);
-    const entities = Math.min(g('entities'), g('cesium'));
-    const scene = Math.max(0, g('cesium') - entities - globeNet - imagery);
+    const entities0 = Math.min(g('entities'), g('cesium'));
+    // labels & points: each piece is taken out of the timer it ran inside (see the header)
+    const pE = Math.min(g('ptsEnt'), entities0), pG = Math.min(g('ptsGlobe'), globeNet);
+    const entities = entities0 - pE, globeNet2 = globeNet - pG;
+    const scene0 = Math.max(0, g('cesium') - entities0 - globeNet - imagery), pP = Math.min(g('ptsPrim'), scene0);
+    const scene = scene0 - pP;
     const rows = [
       { id: 'cloud', label: 'Point clouds', ms: g('potreeUpdate') + g('potreeRender') },
-      { id: 'terrain', label: 'Terrain & globe', ms: globeNet + scene },
+      { id: 'terrain', label: 'Terrain & globe', ms: globeNet2 + scene },
       { id: 'layers', label: 'Map layers', ms: imagery },
-      { id: 'features', label: 'Features & labels', ms: entities + g('labels') },
+      { id: 'features', label: 'Features & lines', ms: entities + g('labels') },
+      { id: 'pts', label: 'Labels & points', ms: pE + pG + pP },
       { id: 'own', label: "FLEX's own work", ms: g('own') + g('minimap') + g('incidence') + g('compass') + g('measure') },
     ];
     const cpu = rows.reduce((s, r) => s + r.ms, 0);
@@ -102,29 +149,38 @@
     rows.push({ id: 'gpu', label: gpuMeasured ? 'GPU (measured)' : 'GPU (estimated)', ms: gpu });
     return { rows, cpu, idle, gpuMeasured, own: { own: g('own'), minimap: g('minimap'), incidence: g('incidence'), compass: g('compass'), measure: g('measure') } };
   }
-  const fmtMs = v => (v == null || !isFinite(v) ? '–' : (v < 10 ? v.toFixed(1) : String(Math.round(v))) + ' ms');
+  const fmtMs = v => (v == null || !isFinite(v) ? '–' : (v < 10 ? v.toFixed(1) : v >= 1000 ? Math.round(v).toLocaleString('en-US') : String(Math.round(v))) + ' ms');
   const fmtCount = v => (v == null || !isFinite(v) ? '–' : v >= 1e6 ? (v / 1e6).toFixed(v >= 1e7 ? 0 : 1).replace(/\.0$/, '') + ' M' : v >= 1e4 ? Math.round(v / 1e3) + ' k' : v >= 1e3 ? (v / 1e3).toFixed(1) + ' k' : String(Math.round(v)));
-  const pure = { percentile, summarize, trimmedMean, fpsGain, estGainFps, rank, pillStep, categories, fmtMs, fmtCount };
+  const pure = { hitchStep, hitchesIn, verdict, percentile, summarize, trimmedMean, fpsGain, estGainFps, rank, pillStep, categories, fmtMs, fmtCount };
 
   // ── Probe (the page) ────────────────────────────────────────────────────
   function makeProbe() {
     if (typeof performance === 'undefined') return null;
-    const NAMES = ['own', 'cesium', 'minimap', 'potreeUpdate', 'potreeRender', 'incidence', 'compass', 'labels', 'measure', 'entities', 'globe', 'imagery'];
+    const NAMES = ['own', 'cesium', 'minimap', 'potreeUpdate', 'potreeRender', 'incidence', 'compass', 'labels', 'measure', 'entities', 'globe', 'imagery', 'ptsEnt', 'ptsPrim', 'ptsGlobe'];
     const IDX = {}; NAMES.forEach((n, i) => { IDX[n] = i; });
     const N = NAMES.length, W = 300;                       // ring of the last 300 frames
     const dts = new Float64Array(W), cpu = new Float64Array(W), buf = new Float64Array(W * N), cur = new Float64Array(N);
     const now = () => performance.now();
     const gpuCtx = [null, null];                           // 0 Cesium, 1 Potree
     const P = {
-      enabled: true, count: 0, W, NAMES, IDX, last: 0, lastTs: 0, t0: 0, inC: false,
-      cfg: { warmupMs: 15000, lowFps: 20, lowMs: 10000 },
+      enabled: true, count: 0, W, NAMES, IDX, last: 0, lastTs: 0, t0: 0, inC: false, inEnt: false, renders: 0,
+      cfg: { warmupMs: 15000, lowFps: 20, lowMs: 10000, jerkyHits: 5 },
+      hitch: { ema: 0, hits: [] }, hitchTimes: null,
       gpu: { mode: 'estimated', ms: null, why: 'no timer query in this browser' },
     };
+    P.hitchTimes = P.hitch.hits;
+    // A hidden tab runs no frames: the gap around it is not a frame (the first frame after it reads 0 and is skipped).
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => { P.lastTs = 0; P.hitch.ema = 0; });
     P.frame = function (ts) {
       if (!P.enabled) { P.lastTs = 0; return; }
-      dts[P.count % W] = P.lastTs ? ts - P.lastTs : 0;
-      P.lastTs = ts; P.t0 = P.last = now();
+      const hid = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+      const dt = P.lastTs && !hid ? ts - P.lastTs : 0;
+      dts[P.count % W] = dt;
+      if (dt > 0) hitchStep(P.hitch, dt, now());
+      P.lastTs = hid ? 0 : ts; P.t0 = P.last = now();
     };
+    /** Hitches (jerky frames) in the last `ms` of real time. */
+    P.hitchCount = function (ms) { return hitchesIn(P.hitch, now(), ms || 10000); };
     P.lap = function (name) {
       if (!P.enabled) return;
       const t = now(); cur[IDX[name]] += t - P.last; P.last = t;
@@ -139,12 +195,12 @@
       if (gpuCtx[0] || gpuCtx[1]) pollGpu();
     };
     P.wrapBegin = function (i) {
-      if (i === 0) P.inC = true;
+      if (i === 0) { P.inC = true; P.inEnt = true; }
       const g = gpuCtx[i]; if (!g || !P.enabled) return;
       try { if (g.pending.length > 6) return; g.q = g.gl.createQuery(); g.gl.beginQuery(g.ext.TIME_ELAPSED_EXT, g.q); g.open = true; } catch (_) { dropGpu(); }
     };
     P.wrapEnd = function (i) {
-      if (i === 0) P.inC = false;
+      if (i === 0) { P.inC = false; P.inEnt = false; }
       const g = gpuCtx[i]; if (!g || !g.open) return;
       try { g.gl.endQuery(g.ext.TIME_ELAPSED_EXT); g.pending.push(g.q); } catch (_) { dropGpu(); }
       g.open = false; g.q = null;
@@ -228,11 +284,41 @@
       w.__perf = true; w.__orig = f; obj[name] = w;
       return true;
     }
+    // Labels & points: time `f` (called with the nesting depth guard) into the bucket for where it ran.
+    let depthP = 0;
+    function ptsBucket() { return P.inEnt ? IDX.ptsEnt : depthG > 0 ? IDX.ptsGlobe : IDX.ptsPrim; }
+    function timedFn(f, forceBucket) {
+      return function () {
+        if (!P.enabled || !P.inC) return f.apply(this, arguments);
+        const first = depthP++ === 0, t = now();
+        try { return f.apply(this, arguments); }
+        finally { depthP--; if (first) cur[forceBucket != null ? forceBucket : ptsBucket()] += now() - t; }
+      };
+    }
+    function wrapPts(obj, name) {
+      const f = obj && obj[name];
+      if (typeof f !== 'function' || f.__perf) return false;
+      const w = timedFn(f); w.__perf = true; w.__orig = f; obj[name] = w;
+      return true;
+    }
+    /** For the page's own per-frame label code: P.timed(fn) returns fn, timed into Labels & points. */
+    P.timed = function (fn) { return timedFn(fn, IDX.ptsPrim); };
     P.attachCesium = function (viewer, Cesium) {
-      const done = { tick: false, globe: 0, imagery: 0 };
+      const done = { tick: false, globe: 0, imagery: 0, pts: 0 };
       try {
-        viewer.clock.onTick.addEventListener(() => { if (P.enabled && P.inC) cur[IDX.entities] += now() - P.last; });
+        viewer.clock.onTick.addEventListener(() => { if (P.enabled && P.inC) { cur[IDX.entities] += now() - P.last; P.inEnt = false; } });
         done.tick = true;
+      } catch (_) {}
+      try { viewer.scene.postRender.addEventListener(() => { P.renders++; }); } catch (_) {}
+      try {
+        ['LabelVisualizer', 'BillboardVisualizer', 'PointVisualizer', 'LabelCollection', 'BillboardCollection', 'PointPrimitiveCollection']
+          .forEach(n => { if (Cesium && Cesium[n] && wrapPts(Cesium[n].prototype, 'update')) done.pts++; });
+        const SP = Cesium && Cesium.Scene && Cesium.Scene.prototype;      // the callbacks that put a clamped point at its height
+        if (SP && typeof SP.updateHeight === 'function' && !SP.updateHeight.__perf) {
+          const orig = SP.updateHeight;
+          SP.updateHeight = function (c, cb, hr) { return orig.call(this, c, typeof cb === 'function' ? timedFn(cb) : cb, hr); };
+          SP.updateHeight.__perf = true; done.pts++;
+        }
       } catch (_) {}
       try { ['update', 'beginFrame', 'render', 'endFrame'].forEach(n => { if (wrap(viewer.scene.globe, n, IDX.globe, false)) done.globe++; }); } catch (_) {}
       try {
