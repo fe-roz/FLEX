@@ -101,6 +101,9 @@ const server = http.createServer((req, res) => {
     // ── A project's own terrain + hillshade from the LiDAR (terrain_generate.js) ──
     } else if (sanitizedPath.startsWith('/api/terrain/')) {
         terrainGen.handle(req, res, sanitizedPath.slice('/api/terrain/'.length), parsedUrl.query);
+    // ── The Jobs panel: running and recent server jobs, their log, Cancel (jobs_api.js) ──
+    } else if (sanitizedPath === '/api/jobs' || sanitizedPath.startsWith('/api/jobs/')) {
+        if (!jobsApi.handle(req, res, sanitizedPath.slice('/api/jobs'.length).replace(/^\//, ''))) jsonResponse(res, { ok: false, error: 'not found' }, 404);
     // ── LiDAR derivations (vegetation density, voids) ────────────────────────
     } else if (sanitizedPath === '/api/lidar/derive' && req.method === 'POST') {
         handleLidarDerive(req, res);
@@ -769,7 +772,7 @@ function handleExportTerrain(req, res) {
         const slug = mapName.normalize('NFKD').replace(/[^\w\s-]/g, '').trim()
                             .replace(/[\s_]+/g, '-').slice(0, 48);
         const filename = slug ? `FLEX-${slug}.zip` : `flex_export_${jobId}.zip`;
-        _exportJobs[jobId] = { status: 'running', progress: [], outPath: outZip, error: null, filename };
+        _exportJobs[jobId] = { status: 'running', progress: [], outPath: outZip, error: null, filename, name: mapName || 'Offline map', started: Date.now(), ended: null, cancelled: false, proc: null };
         jsonResponse(res, { ok: true, jobId });
 
         // Write caves JSON to a temp file so Python can read it
@@ -817,6 +820,8 @@ function handleExportTerrain(req, res) {
             args.push('--z-offset', String(z_offset));
 
         const proc = spawn(CONDA_PYTHON, args);
+        _exportJobs[jobId].proc = proc;
+        proc.on('error', e => { _exportJobs[jobId].progress.push(`⚠ Could not start Python (${e.code || e.message})`); });
         proc.stdout.on('data', d => {
             d.toString().split('\n').forEach(line => {
                 line = line.trim();
@@ -838,22 +843,21 @@ function handleExportTerrain(req, res) {
             for (const f of [cavesFilePath, polyFile, ...demFiles]) {
                 if (f && fs.existsSync(f)) { try { fs.unlinkSync(f); } catch(_) {} }
             }
-            if (code === 0 && fs.existsSync(outZip)) {
+            _exportJobs[jobId].ended = Date.now(); _exportJobs[jobId].proc = null;
+            if (code === 0 && fs.existsSync(outZip) && !_exportJobs[jobId].cancelled) {
                 _exportJobs[jobId].status = 'done';
                 console.log('[export] done:', jobId);
             } else {
                 _exportJobs[jobId].status = 'error';
-                _exportJobs[jobId].error = `Process exited with code ${code}`;
+                _exportJobs[jobId].error = _exportJobs[jobId].cancelled ? 'Cancelled' : `Process exited with code ${code}`;
                 console.error('[export] failed:', jobId, code);
             }
         });
     });
 }
 
-function handleExportStatus(req, res, jobId) {
-    const job = _exportJobs[jobId];
-    if (!job) return jsonResponse(res, { ok: false, error: 'Unknown job' }, 404);
-    // Return last progress line as 'message' and a rough progress % based on step markers
+function exportPct(job) {
+    // A rough progress % from the last line's step marker
     const lines = job.progress;
     const last = lines[lines.length - 1] || '';
     // Step markers first: "[4/7] Fetching satellite..." also says "Fetching",
@@ -866,7 +870,13 @@ function handleExportStatus(req, res, jobId) {
     else if (last.includes('Triangul')) pct = 55;
     else if (last.includes('Packaging GLB')) pct = 85;
     if (job.status === 'done') pct = 100;
-    jsonResponse(res, { status: job.status, progress: pct, message: last, error: job.error,
+    return pct;
+}
+function handleExportStatus(req, res, jobId) {
+    const job = _exportJobs[jobId];
+    if (!job) return jsonResponse(res, { ok: false, error: 'Unknown job' }, 404);
+    const last = job.progress[job.progress.length - 1] || '';
+    jsonResponse(res, { status: job.status, progress: exportPct(job), message: last, error: job.error,
                         filename: job.filename });
 }
 
@@ -893,6 +903,12 @@ function handleExportDownload(req, res, jobId) {
 const _lidarJobs = {};   // jobId -> { status, progress, outDir, error }
 const LIDAR_SCRIPT  = path.join(__dirname, 'lidar_derive.py');
 const LIDAR_OUT_DIR = path.join(__dirname, 'user_files', 'lidar');
+// Running and recent jobs of the three kinds, for the Jobs panel (jobs_api.js)
+const jobsApi = require('./jobs_api')({ sources: {
+    export:  { jobs: _exportJobs, pct: exportPct, download: id => '/api/export/download/' + id },
+    terrain: { jobs: terrainGen.jobs, pct: terrainGen.pctOf },
+    analyze: { jobs: _lidarJobs, pct: lidarPct },
+} });
 
 function handleLidarDerive(req, res) {
     let body = '';
@@ -925,7 +941,7 @@ function handleLidarDerive(req, res) {
         const outDir = path.join(LIDAR_OUT_DIR, jobId);
         fs.mkdirSync(outDir, { recursive: true });
 
-        _lidarJobs[jobId] = { status: 'running', progress: [], outDir, error: null, errLines: [] };
+        _lidarJobs[jobId] = { status: 'running', progress: [], outDir, error: null, errLines: [], name: 'Analyze: vegetation and voids', started: Date.now(), ended: null, cancelled: false, proc: null };
         jsonResponse(res, { ok: true, jobId });
 
         const args = [
@@ -943,6 +959,7 @@ function handleLidarDerive(req, res) {
         if (cell) args.push('--cell', String(cell));
 
         const proc = spawn(CONDA_PYTHON, args);
+        _lidarJobs[jobId].proc = proc;
         proc.stdout.on('data', d => {
             d.toString().split('\n').forEach(line => {
                 line = line.trim();
@@ -963,9 +980,12 @@ function handleLidarDerive(req, res) {
         // Python could not even start (wrong FLEX_PYTHON): say so, not "code null".
         proc.on('error', e => { _lidarJobs[jobId].errLines.push(`Could not start Python (${e.code || e.message})`); });
         proc.on('close', code => {
-            const ok = code === 0 && fs.existsSync(path.join(outDir, 'derived.json'));
-            _lidarJobs[jobId].status = ok ? 'done' : 'error';
-            if (!ok) {
+            const job = _lidarJobs[jobId];
+            const ok = code === 0 && fs.existsSync(path.join(outDir, 'derived.json')) && !job.cancelled;
+            job.status = ok ? 'done' : 'error'; job.ended = Date.now(); job.proc = null;
+            try { fs.writeFileSync(path.join(outDir, 'log.txt'), job.progress.join('\n') + '\n'); } catch (_) {}   // the whole output, for the Jobs panel's Log
+            if (!ok && job.cancelled) { job.error = 'Cancelled'; try { fs.appendFileSync(path.join(outDir, 'log.txt'), 'CANCELLED\n'); } catch (_) {} }
+            else if (!ok) {
                 // The reason, for the panel: the last lines the script wrote on stderr
                 // (its own "ERROR: ..." line comes last), kept in log.txt too.
                 const lines = _lidarJobs[jobId].errLines.filter(l => !/^\s*File "|^\s+\S/.test(l));
@@ -978,9 +998,7 @@ function handleLidarDerive(req, res) {
     });
 }
 
-function handleLidarStatus(req, res, jobId) {
-    const job = _lidarJobs[jobId];
-    if (!job) return jsonResponse(res, { ok: false, error: 'Unknown job' }, 404);
+function lidarPct(job) {
     const lines = job.progress;
     const last  = lines[lines.length - 1] || '';
     let pct = 5;
@@ -990,6 +1008,13 @@ function handleLidarStatus(req, res, jobId) {
     else if (last.includes('[4/')) pct = 95;
     if (job.status === 'done')  pct = 100;
     if (job.status === 'error') pct = 100;
+    return pct;
+}
+function handleLidarStatus(req, res, jobId) {
+    const job = _lidarJobs[jobId];
+    if (!job) return jsonResponse(res, { ok: false, error: 'Unknown job' }, 404);
+    const last  = job.progress[job.progress.length - 1] || '';
+    const pct = lidarPct(job);
     let meta = null;
     if (job.status === 'done') {
         try { meta = JSON.parse(fs.readFileSync(path.join(job.outDir, 'derived.json'), 'utf8')); }

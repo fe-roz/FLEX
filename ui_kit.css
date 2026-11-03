@@ -119,3 +119,51 @@ span.ui-sw.ui-sw-xs { --sw-w: 20px; --sw-h: 11px; --sw-k: 7px; }
 .ui-eye.ui-eye-sm { --sw-w: 20px; --sw-h: 11px; --sw-k: 7px; }
 .ui-eye:focus { outline: none; }
 .ui-eye:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
+
+/* ── Jobs panel (client/src/modules/jobs-panel.js): along the bottom of the map, only while a job is running, waiting or failed ── */
+.jobs-panel { position: fixed; left: 72px; bottom: 10px; z-index: 40; width: min(600px, calc(100vw - 96px)); box-sizing: border-box;
+  font: 12px/1.35 system-ui, sans-serif; color: var(--ui-text); background: rgba(30,32,36,.96); border: 1px solid rgba(255,255,255,.16);
+  border-radius: 8px; box-shadow: 0 2px 14px rgba(0,0,0,.5); }
+.jobs-panel[hidden], .jobs-panel [hidden] { display: none !important; }
+.jobs-panel.idle { width: auto; background: transparent; border: 0; box-shadow: none; }
+.jobs-panel .jp-btn { font: inherit; font-size: 11px; color: var(--ui-text); background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.2);
+  border-radius: 4px; padding: 2px 8px; cursor: pointer; text-decoration: none; }
+.jobs-panel .jp-btn:hover:not(:disabled) { background: rgba(255,255,255,.16); }
+.jobs-panel .jp-btn:disabled { opacity: var(--ui-disabled-opacity); cursor: default; }
+.jobs-panel .jp-btn:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 1px; }
+.jobs-panel .jp-pill { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 10px; font: inherit; font-weight: 600; color: inherit;
+  background: transparent; border: 0; padding: 6px 10px; cursor: pointer; text-align: left; }
+.jobs-panel .jp-pill.bad .jp-pill-t { color: #ff8c7a; }
+.jobs-panel .jp-rows { border-top: 1px solid rgba(255,255,255,.1); max-height: 38vh; overflow-y: auto; }
+.jobs-panel .jp-row { padding: 6px 10px 7px; border-bottom: 1px solid rgba(255,255,255,.07); }
+.jobs-panel .jp-row:last-child { border-bottom: 0; }
+.jobs-panel .jp-top, .jobs-panel .jp-rrow { display: flex; align-items: center; gap: 8px; }
+.jobs-panel .jp-state { flex: none; min-width: 58px; font-weight: 600; color: #7fd4a0; }
+.jobs-panel [data-state="running"] > .jp-top > .jp-state { color: #8ab4ec; }
+.jobs-panel [data-state="waiting"] > .jp-top > .jp-state, .jobs-panel .jp-rrow[data-state="waiting"] .jp-state { color: #e8b45a; }
+.jobs-panel [data-state="failed"] > .jp-top > .jp-state, .jobs-panel .jp-rrow[data-state="failed"] .jp-state { color: #ff8c7a; }
+.jobs-panel .jp-rrow[data-state="cancelled"] .jp-state { color: rgba(255,255,255,.5); }
+.jobs-panel .jp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jobs-panel .jp-time { flex: none; color: rgba(255,255,255,.6); font-variant-numeric: tabular-nums; }
+.jobs-panel .jp-btns { flex: none; display: inline-flex; gap: 4px; }
+.jobs-panel .jp-mid { display: flex; align-items: center; gap: 8px; margin-top: 4px; padding-left: 66px; min-height: 8px; }
+.jobs-panel .jp-bar { flex: 0 0 38%; height: 5px; border-radius: 3px; background: rgba(255,255,255,.12); overflow: hidden; position: relative; }
+.jobs-panel .jp-fill { display: block; height: 100%; width: 0; background: var(--ui-on); transition: width .4s; }
+.jobs-panel .jp-bar.indet .jp-fill { position: absolute; width: 35%; animation: jp-slide 1.4s ease-in-out infinite; }
+@keyframes jp-slide { 0% { left: -35%; } 100% { left: 100%; } }
+.jobs-panel .jp-step { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(255,255,255,.7); }
+.jobs-panel .jp-step.jp-err { color: #ff9c8c; white-space: normal; }
+.jobs-panel .jp-ask { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 6px 10px; background: rgba(138,180,236,.12); border-top: 1px solid rgba(255,255,255,.1); }
+.jobs-panel .jp-ask span { flex: 1 1 220px; }
+.jobs-panel .jp-foot { padding: 3px 10px 5px; text-align: right; }
+.jobs-panel.idle .jp-foot { padding: 0; }
+.jobs-panel .jp-link { font: inherit; font-size: 11px; color: rgba(255,255,255,.6); background: transparent; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
+.jobs-panel.idle .jp-link { text-shadow: 0 0 4px #000, 0 0 2px #000; color: rgba(255,255,255,.8); }
+.jobs-panel .jp-link:hover { color: #fff; }
+.jobs-panel .jp-recent { border-top: 1px solid rgba(255,255,255,.1); max-height: 30vh; overflow-y: auto; background: rgba(30,32,36,.96); border-radius: 0 0 8px 8px; }
+.jobs-panel.idle .jp-recent { border: 1px solid rgba(255,255,255,.16); border-radius: 8px; margin-bottom: 4px; }
+.jobs-panel .jp-rrow { padding: 4px 10px; }
+.jobs-panel .jp-log { border-bottom: 1px solid rgba(255,255,255,.1); }
+.jobs-panel .jp-log-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 10px; font-weight: 600; }
+.jobs-panel .jp-log-pre { margin: 0; padding: 6px 10px 8px; max-height: 34vh; overflow: auto; font: 11px/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-word;
+  color: rgba(255,255,255,.82); background: rgba(0,0,0,.25); }
