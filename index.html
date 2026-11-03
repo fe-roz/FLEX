@@ -842,6 +842,7 @@
         <div class="rail-sep"></div>
         <button type="button" data-target="#mapLayersCollapsible" title="Map layers"><svg class="ico"><use href="#i-map"/></svg><small>Layers</small></button>
         <button type="button" data-target="#lidarCollapsible" title="LiDAR: point clouds, scene, ground and height, incidence"><svg class="ico"><use href="#i-cloud"/></svg><small>LiDAR</small></button>
+        <button type="button" data-target="#terrainCollapsible" title="Terrain: precise ground from a DEM or from the LiDAR"><svg class="ico"><use href="#i-mountain"/></svg><small>Terrain</small></button>
         <div class="rail-sep"></div>
         <button type="button" data-target="#featuresCollapsible" title="Surface: points, CalTopo, data files"><svg class="ico"><use href="#i-pin"/></svg><small>Surface</small></button>
         <button type="button" data-target="#caveCollapsible" title="Caves"><svg class="ico"><use href="#i-cave"/></svg><small>Caves</small></button>
@@ -1467,6 +1468,11 @@
           <div class="lp-panel-wrap pj-side" id="pj-review-panel"></div>
         </div>
 
+        <!-- ⛰ Terrain: patches (project / My data), Add DEM, Generate from LiDAR for an area (terrain-panel.js, area-picker.js) -->
+        <div class="collapse" id="terrainCollapsible">
+          <div class="lp-panel-wrap" id="terrain-panel"></div>
+        </div>
+
         <div class="collapse" id="exportCollapsible">
           <div class="lp-panel-wrap">
 
@@ -2078,6 +2084,8 @@
 <script src="client/src/modules/terrain-patch.js"></script>
 <script src="client/src/modules/minimap-view.js"></script>
 <script src="client/src/modules/custom-layers.js"></script>
+<script src="client/src/modules/area-picker.js"></script>  <!-- pick an area on the map: draw, project footprint, a polygon on the map, the export box (window._areaPicker) -->
+<script src="client/src/modules/terrain-panel.js"></script>  <!-- ⛰ Terrain panel: patches, Add DEM, Generate, moves (window._terrainPanel) -->
 <script src="client/src/modules/caltopo-layers.js"></script>  <!-- the CalTopo map's custom layers in 🗺 Layers, read-only (window._ctLayers) -->
 <!-- Brings the globe back if a map layer stalls at startup -->
 <script src="client/src/modules/globe-watchdog.js"></script>

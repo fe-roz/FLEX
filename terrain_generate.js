@@ -9,7 +9,9 @@
 // and the tiles into the project folder, FLEX maps/<name>/{z}/{x}/{y}.png. The
 // page then records the two layers (custom-layers.js), as for any other layer.
 //
-//   POST /api/terrain/generate   { project, bbox, polygon?, ept: [url…], resolution?, z_offset?, name? } → { jobId }
+//   POST /api/terrain/generate   { project | dest: 'mine', bbox, polygon?, ept: [url…], resolution?, z_offset?, name? } → { jobId }
+//                                 (no project: dest 'mine', the files go into 👤 My data = the private project "mine", user_files/mine/)
+//   POST /api/terrain/move        { from, to, layers: [{id, kind, blob|url, bounds, name…}], who? } → { ok, layers }  (from / to: a project id or 'mine')
 //   GET  /api/terrain/status/<jobId>   { status, progress, message, error, result? }
 //   GET  /api/terrain/tiles/<project>/<folder>/<z>/<x>/<y>.png   a tile (a blank one where the area has none)
 //
@@ -92,7 +94,10 @@ function hillshadeTile(P, z, x, y) {
   return any ? pngLA(T, T, out) : null;
 }
 
-module.exports = function terrainGenerate({ python, script, library }) {
+module.exports = function terrainGenerate({ python, script, library, ensureMine }) {
+  // My data's folder, made on first use (mine.js): where a terrain made with no project open is kept.
+  const mineEnsure = ensureMine || (() => require('./mine').ensure());
+  const MINE = 'mine';
   const jobs = {};
   const outRoot = path.join(path.dirname(library.ROOT), 'terrain_jobs');
   const json = (res, data, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(data)); };
@@ -119,6 +124,7 @@ module.exports = function terrainGenerate({ python, script, library }) {
   /** The finished job's files into the project: the .bin as a blob, the tiles into its folder. */
   function finish(job) {
     const R = JSON.parse(fs.readFileSync(path.join(job.outDir, 'result.json'), 'utf8'));
+    if (job.pid === MINE) mineEnsure();
     const pd = library.projDir(job.pid);
     if (!pd) throw new Error('the project has no folder');
     const list = Array.isArray(R.terrain_tiles) && R.terrain_tiles.length ? R.terrain_tiles : [R.terrain];
@@ -143,11 +149,65 @@ module.exports = function terrainGenerate({ python, script, library }) {
     };
   }
 
+
+  // ── Moving a terrain between project folders / My data (copy; the source is let go by the page on 💾 Save) ──
+  const TILES_URL = /^\/api\/terrain\/tiles\/([A-Za-z0-9_-]{1,40})\/([^/?]{1,100})\/(\{z\}\/\{x\}\/\{y\}\.png)(\?dem=[0-9a-f,.bin]{1,700})?$/;
+  const BIN = /^[0-9a-f]{64}\.bin$/;
+  /**
+   * Copy a terrain's files into another project (or My data) and write its layers there. `layers` are the page's
+   * layer entries: { id, kind: 'terrain', blob, bounds, name } and { id, kind: 'tiles', url, bounds, minZoom, maxZoom, name }.
+   * The patch files are copied by fingerprint; the tiles folder (FLEX maps/<name>) is copied into a free folder name at
+   * the destination, and the tiles link rewritten to it. Nothing is removed here.
+   */
+  function moveTerrain(o) {
+    const from = String(o.from || ''), to = String(o.to || '');
+    if (!ID_RE.test(from) || !ID_RE.test(to) || from === to) throw new Error('two different places, please');
+    if (from === MINE || to === MINE) mineEnsure();
+    const sd = library.projDir(from), td = library.projDir(to);
+    if (!sd || !td) throw new Error('unknown project');
+    if ([from, to].some(x => x !== MINE && library.isArchived(x))) throw new Error('an archived project is read-only: unarchive it first');
+    const ls = Array.isArray(o.layers) ? o.layers.slice(0, 40) : [];
+    if (!ls.length) throw new Error('nothing to move');
+    const by = clean(o.who).slice(0, 40) || 'FLEX', out = [], entries = [];
+    let tiles = 0;
+    for (const l of ls) {
+      if (!l || typeof l !== 'object' || !/^[A-Za-z0-9_-]{1,60}$/.test(String(l.id || ''))) throw new Error('bad layer');
+      const e = { op: 'layer.set', who: by, layer: l.id, kind: l.kind, name: clean(l.name).slice(0, 80), removed: false, order: Number.isFinite(l.order) ? l.order : 0 };
+      if (Array.isArray(l.bounds) && l.bounds.length === 4 && l.bounds.every(num)) e.bounds = l.bounds;
+      if (l.kind === 'terrain') {
+        if (!BIN.test(String(l.blob || ''))) throw new Error('bad patch');
+        if (!library.copyBlobTo(l.blob, to)) throw new Error('the patch file is not on this computer');
+        e.blob = l.blob;
+      } else if (l.kind === 'tiles') {
+        const m = TILES_URL.exec(String(l.url || ''));
+        if (!m) throw new Error('not a terrain tiles link');
+        const folder = decodeURIComponent(m[2]);
+        if (folder === '.' || folder === '..' || folder.includes('/') || folder.includes('\\')) throw new Error('bad folder');
+        let nf = folder;
+        const src = path.join(sd, MAPS, folder);
+        if (fs.existsSync(src)) {
+          // The same tiles already there (an earlier move of this terrain): reuse that folder, else a free name.
+          const same = (() => { try { return fs.readFileSync(path.join(src, 'tiles.json')).equals(fs.readFileSync(path.join(td, MAPS, folder, 'tiles.json'))); } catch (_) { return false; } })();
+          nf = same ? folder : freeFolder(td, folder);
+          tiles += library.copyTree(src, path.join(td, MAPS, nf));
+        }
+        e.url = `/api/terrain/tiles/${to}/${encodeURIComponent(nf)}/${m[3]}${m[4] || ''}`;
+        if (Number.isFinite(l.minZoom)) e.minZoom = l.minZoom;
+        if (Number.isFinite(l.maxZoom)) e.maxZoom = l.maxZoom;
+      } else throw new Error('only terrain patches and their hillshade move this way');
+      entries.push(e); out.push({ id: l.id, kind: l.kind, url: e.url });
+    }
+    entries.forEach(e => library.append('p-' + to, e, to));          // after every file is in place: all or nothing
+    return { ok: true, layers: out, tilesCopied: tiles };
+  }
+
   async function generate(req, res) {
     let o;
     try { o = JSON.parse(await body(req)); } catch (_) { return json(res, { ok: false, error: 'Invalid JSON' }, 400); }
-    const pid = String(o.project || '');
-    if (!ID_RE.test(pid)) return json(res, { ok: false, error: 'open a project first' }, 400);
+    // A project's id, or (no project open) dest 'mine': 👤 My data.
+    const pid = o.dest === MINE && !o.project ? MINE : String(o.project || '');
+    if (!ID_RE.test(pid)) return json(res, { ok: false, error: 'open a project first, or keep the result in My data' }, 400);
+    if (pid === MINE) mineEnsure();
     if (!library.projDir(pid)) return json(res, { ok: false, error: 'this project has no folder yet (it is still in the old library)' }, 400);
     const bbox = o.bbox;
     if (!Array.isArray(bbox) || bbox.length !== 4 || !bbox.every(num) || !(bbox[2] > bbox[0] && bbox[3] > bbox[1]))
@@ -263,6 +323,7 @@ module.exports = function terrainGenerate({ python, script, library }) {
   function handle(req, res, rest, query) {
     try {
       if (req.method === 'POST' && rest === 'generate') return void generate(req, res).catch(e => json(res, { ok: false, error: e.message }, 500));
+      if (req.method === 'POST' && rest === 'move') return void body(req).then(b => json(res, moveTerrain(JSON.parse(b || '{}')))).catch(e => json(res, { ok: false, error: e.message || String(e) }, 400));
       if (req.method === 'GET' && rest.startsWith('status/')) return status(res, rest.slice(7));
       if (req.method === 'GET' && rest.startsWith('tiles/')) return tile(res, rest.slice(6), query);
       return json(res, { error: 'not found' }, 404);
@@ -294,5 +355,5 @@ module.exports = function terrainGenerate({ python, script, library }) {
     }
     return null;
   }
-  return { handle, jobs, pctOf, finish, hillshadeTile, readPatch, exportPatchFiles, exportLayerArgs };
+  return { handle, jobs, pctOf, finish, moveTerrain, hillshadeTile, readPatch, exportPatchFiles, exportLayerArgs };
 };

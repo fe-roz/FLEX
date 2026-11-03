@@ -7,6 +7,7 @@
 // row). This file adds what the strip shows on its own:
 //   - which panel is open (highlight),
 //   - the open project's name under the folder icon, in green,
+//   - the ⛰ Terrain panel (terrain-panel.js; its own icon, no project needed);
 //   - the project-only icons (data-pj-only: Docs, Leads, Review)
 //     greyed with no project open, and their panels closed when it closes;
 //     (data-rail-later would grey one that is not built yet),
@@ -59,13 +60,13 @@
     const m = document.createElement('div'); m.id = 'rail-pick';
     const item = (label, sub, fn, on) => { const x = document.createElement('button'); x.type = 'button'; x.className = 'rp-i' + (on ? ' on' : ''); x.innerHTML = `<span></span><small></small>`; x.firstChild.textContent = label; x.lastChild.textContent = sub || ''; x.addEventListener('click', () => { m.remove(); fn(); }); return x; };
     const t = document.createElement('div'); t.className = 'rp-t'; t.textContent = 'Switch project'; m.appendChild(t);
+    m.appendChild(item('No project', 'close it; 👤 My data stays', () => { if (pj.pid) A.setProject(null); }, !pj.pid));      // first: the way out of a project
     const X = (window._pjx && window._pjx.state) || {};
     const isArch = p => (X.info && X.info[p.id] ? X.info[p.id].archived : !!p.archived);
     let showArch = false; try { showArch = localStorage.getItem('flex.pjx.archived') === '1'; } catch (_) {}
     const all = pj.projects || [], nArch = all.filter(p => isArch(p) && p.id !== pj.pid).length;
     all.filter(p => p.id === pj.pid || showArch || !isArch(p)).forEach(p => m.appendChild(item('📁 ' + (p.name || p.id), p.id === pj.pid ? 'open now' : '', () => { if (p.id !== pj.pid) (window._pjx ? window._pjx.open(p.id) : A.setProject(p.id)); }, p.id === pj.pid)));
     if (nArch) m.appendChild(item((showArch ? 'Hide archived' : 'Show archived') + ` (${nArch})`, '', () => { try { localStorage.setItem('flex.pjx.archived', showArch ? '0' : '1'); } catch (_) {} if (window._pjx && window._pjx.paintLive) try { window._pjx.paintLive(); } catch (_) {} pickProject(anchor); }));
-    m.appendChild(item('No project', 'close it; 👤 My data stays', () => { if (pj.pid) A.setProject(null); }, !pj.pid));
     m.appendChild(item('＋ New project…', '', () => A.newProject()));
     m.appendChild(item('Close this panel', '', () => $('projectCollapsible').classList.remove('show')));
     document.body.appendChild(m);
@@ -79,7 +80,7 @@
   // a panel is in the middle of something on the map (picking an area or a
   // station, drawing) or is one whose work is on the map (Export, Analyze).
   const KEEP_OPEN = new Set(['#exportCollapsible', '#lidarDeriveCollapsible']);
-  const busy = () => !!((window._pjfState && window._pjfState.draw) ||
+  const busy = () => !!((window._pjfState && window._pjfState.draw) || window._apDrawing ||
     [...document.querySelectorAll('[id$="pick-banner"], .pjf-banner')].some(el => el.offsetParent !== null && getComputedStyle(el).display !== 'none'));
   let down = null;
   window.addEventListener('pointerdown', e => {

@@ -586,4 +586,4 @@ async function handle(req, res, rest, query) {
   }
 }
 
-module.exports = { moveCave, setArchived, isArchived, mirrorArchived, copyTree, listTree, projFile, surveyExport, handle, device, read, append, merge, putBlob, blobPath, projects, setProject, adoptFolder, registerPrivate, indexFile, makeFolder, safeName, projDir, kv, kvSet, ROOT, PROJECTS_DIR };
+module.exports = { copyBlobTo, moveCave, setArchived, isArchived, mirrorArchived, copyTree, listTree, projFile, surveyExport, handle, device, read, append, merge, putBlob, blobPath, projects, setProject, adoptFolder, registerPrivate, indexFile, makeFolder, safeName, projDir, kv, kvSet, ROOT, PROJECTS_DIR };

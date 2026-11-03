@@ -16,7 +16,8 @@
 //   - moving a cave between the project and 👤 My data (🕳 Caves, the two
 //     columns) is a waiting change too; until 💾 Save it shows where it is
 //     going, and Discard undoes it. Moved in, it leaves My data; moved out,
-//     it goes back there (one home each).
+//     it goes back there (one home each). A terrain patch and its hillshade
+//     (⛰ Terrain panel) move the same way, and to another project.
 // Notes, leads, documents and reviews go straight into the project (project.js).
 // Camera, layers, styles are personal: a session per project (session.js).
 //
@@ -181,7 +182,7 @@
     const w = ws(), out = { pending: [], extra: { caves: [], layers: [] } };
     if (!pj.pid || !w) return out;
     const S = pj.P;
-    W.moves.forEach(m => out.pending.push({ kind: 'move', move: m, name: m.name, dir: m.dir, what: m.kind === 'cavemove' ? 'to ' + (m.toName || 'another project') : m.dir === 'in' ? 'into the project' : 'out to My data' }));
+    W.moves.forEach(m => out.pending.push({ kind: 'move', move: m, name: m.name, dir: m.dir, what: m.kind === 'cavemove' || m.dir === 'project' ? 'to ' + (m.toName || 'another project') : m.dir === 'in' ? 'into the project' : 'out to My data' }));
     for (const c of w.caves()) {
       if (!c.text) continue;
       if (moving(c.name)) continue;
@@ -201,6 +202,13 @@
   async function commit(p) {
     if (p.kind === 'move' && p.move && p.move.kind === 'cavemove') return commitCaveMove(p.move);
     if (p.kind === 'move' && p.move && p.move.kind === 'feats') return commitFeats(p.move);
+    if (p.kind === 'move' && p.move && p.move.kind === 'terrain') {          // a terrain patch (and its hillshade): terrain-panel.js copies the files, then the source lets go
+      if (!window._terrainPanel) throw new Error('the Terrain panel is missing');
+      await window._terrainPanel.commitMove(p.move);
+      W.moves = W.moves.filter(x => !(x.kind === 'terrain' && x.id === p.move.id));
+      saveMoves();
+      return;
+    }
     if (p.kind === 'move') {
       const w = ws(), c = w.caves().find(x => x.name === p.name);
       if (p.move && p.move.kind !== 'cave') {
