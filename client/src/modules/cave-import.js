@@ -10,6 +10,7 @@
 // (flex.js's globe click handler and the project workspace hooks use them too).
 
 import { parsePLT } from './compass-plt.js';
+import { isCompassDat, datToPlt } from './compass-dat.js';
 
 // ── Pure helpers (no DOM, no Cesium) ─────────────────────────────────────────
 
@@ -413,6 +414,7 @@ export function setupCaveImport({
       if (!c) throw new Error(`this file holds ${cs.length} caves and none is named “${caveName}”`);
       return c.plt;
     }
+    if (isCompassDat(text)) return datToPlt(text).plt;     // Compass .dat: readings reduced to PLT text (compass-dat.js)
     return text;
   }
 
@@ -423,7 +425,7 @@ export function setupCaveImport({
     if (!inp) {
       inp = document.createElement('input');
       inp.type = 'file'; inp.id = 'cave-replace-input'; inp.multiple = true; inp.style.display = 'none';
-      inp.accept = '.plt,.PLT,.txt,.json,.dbf,.DBF,.prj,.PRJ,.shp,.SHP,.shx,.SHX';
+      inp.accept = '.plt,.PLT,.dat,.DAT,.txt,.json,.dbf,.DBF,.prj,.PRJ,.shp,.SHP,.shx,.SHX';
       document.body.appendChild(inp);
       inp.addEventListener('change', () => {
         const files = [...inp.files]; inp.value = '';
@@ -933,7 +935,7 @@ export function setupCaveImport({
           }
           const parsed = parsePLT(text);
           state.cwizParsed = parsed;
-          state.cwizParsed._fileName = fileName.replace(/\.plt$/i, '').replace(/ \(Walls\)$/, '');
+          state.cwizParsed._fileName = fileName.replace(/\.plt$/i, '').replace(/ \((Walls|DAT)\)$/, '');
           state.cwizParsed._rawText  = text;
 
           // Stats
@@ -1049,7 +1051,20 @@ export function setupCaveImport({
       }
       const file = files[0];
       const reader = new FileReader();
-      reader.onload = ev => showText(ev.target.result, file.name);
+      reader.onload = ev => {
+        // A Compass .dat holds readings, not positions: reduce it to PLT text
+        // (compass-dat.js); the wizard then places it like any local PLT.
+        if (isCompassDat(ev.target.result)) {
+          try {
+            const c = datToPlt(ev.target.result);
+            c.warnings.forEach(w => console.warn('[dat]', `"${c.name}":`, w));
+            return showText(c.plt, c.name + ' (DAT)');
+          } catch (e) {
+            errDiv.textContent = 'DAT import: ' + e.message; errDiv.style.display = 'block'; loadBtn.disabled = true; return;
+          }
+        }
+        showText(ev.target.result, file.name);
+      };
       reader.readAsText(file);
     };
 
