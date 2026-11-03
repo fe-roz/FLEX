@@ -147,13 +147,13 @@
       d.entities.add({
         id: 'pjx-fp-' + I.id, name: I.name, description: descHtml(I),
         position: Cesium.Cartesian3.fromDegrees(lon, lat),
-        polyline: fp.length >= 2 ? { positions: Cesium.Cartesian3.fromDegreesArray(ring.flat()), width: 2.5, clampToGround: true,
+        polyline: fp.length >= 2 ? { positions: Cesium.Cartesian3.fromDegreesArray(ring.flat()), width: 2.5, clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN,
           material: I.handDrawn ? Cesium.Color.fromCssColorString('#6fd39a')              // drawn by hand: a solid line
             : new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.fromCssColorString('#6fd39a'), dashLength: 14 }) } : undefined,
-        point: fp.length < 2 ? { pixelSize: 10, color: Cesium.Color.fromCssColorString('#6fd39a'), heightReference: Cesium.HeightReference.CLAMP_TO_GROUND } : undefined,
+        point: fp.length < 2 ? { pixelSize: 10, color: Cesium.Color.fromCssColorString('#6fd39a'), heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN } : undefined,
         label: { text: I.name, font: 'bold 14px sans-serif', fillColor: Cesium.Color.fromCssColorString('#9fe3bd'), outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -6),
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+          heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN, disableDepthTestDistance: Number.POSITIVE_INFINITY },
         properties: { isProjectFootprint: true, projectId: I.id },
       });
     });
@@ -766,10 +766,10 @@
     if (!FP.ds) { FP.ds = new Cesium.CustomDataSource('pj-fp-edit'); v.dataSources.add(FP.ds); }
     FP.ds.entities.removeAll();
     const r = FP.ring;
-    if (r.length >= 2) FP.ds.entities.add({ id: 'fp-line', polyline: { positions: Cesium.Cartesian3.fromDegreesArray((r.length >= 3 ? r.concat([r[0]]) : r).flat()), width: 3, clampToGround: true, material: Cesium.Color.fromCssColorString('#6fd39a') } });
+    if (r.length >= 2) FP.ds.entities.add({ id: 'fp-line', polyline: { positions: Cesium.Cartesian3.fromDegreesArray((r.length >= 3 ? r.concat([r[0]]) : r).flat()), width: 3, clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN, material: Cesium.Color.fromCssColorString('#6fd39a') } });
     if (r.length >= 3) FP.ds.entities.add({ id: 'fp-area', polygon: { hierarchy: Cesium.Cartesian3.fromDegreesArray(r.flat()), material: Cesium.Color.fromCssColorString('#6fd39a').withAlpha(0.15), classificationType: Cesium.ClassificationType.TERRAIN } });
     r.forEach((c, i) => FP.ds.entities.add({ id: 'fpv-' + i, position: Cesium.Cartesian3.fromDegrees(c[0], c[1]),
-      point: { pixelSize: 11, color: Cesium.Color.WHITE, outlineColor: Cesium.Color.fromCssColorString('#2f8f5b'), outlineWidth: 3, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY } }));
+      point: { pixelSize: 11, color: Cesium.Color.WHITE, outlineColor: Cesium.Color.fromCssColorString('#2f8f5b'), outlineWidth: 3, heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN, disableDepthTestDistance: Number.POSITIVE_INFINITY } }));
     v.scene.requestRender && v.scene.requestRender();
     if (FP.bar) { const n = FP.bar.querySelector('.pjx-fp-n'); if (n) n.textContent = r.length + ' corner' + (r.length === 1 ? '' : 's'); const d = FP.bar.querySelector('[data-done]'); if (d) d.disabled = r.length < 3; }
   }

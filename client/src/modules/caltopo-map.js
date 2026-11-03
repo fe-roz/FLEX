@@ -126,17 +126,17 @@ function _caltopoJsonToDataSource(result, ds) {
         if (g.type === 'Point') {
           const col = _ctColor(p['marker-color'], '#ff8800');
           ent = E.add(Object.assign(base, { position: P(g.coordinates),
-            point: { pixelSize: 9, color: col, outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: 5000 },
+            point: { pixelSize: 9, color: col, outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5, heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN, disableDepthTestDistance: 5000 },
             label: window._pjfLabel ? window._pjfLabel(p.title || '') : { text: p.title || '', font: '15px sans-serif', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
                      style: Cesium.LabelStyle.FILL_AND_OUTLINE, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -10),
-                     heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 8000), disableDepthTestDistance: 5000 } }));
+                     heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN, distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 8000), disableDepthTestDistance: 5000 } }));
         } else if (g.type === 'LineString') {
-          ent = E.add(Object.assign(base, { polyline: { positions: _ctSimplify(g.coordinates).map(P), width: Math.max(1, +p['stroke-width'] || 2), material: _ctColor(p.stroke, '#ff0000'), clampToGround: true } }));
+          ent = E.add(Object.assign(base, { polyline: { positions: _ctSimplify(g.coordinates).map(P), width: Math.max(1, +p['stroke-width'] || 2), material: _ctColor(p.stroke, '#ff0000'), clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN } }));
         } else if (g.type === 'Polygon') {
           const ring = _ctSimplify(g.coordinates[0] || []).map(P);
           const col = _ctColor(p.stroke || p.fill, '#ff0000');
-          ent = E.add(Object.assign(base, { polygon: { hierarchy: ring, material: _ctColor(p.fill || p.stroke, '#ff0000').withAlpha(+p['fill-opacity'] || 0.15), heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
-            polyline: { positions: ring, width: Math.max(1, +p['stroke-width'] || 2), material: col, clampToGround: true } }));
+          ent = E.add(Object.assign(base, { polygon: { classificationType: Cesium.ClassificationType.TERRAIN, hierarchy: ring, material: _ctColor(p.fill || p.stroke, '#ff0000').withAlpha(+p['fill-opacity'] || 0.15), heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN },
+            polyline: { positions: ring, width: Math.max(1, +p['stroke-width'] || 2), material: col, clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN } }));
         }
       } catch (e) { console.warn('[caltopo] feature skipped', f.id, e); }
       if (ent) { ent._ctSig = sig; keep.add(id); n++; }
@@ -215,7 +215,7 @@ async function _fetchCaltopoKml() {
     const ds = await Cesium.KmlDataSource.load(kml ? new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' }) : proxiedUrl, {
       camera:        cesiumViewer.scene.camera,
       canvas:        cesiumViewer.scene.canvas,
-      clampToGround: true,
+      clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN,
     });
     caltopoState._ctText = kml; caltopoState._ctMapId = null;
     _ctSimplifyKml(ds);

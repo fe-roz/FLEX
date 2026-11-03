@@ -245,7 +245,7 @@
             if (r.length >= 2 && (!_polyDraft || r.length >= 3)) r.push(r[0]);
             return r.map(_c3);
           }, false),
-          clampToGround: true, width: 2,
+          clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN, width: 2,
           material: Cesium.Color.fromCssColorString('#00aaff'),
         },
       });
@@ -269,7 +269,7 @@
         position: Cesium.Cartesian3.ZERO,
         point: { pixelSize: 10, color: Cesium.Color.WHITE,
                  outlineColor: Cesium.Color.fromCssColorString('#0077dd'), outlineWidth: 2,
-                 heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+                 heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN, disableDepthTestDistance: Number.POSITIVE_INFINITY },
       });
       _polyHandles.push(e);
     }

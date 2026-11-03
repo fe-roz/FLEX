@@ -143,7 +143,7 @@
     const grp = (S.groups[f.group] || {}).name || '';
     shapeDs.entities.add({ id: 'my-' + f.id, name: f.name || (f.kind === 'area' ? 'Area' : 'Line'), description: (f.desc || '') + (grp ? '<p>My data · ' + grp.replace(/[<>&]/g, '') + '</p>' : ''),
       properties: { myShape: f.id },
-      polyline: { positions: Cesium.Cartesian3.fromDegreesArray(f.kind === 'area' ? flat.concat(flat.slice(0, 2)) : flat), width: 3, clampToGround: true, material: col },
+      polyline: { positions: Cesium.Cartesian3.fromDegreesArray(f.kind === 'area' ? flat.concat(flat.slice(0, 2)) : flat), width: 3, clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN, material: col },
       polygon: f.kind === 'area' && f.coords.length >= 3 ? { hierarchy: Cesium.Cartesian3.fromDegreesArray(flat), material: col.withAlpha(0.2), classificationType: Cesium.ClassificationType.TERRAIN } : undefined });
     V.scene.requestRender && V.scene.requestRender();
   }

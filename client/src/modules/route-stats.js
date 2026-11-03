@@ -274,7 +274,7 @@
       if (!hov || !v.entities.contains(hov)) {
         hov = v.entities.add({ id: 'route-hover', position: pos, properties: { isRouteHover: true },
           point: { pixelSize: 10, color: C.Color.fromCssColorString('#ffe600'), outlineColor: C.Color.BLACK, outlineWidth: 2,
-            heightReference: C.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY } });
+            heightReference: C.HeightReference.CLAMP_TO_TERRAIN, disableDepthTestDistance: Number.POSITIVE_INFINITY } });
       } else hov.position = pos;
     }
     function clearHover() { const v = V(); if (hov && v && v.entities.contains(hov)) v.entities.remove(hov); hov = null; }

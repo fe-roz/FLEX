@@ -241,7 +241,7 @@ export function setupWorkflowPanel({
       polyline: {
         positions: new Cesium.CallbackProperty(() => workflowState.drawPositions, false),
         width: 2,
-        clampToGround: true,
+        clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN,
         material: Cesium.Color.LIME
       }
     });
@@ -275,7 +275,7 @@ export function setupWorkflowPanel({
           color: Cesium.Color.LIME,
           outlineColor: Cesium.Color.BLACK,
           outlineWidth: 1,
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+          heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN
         }
       });
       workflowState.drawVertexEntities.push(marker);
@@ -905,7 +905,7 @@ export function setupWorkflowPanel({
         : baseColor;
       // Avoid Cesium polygon-outline geometry path (can crash on tiny/degenerate edges).
       entity.polygon.outline = false;
-      entity.polygon.heightReference = Cesium.HeightReference.CLAMP_TO_GROUND;
+      entity.polygon.heightReference = Cesium.HeightReference.CLAMP_TO_TERRAIN;
       const hierarchy = entity.polygon.hierarchy && typeof entity.polygon.hierarchy.getValue === "function"
         ? entity.polygon.hierarchy.getValue(now)
         : null;
@@ -913,7 +913,7 @@ export function setupWorkflowPanel({
       if (positions && positions.length >= 3) {
         entity.polyline = {
           positions: positions,
-          clampToGround: true,
+          clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN,
           width: isSelected ? 4 : 3,
           material: isSelected ? Cesium.Color.CYAN.withAlpha(1.0) : baseOutline,
         };
@@ -934,7 +934,7 @@ export function setupWorkflowPanel({
           horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
           verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
           pixelOffset: new Cesium.Cartesian2(0, -10),
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         };
       }
@@ -1039,7 +1039,7 @@ export function setupWorkflowPanel({
         : baseColor;
       // Keep fill-based styling only; disable polygon outline to avoid render crash path.
       entity.polygon.outline = false;
-      entity.polygon.heightReference = Cesium.HeightReference.CLAMP_TO_GROUND;
+      entity.polygon.heightReference = Cesium.HeightReference.CLAMP_TO_TERRAIN;
     }
   }
 
@@ -1057,7 +1057,7 @@ export function setupWorkflowPanel({
         }
       }
     }
-    const ds = await Cesium.GeoJsonDataSource.load(catalog, { clampToGround: true });
+    const ds = await Cesium.GeoJsonDataSource.load(catalog, { clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN });
     ds.name = "Backend AOIs";
     ds.show = workflowState.aoiVisible;
     const entities = ds.entities.values;
@@ -1098,7 +1098,7 @@ export function setupWorkflowPanel({
           }
         }))
     };
-    const ds = await Cesium.GeoJsonDataSource.load(featureCollection, { clampToGround: true });
+    const ds = await Cesium.GeoJsonDataSource.load(featureCollection, { clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN });
     ds.name = "AOI Process Areas";
     for (const entity of ds.entities.values) {
       const id = getPropertyValue(entity, "id") || entity.id;

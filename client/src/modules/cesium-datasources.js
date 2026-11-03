@@ -325,7 +325,7 @@ async function addDataFile(fileOrUrl, label, opts = {}) {
         ds = await Cesium.KmlDataSource.load(proxied, {
           camera: cesiumViewer.scene.camera,
           canvas: cesiumViewer.scene.canvas,
-          clampToGround: true,
+          clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN,
         });
       }
     } else {
@@ -341,7 +341,7 @@ async function addDataFile(fileOrUrl, label, opts = {}) {
         ds = await Cesium.KmlDataSource.load(objectUrl, {
           camera: cesiumViewer.scene.camera,
           canvas: cesiumViewer.scene.canvas,
-          clampToGround: true,
+          clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN,
         });
       }
     }

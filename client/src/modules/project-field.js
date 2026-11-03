@@ -103,7 +103,7 @@
       if (!pos) return;
       const look = icon
         ? { billboard: Object.assign({}, icon, { color: suggested ? Cesium.Color.WHITE.withAlpha(0.45) : Cesium.Color.WHITE, scale: suggested ? 0.75 : 1, disableDepthTestDistance: 5000 },
-                                     onGround ? { heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, pixelOffset: new Cesium.Cartesian2(0, -12) } : {}) }
+                                     onGround ? { heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN, pixelOffset: new Cesium.Cartesian2(0, -12) } : {}) }
         : { label: { text: '?', font: 'bold 18px sans-serif', fillColor: Cesium.Color.fromCssColorString('#ffeb3b').withAlpha(suggested ? 0.5 : 1),
                      outlineColor: Cesium.Color.BLACK, outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -14), disableDepthTestDistance: 5000 } };
       leadSrc.entities.add(Object.assign({

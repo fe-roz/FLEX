@@ -91,13 +91,13 @@
       const ents = [];
       if (f.kind === 'point') {
         ents.push(F.src.entities.add(Object.assign(base, { position: pos[0],
-          point: { pixelSize: 9, color: c, outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: 5000 },
+          point: { pixelSize: 9, color: c, outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5, heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN, disableDepthTestDistance: 5000 },
           label: f.style && f.style.label === false ? undefined : window._pjfLabel(f.name || '') })));          // name off: feature-editor.js
       } else if (f.kind === 'line') {
-        ents.push(F.src.entities.add(Object.assign(base, { polyline: { positions: pos, width: 3, material: c, clampToGround: true } })));
+        ents.push(F.src.entities.add(Object.assign(base, { polyline: { positions: pos, width: 3, material: c, clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN } })));
       } else {
-        ents.push(F.src.entities.add(Object.assign(base, { polygon: { hierarchy: pos, material: c.withAlpha(0.25), heightReference: Cesium.HeightReference.CLAMP_TO_GROUND } })));
-        ents.push(F.src.entities.add({ polyline: { positions: pos.concat([pos[0]]), width: 2, material: c, clampToGround: true }, properties: props }));
+        ents.push(F.src.entities.add(Object.assign(base, { polygon: { classificationType: Cesium.ClassificationType.TERRAIN, hierarchy: pos, material: c.withAlpha(0.25), heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN } })));
+        ents.push(F.src.entities.add({ polyline: { positions: pos.concat([pos[0]]), width: 2, material: c, clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN }, properties: props }));
       }
       drawn.set(f.id, { sig, ents });
     });
@@ -134,7 +134,7 @@
     const saved = [Cesium.ScreenSpaceEventType.LEFT_CLICK, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK].map(t => [t, def.getInputAction(t)]);
     saved.forEach(([t]) => def.removeInputAction(t));           // no picking / zooming while drawing
     const temp = kind === 'point' ? null : v.entities.add({ polyline: { positions: new Cesium.CallbackProperty(() => pts.concat(kind === 'area' && pts.length > 2 ? [pts[0]] : []).map(p => Cesium.Cartesian3.fromDegrees(p[0], p[1], p[2])), false),
-      width: 3, material: Cesium.Color.fromCssColorString(ROOT_COLOR), clampToGround: true } });
+      width: 3, material: Cesium.Color.fromCssColorString(ROOT_COLOR), clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN } });
     const finish = async () => {
       const need = kind === 'line' ? 2 : kind === 'area' ? 3 : 1;
       if (pts.length < need) { toast(`A ${kind} needs at least ${need} points`); return; }
@@ -274,9 +274,9 @@
   }
   async function loadFile(file) {
     const n = file.name.toLowerCase();
-    if (/\.gpx$/.test(n)) return Cesium.GpxDataSource.load(file, { clampToGround: true });
+    if (/\.gpx$/.test(n)) return Cesium.GpxDataSource.load(file, { clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN });
     if (/\.(geo)?json$/.test(n)) return Cesium.GeoJsonDataSource.load(JSON.parse(await file.text()));
-    return Cesium.KmlDataSource.load(file, { camera: V().scene.camera, canvas: V().scene.canvas, clampToGround: true });
+    return Cesium.KmlDataSource.load(file, { camera: V().scene.camera, canvas: V().scene.canvas, clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN });
   }
   async function importFile(parent) {
     if (!pj.pid) return;
@@ -550,7 +550,7 @@
     if (g.kind === 'point') {
       F.hl.entities.add({ position: pos[0], point: { pixelSize: 22, color: Y.withAlpha(0.25), outlineColor: Y, outlineWidth: 3, disableDepthTestDistance: Number.POSITIVE_INFINITY } });
     } else {
-      F.hl.entities.add({ polyline: { positions: g.kind === 'area' ? pos.concat([pos[0]]) : pos, width: 7, material: new Cesium.PolylineGlowMaterialProperty({ color: Y, glowPower: 0.25 }), clampToGround: true } });
+      F.hl.entities.add({ polyline: { positions: g.kind === 'area' ? pos.concat([pos[0]]) : pos, width: 7, material: new Cesium.PolylineGlowMaterialProperty({ color: Y, glowPower: 0.25 }), clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN } });
     }
     if (fly) {
       const bs = Cesium.BoundingSphere.fromPoints(pos); bs.radius = Math.max(bs.radius * 1.5, 120);
@@ -573,7 +573,7 @@
   window._pjfLabel = text => ({
     text, font: '15px sans-serif', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
     style: Cesium.LabelStyle.FILL_AND_OUTLINE, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -10),
-    heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 8000),
+    heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN, distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 8000),
     disableDepthTestDistance: 5000,
   });
   // Point cloud drawn over the map: a visible cloud with at least one class of
