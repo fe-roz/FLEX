@@ -1,6 +1,8 @@
 // session.js — Session persistence for FLEX
 // Saves camera position, layer state, loaded point cloud URLs, and misc settings to localStorage.
 
+import { restoreUsgsRef, usgsRefToSave } from "./usgs-auto.js";
+
 const SESSION_KEY          = 'flex_session_v1';
 // One session per project (camera, layers, styles… are personal, per project);
 // "no project" keeps the original key, so FLEX without projects is unchanged.
@@ -193,7 +195,7 @@ export function restoreLayerState(session, viewModel) {
   }
 
   // Restore misc viewModel settings
-  if (usgsRef !== undefined) viewModel.usgsRef = usgsRef;
+  restoreUsgsRef(viewModel, session.layers);
 }
 
 /**
@@ -235,7 +237,7 @@ function _collectLayers() {
     layers: allLayers
       .filter(l => l.name && !l._custom)   // skip unnamed system layers, and your own map layers (project/My data keep those)
       .map(l => ({ name: l.name, show: !!l.show, alpha: l.alpha ?? 1 })),
-    usgsRef: !!_viewModel.usgsRef,
+    ...usgsRefToSave(_viewModel),
   };
 }
 

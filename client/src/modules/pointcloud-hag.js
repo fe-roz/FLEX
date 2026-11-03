@@ -312,7 +312,7 @@ export function setupPointcloudHag({ potreeViewer } = {}) {
     // sub-ground features alone, tight enough to drop obvious garbage. Narrow it
     // deliberately rather than starting narrow.
     minHag: -20.0,
-    maxHag: 20.0,
+    maxHag: 2.5,
     _uploadTimer: null,
     _scan: null,
     _lastShift: 0,
@@ -557,6 +557,18 @@ export function setupPointcloudHag({ potreeViewer } = {}) {
    *
    * Changing it cannot be applied to what is already accumulated, so this rebuilds.
    */
+  /**
+   * The cloud's Z matrix changed (USGS Ref Fix / EGM96): what was binned under the old
+   * one is at the wrong height, so bin it all again under the new one.
+   */
+  function _hagRebin() {
+    try { (potreeViewer?.scene?.pointclouds || []).forEach(pc => pc.updateMatrixWorld && pc.updateMatrixWorld(true)); } catch (e) {}
+    if (!_hag.detail) return;
+    const e = _hagExtent(_hag.detail);
+    _hagReset(e.cx, e.cy);
+    _hagPushUniforms();
+  }
+
   function _hagSetEnvRadius(r) {
     r = Math.max(0, Math.min(3, r | 0));
     if (r === _hag.envRadius) return;
@@ -1134,7 +1146,7 @@ export function setupPointcloudHag({ potreeViewer } = {}) {
     window._hagDebug = _hagDebug;
     window._hagScan = _hagScan;
     // The saved grids (hag-persist.js): Settings' "Clear cached map data" empties them.
-    window._hagStore = { clearAll: clearGridStore, stats: gridStoreStats, saveNow: _hagSaveNow };
+    window._hagStore = { clearAll: clearGridStore, stats: gridStoreStats, saveNow: _hagSaveNow, rebin: _hagRebin };
     const _saveOnHide = () => { if (document.visibilityState === 'hidden') _hagSaveNow(); };
     document.addEventListener('visibilitychange', _saveOnHide);
     window.addEventListener('pagehide', () => _hagSaveNow());

@@ -17,6 +17,8 @@
 // terrainProvider is made in flex.js (`await Cesium.createWorldTerrainAsync()` stays there:
 // the browser tests rewrite that exact text to a flat terrain).
 
+import { restoreUsgsRef, applyAutoUsgsRef, isAutoWrite } from "./usgs-auto.js";
+
 // Options for new Cesium.Viewer; the render loop is ours (render-loop.js).
 export function cesiumViewerOptions(Cesium, terrainProvider) {
   return {
@@ -115,9 +117,7 @@ export function setupLayerActivation({
         const layer = await addCatalogLayer(name, show, alpha);
         if (layer) subscribeLayerToSession(layer);
       }
-      if (savedSession.layers.usgsRef !== undefined) {
-        viewModel.usgsRef = savedSession.layers.usgsRef;
-      }
+      restoreUsgsRef(viewModel, savedSession.layers);   // old sessions (no manual flag) stay automatic
     } else {
       // No session: add the default active layers (bottom -> top order).
       for (const d of DEFAULT_LAYERS) {
@@ -127,10 +127,18 @@ export function setupLayerActivation({
     }
 
     // Subscribe viewModel-level settings that should persist + live-update loaded clouds
+    Cesium.knockout.getObservable(viewModel, 'usgsRefAuto').subscribe(auto => {
+      if (auto) applyAutoUsgsRef(viewModel, potreeViewer.scene.pointclouds, console.log);
+      saveSession();
+    });
     ['usgsRef', 'egm96'].forEach(key => {
       Cesium.knockout.getObservable(viewModel, key).subscribe(() => {
+        // A hand flip of the switch is a manual choice; the automatic one stops.
+        if (key === 'usgsRef' && !isAutoWrite()) viewModel.usgsRefAuto = false;
         saveSession();
         potreeViewer.scene.pointclouds.forEach(applyPcMatrix);
+        // The height filter's ground grid was binned under the old Z matrix: bin it again.
+        if (window._hagStore && window._hagStore.rebin) window._hagStore.rebin();
         // Caves follow the point clouds' datum shift (_pcDatumDz).
         getCaveImports().forEach((imp, i) => { if (imp.georef) window._rerenderCave(i); });
         caveColourChanged();

@@ -25,7 +25,8 @@ export const viewModel = {
   showlidar:    false,
   showOpenTopo: false,
   googleMapsOn: false,
-  usgsRef:      false,
+  usgsRef:      true,   // on by default; usgs-auto.js turns it on/off from each cloud's projection
+  usgsRefAuto:  true,   // false once the person flips the switch by hand
   egm96:        false, // precise EGM96 geoid lookup (credits: THIRD_PARTY.md) — replaces fixed -32 m when on
   cesiumRender: true,  // toggle Cesium's render call each frame (false = Potree-only for perf testing)
   layers:       [],   // active ImageryLayer objects, top → bottom order
