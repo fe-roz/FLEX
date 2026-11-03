@@ -142,5 +142,22 @@ let n = 0; const uid = () => 'new' + (++n);
   ok('exports present', ['liveSystems', 'systemTotals', 'fileGroups', 'planMulti', 'entranceFit'].every(k => typeof L[k] === 'function'));
 }
 
+// Split a cave into its own file (project-workspace splitCave): the records it writes, replayed and undone
+{
+  const base = [PC('cavefile.set', { file: FILE, h: 'h1', ext: 'plt', place: { mode: 'anchor', station: 'A1' }, removed: false }),
+    PC('cave.set', { cave: 'c1', name: 'Cave Ridge', sources: [{ file: FILE, surveys: ['A', 'B'] }] }),
+    PC('cave.set', { cave: 'c2', name: 'Lower Ridge Cave', sources: [{ file: FILE, surveys: ['C', 'D'] }] }), PC('cavefile.set', { file: FILE, multi: true })];
+  const prev = JSON.parse(JSON.stringify(replay(base).caves.c2.sources));
+  const NEW = 'Lower Ridge Cave.plt';
+  const log = base.concat([PC('cavefile.set', { file: NEW, h: 'h2', ext: 'plt', place: { mode: 'anchor', station: 'A1' }, removed: false, split: FILE }),
+    PC('cave.set', { cave: 'c2', sources: [{ file: NEW }], prevSources: prev })]);
+  const S = replay(log), g = L.fileGroups(S, FILE, CODES);
+  ok('split: the cave points at the new file, same placement, parent untouched', JSON.stringify(S.caves.c2.sources) === JSON.stringify([{ file: NEW }]) && S.cavefiles[NEW].h === 'h2' && S.cavefiles[FILE].h === 'h1' && JSON.stringify(S.cavefiles[NEW].place) === JSON.stringify(S.cavefiles[FILE].place));
+  ok('split: the parent keeps one cave, the split surveys read as not yet sorted', g.caves.length === 1 && g.caves[0].name === 'Cave Ridge' && g.unsorted.join() === 'C,D,S', g);
+  const eu = L.multiUndo(log[log.length - 1]);
+  ok('split: undo of the cave record puts its surveys back', eu && JSON.stringify(eu.sources) === JSON.stringify(prev), eu);
+  ok('split: the new file alone holds the cave', L.fileGroups(S, NEW, ['C', 'D']).caves.map(c => c.name).join() === 'Lower Ridge Cave');
+}
+
 console.log((fail ? 'FAILED ' : 'ok ') + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

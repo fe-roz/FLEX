@@ -12,6 +12,7 @@
 // Node (tests): module.exports, same functions.
 //
 //   model(parsed, { name, georef, segments })   → { name, surveys: [{ code, desc, date, team, shots, stations }], … }
+//   subset(parsed, codes)                       → parsed holding only those surveys (opts.surveys does it in files())
 //   files(parsed, opts, formats)                → [{ name: '<cave>.svx', text, type }]
 (function (root) {
   'use strict';
@@ -242,16 +243,32 @@
     return L.join('\r\n') + '\r\n';
   }
 
+  /**
+   * Only some surveys of a parsed file (a cave of a multi-cave file): the same shape parsePLT returns, with just those
+   * surveys, their segments, the leads on their stations and the fixed stations among them.
+   */
+  function subset(parsed, codes) {
+    const keep = new Set((codes || []).map(String));
+    const segments = (parsed.segments || []).filter(g => keep.has(String(g.survey || '')));
+    const names = new Set();
+    segments.forEach(g => g.points.forEach(p => { if (p.name) names.add(p.name); }));
+    return Object.assign({}, parsed, {
+      surveys: (parsed.surveys || []).filter(s => keep.has(String(s.code))), segments,
+      leads: (parsed.leads || []).filter(l => names.has(l.station)),
+      fixedStations: (parsed.fixedStations || []).filter(f => names.has(f.name)) });
+  }
+
   const FORMATS = { svx: { fn: svx, type: 'text/plain' }, csv: { fn: csv, type: 'text/csv' }, plt: { fn: plt, type: 'text/plain' } };
   /** The files for the formats asked for (default all three), named after the cave. */
   function files(parsed, opts, formats) {
+    if (opts && opts.surveys) parsed = subset(parsed, opts.surveys);          // only these surveys (one cave of a multi-cave file)
     const M = model(parsed, opts);
     const base = String((opts && opts.fileBase) || M.name).replace(/\.(plt|json)$/i, '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').trim() || 'Cave';
     return (formats && formats.length ? formats : ['svx', 'csv', 'plt']).filter(f => FORMATS[f])
       .map(f => ({ name: base + '.' + f, text: FORMATS[f].fn(M), type: FORMATS[f].type }));
   }
 
-  const api = { model, svx, csv, plt, files, CSV_COLS };
+  const api = { model, svx, csv, plt, files, subset, CSV_COLS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root._surveyExport = api;
 })(typeof window !== 'undefined' ? window : null);

@@ -272,11 +272,66 @@
     const X = (window._pjx && window._pjx.state) || {};
     return list.filter(p => !(X.info && X.info[p.id] && X.info[p.id].archived));
   }
-  async function askCaveMove(fileName) {
+  /**
+   * Split a cave of a multi-cave file into a survey file of its own: a PLT holding only that cave's surveys (written by
+   * survey-export.js, read back by FLEX's parser to check it), stored as a new project survey file with the parent's
+   * placement (so nothing moves), the cave pointed at it, its surveys no longer the parent's. The parent file itself is
+   * never changed. Returns the new file's name, or null.
+   */
+  async function splitCave(fileName, cid, opts) {
+    opts = opts || {};
+    if (!pj.pid || readOnly()) return null;
+    const c = pj.P.caves[cid], f = pj.P.cavefiles[fileName], SE = window._surveyExport, w = ws();
+    const src = c && (c.sources || []).find(x => x.file === fileName);
+    if (!c || c.removed || !f || f.removed || !src || !SE || !w || !w.parse) return null;
+    if (!src.surveys || !src.surveys.length) { toast('This cave holds the whole file already: nothing to split'); return null; }
+    if (!opts.yes) {
+      const ok = await choose(`Split “${c.name}” into its own file?`, `A new survey file with only its ${src.surveys.length} survey${src.surveys.length === 1 ? '' : 's'} is made, placed where the big file is placed, so nothing moves. “${fileName}” itself is not changed. History can undo it.`,
+        [{ label: 'Split it', value: 'yes', primary: true }]);
+      if (ok !== 'yes') return null;
+    }
+    let parsed = (impOf(fileName) || {}).parsed;
+    if (!parsed) { const r = f.h && await fetch('/api/lib/blob/' + f.h + '.' + (f.ext || 'plt')); if (r && r.ok) parsed = w.parse(await r.text()); }
+    if (!parsed) { toast(`The survey file “${fileName}” isn’t on this computer yet`); return null; }
+    const sub = SE.subset(parsed, src.surveys);
+    const text = SE.plt(SE.model(sub, { name: c.name }));
+    const back = w.parse(text), nodes = x => x.segments.reduce((n, g) => n + g.points.length, 0);
+    if (!back || !nodes(back) || nodes(back) !== nodes(sub)) { toast('Could not write this cave’s surveys as a file of its own (nothing was changed)'); return null; }
+    const base = (c.name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').trim() || 'Cave').slice(0, 60);
+    let name = base + '.plt', k = 2;
+    while (pj.P.cavefiles[name] || pj.P.aliases[name]) name = base + ' ' + (k++) + '.plt';
+    const h = await sha(text);
+    await fetch('/api/lib/blob?ext=plt&h=' + h + '&project=' + encodeURIComponent(pj.pid), { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: bytes(text) });
+    await record('cavefile.set', { file: name, h, ext: 'plt', place: f.place || null, removed: false, split: fileName }, null, { quiet: true });
+    await record('cave.set', { cave: cid, sources: (c.sources || []).filter(x => x.file !== fileName).concat([{ file: name }]), prevSources: JSON.parse(JSON.stringify(c.sources || [])) }, null, { quiet: true });
+    await refreshAfter('cavefile.set');
+    if (w.caveIndex(fileName) >= 0) await loadProjectCave(name);
+    toast(`“${c.name}” is now its own file, “${name}”`);
+    return name;
+  }
+  async function askCaveMove(fileName, cid) {
     if (!pj.pid || readOnly()) return;
-    const cs = cavesOfFile(fileName);
+    let cs = cavesOfFile(fileName);
     if (!cs.length) { toast('This file isn’t a cave of the project yet (⋯ → Caves in this file…)'); return; }
-    if (cs.length > 1 || (pj.P.cavefiles[fileName] && pj.P.cavefiles[fileName].multi)) { toast('This is a multi-cave survey file: its caves share one file, so a cave can’t move on its own. Moving a cave out into its own file comes later.'); return; }
+    if (cs.length > 1 || (pj.P.cavefiles[fileName] && pj.P.cavefiles[fileName].multi)) {
+      // Caves sharing one file move one at a time, after the cave is split out into a file of its own.
+      const part = cs.filter(c => (c.sources || []).some(s => s.file === fileName && s.surveys && s.surveys.length));
+      let pick = cid ? part.find(c => c.id === cid) : null;
+      if (!pick) {
+        if (!part.length) { toast('No cave of this multi-cave survey file has its own surveys yet (⋯ → Multi-cave file…)'); return; }
+        const v = await choose('Move which cave?', 'This is a multi-cave survey file: its caves share one file. A cave is split into a file of its own first, then moves.',
+          part.map(c => ({ label: ['cave', 'Split “' + c.name + '” into its own file, then move'], value: c.id })));
+        pick = part.find(c => c.id === v);
+        if (!pick) return;
+      } else {
+        const v = await choose(`Move “${pick.name}” to another project?`, 'This is a multi-cave survey file: its caves share one file, so a cave can’t move on its own. It can be split into a file of its own first, then moved.',
+          [{ label: 'Split into its own file, then move', value: 'split', primary: true }]);
+        if (v !== 'split') return;
+      }
+      const nf = await splitCave(fileName, pick.id, { yes: true });
+      if (nf) await askCaveMove(nf);
+      return;
+    }
     const c = cs[0], q = queuedCaveMove(c.id);
     if (q) { W.moves = W.moves.filter(x => x !== q); saveMoves(); toast(`The move of “${c.name}” is cancelled`); await badge(); return; }
     const dests = await otherProjects();
@@ -792,5 +847,5 @@
   window._saveAll = saveClick;
   window._pjWs = { opening, placeCaltopo, autosave, save, saveClick, discard, discardAsk, badge, scan, removed, leave, enter, adopt, label, unloadProject,
                    owns, moveCave, moving, loadProjectCave, projName, moveItem, movingItem, layerId, addLayer, caveMenu, pcRow, removeCaveFile,
-                   askCaveMove, queueFeatures, featsOf, addCave, mineStyle, labels: LBL, readOnly };
+                   askCaveMove, splitCave, queueFeatures, featsOf, addCave, mineStyle, labels: LBL, readOnly };
 })();

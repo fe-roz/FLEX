@@ -162,6 +162,21 @@ ok('plt: and again: written twice, same text', SE.plt(SE.model(Q, { name: 'Cave 
   ok('route refuses a project with no folder', threw);
 }
 
+// ── One cave of a multi-cave file: only its surveys, and a PLT FLEX reads back the same ─
+{
+  const sub = SE.subset(P, ['A', 'B']);
+  ok('subset: only those surveys and their segments', sub.surveys.map(x => x.code).join() === 'A,B' && sub.segments.every(g => g.survey !== 'S') && sub.segments.length === 2, sub.surveys);
+  ok('subset: leads follow their stations', sub.leads.length === 1 && SE.subset(P, ['B']).leads.length === 0);
+  const only = SE.files(P, { name: 'Lower Ridge Cave', surveys: ['B'] }, ['csv', 'svx', 'plt']);
+  const csvB = only.find(f => /\.csv$/.test(f.name)).text;
+  ok('export of one cave: its surveys only', /B1/.test(csvB) && !/(^|,)A2/m.test(csvB) && !/S1/.test(csvB.split('\n').slice(4).join('\n')), csvB.slice(0, 300));
+  ok('export of one cave: Survex has one survey', (only.find(f => /\.svx$/.test(f.name)).text.match(/^\*begin /gm) || []).length >= 1 && !/\bA2\b/.test(only.find(f => /\.svx$/.test(f.name)).text.replace(/^;.*$/gm, '')));
+  const back = parsePLT(SE.plt(SE.model(sub, { name: 'Cave Ridge' })));
+  const pts = x => x.segments.map(g => g.survey + ':' + g.points.map(q => q.name + '@' + q.n.toFixed(1) + ',' + q.e.toFixed(1) + ',' + q.v.toFixed(1)).join(' ')).join('|');
+  ok('split PLT: read back by FLEX gives the same stations and positions', pts(back) === pts(sub) && back.leads.length === 1, [pts(back), pts(sub)]);
+  ok('split PLT: the other surveys are gone', !back.segments.some(g => g.survey === 'S'));
+}
+
 fs.rmSync(dir, { recursive: true, force: true });
 console.log((fail ? 'FAILED ' : '') + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

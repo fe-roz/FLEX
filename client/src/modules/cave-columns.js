@@ -87,7 +87,7 @@
     if (codes && FL) g = FL.fileGroups(P, x.name, codes);
     else g = { caves: FL.liveCaves(P).filter(c => (c.sources || []).some(s => s.file === x.name)).map(c => ({ id: c.id, name: c.name, surveys: ((c.sources.find(s => s.file === x.name) || {}).surveys) || [] })), surface: cf.surface || [], unsorted: null };
     const n = (a, w) => a.length + ' ' + w + (a.length === 1 ? '' : 's');
-    return `<div class="cc-sub">${g.caves.map(c => `<div class="cc-sr" data-cave="${esc(c.id)}" data-file="${esc(x.name)}" title="Rename it, put it in a system">${ic('cave')} ${esc(c.name)} <small>${n(c.surveys, 'survey')}</small></div>`).join('')}` +
+    return `<div class="cc-sub">${g.caves.map(c => `<div class="cc-sr" data-cave="${esc(c.id)}" data-file="${esc(x.name)}" title="Rename it, put it in a system">${ic('cave')} ${esc(c.name)} <small>${n(c.surveys, 'survey')}</small><span class="cc-tools"><button type="button" data-cmore title="More: export, split into its own file, move">⋯</button></span></div>`).join('')}` +
       (g.unsorted && g.unsorted.length ? `<div class="cc-sr cc-un" data-sort="${esc(x.name)}" title="These surveys belong to no cave yet — click to sort them">Surface / not yet sorted <small>${n(g.unsorted, 'survey')}</small></div>` : '') +
       (g.surface.length ? `<div class="cc-sr cc-un" data-sort="${esc(x.name)}" title="Marked as surface traverses">Surface traverses <small>${n(g.surface, 'survey')}</small></div>` : '') + '</div>';
   }
@@ -201,8 +201,21 @@
     acts.push(['Add sketch…', () => window._sketches && window._sketches.addForFile(name), 'A scan of a sketch (image or PDF), kept in the project with this cave']);
     if (pw && pw.caveMenu) acts.push(...pw.caveMenu(name, loaded));   // project: Copy CalTopo tag, Caves in this file…, Remove from project
     if (!inP) acts.push(['Forget', () => { if (loaded) w.removeCave(name); w.forgetRecent(name); }, 'Takes it out of My data (its file and history stay)']);
+    popup(name, acts, anchor);
+  }
+  // A cave of a multi-cave file: its own ⋯ (export only its surveys, split it out, move it).
+  function caveMore(cid, file, anchor) {
+    const pw = PW(), cave = (PJ().P.caves || {})[cid];
+    if (!cave) return;
+    const acts = [['Rename, system…', async () => { const A0 = window._pjApi; if (A0 && A0.editCave) { await A0.editCave(cid); render(); } }],
+      ['⇩ Export survey…', () => exportSurvey(file, cid), 'Survex, CSV and PLT files of only this cave’s surveys'],
+      ['Split into its own file…', () => pw.splitCave(file, cid), 'A new survey file with only this cave’s surveys, placed the same; the big file isn’t changed']];
+    if (pw.askCaveMove) acts.push(['Move to another project…', () => pw.askCaveMove(file, cid), 'Splits it into its own file first, then moves it on Save']);
+    popup(cave.name, acts, anchor);
+  }
+  function popup(title, acts, anchor) {
     const m = document.createElement('div'); m.className = 'cc-pop';
-    m.innerHTML = `<div class="cc-pop-t">${esc(name)}</div>` + acts.map(([l, , t], k) => `<button type="button" data-k="${k}" ${t ? 'title="' + esc(t) + '"' : ''}>${esc(l)}</button>`).join('');
+    m.innerHTML = `<div class="cc-pop-t">${esc(title)}</div>` + acts.map(([l, , t], k) => `<button type="button" data-k="${k}" ${t ? 'title="' + esc(t) + '"' : ''}>${esc(l)}</button>`).join('');
     document.body.appendChild(m);
     const r = anchor.getBoundingClientRect();
     m.style.left = Math.min(r.right + 6, window.innerWidth - 200) + 'px';
@@ -223,11 +236,13 @@
     if (text == null) { text = await w.recentText(name); const r = w.recents().find(x => x.name === name); georef = r ? r.georef : null; }
     return text && w.parse ? { parsed: w.parse(text), georef } : null;
   }
-  async function exportSurvey(name) {
+  async function exportSurvey(name, cid) {
     const SE = window._surveyExport, A = window._pjApi, pj = PJ(), pw = PW();
     if (!SE || !A) return;
     const inP = !!(pw && pj.pid && pw.owns(name));
-    const caves = inP && pj.P ? Object.values(pj.P.caves || {}).filter(c => !c.removed && (c.sources || []).some(x => x.file === name)) : [];
+    let caves = inP && pj.P ? Object.values(pj.P.caves || {}).filter(c => !c.removed && (c.sources || []).some(x => x.file === name)) : [];
+    if (cid) caves = caves.filter(c => c.id === cid);              // one cave of a multi-cave file: only its surveys
+    const only = cid && caves.length === 1 ? (caves[0].sources.find(x => x.file === name) || {}).surveys : null;
     const cave = caves.length === 1 ? caves[0].name : name.replace(/\.(plt|json)$/i, '');
     const proj = inP ? (pj.projects || []).find(p => p.id === pj.pid) : null;
     const folder = proj && proj.folder;
@@ -245,7 +260,7 @@
     if (!fmts.length) { A.toast('Nothing ticked: no files written'); return; }
     const S = await surveyOf(name);
     if (!S) { A.toast(`The survey file of “${name}” isn’t on this computer`); return; }
-    const files = SE.files(S.parsed, { name: cave, georef: S.georef, segments }, fmts);
+    const files = SE.files(S.parsed, { name: cave, georef: S.georef, segments, surveys: only && only.length ? only : null }, fmts);
     if (inP && folder) {
       try {
         const res = await fetch('/api/lib/survey-export?project=' + encodeURIComponent(pj.pid), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cave, files: files.map(f => ({ name: f.name, text: f.text })) }) });
@@ -270,6 +285,7 @@
     if (e.target.closest('[data-sysnew]')) { if (MC) { await MC.editSystem(null); render(); } return; }
     const se = e.target.closest('[data-sysedit]'); if (se) { if (MC) { await MC.editSystem(se.dataset.sysedit); render(); } return; }
     const sk = e.target.closest('[data-skcave]'); if (sk) { reveal({ cave: sk.dataset.skcave }); return; }
+    const cm = e.target.closest('[data-cmore]'); if (cm) { const r0 = cm.closest('[data-cave]'); caveMore(r0.dataset.cave, r0.dataset.file, cm); return; }
     const sr = e.target.closest('[data-cave]'); if (sr && A0 && A0.editCave) { await A0.editCave(sr.dataset.cave); render(); return; }
     const sx = e.target.closest('[data-sort]');
     if (sx && MC) { const imp = (window._caveImports || []).find(i => i && i.parsed && i.name === sx.dataset.sort); if (imp) { await MC.multiCave(imp); render(); } else if (A0) A0.toast('Load the file first'); return; }
@@ -389,7 +405,8 @@
   #cave-cols .cc-systems { margin-top: 6px; border-top: 1px solid rgba(255,255,255,.08); padding-top: 3px; }
   #cave-cols .cc-sys-h { display: flex; justify-content: space-between; align-items: center; font-size: 9.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: rgba(255,255,255,.5); padding: 0 3px; }
   #cave-cols .cc-sys { display: grid; grid-template-columns: 1fr auto; align-items: center; }
-  #cave-cols .cc-sys:hover .cc-tools { opacity: 1; }
+  #cave-cols .cc-sys:hover .cc-tools, #cave-cols .cc-sr:hover .cc-tools { opacity: 1; }
+  #cave-cols .cc-sr .cc-tools { float: right; }
   #cave-cols .cc-sys .cc-set-h { white-space: normal; }
   #cave-cols .cc-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
   #cave-cols .cc-hint { font-size: 10px; color: rgba(255,255,255,.4); }
