@@ -28,6 +28,7 @@
   const DEFAULT_MAX_LEVEL = 19; // finest level the patch answers
   const RAMP_M = 60;            // metres inside the patch edge over which the hand-over to world terrain fades
   const STEP = 20;              // metres between world-minus-grid measurements
+  const WORLD_CACHE = 48;       // world tiles kept per provider for edge tiles
   const SKIRT_FACTOR = 6;       // skirts this many times Cesium's default
 
   const schemes = new WeakMap();
@@ -54,6 +55,92 @@
       schemes.set(ts, p);
     }
     return p;
+  }
+
+  // ── Fast globe.getHeight on patch tiles ─────────────────────────────────────────────────────
+  // Cesium's GlobeSurfaceTile.pick (what globe.getHeight ends in) tests the ray against every triangle of the
+  // tile: ~8,500 for a 65 x 65 patch tile, about 0.5 ms a call, and the camera-collision check plus FLEX's own
+  // ground-height reads make two or more calls every frame (it doubled the frame cost over the patch). For the
+  // vertical rays getHeight casts, the triangles are bucketed once per mesh by their footprint in the tile's
+  // (u,v) square, and only the few in the ray's bucket are tested, with the same Cesium routine on the same
+  // decoded positions — so the answer is the one the full scan gives.
+  const GRID = 16, UVPAD = 3 / 4095;            // buckets a side; texture coordinates are 12-bit packed, so pad the footprints
+  const buckets = new WeakMap();
+  function bucketsOf(mesh) {
+    let b = buckets.get(mesh);
+    if (b) return b;
+    const { vertices, indices, encoding } = mesh, nTri = indices.length / 3, uv = new C.Cartesian2();
+    const nv = vertices.length / encoding.stride;
+    const vu = new Float32Array(nv), vv = new Float32Array(nv);
+    for (let i = 0; i < nv; i++) { encoding.decodeTextureCoordinates(vertices, i, uv); vu[i] = uv.x; vv[i] = uv.y; }
+    const start = new Uint32Array(GRID * GRID + 1), box = new Int32Array(nTri * 4);
+    const cell = x => Math.min(GRID - 1, Math.max(0, Math.floor(x * GRID)));
+    for (let t = 0; t < nTri; t++) {
+      const a = indices[3 * t], c = indices[3 * t + 1], d = indices[3 * t + 2];
+      const x0 = cell(Math.min(vu[a], vu[c], vu[d]) - UVPAD), x1 = cell(Math.max(vu[a], vu[c], vu[d]) + UVPAD);
+      const y0 = cell(Math.min(vv[a], vv[c], vv[d]) - UVPAD), y1 = cell(Math.max(vv[a], vv[c], vv[d]) + UVPAD);
+      box[4 * t] = x0; box[4 * t + 1] = x1; box[4 * t + 2] = y0; box[4 * t + 3] = y1;
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) start[y * GRID + x + 1]++;
+    }
+    for (let k = 0; k < GRID * GRID; k++) start[k + 1] += start[k];
+    const fill = start.slice(0, GRID * GRID), list = new Uint32Array(start[GRID * GRID]);
+    for (let t = 0; t < nTri; t++) for (let y = box[4 * t + 2]; y <= box[4 * t + 3]; y++) for (let x = box[4 * t]; x <= box[4 * t + 1]; x++) list[fill[y * GRID + x]++] = t;
+    b = { start, list };
+    buckets.set(mesh, b);
+    return b;
+  }
+  /** Flag a tile's data (and, in turn, the tiles Cesium upsamples from it where the world has no finer data) so
+   *  globe.getHeight uses the bucketed pick on them. */
+  function markPatchTile(data) {
+    data._flexPatchTile = true;
+    const up = data.upsample;
+    if (typeof up === 'function') data.upsample = function () {
+      const r = up.apply(this, arguments);
+      return r && typeof r.then === 'function' ? r.then(d => { if (d && !d._flexPatchTile) markPatchTile(d); return d; }) : r;
+    };
+    return data;
+  }
+  let pickHooked = false;
+  const pickStats = { fast: 0, full: 0, why: {} };   // calls answered by the buckets / by Cesium's full scan (and why)
+  /** Hook GlobeSurfaceTile.prototype.pick once (the viewer needs a tile with data to reach the prototype). */
+  function hookPick(viewer) {
+    if (pickHooked || !viewer || !viewer.scene) return;
+    const find = () => {
+      try { for (const t of viewer.scene.globe._surface._tilesToRender) if (t.data && t.data.pick) return Object.getPrototypeOf(t.data); } catch (_) {}
+      return null;
+    };
+    const apply = proto => {
+      const orig = proto.pick, v0 = new C.Cartesian3(), v1 = new C.Cartesian3(), v2 = new C.Cartesian3(), cart = new C.Cartesian3();
+      proto.pick = function (ray, mode, projection, cullBackFaces, result) {
+        const mesh = this.renderedMesh, td = this.terrainData;
+        if (mode !== undefined || cullBackFaces || !mesh || !td || !td._flexPatchTile || !this.tileBoundingRegion || !this.tileBoundingRegion.rectangle) {
+          pickStats.full++; const w = mode !== undefined ? 'mode' : cullBackFaces ? 'cull' : !mesh ? 'nomesh' : !td ? 'noterraindata' : !td._flexPatchTile ? 'notpatch:' + (td.constructor && td.constructor.name) : 'noregion';
+          pickStats.why[w] = (pickStats.why[w] || 0) + 1;
+          return orig.call(this, ray, mode, projection, cullBackFaces, result);
+        }
+        try {
+          // the ray is globe.getHeight's: along the geodetic surface normal, so its direction gives longitude and latitude
+          const dir = ray.direction, rect = this.tileBoundingRegion.rectangle;
+          const lon = Math.atan2(dir.y, dir.x), lat = Math.atan2(dir.z, Math.hypot(dir.x, dir.y));
+          const u = (lon - rect.west) / (rect.east - rect.west), v = (lat - rect.south) / (rect.north - rect.south);
+          if (!(u >= -0.01 && u <= 1.01 && v >= -0.01 && v <= 1.01)) return orig.call(this, ray, mode, projection, cullBackFaces, result);
+          const b = bucketsOf(mesh), cx = Math.min(GRID - 1, Math.max(0, Math.floor(u * GRID))), cy = Math.min(GRID - 1, Math.max(0, Math.floor(v * GRID)));
+          const { vertices, indices, encoding } = mesh, k = cy * GRID + cx;
+          let minT = Number.MAX_VALUE;
+          for (let q = b.start[k]; q < b.start[k + 1]; q++) {
+            const i = b.list[q] * 3;
+            const t = C.IntersectionTests.rayTriangleParametric(ray, encoding.getExaggeratedPosition(vertices, indices[i], v0), encoding.getExaggeratedPosition(vertices, indices[i + 1], v1), encoding.getExaggeratedPosition(vertices, indices[i + 2], v2), false);
+            if (t !== undefined && t < minT && t >= 0) minT = t;
+          }
+          pickStats.fast++;
+          return minT !== Number.MAX_VALUE ? C.Ray.getPoint(ray, minT, result) : undefined;
+        } catch (_) { return orig.call(this, ray, mode, projection, cullBackFaces, result); }
+      };
+      proto.pick._flexOrig = orig; pickHooked = true;
+    };
+    const proto = find();
+    if (proto) { apply(proto); return; }
+    const off = viewer.scene.postRender.addEventListener(() => { if (pickHooked) { off(); return; } const p = find(); if (p) { apply(p); off(); } });
   }
   const fall = t => { const s = Math.min(Math.max(t, 0), 1); return 1 - s * s * (3 - 2 * s); };
 
@@ -95,7 +182,10 @@
     get hasVertexNormals() { return false; }
     get ready() { return true; }
     get readyPromise() { return Promise.resolve(true); }
-    getLevelMaximumGeometricError(level) { return this._base.getLevelMaximumGeometricError(level); }
+    getLevelMaximumGeometricError(level) {        // asked for every tile every frame: remembered per level
+      const c = this._gerr || (this._gerr = []);
+      return level in c ? c[level] : (c[level] = this._base.getLevelMaximumGeometricError(level));
+    }
 
     _inside(lon, lat) { return lon >= this._w && lon <= this._e && lat >= this._s && lat <= this._n; }
     /** Does the tile touch the patch (and is it a level the patch answers)? */
@@ -152,10 +242,25 @@
         const k = level - l, ax = x >> k, ay = y >> k;
         const av = this._base.getTileDataAvailable ? this._base.getTileDataAvailable(ax, ay, l) : undefined;
         if (av === false) continue;
-        let data; try { data = await this._base.requestTileGeometry(ax, ay, l); } catch (_) { data = null; }
-        if (data && typeof data.interpolateHeight === 'function') return { data, rect: this.tilingScheme.tileXYToRectangle(ax, ay, l) };
+        const w = await this._worldAt(ax, ay, l);
+        if (w) return w;
       }
       return null;
+    }
+    /** One world tile, shared: the many fine tiles along a patch edge all want the same coarse world tile, which was
+     *  requested (and parsed) again for each of them. The last few are kept; a failed request is not remembered. */
+    _worldAt(ax, ay, l) {
+      const cache = this._wcache || (this._wcache = new Map()), key = l + '/' + ax + '/' + ay;
+      let pr = cache.get(key);
+      if (pr) { cache.delete(key); cache.set(key, pr); return pr; }
+      pr = (async () => {
+        let data; try { data = await this._base.requestTileGeometry(ax, ay, l); } catch (_) { data = null; }
+        return data && typeof data.interpolateHeight === 'function' ? { data, rect: this.tilingScheme.tileXYToRectangle(ax, ay, l) } : null;
+      })();
+      cache.set(key, pr);
+      pr.then(w => { if (!w) cache.delete(key); }, () => cache.delete(key));
+      if (cache.size > WORLD_CACHE) cache.delete(cache.keys().next().value);
+      return pr;
     }
     async requestTileGeometry(x, y, level, request) {
       if (!this._overlaps(x, y, level)) return this._base.requestTileGeometry(x, y, level, request);
@@ -179,6 +284,7 @@
         structure: { heightScale: 1, heightOffset: 0, elementsPerHeight: 1, stride: 1, elementMultiplier: 256, isBigEndian: false },
         createdByUpsampling: false
       });
+      markPatchTile(data);
       // Cesium hangs a skirt below each height-map tile of (estimated level error x 4) — too little to
       // hide a join with a world tile. It derives that from the tile count at level 0.
       const mesh = data.createMesh.bind(data);
@@ -301,11 +407,11 @@
     // world terrain heights on a ~20 m lattice over the patch
     const wh = new Float32Array(nxd * nyd), pos = [];
     for (let j = 0; j < nyd; j++) for (let i = 0; i < nxd; i++) pos.push(C.Cartographic.fromDegrees(m.west + i * dxd, m.north - j * dyd));
-    for (let k = 0; k < pos.length; k += 2000) {
-      // (a provider without availability, e.g. the plain ellipsoid, can't say its most detailed level: ask one)
-      const part = base.availability ? await C.sampleTerrainMostDetailed(base, pos.slice(k, k + 2000)) : await C.sampleTerrain(base, MIN_LEVEL, pos.slice(k, k + 2000));
-      part.forEach((c, q) => { wh[k + q] = c.height; });
-    }
+    // (a provider without availability, e.g. the plain ellipsoid, can't say its most detailed level: ask one)
+    // One call for the lot: Cesium groups the positions by tile and requests each tile once, where batches of 2000
+    // (45 for a 6 km patch, one after the other) asked for the same tiles again and waited a round trip each.
+    const part = base.availability ? await C.sampleTerrainMostDetailed(base, pos) : await C.sampleTerrain(base, MIN_LEVEL, pos);
+    part.forEach((c, q) => { wh[q] = c.height; });
     // cells with no data (outside the DEM's own edge) take the world terrain's height; the hand-over
     // strip is then measured from the DEM's real edge, not only from the box
     const edge = edgeField(grid, m.nx, m.ny, (m.east - m.west) / (m.nx - 1) * 111320 * Math.cos(C.Math.toRadians((m.south + m.north) / 2)), (m.north - m.south) / (m.ny - 1) * 110540);
@@ -340,6 +446,7 @@
     // grid + delta is exactly the world terrain there
     if (edge) for (let j = 0; j < m.ny; j++) for (let i = 0; i < m.nx; i++) { const k = j * m.nx + i; if (edge[k] === 0) { const lon = m.west + i * m.dlon, lat = m.north - j * m.dlat; grid[k] = worldAt(lon, lat) - tp._delta(lon, lat); } }
     viewer.terrainProvider = tp;
+    hookPick(viewer);
     return tp;
   }
   /** Fill the unknown cells of a lattice from the nearest known ones, one ring at a time: each unknown cell
@@ -369,5 +476,5 @@
     return changed;
   }
   const uninstall = uninstallAll;
-  window._terrainPatch = { install, uninstall, uninstallAll, parse, pack, edgeField, plan, bake, MAX_SIDE, MAX_TILES, OVERLAP_M, PatchTerrainProvider, RAMP_M };
+  window._terrainPatch = { install, uninstall, uninstallAll, parse, pack, edgeField, plan, bake, MAX_SIDE, MAX_TILES, OVERLAP_M, PatchTerrainProvider, RAMP_M, pickStats };
 })();
