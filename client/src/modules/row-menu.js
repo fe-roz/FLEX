@@ -21,7 +21,7 @@
 // entries, it is kept on screen.
 //
 // window._rowMenu = {
-//   open({ rkey } | { fkey }, anchor)   → the menu element
+//   open({ rkey } | { fkey } | { ctmap, fkey? }, anchor)   → the menu element (ctmap = a CalTopo map row's id: its menu acts on that map)
 //   close()
 //   entries({ rkey } | { fkey })       → [{ id, label, disabled, title }] (tests)
 //   ref(rkey)                          → what _featEdit is handed for a row key
@@ -279,20 +279,20 @@
   }
   // The CalTopo map row itself. Rename is display only (never written to CalTopo); leaving the project waits for 💾 Save like
   // other moves (the map is unloaded then); nothing is deleted in CalTopo.
-  function ctMapEntries() {
-    const SC = window._surfCols, m = SC && SC.ctMap && SC.ctMap();
+  function ctMapEntries(cid) {          // cid: the row's id (data-ctmap): the menu acts on THAT map, whatever other maps are listed
+    const SC = window._surfCols, m = SC && SC.ctMap && SC.ctMap(cid);
     if (!m) return [];
     const list = [];
-    if (SC.merged && SC.merged()) list.push({ id: 'mapnewfolder', icon: 'folder-plus', label: 'New folder…', title: 'A folder that is created in CalTopo when you press Send', run: () => SC.newFolder([]) });
-    list.push({ id: 'maprename', icon: 'text', label: 'Rename…', title: 'Only FLEX shows the new name; CalTopo is not changed', run: async () => { const n = await askText('Rename the CalTopo map (here only)', m.name, 'Rename'); if (n && n !== m.name) await SC.ctRename(n); } });
+    if (m.loaded && SC.merged && SC.merged()) list.push({ id: 'mapnewfolder', icon: 'folder-plus', label: 'New folder…', title: 'A folder that is created in CalTopo when you press Send', run: () => SC.newFolder([]) });
+    list.push({ id: 'maprename', icon: 'text', label: 'Rename…', title: 'Only FLEX shows the new name; CalTopo is not changed', run: async () => { const n = await askText('Rename the CalTopo map (here only)', m.name, 'Rename'); if (n && n !== m.name) await SC.ctRename(n, m.id); } });
     if (m.inProject) {
-      if (m.dir) list.push({ id: 'cancelmove', icon: 'folder-move', label: m.dir === 'remove' ? 'Cancel the removal' : 'Cancel the move', run: () => SC.ctLeave('cancel') });
-      else list.push({ id: 'mapout', icon: 'folder-move', label: 'Move to My data', title: 'Out of the project; the map stays loaded as yours. Waits for 💾 Save', run: () => SC.ctLeave('out') },
-        { id: 'mapremove', icon: 'trash', label: 'Remove from project', title: 'Out of the project and unloaded when you 💾 Save. Nothing is deleted in CalTopo', run: () => SC.ctLeave('remove') });
-    } else list.push({ id: 'mapremove', icon: 'trash', label: 'Remove', title: 'Unload the map. Nothing is deleted in CalTopo', run: () => SC.ctUnload() });
+      if (m.dir) list.push({ id: 'cancelmove', icon: 'folder-move', label: m.dir === 'remove' ? 'Cancel the removal' : 'Cancel the move', run: () => SC.ctLeave('cancel', m.id) });
+      else list.push({ id: 'mapout', icon: 'folder-move', label: 'Move to My data', title: 'Out of the project; the map stays loaded as yours. Waits for 💾 Save', run: () => SC.ctLeave('out', m.id) },
+        { id: 'mapremove', icon: 'trash', label: 'Remove from project', title: 'Out of the project and unloaded when you 💾 Save. Nothing is deleted in CalTopo', run: () => SC.ctLeave('remove', m.id) });
+    } else list.push({ id: 'mapremove', icon: 'trash', label: 'Remove', title: 'Unload the map. Nothing is deleted in CalTopo', run: () => SC.ctUnload(m.id) });
     return list;
   }
-  function folderEntries(fkey) {
+  function folderEntries(fkey, cid) {
     const S = FS(), k = split(fkey);
     const title = S && S.label ? S.label(fkey) : 'Folder';
     const list = [{ id: 'display', icon: 'sliders', label: 'Display…', title: 'Names, colour, line width, symbol, opacity for everything inside', run: () => S.dialog(fkey) }];
@@ -301,7 +301,7 @@
     const cur = S ? (S.get(fkey) || {}) : {}, on = cur.labels !== false;
     list.push({ id: 'names', icon: 'tag', label: on ? 'Names off' : 'Names on', title: on ? 'Hide the names of everything inside' : 'Show the names of everything inside', run: () => S.set(fkey, { labels: !on }) });
     let more = [];
-    if (k.kind === 'caltopo' && !k.id) more = ctMapEntries();
+    if (k.kind === 'caltopo' && !k.id) more = ctMapEntries(cid);
     else if (k.kind === 'project' && k.id) more = projectFolder(k.id);
     else if (k.kind === 'mydata' && k.id) more = myFolder(k.id);
     else if (k.kind === 'caltopo' && k.id) more = ctFolder(k.id);
@@ -309,7 +309,11 @@
     return { title, list };
   }
 
-  function build(o) { return o && o.rkey ? itemEntries(o.rkey) : o && o.fkey != null ? folderEntries(o.fkey) : { title: '', list: [] }; }
+  function ctOnly(cid) {               // a CalTopo map that is not the loaded one: no folders to show, only what can be done with the map
+    const SC = window._surfCols, m = SC && SC.ctMap && SC.ctMap(cid);
+    return m ? { title: m.name, list: ctMapEntries(cid) } : { title: '', list: [] };
+  }
+  function build(o) { return o && o.rkey ? itemEntries(o.rkey) : o && o.fkey != null && o.fkey !== '' ? folderEntries(o.fkey, o.ctmap) : o && o.ctmap != null ? ctOnly(o.ctmap) : { title: '', list: [] }; }
   function open(o, anchor) {
     if (M && anchor && M._anchor === anchor) { close(); return null; }     // the same ⋯ again: closes
     const b = build(o);

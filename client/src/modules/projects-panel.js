@@ -351,9 +351,11 @@
   const pcOf = url => ((window.potreeViewer && potreeViewer.scene && potreeViewer.scene.pointclouds) || []).find(c => c.name === pcName(url));
   function ctState() {
     const w = ws_(); if (!w || !pj.P) return null;
-    const lay = FL.liveLayers(pj.P).find(l => l.kind === 'caltopo') || null;
-    const now = w.caltopo(), src = w.vectorSources().find(s => s.kind === 'caltopo') || null;
-    const loaded = !!(lay && now && src && now.url === lay.url);
+    const cts = FL.liveLayers(pj.P).filter(l => l.kind === 'caltopo');
+    const now = w.caltopo();
+    const lay = (now && cts.find(l => mapId(l.url) && mapId(l.url) === mapId(now.url))) || cts[0] || null;     // the loaded map's layer, else the first
+    const src = w.vectorSources().find(s => s.kind === 'caltopo') || null;
+    const loaded = !!(lay && now && src && (now.url === lay.url || (mapId(now.url) && mapId(now.url) === mapId(lay.url))));
     const st = document.getElementById('caltopo_status'), tm = st && (st.textContent.match(/\d{1,2}:\d{2}(?::\d{2})?(?:\s?[AP]M)?/i) || [])[0];
     const ok = st && /✓/.test(st.textContent);
     return { lay, now, src: loaded ? src : null, loaded, id: lay && mapId(lay.url), other: !lay && now ? mapId(now.url) || 'a map' : null,

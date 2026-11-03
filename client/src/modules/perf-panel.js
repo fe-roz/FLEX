@@ -1,4 +1,4 @@
-// perf-panel.js — the Performance panel (strip button "Speed" above Settings; #perfCollapsible in index.html).
+// perf-panel.js — the Performance panel (strip button "Speed" above Settings; it opens in the bottom-left dock, #flex-dock in index.html, flex-rail.js).
 //
 //   - Always on, in perf-probe.js: frame times (fps, percentiles) and the CPU time of each stage of the frame,
 //     measured inside render-loop.js. This file only reads it (once a second, and only while the panel is open).

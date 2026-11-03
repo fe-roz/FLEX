@@ -332,10 +332,10 @@
     const ftools = x.kind === 'folder' ? `<button type="button" data-gadd="${esc(x.id)}" title="Add to this folder">＋</button><button type="button" data-gdl="${esc(x.id)}" title="Download for CalTopo">⇩</button><button type="button" data-gedit="${esc(x.id)}" title="Rename, colour, move">✏️</button>` : '';
     const fk = !x.dir && fkeyOf(x);
     const marks = (x.nict ? `<b class="sc-st sc-nict" title="${NICT_TIP}">${x.nict} not in CalTopo</b>` : '') + (x.kind === 'caltopo' && x.src ? ctNewsBtn() : '');
-    let html = `<div class="cc-it${x.dir || x.wait ? ' cc-moving' : ''}" data-kind="${x.kind}" data-id="${esc(x.id)}"${fk ? ` data-fkey="${esc(fk)}"` : ''}${MERGED && x.kind === 'caltopo' && x.inProject ? ' data-dpath="[]"' : ''} draggable="${canMove ? 'true' : 'false'}">
+    let html = `<div class="cc-it${x.dir || x.wait ? ' cc-moving' : ''}" data-kind="${x.kind}" data-id="${esc(x.id)}"${fk ? ` data-fkey="${esc(fk)}"` : ''}${MERGED && x.kind === 'caltopo' && x.inProject ? ' data-dpath="[]"' : ''}${x.kind === 'caltopo' ? ` data-ctmap="${esc(x.id)}"` : ''} draggable="${canMove ? 'true' : 'false'}">
       <button type="button" class="cc-eye ui-eye${eyeOn ? ' on' : eyeHalf ? ' half' : ''}" data-eye title="${(x.kind === 'file' || x.kind === 'caltopo') && !x.loaded ? 'Load' : eyeOn ? 'Hide' : 'Show'}"></button>
       <span class="cc-nm" title="${esc(x.name)}"${k ? ` data-expand="${esc(k)}"` : ''}>${k ? arrowOf(k, exp) : '<span class="sc-arrow"></span>'}${icon[x.kind] || ''} ${esc(x.name)}${x.dir || x.wait ? '<b class="cc-dot" title="Waiting: 💾 Save puts it in">•</b>' : ''}<small>${esc(sub)}${marks}</small></span>
-      <span class="cc-tools">${ftools}${fsBtn(fk)}${forget}${arrow}${fk ? moreBtn() : ''}</span></div>`;
+      <span class="cc-tools">${ftools}${fsBtn(fk)}${forget}${arrow}${fk || x.kind === 'caltopo' ? moreBtn() : ''}</span></div>`;
     if (exp) html += `<div class="sc-kids">${kids(x, isOpen)}</div>`;
     return html;
   }
@@ -825,7 +825,7 @@
   host.addEventListener('click', async e => {
     const P = PF();
     const rm = e.target.closest('[data-rmenu]');
-    if (rm) { const row = rm.closest('[data-rkey],[data-fkey]'); if (row && window._rowMenu) window._rowMenu.open(row.dataset.rkey ? { rkey: row.dataset.rkey } : { fkey: row.dataset.fkey }, rm); return; }
+    if (rm) { const row = rm.closest('[data-rkey],[data-fkey],[data-ctmap]'); if (row && window._rowMenu) window._rowMenu.open(row.dataset.rkey ? { rkey: row.dataset.rkey } : row.dataset.ctmap != null ? { ctmap: row.dataset.ctmap, fkey: row.dataset.fkey } : { fkey: row.dataset.fkey }, rm); return; }
     if (e.target.closest('[data-master]')) { setMaster(MS.off); return; }
     if (e.target.closest('[data-labels]')) { setLabels(!LB); return; }
     const fsb = e.target.closest('[data-fstyle]'); if (fsb) { if (window._folderStyle) { await window._folderStyle.dialog(fsb.dataset.fstyle); last = ''; render(); } return; }
@@ -1072,19 +1072,30 @@
   window.addEventListener('flex-folder-style', () => { last = ''; soon(); });
   window.addEventListener('flex-feature-edited', () => { last = ''; soon(true); });
   // The CalTopo map row, for its ⋯ menu (row-menu.js): what it is and what can be done with it.
-  const ctMap = () => { const M = MODEL; const x = M && M.L.concat(M.R).find(r => r.kind === 'caltopo'); return x ? { id: x.id, url: x.url, name: x.name, inProject: !!x.inProject, mine: !x.inProject, dir: x.dir || null, loaded: !!x.loaded } : null; };
-  async function ctRename(name) {      // display only: never written to CalTopo
-    const x = ctMap(); name = String(name || '').trim().slice(0, 120); if (!x || !name) return;
+  // `id` = the clicked row's id (data-ctmap); without it, the loaded map (the one whose row has the ⋯ menu). Two or more maps can be
+  // in a project and/or My data: every action below acts on the one named, never on the first row of the list.
+  const ctMap = id => {
+    const M = MODEL; if (!M) return null;
+    const rows = M.L.concat(M.R).filter(r => r.kind === 'caltopo');
+    const x = id != null ? rows.find(r => r.id === id) : (rows.find(r => r.loaded) || rows[0]);
+    return x ? { id: x.id, url: x.url, name: x.name, inProject: !!x.inProject, mine: !x.inProject, dir: x.dir || null, loaded: !!x.loaded } : null;
+  };
+  async function ctRename(name, id) {  // display only: never written to CalTopo
+    const x = ctMap(id); name = String(name || '').trim().slice(0, 120); if (!x || !name) return;
     if (x.inProject && window._pjApi) await window._pjApi.record('layer.set', { layer: x.id, name });
-    else { const id = mapId(x.url); if (id) { const l = ctLocal(); l[id] = name; try { localStorage.setItem('flex.ct.names', JSON.stringify(l)); } catch (_) {} } }
+    else { const mid = mapId(x.url); if (mid) { const l = ctLocal(); l[mid] = name; try { localStorage.setItem('flex.ct.names', JSON.stringify(l)); } catch (_) {} } }
     last = ''; soon();
   }
-  async function ctLeave(how) {        // 'out' = Move to My data, 'remove' = Remove from project (both wait for 💾 Save); 'cancel'
-    const x = ctMap(), pw = PW(); if (!x || !x.inProject || !pw) return;
+  async function ctLeave(how, id) {    // 'out' = Move to My data, 'remove' = Remove from project (both wait for 💾 Save); 'cancel'
+    const x = ctMap(id), pw = PW(); if (!x || !x.inProject || !pw) return;
     if (how === 'cancel') { if (x.dir) await pw.moveItem({ kind: 'caltopo', id: x.id, name: x.name, dir: x.dir, url: x.url }); }
     else if (x.dir !== how) { if (x.dir) await pw.moveItem({ kind: 'caltopo', id: x.id, name: x.name, dir: x.dir, url: x.url }); await pw.moveItem({ kind: 'caltopo', id: x.id, name: x.name, dir: how, url: x.url }); }
     last = ''; soon();
   }
-  function ctUnload() { const w = ws(); if (w && w.clearCaltopo) w.clearCaltopo(); last = ''; soon(true); }   // a map in My data: Remove
+  function ctUnload(id) {              // a map in My data: Remove (only the loaded map can be unloaded; a row that is not it is left alone)
+    const x = ctMap(id), w = ws(); if (!x || !x.loaded || x.inProject) return;
+    if (w && w.clearCaltopo) w.clearCaltopo();
+    last = ''; soon(true);
+  }
   window._surfCols = { newFolder, ctFolderPath, merged: () => MERGED, ctMap, ctRename, ctLeave, ctUnload, reveal, news: a => newsPop(a || host.querySelector('[data-ctnews]') || host), labels: on => (on === undefined ? LB : setLabels(on)), render: async () => { while (busy) await new Promise(r => setTimeout(r, 20)); last = ''; return render(); }, refresh: () => soon(true), master: on => (on === undefined ? !MS.off : setMaster(on)) };
 })();

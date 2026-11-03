@@ -11,7 +11,7 @@
 // A checkbox with the class .keep-box stays a checkbox (tick now, act later).
 (function () {
   'use strict';
-  const SCOPE = '#toolbar, #mini_map_controls';
+  const SCOPE = '#toolbar, #flex-dock, #mini_map_controls';
   const SEL = ':is(' + SCOPE + ') input[type=checkbox]:not(.keep-box), input.ui-sw[type=checkbox]';
 
   function tag(root) {

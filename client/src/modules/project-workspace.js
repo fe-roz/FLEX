@@ -40,6 +40,7 @@
     return FL.sha256(b);
   }
   function fnv(s) { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16).padStart(8, '0'); }
+  const mapIdOf = u => (String(u || '').match(/\/m\/([A-Za-z0-9]+)/) || [])[1] || null;     // a CalTopo map's id, so two spellings of one link match
   const layerId = (kind, url) => 'l' + fnv(kind + '|' + url);
   const placeKey = g => (g ? JSON.stringify(sortDeep(g)) : '');
   // Empty fields don't count (a placement stored without "survey": "" is the same placement).
@@ -599,7 +600,7 @@
       const urls = k => new Set(ls.filter(l => l.kind === k).map(l => l.url));
       const pcs = urls('pointcloud'), cts = urls('caltopo'), fs = urls('file');
       w.pointClouds().filter(u => pcs.has(u)).forEach(u => w.removePointCloud(u));
-      const ct = w.caltopo(); if (ct && cts.has(ct.url)) w.clearCaltopo();
+      const ct = w.caltopo(), cid = ct && mapIdOf(ct.url); if (ct && (cts.has(ct.url) || (cid && ls.some(l => l.kind === 'caltopo' && mapIdOf(l.url) === cid)))) w.clearCaltopo();
       w.dataFiles().filter(f => fs.has(f.url)).forEach(f => w.removeDataFile(f.url));
     } finally { w.switching = false; }
   }
