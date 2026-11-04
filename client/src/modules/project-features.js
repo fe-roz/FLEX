@@ -68,9 +68,21 @@
     return out;
   }
   F.simplify = simplify;                               // tests
+  // ── Heights (height-model.js) ────────────────────────────────────────────
+  const HM = () => window._heightModel;
+  // Points made before heights were stored (no hsrc) and not linked to CalTopo are drawn on the ground (measured, kept in the
+  // _groundH cache) and nothing is written when a project opens: height-model.js offers "Store heights for N older points",
+  // and the record is written on that click or when the point is edited or moved.
+  const heightItems = () => (!pj.pid || !pj.P ? [] : FL.liveFeatures(pj.P).filter(f => f.kind === 'point' && f.hsrc && !(f.style && f.style.ct) && f.coords && f.coords[0])
+    .map(f => ({ id: f.id, lon: f.coords[0][0], lat: f.coords[0][1], hsrc: f.hsrc })));
+  const oldItems = () => (!pj.pid || !pj.P ? [] : FL.liveFeatures(pj.P).filter(f => f.kind === 'point' && !f.hsrc && !(f.style && f.style.ct) && f.coords && f.coords[0])
+    .map(f => ({ id: f.id, lon: f.coords[0][0], lat: f.coords[0][1] })));
+  const storeHeights = async ups => { for (const u of ups) await record('feature.set', { feature: u.id, coords: u.coords, hsrc: u.hsrc }, null, { quiet: true }); A.refresh('feature.set'); };
+  const regHeights = setInterval(() => { if (!HM()) return; clearInterval(regHeights); HM().register('project', { list: heightItems, old: oldItems, store: storeHeights }); }, 300);
+
   // Drawn entities per feature, rebuilt only when the feature (or its colour) changed.
   const drawn = new Map();                             // feature id → { sig, ents }
-  const sigOf = (f, color) => { const c = f.coords || [], m = c[c.length >> 1]; return [f.kind, f.name, f.desc, color, c.length, c[0], m, c[c.length - 1], window._pjfLabelSig || '', !!(f.style && f.style.label === false)].map(x => JSON.stringify(x)).join('|'); };
+  const sigOf = (f, color) => { const c = f.coords || [], m = c[c.length >> 1]; return [f.kind, f.name, f.desc, color, c.length, c[0], m, c[c.length - 1], window._pjfLabelSig || '', !!(f.style && f.style.label === false), f.hsrc || null, !!(f.style && f.style.ct)].map(x => JSON.stringify(x)).join('|'); };
   function draw() {
     const v = V();
     if (!v || !window.Cesium) return;
@@ -90,11 +102,14 @@
       const base = { name: f.name || ({ point: 'Point', line: 'Line', area: 'Area' }[f.kind]), description: esc(f.desc || '').replace(/\n/g, '<br>'), properties: props };
       const ents = [];
       if (f.kind === 'point') {
-        // On the ground without Cesium's per-frame clamping: the height is sampled once and kept (ground-height.js)
+        // No Cesium per-frame clamping (height-model.js). A point with its own stored height (hsrc) is drawn at it; one linked
+        // to CalTopo (style.ct) follows the ground, sampled once and kept (ground-height.js); an old one with neither is drawn on
+        // the ground until its height is stored (the offer in height-model.js).
+        const own = HM() && HM().isOwn(f);
         const pe = F.src.entities.add(Object.assign(base, { position: pos[0],
           point: { pixelSize: 9, color: c, outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5, disableDepthTestDistance: 5000 },
           label: f.style && f.style.label === false ? undefined : window._pjfLabel(f.name || '') }));          // name off: feature-editor.js
-        if (window._groundH) window._groundH.track(pe, f.coords[0][0], f.coords[0][1]);
+        if (!own && window._groundH) window._groundH.track(pe, f.coords[0][0], f.coords[0][1]);
         ents.push(pe);
       } else if (f.kind === 'line') {
         ents.push(F.src.entities.add(Object.assign(base, { polyline: { positions: pos, width: 3, material: c, clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN } })));
@@ -105,6 +120,7 @@
       drawn.set(f.id, { sig, ents });
     });
     for (const [id, d] of drawn) if (!want.has(id)) { d.ents.forEach(e => F.src.entities.remove(e)); drawn.delete(id); }
+    if (HM()) HM().soon();                                          // older points without a stored height: the offer (height-model.js)
     if (window._folderStyle) window._folderStyle.apply();           // folders' display settings (folder-style.js)
     if (window._labelCull) window._labelCull.soon(150);               // new entities start with their label shown: keep only the readable ones (label-cull.js)
     v.scene.requestRender && v.scene.requestRender();
@@ -207,7 +223,10 @@
     const data = { feature: id || FL.uid(12), kind: f.kind, name: name.value.trim().slice(0, 120), desc: desc.value.trim().slice(0, 4000), group: grp.value };
     const colour = col.value.toLowerCase();
     if (colour !== (grp.value ? groupColor(grp.value) : ROOT_COLOR).toLowerCase() || (f.style && f.style.color)) data.style = { color: colour };
-    if (!id) data.coords = f.coords;
+    if (!id) {
+      data.coords = f.coords;
+      if (f.kind === 'point' && HM()) { const m = await HM().stamp(f.coords[0][0], f.coords[0][1]); data.coords = m.coords; data.hsrc = m.hsrc; }     // its own height, measured now
+    }
     await record('feature.set', data);
   }
   async function editGroup(id, parent) {
@@ -261,18 +280,18 @@
   }
   const lonlat = c => { const k = Cesium.Cartographic.fromCartesian(c); return [+Cesium.Math.toDegrees(k.longitude).toFixed(7), +Cesium.Math.toDegrees(k.latitude).toFixed(7), +k.height.toFixed(1)]; };
   // Features of a loaded data source (KML / GPX / GeoJSON), with their folder path.
-  function walk(ds) {
+  function walk(ds, ext) {
     const now = Cesium.JulianDate.now(), out = [];
     const val = p => (p && p.getValue ? p.getValue(now) : p);
     ds.entities.values.forEach(e => {
       const path = []; let p = e.parent; while (p) { if (p.name) path.unshift(p.name); p = p.parent; }
-      let kind = null, coords = null;
+      let kind = null, coords = null, cls = null;
       if (e.polygon) { const h = val(e.polygon.hierarchy); if (h && h.positions && h.positions.length > 2) { kind = 'area'; coords = h.positions.map(lonlat); } }
       else if (e.polyline) { const ps = val(e.polyline.positions); if (ps && ps.length > 1) { kind = 'line'; coords = ps.map(lonlat); } }
-      else if (e.position && (e.billboard || e.point || e.label || !e.entityCollection || true)) { const ps = val(e.position); if (ps) { kind = 'point'; coords = [lonlat(ps)]; } }
+      else if (e.position && (e.billboard || e.point || e.label || !e.entityCollection || true)) { const ps = val(e.position); if (ps) { kind = 'point'; coords = [lonlat(ps)]; cls = HM() ? HM().classify(e, ext) : null; } }
       if (!kind) return;
       if (kind === 'area' && coords.length > 3) { const a = coords[0], b = coords[coords.length - 1]; if (a[0] === b[0] && a[1] === b[1]) coords.pop(); }
-      out.push({ kind, coords, name: e.name || '', desc: String(val(e.description) || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').trim(), path });
+      out.push({ kind, coords, name: e.name || '', desc: String(val(e.description) || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').trim(), path, cls });
     });
     return out;
   }
@@ -282,12 +301,30 @@
     if (/\.(geo)?json$/.test(n)) return Cesium.GeoJsonDataSource.load(JSON.parse(await file.text()));
     return Cesium.KmlDataSource.load(file, { camera: V().scene.camera, canvas: V().scene.canvas, clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN });
   }
-  async function importFile(parent) {
+  // Imported points: the ground measured once from the best terrain and stored as the point's own height; the file's height
+  // kept next to it (hsrc.fileH). A KMZ point with an absolute altitude keeps the file's height (hsrc.k 'file'). Lines and
+  // areas stay draped: no heights added.
+  async function stampImported(items) {
+    const pts = items.filter(it => it.kind === 'point' && it.cls);
+    const asks = pts.filter(it => it.cls.k !== 'file');
+    const ms = asks.length && HM() ? await HM().stampMany(asks.map(it => [it.coords[0][0], it.coords[0][1]])) : [];
+    pts.forEach(it => {
+      const c = it.cls, lon = it.coords[0][0], lat = it.coords[0][1];
+      if (c.k === 'file') { it.coords = [[lon, lat, c.fileH]]; it.hsrc = { k: 'file', fileH: c.fileH }; return; }
+      const m = ms[asks.indexOf(it)];
+      if (!m) return;
+      it.coords = [[lon, lat, +m.h.toFixed(2)]];
+      it.hsrc = HM().ground(m.t);
+      if (c.fileH != null) it.hsrc.fileH = c.fileH;
+    });
+  }
+  async function importFile(parent, given) {
     if (!pj.pid) return;
-    const file = await pick('.gpx,.kml,.kmz,.geojson,.json');
+    const file = given || await pick('.gpx,.kml,.kmz,.geojson,.json');
     if (!file) return;
     let items;
-    try { items = walk(await loadFile(file)); } catch (e) { dialog({ title: 'Could not read the file', text: e.message || String(e) }); return; }
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    try { items = walk(await loadFile(file), ext); } catch (e) { dialog({ title: 'Could not read the file', text: e.message || String(e) }); return; }
     if (!items.length) { toast('No points, lines or areas in that file'); return; }
     toast(`Importing ${items.length} feature(s)…`);
     const top = FL.uid(10), q = { quiet: true };
@@ -302,7 +339,8 @@
       }
       return id;
     };
-    for (const it of items) await record('feature.set', { feature: FL.uid(12), kind: it.kind, coords: it.coords, name: it.name.slice(0, 120), desc: it.desc.slice(0, 4000), group: await groupFor(it.path) }, null, q);
+    await stampImported(items);
+    for (const it of items) await record('feature.set', Object.assign({ feature: FL.uid(12), kind: it.kind, coords: it.coords, name: it.name.slice(0, 120), desc: it.desc.slice(0, 4000), group: await groupFor(it.path) }, it.hsrc ? { hsrc: it.hsrc } : {}), null, q);
     F.open['g:' + top] = true;
     A.refresh('feature.set');
     toast(`Imported ${items.length} feature(s) into “${file.name}”`);
@@ -327,7 +365,8 @@
     const es = v.entities.values.filter(e => e.properties && e.properties.isUserLabel && e.position);
     for (const e of es) {
       const nm = e.label && e.label.text ? (e.label.text.getValue ? e.label.text.getValue(now) : e.label.text) : (e.name || 'Point');
-      await record('feature.set', { feature: FL.uid(12), kind: 'point', coords: [lonlat(e.position.getValue(now))], name: String(nm).slice(0, 120), group: '' }, null, { quiet: true });
+      const at = lonlat(e.position.getValue(now)), m = HM() ? await HM().stamp(at[0], at[1]) : null;
+      await record('feature.set', Object.assign({ feature: FL.uid(12), kind: 'point', coords: m ? m.coords : [at], name: String(nm).slice(0, 120), group: '' }, m ? { hsrc: m.hsrc } : {}), null, { quiet: true });
       if (window._myData) await window._myData.forgetPoint(e, 'moved');      // moved out of My data
       v.entities.remove(e);
     }

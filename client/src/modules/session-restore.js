@@ -59,8 +59,8 @@ setTimeout(() => {
   }
   // Points of interest kept in My data
   if (window._myData) window._myData.points().then(ps => {
-    ps.forEach(p => cesiumViewer.entities.add({ name: p.name, label: { scale: p.scale, text: p.name, show: p.label !== false }, position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.h),
-      properties: { isUserLabel: true, myFeature: p.id }, point: p.color ? { color: Cesium.Color.fromCssColorString(p.color) } : {} }));
+    ps.forEach(p => window._myData.placePoint(cesiumViewer.entities.add({ name: p.name, label: { scale: p.scale, text: p.name, show: p.label !== false }, position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.h),
+      properties: { isUserLabel: true, myFeature: p.id }, point: p.color ? { color: Cesium.Color.fromCssColorString(p.color) } : {} }), p));      // at its own height (my-data.js)
     if (ps.length) renderPoiList();
   }).catch(e => console.warn('[my data] points:', e));
 

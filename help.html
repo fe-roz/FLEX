@@ -478,6 +478,9 @@ svg.ico { vertical-align: -2px; }
   <li><b>Show in list</b> in the details panel opens Surface (or Caves) at the item: its folders open, the row scrolls into view and flashes.</li>
 </ul>
 
+<h3 id="heights">Heights</h3>
+<p>Every point on the map has one height, and which one depends on where it comes from. <b>Cave data</b> (stations, shots, lines and their names) always keeps its surveyed height. A cave entrance in CalTopo whose description has <code>z=</code> in its <code>flex:</code> line is drawn at that surveyed height. Other <b>CalTopo points</b> stand on the ground. <b>Your own points</b> (in a project, not sent to CalTopo yet, or in My data) keep their own height: when you make or move one, FLEX measures the ground from the finest terrain it has there and keeps that number with the point, together with where it came from (terrain, survey, GPS or file). Once a project point is sent to CalTopo it follows the ground like the others. Points made before this was kept are measured once and saved. <b>Imported files</b>: KML, GPX and GeoJSON points are put on the ground once at import, and the height the file had is kept and shown as <b>File height</b> in the details. A KMZ placemark that has an altitude and an absolute altitude mode keeps the file's height; without an altitude, or set to clamp or relative to ground, it is put on the ground. <b>Lines and areas</b> are always draped over the terrain. When you add finer terrain than a height was measured from, a small notice says <b>Update heights from the new terrain (N points)</b>: <b>Update</b> measures them again; <b>Not now</b> leaves them. Surveyed, GPS and file heights are never changed.</p>
+
 <h2 id="maplayers">Your own map layers</h2>
 <p><svg class="ico" width="14" height="14"><use href="#i-map"/></svg> Layers → <b>Your map layers</b>:</p>
 <ul>

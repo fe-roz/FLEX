@@ -91,15 +91,13 @@ export function setupSearchPins({ Cesium, cesiumViewer, savedSession: _savedSess
     _searchPinButton.title = `Clear search pins (${n})`;
   }
 
+  // The ground under a pin: asked once from the finest terrain and kept (ground-height.js).
   async function _groundHeightAt(carto) {
     const fallback = cesiumViewer.scene.globe.getHeight(carto) ?? 0;
     try {
-      const sample = Cesium.sampleTerrainMostDetailed(cesiumViewer.terrainProvider,
-        [Cesium.Cartographic.clone(carto)]);
-      const timeout = new Promise(res => setTimeout(() => res(null), SEARCH_TERRAIN_WAIT_MS));
-      const r = await Promise.race([sample, timeout]);
-      const h = r && r[0] && r[0].height;
-      return Number.isFinite(h) ? h : fallback;
+      const m = await Promise.race([window._groundH.measure(Cesium.Math.toDegrees(carto.longitude), Cesium.Math.toDegrees(carto.latitude)),
+        new Promise(res => setTimeout(() => res(null), SEARCH_TERRAIN_WAIT_MS))]);
+      return m && Number.isFinite(m.h) ? m.h : fallback;
     } catch (e) {
       console.warn('[search] terrain sample failed; using the loaded terrain', e);
       return fallback;

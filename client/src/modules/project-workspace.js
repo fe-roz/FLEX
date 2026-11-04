@@ -401,7 +401,7 @@
     const pname = projName();
     const groupName = f => { const path = FL.groupPath(pj.P, f.group); return path.length ? path.map(g => g.name || 'Folder').join(' / ') : 'From ' + pname; };
     const color = f => (f.style && f.style.color) || ((FL.groupPath(pj.P, f.group).reverse().find(g => g.color) || {}).color) || null;
-    const items = feats.map(f => ({ id: f.id, kind: f.kind, coords: f.coords, name: f.name || '', desc: f.desc || '', group: groupName(f), color: color(f), style: f.style || null }));
+    const items = feats.map(f => ({ id: f.id, kind: f.kind, coords: f.coords, hsrc: f.hsrc || null, name: f.name || '', desc: f.desc || '', group: groupName(f), color: color(f), style: f.style || null }));
     await MD.adopt(items);                                      // made in My data first: never in neither
     for (const f of feats) await record('feature.set', { feature: f.id, removed: true, movedTo: 'mydata' }, null, { quiet: true });
     if (m.id.startsWith('g:')) {
@@ -450,7 +450,7 @@
       if (m.kind === 'point' && m.target && m.target.length && window._surfMerge) group = await window._surfMerge.ensureGroupPath(m.target);   // dropped on a folder of the merged tree (surface-columns.js)
       if (m.kind === 'pgroup') { group = FL.uid(10); await record('group.set', { group, name: (S.groups[m.id] || {}).name || m.name || 'Points', parent: '' }, null, { quiet: true }); }
       for (const f of pts) {
-        await record('feature.set', { feature: FL.uid(12), kind: 'point', coords: f.coords, name: f.name || 'Point', group }, null, { quiet: true });
+        await record('feature.set', Object.assign({ feature: FL.uid(12), kind: 'point', coords: f.coords, name: f.name || 'Point', group }, f.hsrc ? { hsrc: f.hsrc } : {}), null, { quiet: true });
         await MD.forgetPoint({ properties: { myFeature: { getValue: () => f.id } } }, 'moved');
         const V = window.cesiumViewer, e = V && V.entities.values.find(x => x.properties && x.properties.myFeature && x.properties.myFeature.getValue() === f.id);
         if (e) V.entities.remove(e);

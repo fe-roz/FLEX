@@ -94,25 +94,27 @@
     const icon = typeof window._leadBillboardProps === 'function' ? window._leadBillboardProps() : null;
     const add = (target, fields, suggested, by, leadId) => {
       const t = FL.parseTarget(target);
-      let pos = null, onGround = false;
+      let pos = null, onGround = false, ownH = false, atLL = null;
       if (t.kind === 'station') pos = stationPos(t.cave, t.name);
       else if (t.kind === 'feature') {                  // a lead at a surface point (a dig)
         const f = pj.P.features[t.feature];
-        if (f && !f.removed && f.coords && f.coords.length) { pos = Cesium.Cartesian3.fromDegrees(f.coords[0][0], f.coords[0][1], f.coords[0][2] || 0); onGround = true; }
+        // its own height if it has one (measured, surveyed, GPS), else the ground (ground-height.js)
+        if (f && !f.removed && f.coords && f.coords.length) { pos = Cesium.Cartesian3.fromDegrees(f.coords[0][0], f.coords[0][1], f.coords[0][2] || 0); onGround = true; ownH = !!(f.hsrc && !(f.style && f.style.ct)); atLL = [f.coords[0][0], f.coords[0][1]]; }
       }
       if (!pos) return;
       const look = icon
         ? { billboard: Object.assign({}, icon, { color: suggested ? Cesium.Color.WHITE.withAlpha(0.45) : Cesium.Color.WHITE, scale: suggested ? 0.75 : 1, disableDepthTestDistance: 5000 },
-                                     onGround ? { heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN, pixelOffset: new Cesium.Cartesian2(0, -12) } : {}) }
+                                     onGround ? { pixelOffset: new Cesium.Cartesian2(0, -12) } : {}) }
         : { label: { text: '?', font: 'bold 18px sans-serif', fillColor: Cesium.Color.fromCssColorString('#ffeb3b').withAlpha(suggested ? 0.5 : 1),
                      outlineColor: Cesium.Color.BLACK, outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -14), disableDepthTestDistance: 5000 } };
-      leadSrc.entities.add(Object.assign({
+      const le = leadSrc.entities.add(Object.assign({
         position: pos,
         name: (suggested ? 'Suggested lead at ' : 'Lead at ') + t.name,
         description: (suggested ? `Suggested by ${esc(by || '?')} — not accepted yet (Project → Suggestions).<br>` : '') + esc(leadSummary(fields)) + (fields.desc ? '<br>' + esc(fields.desc) : ''),
         properties: t.kind === 'feature' ? { isFeatureLead: true, leadId: leadId || '', isProjectLead: true, suggested: !!suggested }
           : { isFieldStation: true, cave: t.cave, stationName: t.name, isProjectLead: true, suggested: !!suggested },
       }, look));
+      if (onGround && !ownH && window._groundH) window._groundH.track(le, atLL[0], atLL[1]);
     };
     Object.values(pj.P.leads).forEach(L => { if (!L.deleted && FL.leadActive(L) && L.source !== 'export') add(L.target, L.fields, false, null, L.id); });
     Object.values(pj.P.proposals).forEach(p => {

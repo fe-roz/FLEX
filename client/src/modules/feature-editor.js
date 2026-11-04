@@ -289,6 +289,12 @@
     if (patch.color) { patch.color = hex(patch.color); if (!patch.color) delete patch.color; }
     if (patch.coords && !Array.isArray(patch.coords[0])) patch.coords = [patch.coords];
     const after = Object.assign({}, r, patch.name != null ? { name: patch.name } : {});
+    // A FLEX point that is placed or moved gets its own height measured from the finest terrain there (height-model.js);
+    // patch.hsrc ({k:'survey'|'gps'|'file'}) with the height in coords z keeps a height that is not the ground's.
+    if (patch.coords && r.kind === 'point' && (r.source === 'project' || r.source === 'mydata') && window._heightModel) {
+      const c0 = patch.coords[0], m = await window._heightModel.stamp(c0[0], c0[1], patch.hsrc && patch.hsrc.k !== 'ground' ? Object.assign({}, patch.hsrc, { h: c0[2] }) : null);
+      patch.coords = m.coords; patch.hsrc = m.hsrc;
+    }
     let res;
     try {
       if (r.source === 'project') {
@@ -297,6 +303,7 @@
         if (patch.desc != null) data.desc = patch.desc;
         if (patch.folder !== undefined) data.group = patch.folder || '';
         if (patch.coords) data.coords = patch.coords.map(c => [+c[0], +c[1], +(c[2] || 0)]);
+        if (patch.coords && patch.hsrc) data.hsrc = patch.hsrc;
         if (patch.color !== undefined || patch.label !== undefined || patch.symbol !== undefined) {
           const st = Object.assign({}, f.style || {});
           if (patch.color) st.color = patch.color;
@@ -313,6 +320,7 @@
           ['name', 'desc', 'color', 'label'].forEach(k => { if (patch[k] !== undefined) p[k] = patch[k]; });
           if (patch.folder !== undefined) p.group = patch.folder;
           if (patch.coords) p.coords = patch.coords;
+          if (patch.coords && patch.hsrc) p.hsrc = patch.hsrc;
           res = await M.update(r.id, p);
           const e = r.entity || myEntity(r.id);
           if (res && res.ok && e) {                                    // the point on the map, as it is now

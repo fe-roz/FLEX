@@ -270,11 +270,11 @@
     let hov = null;
     function setHover(lon, lat) {
       const v = V(), C = Cs(); if (!v || !C) return;
-      const pos = C.Cartesian3.fromDegrees(lon, lat, 0);
+      const pos = window._groundH ? window._groundH.pos(lon, lat).pos : C.Cartesian3.fromDegrees(lon, lat, 0);       // on the ground (ground-height.js), no Cesium clamping
       if (!hov || !v.entities.contains(hov)) {
         hov = v.entities.add({ id: 'route-hover', position: pos, properties: { isRouteHover: true },
           point: { pixelSize: 10, color: C.Color.fromCssColorString('#ffe600'), outlineColor: C.Color.BLACK, outlineWidth: 2,
-            heightReference: C.HeightReference.CLAMP_TO_TERRAIN, disableDepthTestDistance: Number.POSITIVE_INFINITY } });
+            disableDepthTestDistance: Number.POSITIVE_INFINITY } });
       } else hov.position = pos;
     }
     function clearHover() { const v = V(); if (hov && v && v.entities.contains(hov)) v.entities.remove(hov); hov = null; }

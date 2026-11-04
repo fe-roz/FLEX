@@ -133,7 +133,11 @@ function _caltopoJsonToDataSource(result, ds) {
             label: window._pjfLabel ? window._pjfLabel(p.title || '') : { text: p.title || '', font: '15px sans-serif', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
                      style: Cesium.LabelStyle.FILL_AND_OUTLINE, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -10),
                      distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 8000), disableDepthTestDistance: 5000 } }));
-          if (window._groundH) window._groundH.track(ent, g.coordinates[0], g.coordinates[1]);     // ground height sampled once, kept (ground-height.js)
+          // A cave entrance (a  flex: cave=…; z=<m>  tag in the description) is drawn at its surveyed height; any other point on the
+          // ground, sampled once and kept (ground-height.js, height-model.js).
+          const tag = window._ctSend && window._ctSend.parseTag ? window._ctSend.parseTag(p.description) : null;
+          if (tag && Number.isFinite(tag.z)) { ent.position = new Cesium.ConstantPositionProperty(Cesium.Cartesian3.fromDegrees(g.coordinates[0], g.coordinates[1], tag.z)); ent._ctSurveyed = true; }
+          else if (window._groundH) window._groundH.track(ent, g.coordinates[0], g.coordinates[1]);
         } else if (g.type === 'LineString') {
           ent = E.add(Object.assign(base, { polyline: { positions: _ctSimplify(g.coordinates).map(P), width: Math.max(1, +p['stroke-width'] || 2), material: _ctColor(p.stroke, '#ff0000'), clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN } }));
         } else if (g.type === 'Polygon') {
