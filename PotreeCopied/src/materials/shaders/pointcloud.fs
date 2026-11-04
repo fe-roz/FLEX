@@ -35,8 +35,11 @@ varying vec3 	vPosition;
 // FLEX: Splat mode [beta], see pointcloud.vs (doSplat) and client/src/modules/splat-mode.js
 #if defined(splat_enabled)
 uniform vec4      uSplatP;         // fill, max px, band, opacity
-uniform vec4      uSplatRect;      // imagery mosaic: x0, y0, width, height in the ground-grid frame (metres)
-uniform float     uSplatColOn;     // 1 = a mosaic is bound
+uniform vec4      uSplatCx;        // imagery atlas: pixel x (relative to the window origin) = dot(uSplatCx, (1, dx, dy, dx*dy))
+uniform vec4      uSplatCy;        //   same for pixel y; dx, dy = metres from the window centre, ground-grid frame
+uniform vec2      uSplatCtr;       // the window centre in the ground-grid frame
+uniform vec4      uSplatWin;       // (atlas offset x, y of the window origin in pixels, window size in pixels, atlas size)
+uniform float     uSplatColOn;     // 1 = an atlas is bound
 uniform sampler2D uSplatColTex;
 varying float vSplatKind;
 varying float vSplatR;
@@ -133,30 +136,35 @@ void main() {
 		vec3 off = P - vViewPosition;
 		float r2 = dot(off, off) / (vSplatR * vSplatR);
 		if (r2 > 1.0) { discard; }
-		// Opacity and soft edge, drawn as screen-door transparency (stochastic discard): the pass is opaque,
-		// depth-tested and depth-writing, so overlapping discs of one surface merge without sorted blending.
-		// Opacity uses noise that depends on the pixel only, so it is the same for every disc covering the pixel
-		// and 30% really shows 30% of the ground. The edge uses noise that includes the disc's position: where
-		// discs overlap the pixel is kept if ANY of them keeps it, so the edges soften and the gaps close.
-		float noiseP = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-		if (uSplatP.w < noiseP) { discard; }
+		// Soft edge, drawn as stochastic discard: the pass is opaque, depth-tested and depth-writing, so overlapping
+		// discs of one surface merge without sorted blending. The noise includes the disc's position, so where discs
+		// overlap the pixel is kept if ANY of them keeps it: the edges soften and the gaps close.
+		// (Opacity is not done here: see the layer opacity in the EDL pass / below.)
 		float a = 1.0 - smoothstep(0.35, 1.0, r2);
 		float noise = fract(sin(dot(gl_FragCoord.xy * 0.37 + vSplatG.xy * 7.13, vec2(12.9898, 78.233))) * 43758.5453);
 		if (a < noise) { discard; }
 		vec3 base = vSplatRgb;
 		if (uSplatColOn > 0.5) {
 			vec2 gxy = vSplatG.xy + vSplatMA.xy * off.x + vSplatMB.xy * off.y + vSplatMC.xy * off.z;
-			vec2 uv = (gxy - uSplatRect.xy) / uSplatRect.zw;
-			if (uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0) {
-				vec4 tc = texture2D(uSplatColTex, uv);
-				base = mix(base, tc.rgb, tc.a);
+			vec2 d = gxy - uSplatCtr;
+			vec4 m = vec4(1.0, d.x, d.y, d.x * d.y);
+			vec2 pr = vec2(dot(uSplatCx, m), dot(uSplatCy, m));
+			if (pr.x > 0.0 && pr.y > 0.0 && pr.x < uSplatWin.z && pr.y < uSplatWin.z) {
+				vec4 tc = texture2D(uSplatColTex, (pr + uSplatWin.xy) / uSplatWin.w);
+				base = mix(base, clamp(tc.rgb / max(tc.a, 0.001), 0.0, 1.0), tc.a);
 			}
 		}
 		gl_FragColor.rgb = base * vSplatLit;
 		vec4 pc = projectionMatrix * vec4(P, 1.0);
 		gl_FragDepthEXT = (pc.z / pc.w) * 0.5 + 0.5;
 		#if defined(use_edl)
-			gl_FragColor.a = log2(-P.z);
+			// the log depth EDL reads, with the sign flipped to mark "ground splat" (no offset: the target may be half
+			// float, where a large offset would quantise the depth into visible bands): edl.fs flips it back, applies
+			// the layer opacity and the edge shading to ground-on-ground pairs
+			gl_FragColor.a = -max(log2(-P.z), 0.001);
+		#else
+			// premultiplied: the canvas is composited over the globe with this alpha (layer opacity)
+			gl_FragColor = vec4(gl_FragColor.rgb * uSplatP.w, uSplatP.w);
 		#endif
 	}
 	#endif

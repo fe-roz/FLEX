@@ -1042,11 +1042,12 @@ void doClipping(){
 // Only compiled when the material has the splat_enabled define (client/src/modules/splat-mode.js).
 // Ground points (class 2, plus points within uSplatP.z metres of the HAG ground grid) become discs lying on the local
 // ground plane; the normal comes from the slope of the same ground grid the height filter uses (uGroundTex*).
-// Other points become small dark green dots, are hidden, or are left as they were (uSplatO = 1 / 0 / 2).
-// The fragment shader intersects the pixel's ray with the disc plane (see pointcloud.fs).
+// Other points are drawn by uSplatQ.y (above the ground band) and uSplatQ.z (below it): 0 hidden, 1 dark green dots,
+// 2 as before, 3 coloured by height above ground, 4 red dots. The fragment shader intersects the pixel's ray with the
+// disc plane (see pointcloud.fs).
 #if defined(splat_enabled)
 uniform vec4  uSplatP;       // fill (disc diameter / node spacing), max screen size px, ground band m, opacity
-uniform float uSplatO;       // other points: 0 hidden, 1 dark green dots, 2 as before
+uniform vec4  uSplatQ;       // max disc size m, other points above, other points below, (unused)
 uniform float uSplatSlope;   // metres either side of the point over which the slope is measured
 uniform float uSplatShade;   // 1 = soft hillshade on the splats
 uniform float uSplatSp;      // spacing of this node's ground points (PotreeRenderer.js flexSplatSpacing)
@@ -1093,6 +1094,12 @@ bool splatGroundZ(vec2 g, float want, out float z, out float src){
 	return pick.a > 0.25 && q16 > 0.001;
 }
 
+vec3 splatHeightColour(float h){
+	float t = clamp(h / 15.0, 0.0, 1.0);
+	vec3 hue = clamp(abs(mod((1.0 - t) * 0.66 * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+	return mix(vec3(1.0), hue, 0.9) * 0.9;
+}
+
 void doSplat(){
 	vSplatKind = 0.0;
 	vSplatR = 1.0; vSplatN = vec3(0.0, 0.0, 1.0); vSplatG = vec3(0.0);
@@ -1106,11 +1113,15 @@ void doSplat(){
 	float gz = 0.0;
 	float gsrc = 0.0;
 	if (usable) { haveG = splatGroundZ(gw.xy, 0.0, gz, gsrc); }
-	bool isGround = isClass2 || (haveG && gw.z - gz <= uSplatP.z && gw.z - gz >= -uSplatP.z);
+	float hag = haveG ? gw.z - gz : 1.0;
+	bool isGround = isClass2 || (haveG && abs(hag) <= uSplatP.z);
 
 	if (!isGround) {
-		if (uSplatO < 0.5) { gl_Position = vec4(100.0, 100.0, 100.0, 0.0); return; }
-		if (uSplatO < 1.5) { gl_PointSize = 2.0; vPointSize = 2.0; vColor = vec3(0.05, 0.24, 0.09); }
+		float mode = hag < 0.0 ? uSplatQ.z : uSplatQ.y;
+		if (mode < 0.5) { gl_Position = vec4(100.0, 100.0, 100.0, 0.0); return; }
+		if (mode < 1.5) { gl_PointSize = 2.0; vPointSize = 2.0; vColor = vec3(0.05, 0.24, 0.09); }
+		else if (mode > 3.5) { gl_PointSize = 2.0; vPointSize = 2.0; vColor = vec3(0.9, 0.12, 0.1); }
+		else if (mode > 2.5) { vColor = haveG ? splatHeightColour(abs(hag)) : vec3(0.6); }
 		return;
 	}
 
@@ -1142,7 +1153,8 @@ void doSplat(){
 	float projFactor = -0.5 * uScreenHeight / (slope * vViewPosition.z);
 	float scale = length(modelViewMatrix * vec4(0, 0, 0, 1) - modelViewMatrix * vec4(uOctreeSpacing, 0, 0, 1)) / uOctreeSpacing;
 	projFactor = projFactor * scale;
-	float px = clamp(uSplatP.x * uSplatSp * projFactor, 2.0, uSplatP.y);
+	// disc size: fill x spacing, no wider than max real size (metres) and max screen size (pixels)
+	float px = clamp(min(uSplatP.x * uSplatSp, uSplatQ.x) * projFactor, 2.0, uSplatP.y);
 
 	vSplatKind = 1.0;
 	vSplatR = 0.5 * px / projFactor;

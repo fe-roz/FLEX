@@ -1496,39 +1496,49 @@ export class Renderer {
 					// FLEX: Splat mode [beta]. Only when the material was compiled with the define: the
 					// uniforms are optimised out of the program otherwise, and the mosaic would waste a unit.
 					if (gu.uSplatP && material.defines && material.defines.get('splat_enabled')) {
-						const sp = gu.uSplatP.value, so = gu.uGroundOrigin.value, sr = gu.uSplatRect.value;
 						const loc = (n) => shader.uniformLocations[n];
-						if (loc("uSplatP")) gl.uniform4f(loc("uSplatP"), sp[0], sp[1], sp[2], sp[3]);
-						shader.setUniform1f("uSplatO", gu.uSplatO.value);
+						const v4 = (n) => { const v = gu[n].value; if (loc(n)) gl.uniform4f(loc(n), v[0], v[1], v[2], v[3]); };
+						v4("uSplatP"); v4("uSplatQ"); v4("uSplatCx"); v4("uSplatCy"); v4("uSplatWin");
 						shader.setUniform1f("uSplatSlope", gu.uSplatSlope.value);
 						shader.setUniform1f("uSplatShade", gu.uSplatShade.value);
 						const colDesc = gu.uSplatColTex.value;
-						const haveCol = !!(colDesc && colDesc.data && colDesc.width);
-						shader.setUniform1f("uSplatColOn", haveCol && gu.uSplatColOn.value > 0.5 ? 1.0 : 0.0);
-						// rect origin relative to the ground-grid origin, differenced in float64
-						if (loc("uSplatRect")) gl.uniform4f(loc("uSplatRect"), sr[0] - so[0], sr[1] - so[1], sr[2], sr[3]);
-						if (haveCol) {
+						shader.setUniform1f("uSplatColOn", colDesc && gu.uSplatColOn.value > 0.5 ? 1.0 : 0.0);
+						// window centre relative to the ground-grid origin, differenced in float64
+						const so = gu.uGroundOrigin.value, sc = gu.uSplatCtr.value;
+						if (loc("uSplatCtr")) gl.uniform2f(loc("uSplatCtr"), sc[0] - so[0], sc[1] - so[1]);
+						if (colDesc) {
+							// The atlas: a size x size RGBA texture the page fills tile by tile (colDesc.sub = queue of
+							// {x, y, src} for texSubImage2D, at most a few a frame so no frame is held up by an upload).
 							let rec = this.hagTextures.get(colDesc);
-							if (!rec) { rec = { id: gl.createTexture(), version: -1 }; this.hagTextures.set(colDesc, rec); }
+							if (!rec) { rec = { id: gl.createTexture(), version: -1, alloc: false }; this.hagTextures.set(colDesc, rec); }
 							shader.setUniform1i("uSplatColTex", currentTextureBindingPoint);
 							gl.activeTexture(gl.TEXTURE0 + currentTextureBindingPoint);
 							gl.bindTexture(gl.TEXTURE_2D, rec.id);
-							if (rec.version !== colDesc.version) {
+							if (!rec.alloc) {
 								gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
 								gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-								gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
-								gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, colDesc.width, colDesc.height, 0,
-								              gl.RGBA, gl.UNSIGNED_BYTE, colDesc.data);
+								gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, colDesc.size, colDesc.size, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
 								gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
 								gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-								gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-								gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-								rec.version = colDesc.version;
+								gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+								gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+								rec.alloc = true;
+							}
+							if (colDesc.sub && colDesc.sub.length) {
+								gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+								gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+								// the same frame can draw several passes: do each queued tile once
+								if (colDesc._frameStamp !== this.flexFrame) {
+									colDesc._frameStamp = this.flexFrame; colDesc._budget = 4;
+								}
+								while (colDesc.sub.length && colDesc._budget > 0) {
+									const t = colDesc.sub.shift(); colDesc._budget--;
+									gl.texSubImage2D(gl.TEXTURE_2D, 0, t.x, t.y, gl.RGBA, gl.UNSIGNED_BYTE, t.src);
+								}
 							}
 							currentTextureBindingPoint++;
 						} else {
-							// a bound sampler is still required: point it at the (always bound) ground texture unit
-							shader.setUniform1i("uSplatColTex", 0);
+							shader.setUniform1i("uSplatColTex", 0);   // a sampler still needs a unit; it is not read (uSplatColOn = 0)
 						}
 					}
 				}
@@ -1604,6 +1614,7 @@ export class Renderer {
 	}
 
 	render(scene, camera, target = null, params = {}) {
+		this.flexFrame = (this.flexFrame || 0) + 1;   // FLEX: Splat mode atlas uploads are budgeted per render call
 
 		const gl = this.gl;
 

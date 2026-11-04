@@ -315,6 +315,9 @@ export class EDLRenderer{
 			uniforms.edlStrength.value = viewer.edlStrength;
 			uniforms.radius.value = viewer.edlRadius;
 			uniforms.opacity.value = viewer.edlOpacity; // HACK
+			// FLEX: Splat mode [beta] (set by client/src/modules/splat-mode.js; absent = no effect)
+			uniforms.uSplatEdge.value = viewer.flexSplat ? viewer.flexSplat.edge : 1.0;
+			uniforms.uSplatOpacity.value = viewer.flexSplat ? viewer.flexSplat.opacity : 1.0;
 			
 			Utils.screenPass.render(viewer.renderer, this.edlMaterial);
 
