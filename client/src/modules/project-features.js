@@ -70,32 +70,15 @@
   F.simplify = simplify;                               // tests
   // ── Heights (height-model.js) ────────────────────────────────────────────
   const HM = () => window._heightModel;
-  // Points made before heights were stored (no hsrc) and not linked to CalTopo: measured once from the finest terrain and
-  // stored (a feature.set with coords z and hsrc). Only with a name to log it under: never asks who you are for this.
-  const stamping = new Set();
-  async function ensureHeights(list) {
-    let who = ''; try { who = localStorage.getItem('flex.author') || ''; } catch (_) {}
-    if (!who || !HM() || pj.readonly || !pj.pid) return;
-    const todo = list.filter(f => f.coords && f.coords[0] && !stamping.has(f.id));
-    if (!todo.length) return;
-    todo.forEach(f => stamping.add(f.id));
-    const pid = pj.pid;
-    let n = 0;
-    try {
-      const ms = await HM().stampMany(todo.map(f => [f.coords[0][0], f.coords[0][1]]));
-      if (pid !== pj.pid) return;
-      for (let i = 0; i < todo.length; i++) {
-        if (!ms[i].exact) { setTimeout(() => stamping.delete(todo[i].id), 30000); continue; }      // terrain not there yet: later
-        const c = todo[i].coords[0];
-        if (await record('feature.set', { feature: todo[i].id, coords: [[c[0], c[1], +ms[i].h.toFixed(2)]], hsrc: HM().ground(ms[i].t) }, null, { quiet: true })) n++;
-      }
-    } catch (e) { console.warn('[heights]', e); todo.forEach(f => stamping.delete(f.id)); }
-    if (n && pid === pj.pid) A.refresh('feature.set');
-  }
+  // Points made before heights were stored (no hsrc) and not linked to CalTopo are drawn on the ground (measured, kept in the
+  // _groundH cache) and nothing is written when a project opens: height-model.js offers "Store heights for N older points",
+  // and the record is written on that click or when the point is edited or moved.
   const heightItems = () => (!pj.pid || !pj.P ? [] : FL.liveFeatures(pj.P).filter(f => f.kind === 'point' && f.hsrc && !(f.style && f.style.ct) && f.coords && f.coords[0])
     .map(f => ({ id: f.id, lon: f.coords[0][0], lat: f.coords[0][1], hsrc: f.hsrc })));
+  const oldItems = () => (!pj.pid || !pj.P ? [] : FL.liveFeatures(pj.P).filter(f => f.kind === 'point' && !f.hsrc && !(f.style && f.style.ct) && f.coords && f.coords[0])
+    .map(f => ({ id: f.id, lon: f.coords[0][0], lat: f.coords[0][1] })));
   const storeHeights = async ups => { for (const u of ups) await record('feature.set', { feature: u.id, coords: u.coords, hsrc: u.hsrc }, null, { quiet: true }); A.refresh('feature.set'); };
-  const regHeights = setInterval(() => { if (!HM()) return; clearInterval(regHeights); HM().register('project', { list: heightItems, store: storeHeights }); }, 300);
+  const regHeights = setInterval(() => { if (!HM()) return; clearInterval(regHeights); HM().register('project', { list: heightItems, old: oldItems, store: storeHeights }); }, 300);
 
   // Drawn entities per feature, rebuilt only when the feature (or its colour) changed.
   const drawn = new Map();                             // feature id → { sig, ents }
@@ -105,7 +88,7 @@
     if (!v || !window.Cesium) return;
     if (!F.src) { F.src = new Cesium.CustomDataSource('pj-features'); v.dataSources.add(F.src); }
     HL.divs.forEach(d => d.remove()); HL.divs.clear(); HL.mode = null;
-    const want = new Set(), hid = hidden(), needStamp = [];            // hid['f:<id>']: that feature hidden on its own (📍 Surface)
+    const want = new Set(), hid = hidden();            // hid['f:<id>']: that feature hidden on its own (📍 Surface)
     if (pj.pid) FL.liveFeatures(pj.P).forEach(f => {
       if (hid['f:' + f.id] || groupHidden(f.group) || !f.coords || !f.coords.length) return;
       want.add(f.id);
@@ -121,13 +104,12 @@
       if (f.kind === 'point') {
         // No Cesium per-frame clamping (height-model.js). A point with its own stored height (hsrc) is drawn at it; one linked
         // to CalTopo (style.ct) follows the ground, sampled once and kept (ground-height.js); an old one with neither is drawn on
-        // the ground until it has been measured and stored (ensureHeights).
+        // the ground until its height is stored (the offer in height-model.js).
         const own = HM() && HM().isOwn(f);
         const pe = F.src.entities.add(Object.assign(base, { position: pos[0],
           point: { pixelSize: 9, color: c, outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5, disableDepthTestDistance: 5000 },
           label: f.style && f.style.label === false ? undefined : window._pjfLabel(f.name || '') }));          // name off: feature-editor.js
         if (!own && window._groundH) window._groundH.track(pe, f.coords[0][0], f.coords[0][1]);
-        if (!f.hsrc && !(f.style && f.style.ct)) needStamp.push(f);
         ents.push(pe);
       } else if (f.kind === 'line') {
         ents.push(F.src.entities.add(Object.assign(base, { polyline: { positions: pos, width: 3, material: c, clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN } })));
@@ -138,7 +120,7 @@
       drawn.set(f.id, { sig, ents });
     });
     for (const [id, d] of drawn) if (!want.has(id)) { d.ents.forEach(e => F.src.entities.remove(e)); drawn.delete(id); }
-    if (needStamp.length) ensureHeights(needStamp);
+    if (HM()) HM().soon();                                          // older points without a stored height: the offer (height-model.js)
     if (window._folderStyle) window._folderStyle.apply();           // folders' display settings (folder-style.js)
     if (window._labelCull) window._labelCull.soon(150);               // new entities start with their label shown: keep only the readable ones (label-cull.js)
     v.scene.requestRender && v.scene.requestRender();

@@ -9,8 +9,9 @@
 //                                                         hsrc = { k: 'ground', t: <terrain key> }   measured from terrain t
 //                                                              | { k: 'survey' | 'gps' | 'file' }    never touched here
 //                                                         hsrc.fileH = the height the imported file had (shown as "File height")
-//                                                       An item with no hsrc is "ground, terrain unknown": measured once
-//                                                       and stored.
+//                                                       An item with no hsrc is "ground, terrain unknown": drawn on the ground,
+//                                                       nothing written when it opens; "Store heights for N older points" in
+//                                                       the offer (or an edit / move of the item) stores it.
 //   Imports (KML, GPX, GeoJSON, KMZ)                    each point's ground is measured once and stored; the file's own
 //                                                       height is kept (fileH). A KMZ placemark with an altitude and
 //                                                       absolute altitudeMode keeps the file's height (k 'file').
@@ -24,7 +25,7 @@
 //   classify(entity, ext)    -> { k: 'ground'|'file', fileH, lon, lat }  how an imported point's height is treated
 //   placeDataSource(ds, ext) a data file's points drawn at ground (or file) height, no Cesium clamping
 //   isOwn(f)                 a project point that keeps its own height (has hsrc, not linked to CalTopo)
-//   register(name, provider) offer: provider = { list(): [{ id, lon, lat, hsrc }], store(updates): Promise }
+//   register(name, provider) offer: provider = { list(): [{ id, lon, lat, hsrc }], old(): [{ id, lon, lat }] (no hsrc yet), store(updates): Promise }
 //   check(), update(), offerState()      the stale-heights offer
 (function () {
   'use strict';
@@ -123,8 +124,8 @@
   // ── Stale heights: finer terrain than the one a stored height was measured from ─
   const providers = new Map();
   HM.register = (name, p) => providers.set(name, p);
-  const S = { n: 0, items: [], dismissed: '', node: null, timer: null, busy: false };
-  HM.offerState = () => ({ n: S.n, shown: !!(S.node && S.node.isConnected), dismissed: S.dismissed });
+  const S = { n: 0, nOld: 0, items: [], olds: [], dismissed: '', node: null, timer: null, busy: false };
+  HM.offerState = () => ({ n: S.n, nOld: S.nOld, shown: !!(S.node && S.node.isConnected), dismissed: S.dismissed });
   function stale() {
     const g = G(), out = [];
     if (!g) return out;
@@ -134,39 +135,55 @@
     });
     return out;
   }
-  const sigOf = items => items.length + ':' + items.map(i => G().keyAt(i.lon, i.lat)).sort().filter((x, i, a) => a.indexOf(x) === i).join('|');
+  // Older points: no height source recorded yet. Drawn on the ground; written only when the offer is accepted.
+  function olds() {
+    const out = [];
+    providers.forEach((p, name) => {
+      let list = []; try { list = p.old ? p.old() || [] : []; } catch (_) {}
+      list.forEach(it => out.push(Object.assign({ provider: name }, it)));
+    });
+    return out;
+  }
+  const sigOf = (items, o) => items.length + '/' + o + ':' + items.map(i => G().keyAt(i.lon, i.lat)).sort().filter((x, i, a) => a.indexOf(x) === i).join('|');
   function hide() { if (S.node) { S.node.remove(); S.node = null; } }
-  function show(items) {
-    S.items = items; S.n = items.length;
-    const txt = `Update heights from the new terrain (${items.length} point${items.length === 1 ? '' : 's'})`;
-    if (S.node && S.node.isConnected) { S.node.querySelector('.hm-t').textContent = txt; return; }
+  const plural = n => `${n} point${n === 1 ? '' : 's'}`;
+  function show(items, o) {
+    S.items = items; S.n = items.length; S.nOld = o.length;
+    const parts = [];
+    if (items.length) parts.push(`Update heights from the new terrain (${plural(items.length)})`);
+    if (o.length) parts.push(`Store heights for ${o.length} older point${o.length === 1 ? '' : 's'}`);
+    const txt = parts.join(' · ');
+    const btn = items.length ? 'Update' : 'Store';
+    if (S.node && S.node.isConnected) { S.node.querySelector('.hm-t').textContent = txt; S.node.querySelector('.hm-up').textContent = btn; return; }
     const d = document.createElement('div');
     d.id = 'hm-offer'; d.className = 'hm-offer';
-    d.innerHTML = '<span class="hm-t"></span><button type="button" class="hm-up">Update</button><button type="button" class="hm-no">Not now</button>';
+    d.innerHTML = '<span class="hm-t"></span><button type="button" class="hm-up"></button><button type="button" class="hm-no">Not now</button>';
     d.querySelector('.hm-t').textContent = txt;
+    d.querySelector('.hm-up').textContent = btn;
     d.querySelector('.hm-up').addEventListener('click', () => update());
-    d.querySelector('.hm-no').addEventListener('click', () => { S.dismissed = sigOf(S.items); hide(); });
+    d.querySelector('.hm-no').addEventListener('click', () => { S.dismissed = sigOf(S.items, S.olds); hide(); });
     document.body.appendChild(d);
     S.node = d;
   }
-  /** Look for stored ground heights that finer terrain now covers; offer to update them (not automatic, not blocking). */
+  /** Look for stored ground heights that finer terrain now covers, and older points with no stored height; offer (not automatic, not blocking). */
   function check() {
-    const items = stale();
-    if (!items.length) { S.n = 0; S.items = []; hide(); return 0; }
-    if (sigOf(items) === S.dismissed) return items.length;
-    show(items);
-    return items.length;
+    const items = stale(), o = olds();
+    S.olds = o;
+    if (!items.length && !o.length) { S.n = 0; S.nOld = 0; S.items = []; hide(); return 0; }
+    if (sigOf(items, o) === S.dismissed) return items.length + o.length;
+    show(items, o);
+    return items.length + o.length;
   }
   HM.check = check;
-  /** Measure again and store: ground-sourced ones only (the list was made from those). */
+  /** Measure again and store: the ground-sourced ones the list was made from, and the older points (as ground). */
   async function update() {
     if (S.busy) return 0;
     S.busy = true;
     try {
-      const items = stale();
+      const items = stale().concat(olds());
       const ms = await G().measureMany(items.map(i => [i.lon, i.lat]));
       const by = new Map();
-      items.forEach((it, i) => { if (!ms[i].exact) return; (by.get(it.provider) || by.set(it.provider, []).get(it.provider)).push({ id: it.id, coords: [[it.lon, it.lat, +ms[i].h.toFixed(2)]], hsrc: Object.assign({}, it.hsrc, { k: 'ground', t: ms[i].t }) }); });
+      items.forEach((it, i) => { if (!ms[i].exact) return; (by.get(it.provider) || by.set(it.provider, []).get(it.provider)).push({ id: it.id, coords: [[it.lon, it.lat, +ms[i].h.toFixed(2)]], hsrc: Object.assign({}, it.hsrc || {}, { k: 'ground', t: ms[i].t }) }); });
       let n = 0;
       for (const [name, ups] of by) { await providers.get(name).store(ups); n += ups.length; }
       S.dismissed = ''; hide(); check();
@@ -175,6 +192,7 @@
   }
   HM.update = update;
   const later = () => { clearTimeout(S.timer); S.timer = setTimeout(check, 1200); };
+  HM.soon = later;
   window.addEventListener('flex-terrain-changed', later);
   window.addEventListener('flex-ground-heights', later);
 

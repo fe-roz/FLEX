@@ -85,18 +85,12 @@
   }
   /**
    * Put a kept point on the map at its own height. One with a height source (hsrc) is drawn at its stored height; an older
-   * one without is drawn on the ground at once, then measured once and stored (height-model.js).
+   * one without is drawn on the ground; its height is stored only when you click the offer in height-model.js, or edit or move it.
    */
   function placePoint(entity, p) {
     if (p.hsrc) { entity.position = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.h || 0); return; }
     if (window._groundH) window._groundH.track(entity, p.lon, p.lat);
-    const HM = window._heightModel;
-    if (!HM) return;
-    HM.stamp(p.lon, p.lat).then(async m => {
-      if (!m.exact) return;
-      const r = await update(p.id, { coords: m.coords, hsrc: m.hsrc });
-      if (r.ok) setPointAt(entity, m.coords[0]);
-    }).catch(e => console.warn('[my data] height:', e));
+    if (window._heightModel) window._heightModel.soon();
   }
   /**
    * Change a kept point (feature-editor.js): patch { name, desc, coords, group,
@@ -237,6 +231,8 @@
     window._heightModel.register('mydata', {
       list: () => Object.values((_state && _state.features) || {}).filter(f => !f.removed && f.kind === 'point' && f.hsrc && f.coords && f.coords[0])
         .map(f => ({ id: f.id, lon: f.coords[0][0], lat: f.coords[0][1], hsrc: f.hsrc })),
+      old: () => Object.values((_state && _state.features) || {}).filter(f => !f.removed && f.kind === 'point' && !f.hsrc && f.coords && f.coords[0])
+        .map(f => ({ id: f.id, lon: f.coords[0][0], lat: f.coords[0][1] })),
       store: async ups => { for (const u of ups) { const r = await update(u.id, { coords: u.coords, hsrc: u.hsrc }); const e = pointEntity(u.id); if (r.ok && e) setPointAt(e, u.coords[0]); } },
     });
   }, 400);

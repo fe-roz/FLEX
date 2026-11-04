@@ -1,5 +1,5 @@
 // Page glue moved out of index.html <head> (classic script, runs at parse time as before):
-// copyCoords, addEPT, addKMZ and the rail/nav-panel toggle wiring.
+// copyCoords, addEPT and the rail/nav-panel toggle wiring.
     function copyCoords() {
         // function for copying the displayed camera coordinates to clipboard
         var copyText = document.getElementById("coord_display").innerText;
@@ -28,27 +28,6 @@
           }
         }
     
-        function addKMZ(){ 
-        var input = document.createElement('input');
-        input.type = 'file';
-    
-        input.onchange = e => { 
-            var file = e.target.files[0]; 
-            cesiumViewer.dataSources.add(Cesium.KmlDataSource.load(file));
-        }
-    
-        input.click();
-        // var link = prompt("KMZ File link", "example/link/file.kmz");
-        // var fullLink = "ProxyUrlGenerator.generateProxyUrl(link);
-        //   try {
-        //    window.addPC(fullLink);
-        //  } catch (error) {
-        //    console.error(
-        //      `There was an error while adding ${fullLink}. ${error}`
-        //    );
-        //  }
-        }
-
         document.addEventListener('DOMContentLoaded', function() {
           // All collapsible nav panels — clicking a button toggles its panel
           // and closes all others (accordion behaviour).
