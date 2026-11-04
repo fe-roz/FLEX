@@ -452,8 +452,11 @@
         case 'feature.set': {
           const f = S.features[e.feature] || (S.features[e.feature] = { id: e.feature, created: { t: e.t, who: e.who } });
           ['kind', 'name', 'desc', 'group'].forEach(k => { if (e[k] != null) f[k] = String(e[k]); });
-          if (Array.isArray(e.coords)) f.coords = e.coords.filter(c => Array.isArray(c) && c.length >= 2).map(c => c.slice(0, 3).map(Number));
+          if (Array.isArray(e.coords)) { f.coords = e.coords.filter(c => Array.isArray(c) && c.length >= 2).map(c => c.slice(0, 3).map(Number)); if (e.hsrc == null) delete f.hsrc; }   // new place, height source unknown
           if (e.style != null) f.style = clone(e.style);
+          // Where the stored height (coords z) of a point came from: { k: 'ground', t: <terrain key> } | { k: 'survey'|'gps'|'file' },
+          // with fileH = the height the imported file had. A record without it leaves the old value; none ever = "ground, terrain unknown".
+          if (e.hsrc != null && typeof e.hsrc === 'object') f.hsrc = clone(e.hsrc);
           if (e.removed != null) f.removed = !!e.removed;
           f.updated = { t: e.t, who: e.who };
           break;

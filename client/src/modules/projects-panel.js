@@ -144,18 +144,19 @@
       if (!fp.length || (I.archived && !showArchived())) return;
       const ring = fp.length >= 3 ? fp.concat([fp[0]]) : fp;
       const lon = fp.reduce((s, q) => s + q[0], 0) / fp.length, lat = Math.max(...fp.map(q => q[1]));
-      d.entities.add({
+      const fpe = d.entities.add({
         id: 'pjx-fp-' + I.id, name: I.name, description: descHtml(I),
         position: Cesium.Cartesian3.fromDegrees(lon, lat),
         polyline: fp.length >= 2 ? { positions: Cesium.Cartesian3.fromDegreesArray(ring.flat()), width: 2.5, clampToGround: true, classificationType: Cesium.ClassificationType.TERRAIN,
           material: I.handDrawn ? Cesium.Color.fromCssColorString('#6fd39a')              // drawn by hand: a solid line
             : new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.fromCssColorString('#6fd39a'), dashLength: 14 }) } : undefined,
-        point: fp.length < 2 ? { pixelSize: 10, color: Cesium.Color.fromCssColorString('#6fd39a'), heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN } : undefined,
+        point: fp.length < 2 ? { pixelSize: 10, color: Cesium.Color.fromCssColorString('#6fd39a') } : undefined,
         label: { text: I.name, font: 'bold 14px sans-serif', fillColor: Cesium.Color.fromCssColorString('#9fe3bd'), outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -6),
-          heightReference: Cesium.HeightReference.CLAMP_TO_TERRAIN, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+          disableDepthTestDistance: Number.POSITIVE_INFINITY },
         properties: { isProjectFootprint: true, projectId: I.id },
       });
+      if (window._groundH) window._groundH.track(fpe, lon, lat);          // on the ground, measured once and kept (ground-height.js)
     });
     V().scene.requestRender && V().scene.requestRender();
   }

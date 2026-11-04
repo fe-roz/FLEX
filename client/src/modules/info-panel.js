@@ -443,6 +443,7 @@
     const folder = f.group ? FL.groupPath(pj.P, f.group).map(g => g.name).join(' / ') : '';
     const pos = posOfShape(f.kind, cs);
     const facts = [['Kind', KIND[f.kind] || f.kind]].concat(shapeFacts(f.kind, cs), pos ? posFacts(pos, f.kind) : []);
+    if (f.kind === 'point' && window._heightModel) facts.push(...window._heightModel.facts(f.hsrc, null, fmtHt));      // where its height came from; the file's own height
     return {
       key: 'feature:' + id, kind: 'feature', icon: KICON[f.kind] || '•', title: f.name || KIND[f.kind] || 'Feature',
       line: [KIND[f.kind], folder].filter(Boolean).join(' · '), color: window._pjf ? window._pjf.colorOf(f) : null,
@@ -517,6 +518,13 @@
     }
     const pos = posOfShape(kind, cs);
     const facts = [['Kind', KIND[kind]]].concat(shapeFacts(kind, cs), pos ? posFacts(pos, kind, !ref || (ref.source !== 'caltopo' && ref.source !== 'file')) : []);
+    if (kind === 'point' && window._heightModel) {                       // where the height came from; the height the imported file had
+      let hs = null, fh = prop(ent, 'fileHeight');
+      if (ref && ref.source === 'mydata' && window._myData && window._myData.cached()) { const mf = (window._myData.cached().features || {})[ref.id]; hs = mf && mf.hsrc; }
+      else if (prop(ent, 'heightSource')) hs = { k: prop(ent, 'heightSource') };
+      else if (ent._ctSurveyed) hs = { k: 'survey' };
+      facts.push(...window._heightModel.facts(hs, fh == null ? null : fh, fmtHt));
+    }
     const from = ref ? (ref.source === 'caltopo' ? 'CalTopo' : ref.srcName) : '';
     const raw = String(val(ent.description) || '');
     const desc = ref ? ref.desc : raw.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|tr|li|h\d)>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\n{3,}/g, '\n\n').trim();

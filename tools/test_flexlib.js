@@ -365,6 +365,22 @@ const pid = 'proj1', cid = 'cave1', cid2 = 'cave2';
   ok('removing a group moves its features to the top', L.liveFeatures(S2).find(f => f.id === 'f1').group === '' && L.liveGroups(S2).length === 0);
 }
 
+// Height source of a point: kept, replaced with the coordinates, dropped when the place changes without one.
+{
+  const PH = (d, t) => Object.assign({ id: 'h' + Math.random().toString(36).slice(2, 8), t, who: 'T', dev: 'pc', op: 'feature.set' }, d);
+  const S = L.replayProject([
+    PH({ feature: 'h1', kind: 'point', coords: [[-100.5678, 45.1234, 1500]], name: 'A', hsrc: { k: 'ground', t: 'world' } }, '2026-11-01T00:00:00Z'),
+    PH({ feature: 'h2', kind: 'point', coords: [[-100.5678, 45.1234, 1500]], name: 'B', hsrc: { k: 'file', fileH: 1510 } }, '2026-11-01T00:00:00Z'),
+    PH({ feature: 'h3', kind: 'point', coords: [[-100.5678, 45.1234]], name: 'Old' }, '2026-11-01T00:00:00Z'),
+    PH({ feature: 'h1', name: 'A2' }, '2026-11-01T00:01:00Z'),
+    PH({ feature: 'h2', coords: [[-100.57, 45.12, 1400]] }, '2026-11-01T00:02:00Z'),
+    PH({ feature: 'h3', coords: [[-100.57, 45.12, 1400]], hsrc: { k: 'ground', t: 'world+ab' } }, '2026-11-01T00:03:00Z'),
+  ], 'p-h');
+  ok('hsrc kept through a rename', S.features.h1.hsrc.k === 'ground' && S.features.h1.hsrc.t === 'world');
+  ok('hsrc dropped when the place moves without one', S.features.h2.hsrc === undefined && S.features.h2.coords[0][2] === 1400);
+  ok('hsrc set by a later record', S.features.h3.hsrc.t === 'world+ab');
+}
+
 // Map layers: a picture with its bounds; bad bounds ignored.
 {
   const PL = (op, d, t) => Object.assign({ id: 'ml' + Math.random().toString(36).slice(2, 8), t: t || '2026-11-01T00:00:00Z', who: 'T', dev: 'pc', op }, d);

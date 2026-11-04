@@ -20,6 +20,10 @@
 //       track(entity, lon, lat)  make the entity's .position follow the ground there (now, and when the answer or
 //                                the terrain changes); the entity is forgotten when it leaves its collection
 //       untrack(entity), keyAt(lon, lat), get(lon, lat), stats(), clear(), whenIdle()
+//       measure(lon, lat)        -> Promise<{ h, t, exact }> the ground height asked once and kept, and the terrain
+//                                (t = keyAt) that answered: what an item stores as its own height with hsrc {k:'ground', t}
+//       measureMany([[lon, lat]…]) the same for a list, asked together
+//       finer(t, lon, lat)       true when the terrain there now has a patch the stored terrain t did not
 // Event 'flex-ground-heights' (detail {n}) after positions were updated.
 (function () {
   'use strict';
@@ -82,7 +86,8 @@
     });
     return db;
   }
-  const chunkId = (k, lon, lat) => k + '|' + Math.floor(lon * 10) + '|' + Math.floor(lat * 10);
+  // from the rounded spot, so that float noise in a coordinate (-100.50000000000001) cannot pick another chunk than the stored one
+  const chunkId = (k, lon, lat) => k + '|' + Math.floor(r5(lon) * 10) + '|' + Math.floor(r5(lat) * 10);
   function chunkFor(k, lon, lat) {
     const id = chunkId(k, lon, lat);
     let c = chunks.get(id);
@@ -144,7 +149,7 @@
           if (c.h[pk(q.lon, q.lat)] !== undefined) { queue.delete(id); continue; }
           todo.push([id, q]); if (todo.length >= BATCH) break;
         }
-        if (!todo.length) { apply(); if (!queue.size) break; continue; }
+        if (!todo.length) { apply(); if (!queue.size) break; await new Promise(r => setTimeout(r, 0)); continue; }       // yield: never a hot loop
         const prov = v.terrainProvider;
         let res = null;
         try {
@@ -209,12 +214,31 @@
     pendingN = n;
     if (n) { const v = V(); if (v && v.scene.requestRender) v.scene.requestRender(); window.dispatchEvent(new CustomEvent('flex-ground-heights', { detail: { n } })); }
   }
+  // ── Asking once for items that store their own height (height-model.js) ──
+  const MEASURE_MS = 12000;
+  async function measureMany(list) {
+    const ks = list.map(c => keyAt(c[0], c[1]));
+    list.forEach((c, i) => { if (get(c[0], c[1]) === undefined) want(c[0], c[1], ks[i]); });
+    await Promise.race([whenIdle(), new Promise(r => setTimeout(r, MEASURE_MS))]);
+    return list.map((c, i) => {
+      const t = keyAt(c[0], c[1]), h = get(c[0], c[1]);
+      if (h !== undefined) return { h, t, exact: true };
+      const g = globeHeight(c[0], c[1]);
+      return { h: g == null ? 0 : g, t, exact: false };
+    });
+  }
+  const measure = async (lon, lat) => (await measureMany([[lon, lat]]))[0];
+  /** Has the terrain at this spot a patch that the stored terrain key t did not have? */
+  function finer(t, lon, lat) {
+    const have = new Set(String(t || '').split('+').slice(1));
+    return keyAt(lon, lat).split('+').slice(1).some(f => !have.has(f));
+  }
   function terrainChanged() { lastProv = null; chunks.forEach((c, id) => { if (!c.dirty && !c.ready) chunks.delete(id); }); apply(); }
   window.addEventListener('flex-terrain-changed', terrainChanged);
   setInterval(() => { const v = V(); if (v && v.terrainProvider !== lastProv && tracked.size) terrainChanged(); }, 2000);
 
   window._groundH = {
-    pos, track, untrack, get, keyAt, whenIdle,
+    pos, track, untrack, get, keyAt, whenIdle, measure, measureMany, finer,
     stats: () => ({ tracked: tracked.size, queued: queue.size, sampled, calls, chunks: chunks.size }),
     clear: async () => { chunks.clear(); tracked.forEach(r => { r.exact = false; }); const d = await openDb(); if (d) try { d.transaction(STORE, 'readwrite').objectStore(STORE).clear(); } catch (_) {} },
     flush,

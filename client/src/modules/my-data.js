@@ -47,7 +47,16 @@
       const g = await sessionGroup();
       const id = uid();
       entity.properties.addProperty('myFeature', id);
-      await rec('feature.set', { feature: id, kind: 'point', coords: [lonlat(entity)], name: labelOf(entity).slice(0, 120), group: g.id, style: { size: size || 'M' } });
+      // Its own height: the ground under it, measured now from the finest terrain (it was made where the camera is) and kept
+      // with where it came from (height-model.js); the point moves down onto it.
+      let at = lonlat(entity), hsrc = null;
+      if (window._heightModel) {
+        const m = await window._heightModel.stamp(at[0], at[1]);
+        at = m.coords[0]; hsrc = m.hsrc;
+        entity.position = Cesium.Cartesian3.fromDegrees(at[0], at[1], at[2]);
+        const V = window.cesiumViewer; if (V && V.scene.requestRender) V.scene.requestRender();
+      }
+      await rec('feature.set', Object.assign({ feature: id, kind: 'point', coords: [at], name: labelOf(entity).slice(0, 120), group: g.id, style: { size: size || 'M' } }, hsrc ? { hsrc } : {}));
     } catch (e) { console.warn('[my data] point not kept:', e); }
   }
   /** Deleted from the list, or moved into a project. */
@@ -60,9 +69,34 @@
   async function points() {
     const S = await state(true);
     return Object.values(S.features || {}).filter(f => !f.removed && f.kind === 'point' && f.coords && f.coords[0])
-      .map(f => ({ id: f.id, name: f.name || 'Point', lon: f.coords[0][0], lat: f.coords[0][1], h: f.coords[0][2] || 0,
+      .map(f => ({ id: f.id, name: f.name || 'Point', lon: f.coords[0][0], lat: f.coords[0][1], h: f.coords[0][2] || 0, hsrc: f.hsrc || null,
                    scale: SIZE[(f.style && f.style.size) || 'M'] || 1, group: (S.groups[f.group] || {}).name || '',
                    color: (f.style && f.style.color) || null, label: !(f.style && f.style.label === false) }));
+  }
+  /** The map entity of a kept point. */
+  function pointEntity(id) {
+    const V = window.cesiumViewer;
+    return V ? V.entities.values.find(e => e.properties && e.properties.myFeature && e.properties.myFeature.getValue() === id) || null : null;
+  }
+  function setPointAt(entity, c) {
+    if (window._groundH) window._groundH.untrack(entity);
+    entity.position = Cesium.Cartesian3.fromDegrees(c[0], c[1], c[2] || 0);
+    const V = window.cesiumViewer; if (V && V.scene.requestRender) V.scene.requestRender();
+  }
+  /**
+   * Put a kept point on the map at its own height. One with a height source (hsrc) is drawn at its stored height; an older
+   * one without is drawn on the ground at once, then measured once and stored (height-model.js).
+   */
+  function placePoint(entity, p) {
+    if (p.hsrc) { entity.position = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.h || 0); return; }
+    if (window._groundH) window._groundH.track(entity, p.lon, p.lat);
+    const HM = window._heightModel;
+    if (!HM) return;
+    HM.stamp(p.lon, p.lat).then(async m => {
+      if (!m.exact) return;
+      const r = await update(p.id, { coords: m.coords, hsrc: m.hsrc });
+      if (r.ok) setPointAt(entity, m.coords[0]);
+    }).catch(e => console.warn('[my data] height:', e));
   }
   /**
    * Change a kept point (feature-editor.js): patch { name, desc, coords, group,
@@ -75,6 +109,7 @@
       const e = { feature: id };
       ['name', 'desc', 'group'].forEach(k => { if (patch[k] != null) e[k] = String(patch[k]); });
       if (Array.isArray(patch.coords)) e.coords = patch.coords;
+      if (patch.hsrc) e.hsrc = patch.hsrc;
       if (patch.color !== undefined || patch.label !== undefined) {
         const st = Object.assign({}, f.style || {});
         if (patch.color) st.color = patch.color;
@@ -159,9 +194,10 @@
   function drawPoint(f) {
     const V = window.cesiumViewer; if (!V) return;
     if (V.entities.values.some(e => e.properties && e.properties.myFeature && e.properties.myFeature.getValue() === f.id)) return;
-    V.entities.add({ name: f.name || 'Point', label: { scale: SIZE[(f.style && f.style.size) || 'M'] || 1, text: f.name || 'Point', show: !(f.style && f.style.label === false) },
+    const ent = V.entities.add({ name: f.name || 'Point', label: { scale: SIZE[(f.style && f.style.size) || 'M'] || 1, text: f.name || 'Point', show: !(f.style && f.style.label === false) },
       position: Cesium.Cartesian3.fromDegrees(f.coords[0][0], f.coords[0][1], f.coords[0][2] || 0), properties: { isUserLabel: true, myFeature: f.id },
       point: f.style && f.style.color ? { color: Cesium.Color.fromCssColorString(f.style.color) } : {} });
+    placePoint(ent, { id: f.id, lon: f.coords[0][0], lat: f.coords[0][1], h: f.coords[0][2] || 0, hsrc: f.hsrc || null });
   }
   /**
    * Take features in. items: [{ id (the project's), kind, coords, name, desc, group (a name), color }].
@@ -181,7 +217,7 @@
       out.push(id);
       if (cur && !cur.removed) continue;
       const style = Object.assign({}, it.style || {}, it.color ? { color: it.color } : {});
-      await rec('feature.set', { feature: id, kind: it.kind, coords: it.coords, name: String(it.name || '').slice(0, 120) || (it.kind === 'point' ? 'Point' : it.kind === 'area' ? 'Area' : 'Line'), desc: String(it.desc || '').slice(0, 4000), group: gid[g], style, removed: false });
+      await rec('feature.set', { hsrc: it.hsrc || undefined, feature: id, kind: it.kind, coords: it.coords, name: String(it.name || '').slice(0, 120) || (it.kind === 'point' ? 'Point' : it.kind === 'area' ? 'Area' : 'Line'), desc: String(it.desc || '').slice(0, 4000), group: gid[g], style, removed: false });
     }
     S = await state(true);
     out.forEach(id => { const f = S.features[id]; if (!f || f.removed) return; if (f.kind === 'point') drawPoint(f); else drawShape(f, S); });
@@ -194,5 +230,16 @@
     state(true).then(S => shapes().forEach(f => drawShape(f, S))).catch(e => console.warn('[my data] shapes:', e));
   }, 500);
 
-  window._myData = { adopt, shapes, shapeEntity, forgetShape, shapeDs: () => shapeDs, keepPoint, forgetPoint, update, cached: () => _state, points, keepFile, forgetFile, filesToRestore, state, record: rec };
+  // The offer for finer terrain (height-model.js): kept points whose height was measured from coarser terrain.
+  const regTimer = setInterval(() => {
+    if (!window._heightModel) return;
+    clearInterval(regTimer);
+    window._heightModel.register('mydata', {
+      list: () => Object.values((_state && _state.features) || {}).filter(f => !f.removed && f.kind === 'point' && f.hsrc && f.coords && f.coords[0])
+        .map(f => ({ id: f.id, lon: f.coords[0][0], lat: f.coords[0][1], hsrc: f.hsrc })),
+      store: async ups => { for (const u of ups) { const r = await update(u.id, { coords: u.coords, hsrc: u.hsrc }); const e = pointEntity(u.id); if (r.ok && e) setPointAt(e, u.coords[0]); } },
+    });
+  }, 400);
+
+  window._myData = { placePoint, pointEntity, adopt, shapes, shapeEntity, forgetShape, shapeDs: () => shapeDs, keepPoint, forgetPoint, update, cached: () => _state, points, keepFile, forgetFile, filesToRestore, state, record: rec };
 })();

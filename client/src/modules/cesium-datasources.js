@@ -345,6 +345,8 @@ async function addDataFile(fileOrUrl, label, opts = {}) {
         });
       }
     }
+    // Points at their ground (measured once, kept) or, for a KMZ placemark with an absolute altitude, the file's height: no Cesium clamping
+    if (window._heightModel) window._heightModel.placeDataSource(ds, typeof fileOrUrl === 'string' ? fileOrUrl.split('?')[0].split('.').pop() : fileOrUrl.name.split('.').pop());
     cesiumViewer.dataSources.add(ds);
     const entry = {
       id: ++_dataFileIdCounter,
