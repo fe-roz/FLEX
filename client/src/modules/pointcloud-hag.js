@@ -308,6 +308,10 @@ export function setupPointcloudHag({ potreeViewer } = {}) {
     obsLo: Infinity, obsHi: -Infinity,
     processed: new Map(),   // node key -> its world bbox, so a shift can re-queue selectively
     enabled: false,
+    // Other features that read the grid (Splat mode): while any holds it, the scan keeps filling it
+    // even though the filter, the highlight and the diagnose colours are all off.
+    holders: new Set(),
+    hold(owner, on) { if (on) this.holders.add(owner); else this.holders.delete(owner); },
     // A generous default: wide enough to leave real terrain, vegetation and
     // sub-ground features alone, tight enough to drop obvious garbage. Narrow it
     // deliberately rather than starting narrow.
@@ -642,7 +646,7 @@ export function setupPointcloudHag({ potreeViewer } = {}) {
     // competed for exactly the frames the point cloud was trying to load in. The
     // trade is that switching a feature on now starts from an empty grid and
     // takes a few seconds of catch-up to fill.
-    if (!_hag.enabled && !_hag.bushOn && !_hag.debugColor) return;
+    if (!_hag.enabled && !_hag.bushOn && !_hag.debugColor && !_hag.holders.size) return;
 
     const view = _hagViewCenter();
     if (!view) return;

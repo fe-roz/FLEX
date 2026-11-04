@@ -126,6 +126,33 @@ view, one getter, one line in the point loop; in the batcher, one
 worker is a separate script loaded by URL; patching means serving a modified
 copy), and the batcher part only by replacing `EptLazBatcher.prototype.push`.
 
+### 7. Splat mode [beta]: ground as discs on the slope
+`src/materials/shaders/pointcloud.vs` -- the `splat_enabled` block (uniforms `uSplat*`, varyings `vSplat*`,
+`splatGroundZ()`, `doSplat()`) and its one-line call after `doClipping()` in `main()`.
+`src/materials/shaders/pointcloud.fs` -- `#extension GL_EXT_frag_depth` also under `splat_enabled`, the
+`uSplat*` / `vSplat*` declarations, a `gl_FragDepthEXT = gl_FragCoord.z` line (a shader that writes depth must write it on
+every path) and the disc block at the end of `main()`.
+`src/materials/PointCloudMaterial.js` -- the `uSplat*` entries in `uniforms` (`uSplatColTex` is the same plain
+`{width,height,data,version}` descriptor as the ground grids, type `"hagtex"`).
+`src/PotreeRenderer.js` -- `flexSplatSpacing()` (typical spacing of a node's class-2 points, once per node, cached on the
+geometry node as `_flexSplatSp`), and in `renderOctree()` the `uSplatSp` upload in the node loop plus a block next to the
+height-filter uploads that sends the `uSplat*` uniforms and the imagery mosaic (raw GL, LINEAR filter). Everything is
+inside `material.defines.get('splat_enabled')`: with the define off (the default) no splat code is compiled, no uniform is
+sent, no texture unit is used, and the picture is unchanged.
+Why: FLEX's Splat mode (`client/src/modules/splat-mode.js`): ground (class 2 plus points within a band of the height
+filter's ground grid) drawn as one disc per point, lying on the local ground plane (normal from the grid's slope), coloured
+per pixel from an imagery mosaic; other points as dark green dots, normal, or hidden. The fragment shader intersects the
+pixel's ray with the disc plane, discards outside the ellipse, writes the true depth (`gl_FragDepthEXT`) and, with EDL, the
+log depth in alpha. The pass stays opaque: FLEX renders with `useHQ = false`, so Potree's two-pass weighted splatting is not
+used; the soft edge and the opacity are screen-door discard (opacity noise depends on the pixel only, edge noise on the
+disc too, so overlapping discs fill each other's edge). Depth of each disc is pushed back by 0.1 x the node's spacing so
+finer discs win over the coarse ones that lie above curved ground. The view matrix is a pure rotation of the world
+(= ground-grid) frame, so normals and view offsets go between the two with `mat3(viewMatrix)`; that also holds for
+EPSG:3857 clouds whose matrix stretches z.
+Re-apply: copy the marked blocks; the GLSL comments must not contain backticks (the shaders are built into a JS template
+string). Runtime patch: **no** (the fragment shader, the renderer node loop and the material uniforms are all edited).
+Test: kit `tests/test_splat.js` (synthetic laszip EPT); `tools/test_splat_mode.js` for the pure parts.
+
 ## Changed by the 1.8.2 move (not FLEX edits, but FLEX relies on them)
 
 * The GPS time attribute is now called `gps-time` on every geometry (it was

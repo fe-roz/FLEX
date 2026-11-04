@@ -181,6 +181,18 @@ export class PointCloudMaterial extends THREE.RawShaderMaterial {
 			uBushOn:           { type: "f",   value: 0.0 },
 			uBushRange:        { type: "2fv", value: [1.0, 3.0] },
 			uHagRange:       { type: "2fv", value: [-10.0, 100.0] },
+			// FLEX: Splat mode [beta] uniforms (shader: doSplat in pointcloud.vs, the disc in
+			// pointcloud.fs). Uploaded by name in PotreeRenderer.renderOctree, like the ground
+			// grid above. uSplatColTex is a plain {width,height,data,version} (type "hagtex" for
+			// the same reason); uSplatRect is [x0, y0, w, h] in ABSOLUTE cloud coordinates and is
+			// shifted by uGroundOrigin in float64 when it is uploaded.
+			uSplatP:     { type: "4fv", value: [1.6, 64.0, 0.3, 1.0] },
+			uSplatO:     { type: "f",   value: 1.0 },
+			uSplatSlope: { type: "f",   value: 1.5 },
+			uSplatShade: { type: "f",   value: 1.0 },
+			uSplatColOn: { type: "f",   value: 0.0 },
+			uSplatRect:  { type: "4fv", value: [0.0, 0.0, 1.0, 1.0] },
+			uSplatColTex: { type: "hagtex", value: null },
 			matcapTextureUniform: 	{ type: "t", value: this.matcapTexture },
 			backfaceCulling: { type: "b", value: false },
 		};
