@@ -28,6 +28,8 @@ export class EyeDomeLightingMaterial extends THREE.RawShaderMaterial{
 			uEDLColor:      { type: 't', 	value: null },
 			uEDLDepth:      { type: 't', 	value: null },
 			opacity:        { type: 'f',	value: 1.0 },
+			uSplatEdge:     { type: 'f',	value: 1.0 },       // FLEX: Splat mode [beta], see edl.fs
+			uSplatOpacity:  { type: 'f',	value: 1.0 },
 			uProj:          { type: "Matrix4fv", value: [] },
 		};
 

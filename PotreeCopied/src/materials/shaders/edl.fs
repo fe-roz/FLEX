@@ -15,6 +15,10 @@ uniform vec2 neighbours[NEIGHBOUR_COUNT];
 uniform float edlStrength;
 uniform float radius;
 uniform float opacity;
+// FLEX: Splat mode [beta]: ground splats carry negative log depth in alpha (pointcloud.fs). uSplatEdge scales the
+// darkening between two ground splat pixels (0 none, 1 as EDL), uSplatOpacity is the ground layer's opacity.
+uniform float uSplatEdge;
+uniform float uSplatOpacity;
 
 uniform float uNear;
 uniform float uFar;
@@ -26,7 +30,7 @@ uniform sampler2D uEDLDepth;
 
 varying vec2 vUv;
 
-float response(float depth){
+float response(float depth, bool depthGround){
 	vec2 uvRadius = radius / vec2(screenWidth, screenHeight);
 	
 	float sum = 0.0;
@@ -36,12 +40,14 @@ float response(float depth){
 		
 		float neighbourDepth = texture2D(uEDLColor, uvNeighbor).a;
 		neighbourDepth = (neighbourDepth == 1.0) ? 0.0 : neighbourDepth;
+		bool neighbourGround = neighbourDepth < 0.0;        // FLEX: splat flag
+		if (neighbourGround) { neighbourDepth = -neighbourDepth; }
 
 		if(neighbourDepth != 0.0){
 			if(depth == 0.0){
 				sum += 100.0;
 			}else{
-				sum += max(0.0, depth - neighbourDepth);
+				sum += max(0.0, depth - neighbourDepth) * ((depthGround && neighbourGround) ? uSplatEdge : 1.0);
 			}
 		}
 	}
@@ -54,10 +60,13 @@ void main(){
 	
 	float depth = cEDL.a;
 	depth = (depth == 1.0) ? 0.0 : depth;
-	float res = response(depth);
+	bool isGroundSplat = depth < 0.0;                        // FLEX: splat flag
+	if (isGroundSplat) { depth = -depth; }
+	float res = response(depth, isGroundSplat);
 	float shade = exp(-res * 300.0 * edlStrength);
 
 	gl_FragColor = vec4(cEDL.rgb * shade, opacity);
+	if (isGroundSplat) { gl_FragColor = vec4(cEDL.rgb * shade * uSplatOpacity, opacity * uSplatOpacity); }   // premultiplied
 
 	{ // write regular hyperbolic depth values to depth buffer
 		float dl = pow(2.0, depth);

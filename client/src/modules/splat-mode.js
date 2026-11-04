@@ -1,37 +1,47 @@
 // Splat mode [beta] (📊 LiDAR → Splat mode): the ground of a streamed point cloud drawn as soft discs lying on the
-// ground, coloured from a map layer; the other points as small dark green dots, as before, or hidden. Visual only:
+// ground, coloured from a map layer; the other points as dots, normal, coloured by height, or hidden. Visual only:
 // nothing is written, nothing in the cloud is changed, and off is exactly the usual drawing (the shader code is not
 // even compiled in: the `splat_enabled` define is added to the Potree material only while it is on).
 //
-// How it works (the shader is PotreeCopied/src/materials/shaders/pointcloud.vs doSplat() and pointcloud.fs, edit 8 in
-// PotreeCopied/FLEX_PATCHES.md):
+// How it works (the shaders are PotreeCopied/src/materials/shaders/pointcloud.vs doSplat(), pointcloud.fs and edl.fs,
+// edit 7 in PotreeCopied/FLEX_PATCHES.md):
 //   ground     class 2, plus any point within `band` metres of the height-above-ground grid (pointcloud-hag.js keeps
 //              filling that grid while Splat mode holds it, even with the height filter off).
-//   normal     from the slope of that grid at the point (central differences over `uSplatSlope` metres).
-//   disc       one point sprite per ground point, `fill` x node spacing wide (capped at `maxPx` pixels on screen); the
-//              fragment shader intersects the pixel's ray with the disc's plane, so the disc is an ellipse that follows
-//              the slope, and writes the true depth there. Gaussian soft edge and the opacity are drawn as
-//              screen-door discard: the pass stays opaque, so it works with EDL and without sorting. (FLEX renders
-//              with useHQ off, so Potree's two-pass weighted splatting is not in play.)
-//   colour     a mosaic of an imagery layer, built here on camera stops: tiles are fetched with the layer's
-//              ImageryProvider.requestImage(x, y, level) at a level matched to the cell size, resampled into the
-//              cloud's own coordinate system (a square around the view, 2048 x 2048), and handed to Potree as a plain
-//              {width,height,data,version} (like the ground grids). Each fragment looks its colour up from where the
-//              ray meets the disc. Outside the mosaic, or while tiles load: the point's own colour.
+//   normal     from the slope of that grid at the point.
+//   disc       one point sprite per ground point, `fill` x node spacing wide (capped at `maxWorld` metres and `maxPx`
+//              pixels); the fragment shader intersects the pixel's ray with the disc's plane, so the disc is an ellipse
+//              that follows the slope, and writes the true depth there. The soft edge is stochastic discard.
+//   opacity    the ground is drawn opaque (so overlapping discs never darken each other) and flagged in the EDL pass's
+//              log-depth channel; the EDL pass then writes it with the layer's alpha and the canvas is composited over
+//              the globe: real translucency, smooth at any opacity. `edge` scales the EDL darkening between two ground
+//              pixels (the halo around discs).
+//   colour     an ATLAS of the imagery layer, filled tile by tile on camera stops: a 2048 x 2048 texture of 8 x 8 tile
+//              slots (4 x 4 for 512 px tiles) used as a ring (tile x, y lives in slot x mod 8, y mod 8), so panning
+//              only uploads the tiles that scroll in, one texSubImage2D each, a few a frame, and nothing is resampled
+//              on the CPU. The shader maps a ground position to an atlas pixel with a bilinear fit of the layer's
+//              projection (fitted here, from a few proj4 calls, in cloud coordinates). Tiles come from the layer's
+//              ImageryProvider.requestImage(x, y, level) and are kept in an LRU cache. Outside the window, or while a
+//              tile loads: the point's own colour.
+//   orientation requestImage() returns an ImageBitmap decoded with flipY for most providers (Cesium's
+//              ImageryProvider.loadImage); drawing one as it is gives upside-down imagery, so bitmaps are drawn flipped.
 //
 // Pure exports (no browser), node-testable by tools/test_splat_mode.js:
-//   SPLAT_DEFAULTS, sanitize(raw), pickLayerIndex(names), mercY(latRad), tileFraction(scheme, lonRad, latRad, level),
-//   chooseLevel(opts), viewRect(boxes, opts), fillMosaic(opts)
+//   SPLAT_DEFAULTS, OTHER_MODES, sanitize(raw), pickLayerIndex(names), mercY, tileFraction, metresPerTilePixel,
+//   chooseLevel, viewRect, fitBilinear, atlasLevel, windowTiles, slotOf
 // Setup:
 //   setupSplatMode({ Cesium, proj4, potreeViewer, cesiumViewer, hag }) -> { get, set, enable, apply, mosaic, ... }
 //   window._splat is that object.
 
 export const SPLAT_DEFAULTS = {
-  on: false, fill: 1.6, maxPx: 64, opacity: 1, band: 0.3,
-  other: 'dots',           // 'dots' | 'normal' | 'hidden'
+  on: false, fill: 1.6, maxPx: 64, maxWorld: 6, opacity: 1, band: 0.3,
+  edge: 0.3,               // 0 = no EDL darkening between ground discs, 1 = as the rest of the cloud
+  above: 'dots',           // other points above the ground band
+  below: 'red',            // other points below it
   layer: '',               // an imagery layer's name; '' = the satellite / current base map; 'none' = the point's own colour
   shade: true,             // soft hillshade from the slope
 };
+// what the shader's mode numbers mean (uSplatQ.y / .z)
+export const OTHER_MODES = { hidden: 0, dots: 1, normal: 2, height: 3, red: 4 };
 
 const num = (v, lo, hi) => (typeof v === 'number' && isFinite(v)) ? Math.min(hi, Math.max(lo, v)) : undefined;
 export function sanitize(raw) {
@@ -41,9 +51,13 @@ export function sanitize(raw) {
   put('on', typeof raw.on === 'boolean' ? raw.on : undefined);
   put('fill', num(raw.fill, 0.3, 4));
   put('maxPx', num(raw.maxPx, 3, 128));
+  put('maxWorld', num(raw.maxWorld, 0.2, 30));
   put('opacity', num(raw.opacity, 0.05, 1));
   put('band', num(raw.band, 0, 3));
-  put('other', ['dots', 'normal', 'hidden'].includes(raw.other) ? raw.other : undefined);
+  put('edge', num(raw.edge, 0, 1));
+  const mode = v => (typeof v === 'string' && v in OTHER_MODES) ? v : undefined;
+  put('above', mode(raw.above !== undefined ? raw.above : raw.other));     // "other" was the one dropdown of the first version
+  put('below', mode(raw.below));
   put('layer', typeof raw.layer === 'string' && raw.layer.length < 200 ? raw.layer : undefined);
   put('shade', typeof raw.shade === 'boolean' ? raw.shade : undefined);
   return o;
@@ -86,7 +100,7 @@ export function chooseLevel({ scheme, texel, lat, tileWidth, minLevel = 0, maxLe
 }
 
 /**
- * The square (in cloud coordinates) the mosaic covers: around the finest visible nodes. boxes = [{x0,y0,x1,y1,level}].
+ * The square (in cloud coordinates) the colour has to cover: around the finest visible nodes. boxes = [{x0,y0,x1,y1,level}].
  * Returns { cx, cy, side } or null.
  */
 export function viewRect(boxes, { minSide = 60, maxSide = 3000, margin = 1.25, levelSpan = 1 } = {}) {
@@ -104,47 +118,43 @@ export function viewRect(boxes, { minSide = 60, maxSide = 3000, margin = 1.25, l
 }
 
 /**
- * Resample tile pixels into the cloud's coordinate system.
- *   out     Uint8Array(T*T*4), row 0 = the south edge of the rect (so v = (y - y0) / side, no flip)
- *   lonlat  (x, y) -> [lonRad, latRad]   (the cloud's CRS -> WGS84)
- *   mosaic  { data: Uint8ClampedArray RGBA, width, height, tx0, ty0 (first tile), tw, th (tile size px) }
- * The lon / lat is computed on a coarse lattice and interpolated (a few km of UTM is straight enough).
+ * Least-squares fit of v = a0 + a1*x + a2*y + a3*x*y to samples. xs, ys, vs: arrays. Returns [a0, a1, a2, a3].
+ * (x, y are metres from the window centre, v is atlas pixels: a few km of any map projection is straight enough that
+ * the cross term takes up the curvature to well under a pixel.)
  */
-export function fillMosaic({ out, T, x0, y0, side, lonlat, scheme, level, mosaic, have }) {
-  const K = 32, lat = new Float64Array((K + 1) * (K + 1) * 2);
-  for (let j = 0; j <= K; j++) for (let i = 0; i <= K; i++) {
-    const p = lonlat(x0 + side * i / K, y0 + side * j / K), o = (j * (K + 1) + i) * 2;
-    lat[o] = p[0]; lat[o + 1] = p[1];
+export function fitBilinear(xs, ys, vs) {
+  const n = xs.length, A = Array.from({ length: 4 }, () => new Float64Array(5));
+  for (let k = 0; k < n; k++) {
+    const r = [1, xs[k], ys[k], xs[k] * ys[k]];
+    for (let i = 0; i < 4; i++) { for (let j = 0; j < 4; j++) A[i][j] += r[i] * r[j]; A[i][4] += r[i] * vs[k]; }
   }
-  const { data, width: W, height: H, tx0, ty0, tw, th } = mosaic;
-  let covered = 0;
-  for (let r = 0; r < T; r++) {
-    const fj = (r + 0.5) / T * K, j = Math.min(K - 1, fj | 0), tj = fj - j;
-    for (let c = 0; c < T; c++) {
-      const fi = (c + 0.5) / T * K, i = Math.min(K - 1, fi | 0), ti = fi - i;
-      const o00 = (j * (K + 1) + i) * 2, o10 = o00 + 2, o01 = o00 + (K + 1) * 2, o11 = o01 + 2;
-      const lon = (1 - tj) * ((1 - ti) * lat[o00] + ti * lat[o10]) + tj * ((1 - ti) * lat[o01] + ti * lat[o11]);
-      const la = (1 - tj) * ((1 - ti) * lat[o00 + 1] + ti * lat[o10 + 1]) + tj * ((1 - ti) * lat[o01 + 1] + ti * lat[o11 + 1]);
-      const f = tileFraction(scheme, lon, la, level);
-      const px = (f.fx - tx0) * tw - 0.5, py = (f.fy - ty0) * th - 0.5;
-      const q = (r * T + c) * 4;
-      const ix = Math.floor(px), iy = Math.floor(py);
-      if (ix < 0 || iy < 0 || ix >= W - 1 || iy >= H - 1) { out[q + 3] = 0; continue; }
-      // a tile that did not load leaves its pixels at alpha 0: do not mix those in
-      const a = (iy * W + ix) * 4, b = a + 4, cc = a + W * 4, d = cc + 4;
-      if (data[a + 3] < 128 || data[b + 3] < 128 || data[cc + 3] < 128 || data[d + 3] < 128) { out[q + 3] = 0; continue; }
-      const fx = px - ix, fy = py - iy;
-      for (let k = 0; k < 3; k++) {
-        out[q + k] = (data[a + k] * (1 - fx) + data[b + k] * fx) * (1 - fy) + (data[cc + k] * (1 - fx) + data[d + k] * fx) * fy;
-      }
-      out[q + 3] = 255; covered++;
-    }
+  for (let c = 0; c < 4; c++) {                       // Gaussian elimination with pivoting
+    let p = c; for (let r = c + 1; r < 4; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
+    [A[c], A[p]] = [A[p], A[c]];
+    for (let r = c + 1; r < 4; r++) { const f = A[r][c] / A[c][c]; for (let j = c; j < 5; j++) A[r][j] -= f * A[c][j]; }
   }
-  return covered / (T * T);
+  const a = [0, 0, 0, 0];
+  for (let i = 3; i >= 0; i--) { let t = A[i][4]; for (let j = i + 1; j < 4; j++) t -= A[i][j] * a[j]; a[i] = t / A[i][i]; }
+  return a;
 }
 
+/**
+ * The imagery level for an atlas window: the finest level (within the provider's limits) whose window of
+ * (N - 1) tiles still covers `side` metres.  tileMetres(L) = ground metres across one tile at level L.
+ */
+export function atlasLevel({ side, N, tileMetres, minLevel = 0, maxLevel = 19 }) {
+  let L = maxLevel;
+  while (L > minLevel && (N - 1) * tileMetres(L) < side) L--;
+  return L;
+}
+
+/** The N x N tiles of a window whose middle is the tile position (fx, fy): { x0, y0, N }. */
+export function windowTiles(fx, fy, N) { return { x0: Math.floor(fx - N / 2 + 0.5), y0: Math.floor(fy - N / 2 + 0.5), N }; }
+/** The ring slot of a tile. */
+export function slotOf(tx, ty, N) { return { sx: ((tx % N) + N) % N, sy: ((ty % N) + N) % N }; }
+
 const KEY = 'flex.splat';
-const MOSAIC_T = 2048;
+const ATLAS = 2048;
 
 export function setupSplatMode({ Cesium, proj4, potreeViewer, cesiumViewer, hag, storage } = {}) {
   const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null);
@@ -152,27 +162,38 @@ export function setupSplatMode({ Cesium, proj4, potreeViewer, cesiumViewer, hag,
   const save = () => { try { store.setItem(KEY, JSON.stringify(opts)); } catch (_) {} };
   let opts = { ...SPLAT_DEFAULTS, ...load() };
 
-  const mos = { desc: null, rect: null, seq: 0, busy: false, layerName: null, level: null, tiles: 0, tilesOk: 0, covered: 0, ms: 0, err: '', texel: 0, key: '', crs: null };
-  let lastMove = 0, timer = null, ui = null;
+  // the atlas and what the shader is told about it
+  const at = {
+    desc: { size: ATLAS, sub: [] },        // the plain descriptor PotreeRenderer uploads (sub = tiles waiting for texSubImage2D)
+    cur: null,                             // the mapping in use: { Cx, Cy, ctr: [x, y], win: [..4], rect: {cx, cy, side} }
+    pending: null,                         // a new mapping, applied once the tile uploads it needs are through
+    slotKey: {},                           // slot "sx,sy" -> the tile key last queued into it
+    layerName: null, level: null, texel: 0, err: '', ms: 0, slot: 256, N: 8, win: null, _count: null,
+  };
+  const cache = new Map();                 // tile key -> canvas (LRU)
+  const CACHE_MAX = 400;
+  const inflight = new Map();              // tile key -> true
+  const layerIds = new WeakMap(); let layerSeq = 0;
+  let lastMove = 0, timer = null, ui = null, fetching = 0;
+  const fetchQ = [];
 
   const pcs = () => (potreeViewer && potreeViewer.scene && potreeViewer.scene.pointclouds) || [];
 
   // ---- material ------------------------------------------------------------------------------------------------
-  function uniformsFor(pc) {
-    const u = pc.material && pc.material.uniforms;
-    return u && u.uSplatP ? u : null;
-  }
+  const uniformsFor = pc => { const u = pc.material && pc.material.uniforms; return u && u.uSplatP ? u : null; };
   function pushUniforms() {
-    const other = { hidden: 0, dots: 1, normal: 2 }[opts.other];
+    const q = [opts.maxWorld, OTHER_MODES[opts.above], OTHER_MODES[opts.below], 0];
     for (const pc of pcs()) {
       const u = uniformsFor(pc); if (!u) continue;
       u.uSplatP.value = [opts.fill, opts.maxPx, opts.band, opts.opacity];
-      u.uSplatO.value = other;
+      u.uSplatQ.value = q;
       u.uSplatShade.value = opts.shade ? 1 : 0;
-      u.uSplatColTex.value = opts.on ? mos.desc : null;
-      u.uSplatColOn.value = opts.on && mos.desc && mos.rect ? 1 : 0;
-      if (mos.rect) u.uSplatRect.value = [mos.rect.x0, mos.rect.y0, mos.rect.side, mos.rect.side];
+      u.uSplatColTex.value = opts.on ? at.desc : null;
+      u.uSplatColOn.value = opts.on && at.cur ? 1 : 0;
+      if (at.cur) { u.uSplatCx.value = at.cur.Cx; u.uSplatCy.value = at.cur.Cy; u.uSplatCtr.value = at.cur.ctr; u.uSplatWin.value = at.cur.win; }
     }
+    // the layer opacity and the edge shading are applied by the EDL pass
+    if (potreeViewer) potreeViewer.flexSplat = opts.on ? { edge: opts.edge, opacity: opts.opacity } : null;
   }
   function applyDefine(pc) {
     const m = pc.material; if (!m || !m.defines) return;
@@ -200,6 +221,7 @@ export function setupSplatMode({ Cesium, proj4, potreeViewer, cesiumViewer, hag,
     const k = pickLayerIndex(list.map(l => l.name));
     return k >= 0 ? list[k] : null;
   }
+  const idOf = layer => { if (!layerIds.has(layer)) layerIds.set(layer, ++layerSeq); return layerIds.get(layer); };
   const schemeOf = prov => {
     const ts = prov.tilingScheme, r = ts.rectangle;
     return { merc: ts instanceof Cesium.WebMercatorTilingScheme, west: r.west, east: r.east, south: r.south, north: r.north,
@@ -232,87 +254,169 @@ export function setupSplatMode({ Cesium, proj4, potreeViewer, cesiumViewer, hag,
     return (x, y) => { const p = f.forward([x, y]); return [p[0] * D, p[1] * D]; };
   }
 
+  // ---- tiles: fetch, draw (right way up), cache, queue for upload ------------------------------------------------
   const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+  const isBitmap = img => typeof ImageBitmap !== 'undefined' && img instanceof ImageBitmap;
+  function cachePut(k, cv) { cache.delete(k); cache.set(k, cv); while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value); }
+  function cacheGet(k) { const v = cache.get(k); if (v) { cache.delete(k); cache.set(k, v); } return v; }
+  let blankCv = null;
+  const blank = slot => { if (!blankCv || blankCv.width !== slot) { blankCv = document.createElement('canvas'); blankCv.width = blankCv.height = slot; } return blankCv; };
 
-  /** Build the colour mosaic for the current view (or the given rect). Resolves to the status. */
+  /** Draw a provider image into a slot-sized canvas, upright. A bitmap from requestImage comes decoded with flipY. */
+  function drawUpright(img, slot) {
+    const cv = document.createElement('canvas'); cv.width = cv.height = slot;
+    const g = cv.getContext('2d');
+    if (isBitmap(img)) { g.translate(0, slot); g.scale(1, -1); }
+    g.drawImage(img, 0, 0, slot, slot);
+    return cv;
+  }
+  const singleImages = new Map();      // layer id -> promise of the whole image, upright
+  function singleImage(prov, lid) {
+    if (!singleImages.has(lid)) singleImages.set(lid, (async () => {
+      const img = await withTimeout(Promise.resolve(prov.requestImage(0, 0, 0)), 20000);
+      if (!img) throw new Error('no image');
+      const w = img.width, h = img.height, cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      const g = cv.getContext('2d'); if (isBitmap(img)) { g.translate(0, h); g.scale(1, -1); } g.drawImage(img, 0, 0);
+      return cv;
+    })());
+    return singleImages.get(lid);
+  }
+  const enqueueUpload = (sx, sy, src, slot) => { at.desc.sub.push({ x: sx * slot, y: sy * slot, src }); };
+
+  function pumpFetch() {
+    while (fetching < 6 && fetchQ.length) {
+      const job = fetchQ.shift();
+      if (job.win !== at.win) { inflight.delete(job.tk); continue; }          // the window moved on
+      fetching++;
+      job.run().catch(() => {}).then(() => { fetching--; pumpFetch(); });
+    }
+  }
+
+  // ---- the window: which tiles the atlas holds, and the fit of the map into it -----------------------------------
+  /** Work out the window, queue what the atlas needs, and (when its uploads are through) switch the mapping. */
   async function mosaic(force) {
     if (!opts.on) return status();
-    const my = ++mos.seq;
     const found = chosenLayer();
-    if (!found) { mos.desc = null; mos.rect = null; mos.layerName = null; mos.err = opts.layer === 'none' ? '' : 'no map layer'; pushUniforms(); return status(); }
+    if (!found) { at.cur = null; at.layerName = null; at.err = opts.layer === 'none' ? '' : 'no map layer'; pushUniforms(); return status(); }
     const boxes = viewBoxes();
     const r = viewRect(boxes);
     if (!r) return status();
-    const pc = boxes[0].pc;
-    const prov = found.layer.imageryProvider;
-    if (!prov || !prov.tilingScheme || typeof prov.requestImage !== 'function') { mos.err = 'this layer cannot give tiles'; return status(); }
-    const T = MOSAIC_T, side = r.side, x0 = r.cx - side / 2, y0 = r.cy - side / 2, texel = side / T;
-    // Skip when the view has not really changed
-    const key = found.name + '|' + (pc.projection || '');
-    if (!force && mos.rect && mos.key === key && Math.abs(r.cx - (mos.rect.x0 + mos.rect.side / 2)) < mos.rect.side * 0.2 &&
-        Math.abs(r.cy - (mos.rect.y0 + mos.rect.side / 2)) < mos.rect.side * 0.2 && side / mos.rect.side < 1.6 && side / mos.rect.side > 0.5) return status();
-    mos.busy = true; mos.err = '';
+    const pc = boxes[0].pc, layer = found.layer, prov = layer.imageryProvider;
+    if (!prov || !prov.tilingScheme || typeof prov.requestImage !== 'function') { at.err = 'this layer cannot give tiles'; return status(); }
     const t0 = performance.now();
-    try {
-      const lonlat = toLonLat(pc), scheme = schemeOf(prov);
-      const corners = [lonlat(x0, y0), lonlat(x1(x0, side), y0), lonlat(x0, x1(y0, side)), lonlat(x1(x0, side), x1(y0, side))];
-      const lonMin = Math.min(...corners.map(c => c[0])), lonMax = Math.max(...corners.map(c => c[0]));
-      const latMin = Math.min(...corners.map(c => c[1])), latMax = Math.max(...corners.map(c => c[1]));
-      const tw = prov.tileWidth || 256, th = prov.tileHeight || 256;
-      const rangeAt = L => {
-        const a = tileFraction(scheme, lonMin, latMax, L), b = tileFraction(scheme, lonMax, latMin, L);
-        const nx = scheme.nx0 * Math.pow(2, L), ny = scheme.ny0 * Math.pow(2, L);
-        const t0x = Math.max(0, Math.floor(a.fx)), t1x = Math.min(nx - 1, Math.floor(b.fx));
-        const t0y = Math.max(0, Math.floor(a.fy)), t1y = Math.min(ny - 1, Math.floor(b.fy));
-        return { t0x, t1x, t0y, t1y, n: Math.max(0, t1x - t0x + 1) * Math.max(0, t1y - t0y + 1) };
-      };
-      const midLat = (latMin + latMax) / 2;
-      const level = chooseLevel({ scheme, texel, lat: midLat, tileWidth: tw, minLevel: prov.minimumLevel || 0,
-        maxLevel: Math.min(prov.maximumLevel != null ? prov.maximumLevel : 19, 21), tilesAt: L => rangeAt(L).n });
-      const rg = rangeAt(level);
-      if (!rg.n) { mos.err = 'the view is outside this layer'; mos.busy = false; return status(); }
-      const W = (rg.t1x - rg.t0x + 1) * tw, H = (rg.t1y - rg.t0y + 1) * th;
-      const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-      const g = cv.getContext('2d', { willReadFrequently: true });
-      let ok = 0, total = 0;
-      const jobs = [];
-      for (let ty = rg.t0y; ty <= rg.t1y; ty++) for (let tx = rg.t0x; tx <= rg.t1x; tx++) {
-        total++;
-        jobs.push((async () => {
-          try {
-            const img = await withTimeout(Promise.resolve(prov.requestImage(tx, ty, level)), 15000);
-            if (!img) return;
-            g.drawImage(img, (tx - rg.t0x) * tw, (ty - rg.t0y) * th, tw, th);
-            ok++;
-          } catch (_) { /* this tile stays transparent: the point's own colour shows there */ }
-        })());
-      }
-      await Promise.all(jobs);
-      if (my !== mos.seq) return status();            // a newer mosaic was asked for
-      let id;
-      try { id = g.getImageData(0, 0, W, H); } catch (e) { mos.err = 'the browser would not let FLEX read this layer\'s tiles'; mos.busy = false; return status(); }
-      const out = (mos.desc && mos.desc.data && mos.desc.data.length === T * T * 4) ? mos.desc.data : new Uint8Array(T * T * 4);
-      out.fill(0);
-      const covered = fillMosaic({ out, T, x0, y0, side, lonlat, scheme, level,
-        mosaic: { data: id.data, width: W, height: H, tx0: rg.t0x, ty0: rg.t0y, tw, th }, have: null });
-      if (my !== mos.seq) return status();
-      mos.desc = { width: T, height: T, data: out, version: (mos.desc ? mos.desc.version : 0) + 1 };
-      mos.rect = { x0, y0, side }; mos.key = key; mos.layerName = found.name; mos.level = level;
-      mos.tiles = total; mos.tilesOk = ok; mos.covered = covered; mos.texel = texel; mos.ms = Math.round(performance.now() - t0);
-      if (!ok) mos.err = 'no tiles came back';
-      pushUniforms();
-    } catch (e) {
-      mos.err = String(e && e.message || e).slice(0, 120);
+    const lid = idOf(layer), crsKey = pc.projection || '';
+    const scheme = schemeOf(prov);
+    const tw = prov.tileWidth || 256;
+    const single = tw > 512 || (prov.maximumLevel === 0 && scheme.nx0 === 1 && scheme.ny0 === 1 && tw > 256);
+    const slot = single ? 256 : (tw > 256 ? 512 : 256), N = ATLAS / slot;
+    const lonlat = toLonLat(pc);
+    const midLL = lonlat(r.cx, r.cy), midLat = midLL[1];
+    let level = 0;
+    const tileM = L => (scheme.east - scheme.west) * 6378137 * Math.cos(midLat) / (scheme.nx0 * Math.pow(2, L));
+    if (!single) {
+      const ideal = atlasLevel({ side: r.side, N, tileMetres: tileM, minLevel: prov.minimumLevel || 0, maxLevel: Math.min(prov.maximumLevel != null ? prov.maximumLevel : 19, 21) });
+      level = ideal;
+      // keep the level we have while it still holds the view (a level change refills the whole atlas)
+      if (at.win && at.win.layerId === lid && at.win.crs === crsKey && at.win.level <= ideal && at.win.level >= ideal - 1 &&
+          (N - 1) * tileM(at.win.level) >= r.side) level = at.win.level;
     }
-    mos.busy = false;
+    const pixelOf = (lon, lat) => {
+      if (single) { const u = (lon - scheme.west) / (scheme.east - scheme.west), v = (scheme.north - lat) / (scheme.north - scheme.south); return [u * tw, v * (prov.tileHeight || tw)]; }
+      const f = tileFraction(scheme, lon, lat, level); return [f.fx * slot, f.fy * slot];
+    };
+    const mid = pixelOf(midLL[0], midLL[1]);
+    let w = at.win;
+    const inside = w && w.layerId === lid && w.crs === crsKey && w.level === level && w.slot === slot &&
+      (() => { const rx = (mid[0] - w.x0 * slot) / slot, ry = (mid[1] - w.y0 * slot) / slot; return rx > 1.5 && rx < N - 1.5 && ry > 1.5 && ry < N - 1.5; })();
+    if (!inside || force) {
+      const wt = windowTiles(mid[0] / slot, mid[1] / slot, N);
+      w = { layerId: lid, crs: crsKey, level, slot, x0: wt.x0, y0: wt.y0, N, single, id: ++layerSeq };
+      at.win = w; at.layerName = found.name; at.level = single ? 0 : level; at.slot = slot; at.N = N;
+      // slots that now hold a different tile: queue the tile (from the cache) or a blank
+      for (let ty = w.y0; ty < w.y0 + N; ty++) for (let tx = w.x0; tx < w.x0 + N; tx++) {
+        const { sx, sy } = slotOf(tx, ty, N), sk = sx + ',' + sy, tk = lid + '|' + level + '|' + tx + '|' + ty;
+        if (at.slotKey[sk] === tk) continue;
+        at.slotKey[sk] = tk;
+        enqueueUpload(sx, sy, cacheGet(tk) || blank(slot), slot);
+      }
+    }
+    // tiles the view needs (the square's tiles plus a margin): fetch the ones not in the cache, nearest the middle first
+    {
+      const mg = single ? 0.5 : 0.6, half = r.side / 2;
+      const c = [lonlat(r.cx - half, r.cy - half), lonlat(r.cx + half, r.cy - half), lonlat(r.cx - half, r.cy + half), lonlat(r.cx + half, r.cy + half)].map(p => pixelOf(p[0], p[1]));
+      const tx0 = Math.floor(Math.min(...c.map(p => p[0])) / slot - mg), tx1 = Math.floor(Math.max(...c.map(p => p[0])) / slot + mg);
+      const ty0 = Math.floor(Math.min(...c.map(p => p[1])) / slot - mg), ty1 = Math.floor(Math.max(...c.map(p => p[1])) / slot + mg);
+      const jobs = [];
+      for (let ty = Math.max(ty0, w.y0); ty <= Math.min(ty1, w.y0 + N - 1); ty++) for (let tx = Math.max(tx0, w.x0); tx <= Math.min(tx1, w.x0 + N - 1); tx++) {
+        const tk = lid + '|' + level + '|' + tx + '|' + ty;
+        if (cache.has(tk) || inflight.has(tk)) continue;
+        jobs.push({ tx, ty, tk, d: Math.abs(tx - mid[0] / slot) + Math.abs(ty - mid[1] / slot) });
+      }
+      jobs.sort((a, b) => a.d - b.d);
+      for (const j of jobs) {
+        inflight.set(j.tk, true);
+        fetchQ.push({ win: w, tk: j.tk, run: async () => {
+          try {
+            let cv = null;
+            if (single) {
+              const big = await singleImage(prov, lid);
+              cv = document.createElement('canvas'); cv.width = cv.height = slot;
+              cv.getContext('2d').drawImage(big, j.tx * slot, j.ty * slot, slot, slot, 0, 0, slot, slot);
+            } else {
+              const img = await withTimeout(Promise.resolve(prov.requestImage(j.tx, j.ty, level)), 15000);
+              if (img) cv = drawUpright(img, slot);
+            }
+            if (cv) {
+              cachePut(j.tk, cv);
+              const { sx, sy } = slotOf(j.tx, j.ty, N);
+              if (at.slotKey[sx + ',' + sy] === j.tk) enqueueUpload(sx, sy, cv, slot);
+            }
+          } catch (_) { /* this tile stays blank: the point's own colour shows */ }
+          finally { inflight.delete(j.tk); render(); }
+        } });
+      }
+      pumpFetch();
+      at._count = { tx0, tx1, ty0, ty1 };
+    }
+    // the fit of the map into window pixels, valid around the view
+    const fitSide = single ? Math.max(r.side * 1.5, 100) : Math.min(N * tileM(level), Math.max(r.side * 1.6, 120));
+    const old = at.pending || at.cur;
+    const needFit = !old || old.winId !== w.id || Math.abs(old.rect.cx - r.cx) > old.rect.side * 0.2 || Math.abs(old.rect.cy - r.cy) > old.rect.side * 0.2 ||
+      fitSide > old.rect.side * 1.5 || fitSide < old.rect.side * 0.5;
+    if (needFit) {
+      const K = 6, xs = [], ys = [], px = [], py = [], ox = w.x0 * slot, oy = w.y0 * slot;
+      for (let j = 0; j <= K; j++) for (let i = 0; i <= K; i++) {
+        const dx = (i / K - 0.5) * fitSide, dy = (j / K - 0.5) * fitSide;
+        const ll = lonlat(r.cx + dx, r.cy + dy), p = pixelOf(ll[0], ll[1]);
+        xs.push(dx); ys.push(dy); px.push(p[0] - ox); py.push(p[1] - oy);
+      }
+      const Cx = fitBilinear(xs, ys, px), Cy = fitBilinear(xs, ys, py);
+      const wmx = (((w.x0 % N) + N) % N) * slot, wmy = (((w.y0 % N) + N) % N) * slot;
+      at.pending = { Cx, Cy, ctr: [r.cx, r.cy], win: [wmx, wmy, N * slot, ATLAS], rect: { cx: r.cx, cy: r.cy, side: fitSide }, winId: w.id };
+      const g = Math.abs(Cx[1] * Cy[2] - Cx[2] * Cy[1]);
+      at.texel = g > 0 ? 1 / Math.sqrt(g) : 0;     // metres per atlas pixel
+    }
+    at.err = ''; at.ms = Math.round(performance.now() - t0);
+    flushPending();
     render();
     return status();
   }
-  const x1 = (a, s) => a + s;
+  /** Switch to a new mapping only once the tile uploads it depends on are through (no half-filled atlas on screen). */
+  function flushPending() {
+    if (at.pending && !at.desc.sub.length) { at.cur = at.pending; at.pending = null; pushUniforms(); }
+  }
 
   function status() {
-    return { on: opts.on, layer: mos.layerName, level: mos.level, tiles: mos.tiles, tilesOk: mos.tilesOk, covered: +mos.covered.toFixed(3),
-      ms: mos.ms, texel: +mos.texel.toFixed(3), rect: mos.rect, err: mos.err, busy: mos.busy, hasTexture: !!mos.desc };
+    let ok = 0, needed = 0;
+    if (at.win && at._count) {
+      const w = at.win, c = at._count;
+      for (let ty = Math.max(c.ty0, w.y0); ty <= Math.min(c.ty1, w.y0 + w.N - 1); ty++) for (let tx = Math.max(c.tx0, w.x0); tx <= Math.min(c.tx1, w.x0 + w.N - 1); tx++) {
+        needed++; if (cache.has(w.layerId + '|' + w.level + '|' + tx + '|' + ty)) ok++;
+      }
+    }
+    return { on: opts.on, layer: at.layerName, level: at.level, tiles: needed, tilesOk: ok, covered: needed ? +(ok / needed).toFixed(3) : 0,
+      ms: at.ms, texel: +at.texel.toFixed(3), rect: at.cur && at.cur.rect, err: at.err, busy: fetching > 0 || fetchQ.length > 0 || at.desc.sub.length > 0, hasTexture: !!at.cur,
+      queued: at.desc.sub.length, cached: cache.size };
   }
 
   // ---- state ---------------------------------------------------------------------------------------------------
@@ -322,26 +426,28 @@ export function setupSplatMode({ Cesium, proj4, potreeViewer, cesiumViewer, hag,
     Object.assign(opts, p);
     save();
     apply();
-    if (opts.on && (layerChanged || p.on)) { mos.rect = null; setTimeout(() => mosaic(true), 50); }
+    if (opts.on && (layerChanged || p.on)) { at.win = null; at.cur = null; at.pending = null; at.slotKey = {}; at.desc.sub.length = 0; pushUniforms(); setTimeout(() => mosaic(true), 50); }
     render();
     return get();
   }
   function enable(on) { return set({ on: !!on }); }
 
-  // ---- when to rebuild the mosaic -------------------------------------------------------------------------------
+  // ---- when to refresh -------------------------------------------------------------------------------------------
   function schedule(delay) {
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => { timer = null; if (opts.on && !mos.busy) mosaic(false); }, delay);
+    timer = setTimeout(() => { timer = null; if (opts.on) mosaic(false); }, delay);
   }
-  function onMove() { lastMove = performance.now(); schedule(700); }
+  function onMove() { lastMove = performance.now(); schedule(500); }
   try { if (cesiumViewer && cesiumViewer.camera && cesiumViewer.camera.moveEnd) cesiumViewer.camera.moveEnd.addEventListener(onMove); } catch (_) {}
-  // new clouds, and nodes that finish loading after the camera stopped
+  // new clouds, nodes that finish loading after the camera stopped
   setInterval(() => {
     if (!opts.on) return;
     for (const pc of pcs()) applyDefine(pc);
     pushUniforms();
-    if (!mos.busy && performance.now() - lastMove > 900) mosaic(false);
+    if (performance.now() - lastMove > 700) mosaic(false);
   }, 1500);
+  // a new mapping waits for its tile uploads (a few a frame) before it is switched on
+  (function tick() { try { if (opts.on && at.pending) flushPending(); } catch (_) {} if (typeof requestAnimationFrame !== 'undefined') requestAnimationFrame(tick); })();
 
   // ---- the panel -----------------------------------------------------------------------------------------------
   function render() {
@@ -364,8 +470,10 @@ export function setupSplatMode({ Cesium, proj4, potreeViewer, cesiumViewer, hag,
       const rows = [
         slider('lp-splat-fill', 'Fill', 0.3, 4, 0.05, 'fill', v => v.toFixed(2) + ' × spacing', 'Disc size as a multiple of the point spacing of the node. Raise it to close gaps between the discs.'),
         slider('lp-splat-max', 'Max screen size', 3, 128, 1, 'maxPx', v => Math.round(v) + ' px', 'No disc is drawn wider than this on screen. Matters close up, where a point spacing is many pixels wide.'),
-        slider('lp-splat-opacity', 'Opacity', 0.05, 1, 0.05, 'opacity', v => Math.round(v * 100) + '%', 'Below 100% the ground is drawn see-through in a fine dither.'),
+        slider('lp-splat-maxworld', 'Max real size', 0.2, 30, 0.1, 'maxWorld', v => v.toFixed(1) + ' m', 'No disc is wider than this on the ground, however sparse the points are (far away the points are far apart and the discs would be huge). Gaps open where the points are further apart than this.'),
+        slider('lp-splat-opacity', 'Opacity', 0.05, 1, 0.05, 'opacity', v => Math.round(v * 100) + '%', 'The ground layer\'s opacity: the globe and anything under it shows through.'),
         slider('lp-splat-band', 'Ground band', 0, 3, 0.05, 'band', v => v.toFixed(2) + ' m', 'Ground is class 2 plus every point within this height of the ground grid (the one the height filter uses).'),
+        slider('lp-splat-edge', 'Edge shading', 0, 1, 0.05, 'edge', v => v <= 0 ? 'none' : Math.round(v * 100) + '%', 'The dark rims eye-dome lighting draws where two discs meet at slightly different depths. 0 removes them from the ground, 100% leaves them as the rest of the cloud has them. Eye-dome lighting must be on for this to matter.'),
       ];
       rows.forEach(r => box.appendChild(r));
       const sel = (id, label, title) => {
@@ -374,28 +482,31 @@ export function setupSplatMode({ Cesium, proj4, potreeViewer, cesiumViewer, hag,
         return l;
       };
       const lay = sel('lp-splat-layer', 'Ground colour from', 'Any map layer from 🗺 Layers. Its tiles are fetched at the detail the cloud needs, each time the camera stops.');
-      const oth = sel('lp-splat-other', 'Other points', 'Everything that is not ground.');
-      oth.querySelector('select').innerHTML = '<option value="dots">Small dark green dots</option><option value="normal">Normal (current colouring)</option><option value="hidden">Hidden</option>';
-      box.appendChild(lay); box.appendChild(oth);
+      const modeOpts = '<option value="dots">Small dark green dots</option><option value="normal">Normal (current colouring)</option><option value="height">Coloured by height above ground</option><option value="red">Small red dots</option><option value="hidden">Hidden</option>';
+      const above = sel('lp-splat-above', 'Points above the ground', 'Everything higher than the ground band: trees, shrubs, buildings.');
+      const below = sel('lp-splat-below', 'Points below the ground', 'Everything lower than the ground band: noise, and returns under the ground (often entrances and voids).');
+      above.querySelector('select').innerHTML = modeOpts; below.querySelector('select').innerHTML = modeOpts;
+      box.appendChild(lay); box.appendChild(above); box.appendChild(below);
       const shade = window.uiSwitch(opts.shade, on => set({ shade: on }), 'Soft hillshade on the slope', { id: 'lp-splat-shade', small: true });
       shade.style.marginTop = '6px'; box.appendChild(shade);
       const st = document.createElement('div'); st.id = 'lp-splat-status'; st.style.cssText = 'font-size:10px; color:rgba(255,255,255,0.45); margin-top:6px;';
       box.appendChild(st);
       host.appendChild(box);
-      oth.querySelector('select').addEventListener('change', e => set({ other: e.target.value }));
+      above.querySelector('select').addEventListener('change', e => set({ above: e.target.value }));
+      below.querySelector('select').addEventListener('change', e => set({ below: e.target.value }));
       lay.querySelector('select').addEventListener('change', e => set({ layer: e.target.value }));
       lay.querySelector('select').addEventListener('focus', () => fillLayers());
-      ui = { sw, box, rows, lay: lay.querySelector('select'), oth: oth.querySelector('select'), st, shade };
+      ui = { sw, box, rows, lay: lay.querySelector('select'), above: above.querySelector('select'), below: below.querySelector('select'), st, shade };
     }
     const sw = ui.sw.querySelector('input') || ui.sw; if (sw.checked !== opts.on) sw.checked = opts.on;
     ui.box.style.display = opts.on ? '' : 'none';
     ui.rows.forEach(r => r._sync());
-    ui.oth.value = opts.other;
+    ui.above.value = opts.above; ui.below.value = opts.below;
     const sh = ui.shade.querySelector('input') || ui.shade; sh.checked = opts.shade;
     fillLayers();
     const s = status();
     ui.st.textContent = !opts.on ? '' : s.err ? 'Colour: ' + s.err + ' (the points\' own colour is used)'
-      : s.busy ? 'Fetching map tiles…' : s.layer ? 'Colour: ' + s.layer + ', zoom ' + s.level + ', ' + s.tilesOk + '/' + s.tiles + ' tiles, ' + (s.texel * 100 | 0) / 100 + ' m per texel'
+      : s.layer ? 'Colour: ' + s.layer + ', zoom ' + s.level + ', ' + s.tilesOk + '/' + s.tiles + ' tiles' + (s.busy ? ', loading…' : '') + ', ' + (s.texel * 100 | 0) / 100 + ' m per pixel'
       : opts.layer === 'none' ? 'Colour: the points\' own' : 'Waiting for point cloud nodes…';
   }
   function fillLayers() {
@@ -412,7 +523,7 @@ export function setupSplatMode({ Cesium, proj4, potreeViewer, cesiumViewer, hag,
   }
 
   const api = { get, set, enable, apply, mosaic, status, layers: () => layerList().map(l => ({ i: l.i, name: l.name, show: l.show })), chosenLayer: () => { const c = chosenLayer(); return c && c.name; },
-    render, defaults: SPLAT_DEFAULTS, _mos: mos };
+    render, defaults: SPLAT_DEFAULTS, _atlas: at, _cache: cache };
   if (typeof window !== 'undefined') window._splat = api;
   render();
   apply();

@@ -134,18 +134,26 @@ copy), and the batcher part only by replacing `EptLazBatcher.prototype.push`.
 every path) and the disc block at the end of `main()`.
 `src/materials/PointCloudMaterial.js` -- the `uSplat*` entries in `uniforms` (`uSplatColTex` is the same plain
 `{width,height,data,version}` descriptor as the ground grids, type `"hagtex"`).
+`src/materials/shaders/edl.fs`, `src/materials/EyeDomeLightingMaterial.js`, `src/viewer/EDLRenderer.js` -- the EDL pass
+reads a ground splat pixel by the sign of its log depth (negative = splat; a depth offset would quantise on a half-float
+target), flips it back, scales the darkening between two splat pixels by `uSplatEdge` and writes the pixel with the
+layer's alpha (`uSplatOpacity`, premultiplied), so the ground layer is truly translucent over the globe. The two uniforms
+come from `viewer.flexSplat` (`{edge, opacity}`, set by splat-mode.js; absent = 1, 1 = no change).
 `src/PotreeRenderer.js` -- `flexSplatSpacing()` (typical spacing of a node's class-2 points, once per node, cached on the
 geometry node as `_flexSplatSp`), and in `renderOctree()` the `uSplatSp` upload in the node loop plus a block next to the
-height-filter uploads that sends the `uSplat*` uniforms and the imagery mosaic (raw GL, LINEAR filter). Everything is
+height-filter uploads that sends the `uSplat*` uniforms and the imagery atlas: a 2048 x 2048 RGBA texture allocated once
+(REPEAT wrap, LINEAR) and filled by `texSubImage2D` from the descriptor's `sub` queue, at most 4 tiles per render call, so a
+change of imagery never costs a frame. Everything is
 inside `material.defines.get('splat_enabled')`: with the define off (the default) no splat code is compiled, no uniform is
 sent, no texture unit is used, and the picture is unchanged.
 Why: FLEX's Splat mode (`client/src/modules/splat-mode.js`): ground (class 2 plus points within a band of the height
 filter's ground grid) drawn as one disc per point, lying on the local ground plane (normal from the grid's slope), coloured
-per pixel from an imagery mosaic; other points as dark green dots, normal, or hidden. The fragment shader intersects the
+per pixel from the imagery atlas (ground position -> atlas pixel by a bilinear fit sent as `uSplatCx/Cy/Ctr/Win`); other
+points above / below the ground band as dots, normal, coloured by height, red dots, or hidden (`uSplatQ`). The fragment shader intersects the
 pixel's ray with the disc plane, discards outside the ellipse, writes the true depth (`gl_FragDepthEXT`) and, with EDL, the
-log depth in alpha. The pass stays opaque: FLEX renders with `useHQ = false`, so Potree's two-pass weighted splatting is not
-used; the soft edge and the opacity are screen-door discard (opacity noise depends on the pixel only, edge noise on the
-disc too, so overlapping discs fill each other's edge). Depth of each disc is pushed back by 0.1 x the node's spacing so
+log depth in alpha. The point pass stays opaque: FLEX renders with `useHQ = false`, so Potree's two-pass weighted splatting is not
+used. The soft edge is stochastic discard (noise includes the disc's position, so overlapping discs fill each other's
+edge); the opacity is the EDL pass's alpha (without EDL, the splat fragment writes premultiplied alpha itself). Depth of each disc is pushed back by 0.1 x the node's spacing so
 finer discs win over the coarse ones that lie above curved ground. The view matrix is a pure rotation of the world
 (= ground-grid) frame, so normals and view offsets go between the two with `mat3(viewMatrix)`; that also holds for
 EPSG:3857 clouds whose matrix stretches z.
