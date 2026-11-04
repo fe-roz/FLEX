@@ -1290,6 +1290,15 @@
               </div>
             </div>
 
+            <!-- Splat mode [beta] (splat-mode.js): the ground drawn as discs on the slope, coloured from a map layer.
+                 The controls are built by the module into #lp-splat-body. -->
+            <div class="lp-section" style="width:0; min-width:100%; box-sizing:border-box;">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▸</span> Splat mode [beta]
+              </div>
+              <div class="lp-section-body open" id="lp-splat-body"></div>
+            </div>
+
             <!-- Ground and height. No job and no bbox: it works on whatever is
                  streamed in right now, so it belongs with the live tools rather
                  than next to the batch Analyze run. Starts collapsed - it is

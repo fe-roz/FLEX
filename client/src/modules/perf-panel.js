@@ -190,6 +190,7 @@
       get: () => mm.style.display !== 'none', set: on => { if ((mm.style.display !== 'none') !== !!on) press(77); } });
     if ($('incidence_toggle') && $('incidence_toggle').checked) out.push(chkAct('incidence', 'Incidence lines', 'Turn incidence lines off', 'incidence', 'incidence_toggle'));
     if ($('lp-hag-enable') && $('lp-hag-enable').checked) out.push(chkAct('hag', 'Height filter', 'Turn the height filter off', 'hag', 'lp-hag-enable'));
+    if ($('lp-splat-on') && $('lp-splat-on').checked) out.push(chkAct('splat', 'Splat mode', 'Turn Splat mode off', 'splat', 'lp-splat-on'));
     return out.filter(Boolean);
   }
   const sameState = (a, b) => (typeof a === 'number' || typeof b === 'number') ? a === b : !!a === !!b;

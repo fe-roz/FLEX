@@ -285,6 +285,7 @@ setupUpdateChecker();
 import { setupPotreePointcloud } from "./client/src/modules/potree-pointcloud.js";
 import { setupPointcloudIncidence } from "./client/src/modules/pointcloud-incidence.js";
 import { setupPointcloudHag } from "./client/src/modules/pointcloud-hag.js";
+import { setupSplatMode } from "./client/src/modules/splat-mode.js";
 import { setupEntwineLocal } from "./client/src/modules/entwine-local.js";
 
 // addPC, the addPC interceptor (tracks loaded URLs), the restore banner and the
@@ -544,3 +545,5 @@ requestAnimationFrame(loop);
 // Moved to client/src/modules/pointcloud-hag.js (flex.js split, wave 2); window._hag
 // and the window._hag* hooks are defined there.
 setupPointcloudHag({ potreeViewer });
+// Splat mode [beta] (LiDAR pane): the ground as discs on the slope, coloured from a map layer. Reads the grid above.
+setupSplatMode({ Cesium, proj4, potreeViewer, cesiumViewer, hag: window._hag });

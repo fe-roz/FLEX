@@ -1038,6 +1038,128 @@ void doClipping(){
 
 
 
+// ── FLEX: Splat mode [beta] ─────────────────────────────────────────────────────────────────────────────────────────────
+// Only compiled when the material has the splat_enabled define (client/src/modules/splat-mode.js).
+// Ground points (class 2, plus points within uSplatP.z metres of the HAG ground grid) become discs lying on the local
+// ground plane; the normal comes from the slope of the same ground grid the height filter uses (uGroundTex*).
+// Other points become small dark green dots, are hidden, or are left as they were (uSplatO = 1 / 0 / 2).
+// The fragment shader intersects the pixel's ray with the disc plane (see pointcloud.fs).
+#if defined(splat_enabled)
+uniform vec4  uSplatP;       // fill (disc diameter / node spacing), max screen size px, ground band m, opacity
+uniform float uSplatO;       // other points: 0 hidden, 1 dark green dots, 2 as before
+uniform float uSplatSlope;   // metres either side of the point over which the slope is measured
+uniform float uSplatShade;   // 1 = soft hillshade on the splats
+uniform float uSplatSp;      // spacing of this node's ground points (PotreeRenderer.js flexSplatSpacing)
+varying float vSplatKind;    // 0 = not a disc
+varying float vSplatR;       // disc radius, view-space metres
+varying vec3  vSplatN;       // disc normal, view space, facing the camera
+varying vec3  vSplatG;       // disc centre in the ground-grid frame
+varying vec3  vSplatMA;      // view-space offset -> ground-grid frame offset, one column per view axis
+varying vec3  vSplatMB;
+varying vec3  vSplatMC;
+varying vec3  vSplatRgb;     // the point's own colour (fallback while imagery is missing)
+varying float vSplatLit;     // hillshade factor, 1 on flat ground
+varying float vSplatBias;    // depth push-back, metres
+
+// Ground height (lowest class-2 return around the cell) at a grid-frame xy, same ranking as the height filter:
+// a real ground return in either grid beats an estimate in either. want 0 = either grid (returns which one it
+// used in src: 1 detail, 2 coarse); 1 / 2 = only that grid. The slope is measured in the one grid the point's own
+// height came from, so detail and coarse heights are never differenced against each other.
+bool splatGroundZ(vec2 g, float want, out float z, out float src){
+	vec4 gsD = vec4(0.0);
+	if (want < 1.5) {
+		vec2 uvD = (g / uGroundCellSize) / uGroundTexSize;
+		if (uvD.x >= 0.0 && uvD.x <= 1.0 && uvD.y >= 0.0 && uvD.y <= 1.0) {
+			vec2 htD = 0.5 / uGroundTexSize;
+			gsD = texture2D(uGroundTex, clamp(uvD, htD, 1.0 - htD));
+		}
+	}
+	vec4 gsC = vec4(0.0);
+	if (uGroundFallbackOn > 0.5 && (want < 0.5 || want > 1.5)) {
+		vec2 uvC = ((g + uGroundShiftC) / uGroundCellSizeC) / uGroundTexSizeC;
+		if (uvC.x >= 0.0 && uvC.x <= 1.0 && uvC.y >= 0.0 && uvC.y <= 1.0) {
+			vec2 htC = 0.5 / uGroundTexSizeC;
+			gsC = texture2D(uGroundTexC, clamp(uvC, htC, 1.0 - htC));
+		}
+	}
+	vec4 pick = vec4(0.0);
+	src = 0.0;
+	if      (gsD.a > 0.75) { pick = gsD; src = 1.0; }
+	else if (gsC.a > 0.75) { pick = gsC; src = 2.0; }
+	else if (gsD.a > 0.25) { pick = gsD; src = 1.0; }
+	else if (gsC.a > 0.25) { pick = gsC; src = 2.0; }
+	float q16 = pick.r * 256.0 + pick.g;
+	z = uGroundZRange.x + q16 * (255.0 / 65535.0) * uGroundZRange.y;
+	return pick.a > 0.25 && q16 > 0.001;
+}
+
+void doSplat(){
+	vSplatKind = 0.0;
+	vSplatR = 1.0; vSplatN = vec3(0.0, 0.0, 1.0); vSplatG = vec3(0.0);
+	vSplatMA = vec3(1.0, 0.0, 0.0); vSplatMB = vec3(0.0, 1.0, 0.0); vSplatMC = vec3(0.0, 0.0, 1.0);
+	vSplatRgb = vec3(0.5); vSplatLit = 1.0; vSplatBias = 0.0;
+
+	vec4 gw = uGroundModelMatrix * vec4(position, 1.0);
+	bool usable = gw.w > 0.5 && uGroundCellSize > 0.0 && uGroundTexSize.x > 1.0 && uGroundZRange.y > 5.0;
+	bool isClass2 = abs(classification - 2.0) < 0.5;
+	bool haveG = false;
+	float gz = 0.0;
+	float gsrc = 0.0;
+	if (usable) { haveG = splatGroundZ(gw.xy, 0.0, gz, gsrc); }
+	bool isGround = isClass2 || (haveG && gw.z - gz <= uSplatP.z && gw.z - gz >= -uSplatP.z);
+
+	if (!isGround) {
+		if (uSplatO < 0.5) { gl_Position = vec4(100.0, 100.0, 100.0, 0.0); return; }
+		if (uSplatO < 1.5) { gl_PointSize = 2.0; vPointSize = 2.0; vColor = vec3(0.05, 0.24, 0.09); }
+		return;
+	}
+
+	// slope of the ground grid around the point: central differences over +-h metres
+	vec3 nG = vec3(0.0, 0.0, 1.0);
+	if (haveG) {
+		float cellS = gsrc > 1.5 ? uGroundCellSizeC : uGroundCellSize;
+		float h = max(uSplatSlope, 2.0 * cellS);
+		float zx1 = gz, zx0 = gz, zy1 = gz, zy0 = gz;
+		float t, ts;
+		if (splatGroundZ(gw.xy + vec2( h, 0.0), gsrc, t, ts)) zx1 = t;
+		if (splatGroundZ(gw.xy + vec2(-h, 0.0), gsrc, t, ts)) zx0 = t;
+		if (splatGroundZ(gw.xy + vec2(0.0,  h), gsrc, t, ts)) zy1 = t;
+		if (splatGroundZ(gw.xy + vec2(0.0, -h), gsrc, t, ts)) zy0 = t;
+		nG = normalize(vec3(-(zx1 - zx0) / (2.0 * h), -(zy1 - zy0) / (2.0 * h), 1.0));
+	}
+
+	// The ground-grid frame is the world frame (the node's world matrix with only the grid origin taken off), and the
+	// view matrix is a pure rotation + translation of it, so a direction goes between the two by mat3(viewMatrix).
+	// (That holds when the cloud's matrix stretches z, as for EPSG:3857 clouds.)
+	mat3 Vm = mat3(viewMatrix);
+	vec3 nV = normalize(Vm * nG);
+	if (dot(nV, vViewPosition) > 0.0) { nV = -nV; }
+	vec3 i0 = vec3(Vm[0].x, Vm[1].x, Vm[2].x);   // view x axis, in the ground-grid frame
+	vec3 i1 = vec3(Vm[0].y, Vm[1].y, Vm[2].y);
+	vec3 i2 = vec3(Vm[0].z, Vm[1].z, Vm[2].z);
+
+	float slope = tan(fov / 2.0);
+	float projFactor = -0.5 * uScreenHeight / (slope * vViewPosition.z);
+	float scale = length(modelViewMatrix * vec4(0, 0, 0, 1) - modelViewMatrix * vec4(uOctreeSpacing, 0, 0, 1)) / uOctreeSpacing;
+	projFactor = projFactor * scale;
+	float px = clamp(uSplatP.x * uSplatSp * projFactor, 2.0, uSplatP.y);
+
+	vSplatKind = 1.0;
+	vSplatR = 0.5 * px / projFactor;
+	vSplatBias = 0.1 * uSplatSp;
+	vSplatN = nV;
+	vSplatG = gw.xyz;
+	vSplatMA = i0; vSplatMB = i1; vSplatMC = i2;
+	vec3 own = getRGB();
+	vSplatRgb = (own.r + own.g + own.b) < 0.02 ? vec3(0.55) : own;
+	vec3 L = normalize(vec3(-0.5, 0.5, 0.7));
+	vSplatLit = mix(1.0, clamp(dot(nG, L) / L.z, 0.0, 1.6), 0.45 * uSplatShade);
+	gl_PointSize = px * 1.2;     // the sprite has to hold the whole ellipse
+	vPointSize = px;
+	vColor = vSplatRgb * vSplatLit;
+}
+#endif
+
 // 
 // ##     ##    ###    #### ##    ## 
 // ###   ###   ## ##    ##  ###   ## 
@@ -1091,6 +1213,10 @@ void main() {
 
 	// CLIPPING
 	doClipping();
+
+	#if defined(splat_enabled)
+		doSplat();   // FLEX: Splat mode [beta]
+	#endif
 
 	#if defined(num_clipspheres) && num_clipspheres > 0
 		for(int i = 0; i < num_clipspheres; i++){

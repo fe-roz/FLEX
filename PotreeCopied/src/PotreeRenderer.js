@@ -153,6 +153,31 @@ let attributeLocations = {
 	"aExtra":  {name: "aExtra", location: 11},
 };
 
+// FLEX: Splat mode [beta], see pointcloud.vs doSplat. Typical spacing of a node's ground points, in the node's
+// own units: sqrt(area / count) over the rectangle the class-2 points span (every point if there are
+// almost no class-2 ones). Never finer than a quarter of the nominal spacing nor coarser than 4x it.
+function flexSplatSpacing(geometry, nominal) {
+	const pos = geometry.attributes.position && geometry.attributes.position.array;
+	if (!pos) return nominal;
+	const cls = geometry.attributes.classification && geometry.attributes.classification.array;
+	const n = pos.length / 3;
+	let cnt = 0, x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+	const scan = (onlyGround) => {
+		cnt = 0; x0 = y0 = Infinity; x1 = y1 = -Infinity;
+		for (let i = 0; i < n; i++) {
+			if (onlyGround && (!cls || cls[i] !== 2)) continue;
+			const x = pos[3 * i], y = pos[3 * i + 1];
+			if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+			cnt++;
+		}
+	};
+	scan(true);
+	if (cnt < 8) scan(false);
+	if (cnt < 4) return nominal;
+	const sp = Math.sqrt(Math.max((x1 - x0) * (y1 - y0), 1e-6) / cnt);
+	return Math.min(nominal * 4, Math.max(nominal * 0.25, sp));
+}
+
 class Shader {
 
 	constructor(gl, name, vsSource, fsSource) {
@@ -833,6 +858,18 @@ export class Renderer {
 			shader.setUniform1f("uLevel", level);
 			shader.setUniform1f("uNodeSpacing", node.geometryNode.estimatedSpacing);
 
+			// FLEX: Splat mode [beta]. What a disc must cover is the spacing of THIS node's ground points, not
+			// the octree's nominal spacing (a node deep in the tree can hold far fewer points than its grid
+			// allows, and the data may stop being denser than the finest grid). Measured once per node.
+			if (material.defines && material.defines.get('splat_enabled')) {
+				const gn = node.geometryNode;
+				let sp = gn._flexSplatSp;
+				if (sp === undefined && gn.geometry) {
+					sp = gn._flexSplatSp = flexSplatSpacing(gn.geometry, material.spacing / Math.pow(2, level));
+				}
+				shader.setUniform1f("uSplatSp", sp === undefined ? material.spacing / Math.pow(2, level) : sp);
+			}
+
 			shader.setUniform1f("uPCIndex", i);
 			// uBBSize
 
@@ -1455,6 +1492,45 @@ export class Renderer {
 					shader.setUniform1f("uHagCull", gu.uHagCull ? gu.uHagCull.value : 1.0);
 					shader.setUniform1f("uBushOn",  gu.uBushOn  ? gu.uBushOn.value  : 0.0);
 					if (gu.uBushRange) shader.setUniform2f("uBushRange", gu.uBushRange.value);
+
+					// FLEX: Splat mode [beta]. Only when the material was compiled with the define: the
+					// uniforms are optimised out of the program otherwise, and the mosaic would waste a unit.
+					if (gu.uSplatP && material.defines && material.defines.get('splat_enabled')) {
+						const sp = gu.uSplatP.value, so = gu.uGroundOrigin.value, sr = gu.uSplatRect.value;
+						const loc = (n) => shader.uniformLocations[n];
+						if (loc("uSplatP")) gl.uniform4f(loc("uSplatP"), sp[0], sp[1], sp[2], sp[3]);
+						shader.setUniform1f("uSplatO", gu.uSplatO.value);
+						shader.setUniform1f("uSplatSlope", gu.uSplatSlope.value);
+						shader.setUniform1f("uSplatShade", gu.uSplatShade.value);
+						const colDesc = gu.uSplatColTex.value;
+						const haveCol = !!(colDesc && colDesc.data && colDesc.width);
+						shader.setUniform1f("uSplatColOn", haveCol && gu.uSplatColOn.value > 0.5 ? 1.0 : 0.0);
+						// rect origin relative to the ground-grid origin, differenced in float64
+						if (loc("uSplatRect")) gl.uniform4f(loc("uSplatRect"), sr[0] - so[0], sr[1] - so[1], sr[2], sr[3]);
+						if (haveCol) {
+							let rec = this.hagTextures.get(colDesc);
+							if (!rec) { rec = { id: gl.createTexture(), version: -1 }; this.hagTextures.set(colDesc, rec); }
+							shader.setUniform1i("uSplatColTex", currentTextureBindingPoint);
+							gl.activeTexture(gl.TEXTURE0 + currentTextureBindingPoint);
+							gl.bindTexture(gl.TEXTURE_2D, rec.id);
+							if (rec.version !== colDesc.version) {
+								gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+								gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+								gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+								gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, colDesc.width, colDesc.height, 0,
+								              gl.RGBA, gl.UNSIGNED_BYTE, colDesc.data);
+								gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+								gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+								gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+								gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+								rec.version = colDesc.version;
+							}
+							currentTextureBindingPoint++;
+						} else {
+							// a bound sampler is still required: point it at the (always bound) ground texture unit
+							shader.setUniform1i("uSplatColTex", 0);
+						}
+					}
 				}
 			}
 
