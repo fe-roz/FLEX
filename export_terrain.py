@@ -1605,13 +1605,16 @@ def convert_caves(caves_path, utm_center_e, utm_center_n, progress=print, zone=N
         # The survey's code on its own (the name is "code — description").
         if survey.get("code") is not None:
             survey_out["code"] = str(survey["code"])
-        # Open leads: station name, position and the note/size/date, if any.
+        # Open leads: station name, position and the note/size/date, if any. Leads kept in
+        # FLEX (a project's or My data's) also carry their status, source ("flex"; a survey
+        # file's own say "file" or nothing: older payloads), id and priority. The viewer
+        # reads old caves.json without those keys just the same.
         leads_out = []
         for ld in survey.get("leads", []):
             le, ln, _ = latlon_to_utm(ld.get("lat", 0), ld.get("lon", 0), zone)
             entry = {"station": ld.get("station", ""),
                      "xyz": [le - utm_center_e, ln - utm_center_n, ld.get("elev", 0)]}
-            for key in ("description", "width", "height", "date"):
+            for key in ("description", "width", "height", "date", "status", "source", "id", "priority"):
                 if ld.get(key) is not None:
                     entry[key] = ld[key]
             leads_out.append(entry)

@@ -91,6 +91,7 @@ export function setupCaveLeadsLabels({
         position: pos,
         show: imp.visible && _caveLeadsVisible,
         billboard: { ..._leadBillboardProps(), disableDepthTestDistance: 5000, distanceDisplayCondition: ddc },
+        label: window._flexLeads ? window._flexLeads.look({ fields: { desc: ld.d }, station: ld.station }).label : undefined,
         // Lead text comes from the data file and the InfoBox runs unsandboxed: escape it.
         description: [
           `<b>Lead at ${_escapeHtml(ld.station)}</b>`,
@@ -99,7 +100,7 @@ export function setupCaveLeadsLabels({
           ld.t ? `Noted ${_escapeHtml(ld.t)}` : null,
           `Cave: ${_escapeHtml(imp.name)}`,
         ].filter(Boolean).join('<br>'),
-        properties: { isCaveSurvey: true, isCaveLead: true, surveyName: imp.name },
+        properties: { isCaveSurvey: true, isCaveLead: true, surveyName: imp.name, leadStation: ld.station, leadD: ld.d == null ? '' : String(ld.d) },
       });
       imp.cesiumIds.push(e.id);
     }
@@ -360,10 +361,12 @@ export function setupCaveLeadsLabels({
     for (const imp of _caveImports) {
       for (const id of imp.cesiumIds) {
         const e = cesiumViewer.entities.getById(id);
-        if (_isLeadEntity(e)) e.show = imp.visible && _caveLeadsVisible;
+        if (_isLeadEntity(e)) e.show = imp.visible && _caveLeadsVisible && !e._flexHidden;
       }
     }
+    if (window._flexLeads) window._flexLeads.visibility();     // FLEX leads (project, My data) follow the same switch
   };
+  window._caveLeadsOn = () => _caveLeadsVisible;
 
   function _isAreaLabelEntity(e) {
     return !!(e && e.properties && e.properties.isCaveAreaLabel && e.properties.isCaveAreaLabel.getValue());

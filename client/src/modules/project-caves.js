@@ -345,9 +345,12 @@
   }
 
   // ── Leads ──────────────────────────────────────────────────────────────────
-  async function editLead(cid, name, item) {
+  // store: where the lead is kept. Default: the open project. flex-leads.js passes
+  // My data's ({ P (its replayed state), record(op, data), caveName(cid), mine: true }).
+  async function editLead(cid, name, item, store) {
     if (!(await ensureAuthor())) return;
-    const lists = FL.leadLists(pj.P);
+    const S = store || { P: pj.P, record, caveName };
+    const lists = FL.leadLists(S.P);
     const rec = item && item.rec;
     const cur = Object.assign({}, item ? item.fields : { status: 'open' });
     const vals = JSON.parse(JSON.stringify(cur));
@@ -380,7 +383,7 @@
               buttons: [{ label: 'Cancel', value: null }, { label: 'Add', value: 'ok', primary: true }] });
             if (!r || !r.value.trim()) return;
             const v = r.value.trim().slice(0, 40);
-            await record('project.lists', { add: { [fd.list]: [v] } });
+            await S.record('project.lists', { add: { [fd.list]: [v] } });
             const b = chip(v, v); box.insertBefore(b, add); b.click();
           }, 'chip');
           add.title = 'Add a choice to this project’s list';
@@ -410,13 +413,13 @@
       });
       form.appendChild(s);
     }
-    if (rec) form.appendChild(btn(`History (${rec.history.length})`, () => history(rec.history, 'Lead history')));
-    const r = await dialog({ title: (rec || item ? 'Lead at ' : 'New lead at ') + name + (cid ? ' · ' + caveName(cid) : ''), body: form, wide: true,
+    if (rec && !S.mine) form.appendChild(btn(`History (${rec.history.length})`, () => history(rec.history, 'Lead history')));
+    const r = await dialog({ title: (rec || item ? 'Lead at ' : 'New lead at ') + name + (cid ? ' · ' + S.caveName(cid) : ''), body: form, wide: true,
       text: rec ? `Found ${rec.created.who}, ${when(rec.created.t)} · last change ${rec.updated.who}, ${when(rec.updated.t)}${rec.source ? ' · from ' + rec.source : ''}` : (item && item.ld ? 'From the survey file; saving makes it a project lead.' : null),
       buttons: [{ label: 'Cancel', value: null }, ...(rec ? [{ label: 'Remove', value: 'rm', danger: true }] : []), { label: 'Save', value: 'ok', primary: true }] });
     if (!r) return;
     const id = (item && item.id) || FL.uid(12);
-    if (r.button === 'rm') { await record('lead.del', { lead: id, base: rec ? rec.heads : [] }); return; }
+    if (r.button === 'rm') { await S.record('lead.del', { lead: id, base: rec ? rec.heads : [] }); return; }
     const changed = {}, prev = {};
     const norm = v => (v === undefined || v === '' || (Array.isArray(v) && !v.length)) ? null : v;
     FL.LEAD_FIELDS.forEach(fd => {
@@ -428,7 +431,7 @@
     const data = { lead: id, fields: changed, base: rec ? rec.heads : [] };
     if (!rec) { data.target = (item && item.target) || FL.T.station(cid, name); if (item && item.ld) data.source = 'export'; }
     else data.prev = prev;
-    await record('lead.set', data);
+    await S.record('lead.set', data);
   }
   function leadEl(cid, name, x) {
     const d = el('div', 'pj-item' + (x.active ? '' : ' closed') + (x.rec && x.rec.conflicts ? ' conflict' : ''));
@@ -437,7 +440,7 @@
     if (x.fields.tie) d.appendChild(el('div', 'pj-sub', ['pin', x.fields.tie]));
     if (x.rec) d.appendChild(el('div', 'pj-sub', `${x.rec.updated.who} · ${when(x.rec.updated.t)}${x.rec.sightings ? ' · seen ' + x.rec.sightings.length + '×' : ''}`));
     else d.appendChild(el('div', 'pj-sub', 'from the survey file'));
-    d.addEventListener('click', () => editLead(cid, name, x));
+    d.addEventListener('click', () => editLead(cid, name, x, x.store));
     return d;
   }
 
@@ -448,6 +451,6 @@
 
   Object.assign(X, {
     multiCave, editSystem, caveSystems, systemsDialog,
-    imps, caveFor, caveName, partsOf, linkFile, editCave, stationsOf, stationPos, leadsAt, allLeads, leadSummary, targetLabel, editNote, noteEl, editLead, leadEl,
+    imps, caveFor, caveName, partsOf, linkFile, editCave, stationsOf, stationPos, leadsAt, allLeads, leadSummary, targetLabel, editNote, noteEl, editLead, leadEl, exportLeadId, exportLeadFields,
   });
 })();

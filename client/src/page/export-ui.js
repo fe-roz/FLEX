@@ -630,23 +630,35 @@
           if (!p || !inBox(p[0], p[1])) continue;
           areaLabels.push({ text: String(lb.text), cave: imp.name || '', lon: p[0], lat: p[1], elev: p[2] });
         }
-        // Open leads ride with the survey of the station they hang off.
+        // Open leads ride with the survey of the station they hang off: the file's own, and FLEX's
+        // (the open project's and My data's, flex-leads.js). A file lead that was adopted into either is
+        // exported once, from its record (closed or removed: not at all).
         const stnByName = new Map();
         for (const s of imp.parsed.stations || []) if (!stnByName.has(s.name)) stnByName.set(s.name, s);
+        const FX = window._flexLeads ? window._flexLeads.exportFor(imp, stnByName) : null;
+        const addLead = (s, station, f) => {
+          if (!s || hidden(s.survey || '')) return;
+          const p = ll(s);
+          if (!p || !inBox(p[0], p[1])) return;
+          const lead = { station, lon: p[0], lat: p[1], elev: p[2] };
+          if (f.desc) lead.description = String(f.desc);
+          if (f.w != null && isFinite(f.w)) lead.width = Number(f.w);
+          if (f.h != null && isFinite(f.h)) lead.height = Number(f.h);
+          if (f.date) lead.date = String(f.date);
+          if (f.status) lead.status = String(f.status);
+          if (f.source) lead.source = String(f.source);
+          if (f.id) lead.id = String(f.id);
+          if (f.priority) lead.priority = String(f.priority);
+          const sv = entryFor(s.survey || '');
+          (sv.leads || (sv.leads = [])).push(lead);
+        };
         for (const ld of imp.parsed.leads || []) {
           if (ld.done) continue;
           const s = stnByName.get(ld.station);
-          if (!s || hidden(s.survey || '')) continue;
-          const p = ll(s);
-          if (!p || !inBox(p[0], p[1])) continue;
-          const lead = { station: ld.station, lon: p[0], lat: p[1], elev: p[2] };
-          if (ld.d) lead.description = String(ld.d);
-          if (ld.w != null && isFinite(ld.w)) lead.width = ld.w;
-          if (ld.h != null && isFinite(ld.h)) lead.height = ld.h;
-          if (ld.t) lead.date = String(ld.t);
-          const sv = entryFor(s.survey || '');
-          (sv.leads || (sv.leads = [])).push(lead);
+          if (FX && FX.adopted(ld, s)) continue;
+          addLead(s, ld.station, { desc: ld.d, w: ld.w, h: ld.h, date: ld.t, status: 'open', source: 'file' });
         }
+        if (FX) for (const fl of FX.leads) addLead(fl.s, fl.station, { desc: fl.fields.desc, w: fl.fields.w, h: fl.fields.h, date: fl.fields.found, status: fl.status, source: 'flex', id: fl.id, priority: fl.fields.priority });
       });
     } catch(e) { console.warn('Cave export (parsed) error:', e); }
 

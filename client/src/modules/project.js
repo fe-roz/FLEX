@@ -17,7 +17,7 @@
   'use strict';
   const X = window._pjParts;
   if (!X) return;                          // project-ui-kit.js found no flexlib.js (it said so)
-  const { pj, filesToPages, setProject, archive, FL, el, btn, esc, when, toast, dialog, choose, record, render, refreshCard, openCard, flyTo, caveFor, caveName, partsOf, stationPos, stationsOf, docEl, docOpen, docByPage, describe, headsFor, targetLabel, editNote, noteEl, declAt, yearOf, imps, who, ensureAuthor, linkFile, editCave, newProject, refresh, editLead, renameProject, editDescription, importSync, acceptAbove, reload, post, closeCard, stopVideos, videoEl, fileOpen, galleryClose, addPages, editTags, leadEl, leadsAt, leadSummary, blobUrl, docSub, storeBytes, pickFiles, cardTarget, $, api, loadAll, onSelect, drawField, drawLeads, banner } = X;
+  const { pj, filesToPages, setProject, archive, FL, el, btn, esc, when, toast, dialog, choose, record, render, refreshCard, openCard, flyTo, caveFor, caveName, partsOf, stationPos, stationsOf, docEl, docOpen, docByPage, describe, headsFor, targetLabel, editNote, noteEl, declAt, yearOf, imps, who, ensureAuthor, linkFile, editCave, newProject, refresh, editLead, renameProject, editDescription, importSync, acceptAbove, reload, post, closeCard, stopVideos, videoEl, fileOpen, galleryClose, addPages, editTags, leadEl, leadsAt, leadSummary, blobUrl, docSub, storeBytes, pickFiles, cardTarget, $, api, loadAll, onSelect, drawField, drawLeads, banner, exportLeadId, exportLeadFields } = X;
   delete window._pjParts;
 
   pj._filesToPages = filesToPages;               // tests
@@ -29,7 +29,7 @@
     caveFor, caveName, partsOf, stationPos, stationsOf, docEl, docOpen, docByPage, describe, headsFor, targetLabel,
     editNote, noteEl, declAt, yearOf, imps, who, ensureAuthor, linkFile, editCave, newProject, refresh, editLead, renameProject, editDescription, setProject, importSync, acceptAbove, reload, archive, post, closeCard,
     stopVideos, videoEl, fileOpen, galleryClose, addPages, editTags, leadEl, leadsAt, leadSummary, blobUrl, docSub,
-    filesToPages, storeBytes, pickFiles, cardTarget };
+    filesToPages, storeBytes, pickFiles, cardTarget, drawLeads, exportLeadId, exportLeadFields };
 
   // ── What the export takes from the project (index.html _collectCavesInBbox) ─
   window._pjExport = () => pj.pid ? {
