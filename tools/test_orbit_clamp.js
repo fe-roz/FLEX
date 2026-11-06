@@ -63,7 +63,7 @@ function world(opts) {
   const env = { THREE, controls, camera, stationMap, terrainScale: opts.terrainScale || 3000 };
   const api = new Function(...Object.keys(env),
     blk[0] + '\n_orbitTerrainZ = ' + JSON.stringify(opts.terrainZ || null) + ';' +
-    '\n_orbitXY = ' + JSON.stringify(opts.terrainXY === undefined ? [-500, -500, 500, 500] : opts.terrainXY) + ';' +
+    '\n_orbitXY = ' + JSON.stringify(opts.terrainXY === undefined ? [-1e7, -1e7, 1e7, 1e7] : opts.terrainXY) + ';' +
     '\nupdateOrbitZRange();' +
     '\nreturn { updateOrbitZRange, clampOrbitTarget, orbitAimInRange,' +
     ' range: () => [_orbitZMin, _orbitZMax] };')(...Object.values(env));
@@ -209,6 +209,24 @@ function panRun(pitch, code, frames) {
   ok('far off the map: centre in the band', p.z >= 30 - 1e-9 && p.z <= 310 + 1e-9, p.z);
   const inside = w.orbitAimInRange(new THREE.Vector3(0, 0, 150), new THREE.Vector3(0, 1, 0), 300);
   ok('over the map: centre unchanged', inside.distanceTo(new THREE.Vector3(0, 300, 150)) < 1e-9, inside.toArray());
+}
+
+// ── Panning far sideways: held over the map plus a margin, the view rigid ────
+{
+  const w = world({ terrainZ: [100, 300], stations: [40], terrainXY: [-500, -400, 500, 400] });
+  aim(w, new THREE.Vector3(0, 0, 200), 50, 400);
+  const off0 = w.camera.position.clone().sub(w.controls.target);
+  for (let i = 0; i < 400; i++) { key(w.el, 'ArrowRight'); frame(w); }
+  const pad = Math.max(25, 0.05 * 1000);
+  ok('pan right for a long time: target stops at the edge + margin', Math.abs(w.controls.target.x - (500 + pad)) < 1e-6, w.controls.target.x);
+  ok('…and the view keeps its distance and tilt', w.camera.position.clone().sub(w.controls.target).distanceTo(off0) < 1e-3);
+  for (let i = 0; i < 600; i++) { key(w.el, 'ArrowUp'); frame(w); }
+  ok('pan up/down too: inside the box + margin', w.controls.target.y <= 400 + pad + 1e-6 && w.controls.target.y >= -400 - pad - 1e-6, w.controls.target.y);
+  const tiny = world({ terrainZ: [0, 10], stations: [], terrainXY: [0, 0, 10, 10] });
+  tiny.controls.target.set(500, 500, 5); tiny.camera.position.set(500, 400, 50); tiny.controls.update();
+  tiny.clampOrbitTarget(true);
+  ok('small map: at least a 25 m margin', Math.abs(tiny.controls.target.x - 35) < 1e-6 && Math.abs(tiny.controls.target.y - 35) < 1e-6, tiny.controls.target.toArray());
+  ok('wiring: fly/crane keeps the camera over the map too', /if \(_orbitXY\) \{ {8}\/\/ fly \/ crane/.test(html.replace(/\s+/g, ' ').replace(/ {2,}/g, ' ')) || /fly \/ crane: the camera stays over the map/.test(html));
 }
 
 // ── Wiring in viewer.html ────────────────────────────────────────────────────

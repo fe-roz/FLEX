@@ -14,6 +14,11 @@ example coordinates.
         [--extent-km 6]      a larger terrain (default 1 x 0.8 km); over 5 km it is
                              tiled the way the exporter does (tex_tiles.py)
         [--flex-leads]       one lead kept in FLEX on the main line (status, source, id, priority)
+        [--docs]             a project (id pjtest0001, cave id cavetest01) and three documents with
+                             page images, written the way the export does (docs.json, docs_<sha>.jpg,
+                             inline in viewer.html); docs_input.json beside the export is what the
+                             server would have handed the exporter
+        [--docs-inline-cap N] bytes of page images inlined in viewer.html (default: the exporter's)
         [--field-fixture]    extra data for tools/test_viewer_field.js: leads whose
                              survey order differs from the straight-line one, shots
                              with no from/to names, a bare survey code beside the
@@ -32,7 +37,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 from export_terrain import export_glb, latlon_to_utm, utm_zone_for
 from tex_tiles import plan_tiles, tile_name, meta_entry
-from viewer_inline import build_inline_viewer, local_viewer_libs
+from viewer_inline import build_inline_viewer, local_viewer_libs, load_docs, docs_inline_json, DOCS_INLINE_CAP
 from cave_walls import pack_walls
 
 LAT0, LON0 = 45.1234, -100.5678          # the project's example place
@@ -196,12 +201,51 @@ def caves_json(e0, n0, zone, fixture=False, flex_leads=False):
     return out
 
 
+PJ_ID, CAVE_ID, OTHER_CAVE_ID = 'pjtest0001', 'cavetest01', 'caveother9'
+
+
+def make_docs(out):
+    """Three documents of project PJ_ID (a station, the cave, the inbox), page images made here.
+    Returns the exporter's docs input ({project, caves, entries, pages})."""
+    import hashlib
+    pages_dir = out / '_pages'
+    pages_dir.mkdir(exist_ok=True)
+    def page(label, color, w=640, h=480):
+        im = Image.new('RGB', (w, h), color)
+        d = ImageDraw.Draw(im)
+        d.rectangle([20, 20, w - 20, h - 20], outline=(255, 255, 255), width=4)
+        d.text((40, 40), label, fill=(255, 255, 255))
+        buf = io.BytesIO(); im.save(buf, 'JPEG', quality=80)
+        data = buf.getvalue()
+        sha = hashlib.sha256(data).hexdigest()
+        f = pages_dir / f'{sha}.jpg'
+        f.write_bytes(data)
+        return {'h': sha, 'ext': 'jpg', 'w': w, 'ht': h, 'name': label + '.jpg'}, str(f)
+    p1, f1 = page('field notes p1', (120, 60, 60)); p2, f2 = page('field notes p2', (60, 120, 60))
+    p3, f3 = page('cave sketch', (60, 60, 120)); p4, f4 = page('trip photo', (110, 110, 50))
+    def add(seq, doc, title, kind, tags, pages):
+        return {'id': f'dtest.{seq}', 'dev': 'dtest', 'seq': seq, 't': f'2026-10-0{seq}T10:00:00.000Z', 'who': 'Test', 'op': 'doc.add',
+                'doc': doc, 'title': title, 'kind': kind, 'date': '2026-09-20', 'pages': pages, 'tags': tags}
+    entries = [
+        add(1, 'docnotes01', 'Field notes, A3 trip', 'notes', [f'project:{PJ_ID}', f'station:{CAVE_ID}:A3'], [p1, p2]),
+        add(2, 'docsketch1', 'Plan sketch', 'sketch-plan', [f'project:{PJ_ID}', f'cave:{CAVE_ID}'], [p3]),
+        add(3, 'docinbox01', 'Unsorted photo', 'photo', [f'project:{PJ_ID}'], [p4]),
+        add(4, 'docother01', 'Other cave notes', 'notes', [f'project:{PJ_ID}', f'cave:{OTHER_CAVE_ID}'], [p4]),
+    ]
+    # (the server drops documents only about caves that are not in the export; this one stays out here too)
+    entries = [e for e in entries if e['doc'] != 'docother01']
+    return {'project': {'id': PJ_ID, 'name': 'Test Project'}, 'caves': [{'id': CAVE_ID, 'name': 'Cave Ridge'}], 'entries': entries,
+            'pages': [dict(p, path=f) for p, f in ((p1, f1), (p2, f2), (p3, f3), (p4, f4))]}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('out_dir')
     ap.add_argument('--name', default='Cave Ridge')
     ap.add_argument('--extent-km', type=float, default=0, help='terrain size, long side (default 1 km x 0.8 km)')
     ap.add_argument('--field-fixture', action='store_true')
+    ap.add_argument('--docs', action='store_true', help='a project with documents (see above)')
+    ap.add_argument('--docs-inline-cap', type=int, default=DOCS_INLINE_CAP)
     ap.add_argument('--flex-leads', action='store_true', help='a lead kept in FLEX (source flex, status, id, priority) on the main line')
     a = ap.parse_args()
     global W, H
@@ -226,6 +270,9 @@ def main():
         'extent_utm': [e0 - W / 2, n0 - H / 2, e0 + W / 2, n0 + H / 2],
         'hillshade': None, 'hillshade_cell_m': None, 'terrain': 'lidar', 'terrain_cell_m': 12.5,
     }
+    if a.docs:
+        caves['meta']['project'] = {'id': PJ_ID, 'name': 'Test Project'}
+        caves['meta']['caves'] = [{'id': CAVE_ID, 'name': 'Cave Ridge'}]
     tiles = []
     cols, rows = plan_tiles(W, H)
     if cols * rows > 1:
@@ -248,13 +295,26 @@ def main():
     import base64
     tex_b64 = base64.b64encode((out / 'tex_sat.jpg').read_bytes()).decode('ascii')
     hs_b64 = base64.b64encode((out / 'tex_hs.jpg').read_bytes()).decode('ascii') if tiles else None
+    docs_files, docs_json = [], None
+    if a.docs:
+        din = make_docs(out)
+        (out / 'docs_input.json').write_text(json.dumps(din), encoding='utf-8')
+        side, docs_files = load_docs(out / 'docs_input.json', progress=lambda m: None)
+        (out / 'docs.json').write_text(json.dumps(side, separators=(',', ':')), encoding='utf-8')
+        for zname, fp in docs_files:
+            shutil.copyfile(fp, out / zname)
+        docs_json = docs_inline_json(side, lambda n: dict(docs_files)[n].read_bytes(), a.docs_inline_cap)
     html = build_inline_viewer(out / 'terrain.glb', tex_b64, caves, libs, progress=lambda m: None,
-                               walls_bytes=data, hs_b64=hs_b64)
+                               walls_bytes=data, hs_b64=hs_b64, docs_json=docs_json)
     (out / 'viewer.html').write_text(html, encoding='utf-8')
     slug = a.name.replace(' ', '-')
     with zipfile.ZipFile(out.parent / f'FLEX-{slug}.zip', 'w', zipfile.ZIP_DEFLATED) as zf:
         for name in ('terrain.glb', 'tex_sat.jpg', 'walls.bin', 'caves.json', 'viewer.html', *(['tex_hs.jpg'] if tiles else []), *tiles):
             zf.write(out / name, name)
+        if a.docs:
+            zf.write(out / 'docs.json', 'docs.json')
+            for zname, _ in docs_files:
+                zf.write(out / zname, zname)
         for p in sorted((out / 'libs').glob('*.js')):
             zf.write(p, 'libs/' + p.name)
     print(f'wrote {out} and {out.parent / f"FLEX-{slug}.zip"}')
