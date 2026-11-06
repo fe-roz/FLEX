@@ -64,6 +64,7 @@ export function createContextMenuElement({ document: doc = document } = {}) {
   menu.className = 'map-context-menu';
   menu.innerHTML = `
     <div id="contextMenuSelect"></div>
+    <div id="contextMenuLeads"></div>
     <div class="context-menu-coords" id="contextMenuCoords"
          data-action="copyCoords" title="Click to copy coordinates">--</div>
     <div class="context-menu-divider"></div>
@@ -263,12 +264,18 @@ export class ContextMenuController {
   _updateMenuContent() {
     const { lat, lng } = this.currentCoords;
     const selEl = this.menuElement.querySelector('#contextMenuSelect');
+    const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const row = (it, i) => `<div class="context-menu-item" data-action="select" data-i="${i}"><span class="context-menu-text">${esc(it.label)}</span></div>`;
     if (selEl) {
-      const items = this._selItems || [];
-      const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-      selEl.innerHTML = items.length ? '<div class="context-menu-head">Select</div>' +
-        items.map((it, i) => `<div class="context-menu-item" data-action="select" data-i="${i}"><span class="context-menu-text">${esc(it.label)}</span></div>`).join('') +
-        '<div class="context-menu-divider"></div>' : '';
+      const items = (this._selItems || []).map((it, i) => [it, i]).filter(([it]) => !it.lead);
+      selEl.innerHTML = items.length ? '<div class="context-menu-head">Select</div>' + items.map(([it, i]) => row(it, i)).join('') + '<div class="context-menu-divider"></div>' : '';
+    }
+    // Items with lead: true (flex-leads.js: Add lead at a station) get their own section.
+    let leadEl = this.menuElement.querySelector('#contextMenuLeads');
+    if (!leadEl && selEl) { leadEl = this.document.createElement('div'); leadEl.id = 'contextMenuLeads'; selEl.after(leadEl); }
+    if (leadEl) {
+      const items = (this._selItems || []).map((it, i) => [it, i]).filter(([it]) => it.lead);
+      leadEl.innerHTML = items.length ? '<div class="context-menu-head">Leads</div>' + items.map(([it, i]) => row(it, i)).join('') + '<div class="context-menu-divider"></div>' : '';
     }
     const zoom = altitudeToZoom(this.currentAltitude, lat);
 

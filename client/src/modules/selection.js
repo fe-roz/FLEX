@@ -165,6 +165,8 @@
     segsOf(h).forEach(sid => items.push({ label: 'Segment ' + (window._pjSeg ? window._pjSeg.segName(sid) : sid), run: () => show(Object.assign(at('segment', h, sid), { sid })) }));
     const st = h.station ? [h.station] : (h.ends || []);
     st.forEach(n => items.push({ label: 'Station ' + n, run: () => show(Object.assign(at('station', Object.assign({}, h, { near: n })), { station: n })) }));
+    // Add a lead at a station (flex-leads.js: the project's, or My data's without a project / for a cave outside it).
+    if (window._flexLeads) st.forEach(n => items.push({ lead: true, label: 'Add lead at ' + n + '…', run: () => window._flexLeads.add(h.imp, h.code, n) }));
     return items;
   };
 

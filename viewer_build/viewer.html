@@ -5216,9 +5216,12 @@ function ffNoteEl(n) {
 // A lead from the export (Breakout / Walls import) becomes a project lead the
 // first time someone saves it; its id comes from cave, station and
 // description, so two phones adopting the same lead make the same record.
-const ffExportLeadId = (cid, ld) => 'x' + ffFnv(cid + '|' + (ld.station || '') + '|' + (ld.description || ''));
+// A lead kept in FLEX (source "flex", from the desktop's project or My data) brings its own id, so a project
+// synced to this phone and the export never show it twice.
+const ffExportLeadId = (cid, ld) => ld.id ? String(ld.id) : 'x' + ffFnv(cid + '|' + (ld.station || '') + '|' + (ld.description || ''));
 function ffExportLeadFields(ld) {
-  const f = { status: 'open' };
+  const f = { status: (ld.status && FL.LEAD.status.some(s => s[0] === ld.status)) ? ld.status : 'open' };
+  if (ld.priority) f.priority = String(ld.priority);
   if (ld.description) f.desc = ld.description;
   if (ld.width != null && isFinite(ld.width)) f.w = +(+ld.width).toFixed(2);
   if (ld.height != null && isFinite(ld.height)) f.h = +(+ld.height).toFixed(2);
@@ -7081,6 +7084,7 @@ function selectStation(st) {
     if (ld.description) html += `<div class="fx-row"><span class="val">${esc(ld.description)}</span></div>`;
     if (size) html += `<div class="fx-row"><span class="lbl">Size:</span> <span class="val">${size}</span></div>`;
     if (ld.date) html += `<div class="fx-row"><span class="lbl">Noted:</span> <span class="val">${esc(ld.date)}</span></div>`;
+    if (ld.source === 'flex') html += `<div class="fx-row"><span class="lbl">Kept in FLEX:</span> <span class="val">${esc(typeof FL !== 'undefined' && FL.statusLabel ? FL.statusLabel(ld.status || 'open') : (ld.status || 'open'))}${ld.priority ? ' · P' + esc(ld.priority) : ''}</span></div>`;
   });
 
   const titleEl2 = document.getElementById('info-title');

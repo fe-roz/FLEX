@@ -271,7 +271,7 @@ export function setupCaveDisplay({
     for (const id of imp.cesiumIds) {
       const e = cesiumViewer.entities.getById(id);
       if (!e) continue;
-      e.show = _isLeadEntity(e) ? vis && _leadsVisible() : _isAreaLabelEntity(e) ? _areaLabelsShown(imp) : vis;
+      e.show = _isLeadEntity(e) ? vis && _leadsVisible() && !e._flexHidden : _isAreaLabelEntity(e) ? _areaLabelsShown(imp) : vis;
     }
     if (imp._linePrim) imp._linePrim.show = vis;
     if (imp._stationLayer) {
@@ -644,6 +644,7 @@ export function setupCaveDisplay({
       imp._bounds = allPos.length ? Cesium.BoundingSphere.fromPoints(allPos) : null;
       _buildCaveStations(imp);
       _addCaveLeads(imp, convertFn);
+      if (window._flexLeads) setTimeout(() => window._flexLeads.redraw(), 0);   // FLEX leads sit at the stations as they are now
       _addCaveAreaLabels(imp, convertFn);
       _buildCavePassages(imp, convertFn);
     }
@@ -675,6 +676,7 @@ export function setupCaveDisplay({
     _caveImports.splice(i, 1);
     _renderCaveList();
     _caveColourChanged();
+    if (window._flexLeads) window._flexLeads.redraw();
     if (_caveImports.length === 0) {
       const chk = document.getElementById('lp-cave-toggle');
       if (chk) chk.checked = false;

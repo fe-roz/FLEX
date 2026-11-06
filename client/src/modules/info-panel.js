@@ -454,22 +454,36 @@
       edit: refEdit(ref) || (() => window._pjf && window._pjf.editFeature(id)), hideInfo: true, canAdd: true,
     };
   }
+  // A lead: the project's, My data's (flex-leads.js) or one of a survey file's own. A lead at a station sits at the
+  // station's own 3D place (cave data keeps its height); at a surface point, at the point.
   function leadSubject(id) {
-    const L = pj.P && pj.P.leads[id];
-    if (!L || L.deleted) return null;
-    const at = A.targetLabel(L.target), p = FL.parseTarget(L.target), f = p.kind === 'feature' ? pj.P.features[p.feature] : null;
-    const facts = [['Status', FL.statusLabel(L.fields.status || 'open')], ['At', at]];
-    if (L.fields.priority) facts.push(['Priority', String(L.fields.priority)]);
-    if (L.fields.types && L.fields.types.length) facts.push(['Needs', L.fields.types.join(', ')]);
-    const pos = f && f.coords && f.coords[0] ? f.coords[0] : null;
+    const FX = window._flexLeads, hit = FX ? FX.lookup(id) : (pj.P && pj.P.leads[id] ? { L: pj.P.leads[id], row: leadItem(pj.P.leads[id]), store: undefined } : null);
+    if (!hit) return null;
+    const L = hit.L, store = hit.store, mine = !!(store && store.mine), isFile = !!hit.file;
+    const at = FX ? FX.labelOf(L.target) : A.targetLabel(L.target), p = FL.parseTarget(L.target), f = p.kind === 'feature' ? pj.P.features[p.feature] : null;
+    const fields = L.fields || {};
+    const facts = [['Status', FL.statusLabel(fields.status || 'open')], ['At', at]];
+    if (mine) facts.push(['Kept in', 'My data']);
+    else if (isFile) facts.push(['From', 'the survey file']);
+    if (fields.priority) facts.push(['Priority', String(fields.priority)]);
+    if (fields.types && fields.types.length) facts.push(['Needs', fields.types.join(', ')]);
+    if (fields.w != null || fields.h != null) facts.push(['Size', `${fields.h != null ? fmtHt(fields.h) + ' high' : '?'} × ${fields.w != null ? fmtHt(fields.w) + ' wide' : '?'}`]);
+    if (fields.found) facts.push(['Noted', String(fields.found)]);
+    let pos = f && f.coords && f.coords[0] ? f.coords[0] : null;
+    if (!pos && p.kind === 'station' && FX && window.Cesium) { const sp = FX.stationPos(p.cave, p.name); if (sp) pos = cartoOf(sp); }
     if (pos) facts.push(...posFacts(pos, 'point', true, true));
-    const t = FL.T.lead(id);
+    const t = FL.T.lead(id), rec = !mine && !isFile;
     return {
-      key: 'lead:' + id, kind: 'lead', icon: '❓', title: 'Lead at ' + at, line: A.leadSummary(L.fields), facts, desc: L.fields.desc || '', target: t,
+      key: 'lead:' + id, kind: 'lead', icon: '❓', title: 'Lead at ' + (p.kind === 'station' ? p.name : at), line: A.leadSummary(fields), facts, desc: fields.desc || '', target: t,
       pos, self: { lead: id, target: L.target }, ref: f && FE() ? FE().refOf({ source: 'project', id: f.id }) : null, refIsHost: true,
-      notes: FL.notesOn(pj.P, t), leads: [], docs: uniq(docsOn(t).concat(f ? docsOn(L.target) : [])),
-      edit: () => A.editLead(null, at, leadItem(L)), hideInfo: true, canAdd: true,
+      notes: rec ? FL.notesOn(pj.P, t) : [], leads: [], docs: rec ? uniq(docsOn(t).concat(f ? docsOn(L.target) : [])) : [],
+      edit: () => A.editLead(p.kind === 'station' ? p.cave : null, p.kind === 'station' ? p.name : at, hit.row, store), hideInfo: true, canAdd: rec,
     };
+  }
+  // A survey file's own lead marker ("?" from a Breakout / Walls file).
+  function fileLeadSubject(ent) {
+    const FX = window._flexLeads, id = FX && FX.fileLeadIdOf(ent);
+    return id ? leadSubject(id) : null;
   }
   // A cave, survey or station: from the card in the details panel.
   function cardSubject() {
@@ -535,6 +549,7 @@
   }
   function subjectOf(ent) {
     if (!ent) return null;
+    if (prop(ent, 'isCaveLead')) return fileLeadSubject(ent);
     if (prop(ent, 'isCaveSurvey') || prop(ent, 'isFieldStation') || prop(ent, 'isProjectFootprint') || ent._caveLazy) return null;
     if (prop(ent, 'isProjectFeature')) { if (window._pjfState && window._pjfState.draw) return null; return featureSubject(prop(ent, 'featureId')); }
     if (prop(ent, 'isFeatureLead')) return leadSubject(prop(ent, 'leadId'));

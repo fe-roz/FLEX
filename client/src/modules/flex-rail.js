@@ -175,7 +175,7 @@
     const b = e.target.closest('button');
     if (!b || b.disabled) return;
     // The project panels are drawn by project.js; draw them as they open.
-    if (b.hasAttribute('data-pj-only') && window._pjApi) setTimeout(() => window._pjApi.render(), 0);
+    if ((b.hasAttribute('data-pj-only') || b.dataset.target === '#leadsCollapsible') && window._pjApi) setTimeout(() => window._pjApi.render(), 0);
     setTimeout(sync, 0);                               // after the accordion handler
   });
 

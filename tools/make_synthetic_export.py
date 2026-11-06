@@ -13,6 +13,7 @@ example coordinates.
     python tools/make_synthetic_export.py OUT_DIR [--name "Cave Ridge"]
         [--extent-km 6]      a larger terrain (default 1 x 0.8 km); over 5 km it is
                              tiled the way the exporter does (tex_tiles.py)
+        [--flex-leads]       one lead kept in FLEX on the main line (status, source, id, priority)
         [--field-fixture]    extra data for tools/test_viewer_field.js: leads whose
                              survey order differs from the straight-line one, shots
                              with no from/to names, a bare survey code beside the
@@ -141,8 +142,7 @@ LOOP = [
 CODE_C1 = [('C1', 60, 100, 5, 2, 2, 3, 1), ('C2', 70, 110, 5, 2, 2, 3, 1)]
 CODE_C2 = [('A1', 300, 300, 5, 2, 2, 3, 1), ('C3', 310, 310, 5, 2, 2, 3, 1)]
 
-
-def caves_json(e0, n0, zone, fixture=False):
+def caves_json(e0, n0, zone, fixture=False, flex_leads=False):
     known = {}
     main = place(MAIN, known)
     branch = place(BRANCH, known)
@@ -179,6 +179,9 @@ def caves_json(e0, n0, zone, fixture=False):
             sv['leads'] = [{'station': 'A10', 'xyz': known['A10'], 'description': 'Water crawl', 'width': 0.6, 'height': 0.4}]
         if fixture and name == 'Side loop':
             sv['leads'] = [{'station': 'X1', 'xyz': known['X1'], 'description': 'Dig at the end', 'width': 0.5, 'height': 0.5}]
+        if flex_leads and name == 'Main line':          # a lead kept in FLEX (project / My data), as the desktop export writes it
+            sv['leads'] = [{'station': 'A10', 'xyz': known['A10'], 'description': 'Draughting squeeze', 'width': 0.4, 'height': 0.3,
+                            'date': '2026-10-02', 'status': 'confirmed', 'source': 'flex', 'id': 'flexlead-1', 'priority': '2'}]
         if name == 'North branch':
             sv['leads'] = [{'station': 'B3', 'xyz': known['B3'], 'description': 'Tight crawl continues north, air',
                             'width': 0.4, 'height': 0.3, 'date': '2026-09-01'}]
@@ -199,6 +202,7 @@ def main():
     ap.add_argument('--name', default='Cave Ridge')
     ap.add_argument('--extent-km', type=float, default=0, help='terrain size, long side (default 1 km x 0.8 km)')
     ap.add_argument('--field-fixture', action='store_true')
+    ap.add_argument('--flex-leads', action='store_true', help='a lead kept in FLEX (source flex, status, id, priority) on the main line')
     a = ap.parse_args()
     global W, H
     if a.extent_km:
@@ -211,7 +215,7 @@ def main():
     v, f, uv = terrain()
     export_glb(v, f, uv, out / 'terrain.glb', progress=lambda m: None)
     texture(out / 'tex_sat.jpg')
-    caves = caves_json(e0, n0, zone, a.field_fixture)
+    caves = caves_json(e0, n0, zone, a.field_fixture, a.flex_leads)
     data, desc = pack_walls(caves.pop('passages'))
     (out / 'walls.bin').write_bytes(data)
     caves['walls'] = desc

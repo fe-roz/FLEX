@@ -14,7 +14,7 @@
     const get = k => (pr && pr[k] ? pr[k].getValue() : null);
     if (!pr) { closeCard(); if (window._sel) window._sel.clear(); return; }
     if (get('isCaveSurvey') && window._sel && window._sel.active()) return;     // selection.js chose what to show
-    if (get('isFeatureLead')) { closeCard(); return; }        // the details panel shows it (info-panel.js); ✏️ there edits it
+    if (get('isFeatureLead') || get('isCaveLead')) { closeCard(); return; }        // the details panel shows it (info-panel.js); ✏️ there edits it
     if (get('isFieldStation')) { openCard({ cid: get('cave'), name: get('stationName'), field: true }); return; }
     if (!get('isCaveSurvey')) { closeCard(); return; }
     const imp = imps().find(i => i.name === get('surveyName'));
@@ -38,12 +38,14 @@
     head.appendChild(btn('✕', closeCard, 'small'));
     box.appendChild(head);
     if (!pj.pid) {
-      box.appendChild(el('div', 'pj-note', 'Notes, leads and documents belong to a project: open Project to choose or create one.'));
+      box.appendChild(el('div', 'pj-note', 'Notes and documents belong to a project: open Project to choose or create one. A lead can be kept in My data without one.'));
+      if (window._flexLeads) window._flexLeads.card(box, c);
       return;
     }
     if (!c.cid) {
       box.appendChild(el('div', 'pj-note', `“${c.imp ? c.imp.name : 'This file'}” isn’t a cave of “${pj.P.name || 'this project'}” yet.`));
       if (c.imp) box.appendChild(btn('Link it to a cave…', async () => { await linkFile(c.imp); c.cid = caveFor(c.imp, c.code); renderCard(); }, 'primary'));
+      if (window._flexLeads) window._flexLeads.card(box, c);          // a lead there goes to My data
       return;
     }
     // Picked with selection.js: Details / Files / History.
