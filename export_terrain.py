@@ -29,7 +29,7 @@ VIEWER_LIBS = {
         'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
 }
 
-from viewer_inline import build_inline_viewer   # stdlib only (tools/rebuild_viewer.py)
+from viewer_inline import build_inline_viewer, load_docs, docs_inline_json   # stdlib only (tools/rebuild_viewer.py)
 from tex_tiles import plan_tiles, make_tiles, meta_entry   # texture tiles for areas over ~5 km
 
 import numpy as np
@@ -2080,6 +2080,7 @@ def main():
     ap.add_argument('--bbox',        required=True, nargs=4, type=float,
                     metavar=('minLon','minLat','maxLon','maxLat'))
     ap.add_argument('--caves',       default=None,  help='Path to caves.json (PLT lines)')
+    ap.add_argument('--docs',        default=None,  help='Path to the documents file (export_docs.js): entries + page images to carry in the zip')
     ap.add_argument('--polygon',     default=None,
                     help='Export only inside this polygon: JSON [[lon, lat], ...]. A hard cut '
                          '(terrain ends exactly at the line); the frame is the box around it, '
@@ -2526,11 +2527,23 @@ def main():
                     walls_bytes = None
             zf.writestr('caves.json', json.dumps(caves_out))
 
+            # Documents of the project that belong to these caves: docs.json + one file per page
+            docs_json = None
+            if args.docs and os.path.exists(args.docs):
+                docs_side, docs_files = load_docs(args.docs, progress=lambda m: print(f"[6/7] {m}"))
+                if docs_side['entries']:
+                    zf.writestr('docs.json', json.dumps(docs_side, separators=(',', ':')))
+                    for zname, fpath in docs_files:
+                        zf.write(fpath, zname, compress_type=zipfile.ZIP_STORED)
+                    docs_json = docs_inline_json(docs_side, lambda n: dict(docs_files)[n].read_bytes())
+                    print(f"[6/7] Documents: {len(docs_side['entries'])} entries, {len(docs_files)} page images "
+                          f"({sum(p['size'] for p in docs_side['pages']) // 1024} KB)")
+
             # Viewer HTML: fully self-contained (Three.js + GLB + textures + caves all inline)
             inline_html = build_inline_viewer(
                 glb_path, tex_b64, caves_out, viewer_libs,
                 progress=lambda m: print(f"[6/7] {m}"),
-                hs_b64=hs_b64, walls_bytes=walls_bytes)
+                hs_b64=hs_b64, walls_bytes=walls_bytes, docs_json=docs_json)
             zf.writestr('viewer.html', inline_html.encode('utf-8'))
 
             # serve.bat (Windows) — double-click to start local HTTP server

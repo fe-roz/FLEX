@@ -94,6 +94,16 @@ const server = http.createServer((req, res) => {
         handleEntwineStop(req, res);
     } else if (sanitizedPath === '/api/export/terrain' && req.method === 'POST') {
         handleExportTerrain(req, res);
+    } else if (sanitizedPath === '/api/export/docs-info' && req.method === 'GET') {
+        // How many documents and page images "Include documents" would carry (export_docs.js)
+        try {
+            const q = parsedUrl.query || {};
+            const pid = String(q.project || '');
+            if (!/^[A-Za-z0-9_-]{1,64}$/.test(pid)) return jsonResponse(res, { ok: true, docs: 0, pages: 0, bytes: 0 });
+            const caves = q.caves ? String(q.caves).split(',').filter(c => /^[A-Za-z0-9_-]{1,64}$/.test(c)) : null;
+            const c = require('./export_docs').collect(library, pid, caves);
+            jsonResponse(res, { ok: true, docs: c.docs, pages: c.pages.length, bytes: c.bytes, skipped: c.skipped });
+        } catch (e) { jsonResponse(res, { ok: false, error: String(e.message || e) }, 500); }
     } else if (sanitizedPath.startsWith('/api/export/status/') && req.method === 'GET') {
         handleExportStatus(req, res, sanitizedPath.slice('/api/export/status/'.length));
     } else if (sanitizedPath.startsWith('/api/export/download/') && req.method === 'GET') {
@@ -743,6 +753,8 @@ function handleExportTerrain(req, res) {
             terrain_patches   = null,        // ['<sha>.bin', ...]: the project's terrain patches, laid over the map terrain
             satellite_layer   = null,        // a map layer as the satellite texture (satellite_source 'layer'): see exportLayerArgs
             hillshade_layer   = null,        // a map layer as the hillshade texture (hillshade_mode 'layer')
+            docs_project      = null,        // project id: carry its documents (export_docs.js), with docs_caves = the exported caves' ids
+            docs_caves        = null,
         } = params;
         const hsMode  = ['lidar', 'dem', 'url', 'none', 'layer'].includes(hillshade_mode) ? hillshade_mode : 'lidar';
         // Map terrain: heights FLEX sampled from its own 3D terrain on a lon/lat
@@ -827,6 +839,20 @@ function handleExportTerrain(req, res) {
         if (mapName) args.push('--name', mapName);
         if (cavesFilePath) args.push('--caves', cavesFilePath);
         if (polyFile) args.push('--polygon', polyFile);
+        // The project's documents that belong to these caves: entries + page images
+        if (typeof docs_project === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(docs_project)) {
+            try {
+                const ids = Array.isArray(docs_caves) ? docs_caves.filter(c => typeof c === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(c)) : null;
+                const c = require('./export_docs').collect(library, docs_project, ids);
+                if (c.entries.length) {
+                    const f = path.join(EXPORT_OUT_DIR, `docs_${jobId}.json`);
+                    fs.writeFileSync(f, JSON.stringify(c));
+                    args.push('--docs', f);
+                    _exportJobs[jobId].progress.push(`Documents: ${c.docs} (${c.pages.length} pages, ${(c.bytes / 1048576).toFixed(1)} MB)` +
+                        (c.skipped.pdf ? `; ${c.skipped.pdf} PDF page(s) stay in the project` : ''));
+                }
+            } catch (e) { _exportJobs[jobId].progress.push('⚠ Documents left out: ' + (e.message || e)); }
+        }
         if (typeof z_offset === 'number' && Number.isFinite(z_offset) && Math.abs(z_offset) < 200)
             args.push('--z-offset', String(z_offset));
 

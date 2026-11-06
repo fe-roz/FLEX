@@ -19,8 +19,75 @@ def local_viewer_libs():
     return {'libs/' + p.name: p for p in sorted(d.glob('*.js'))} if d.exists() else {}
 
 
+# ── Documents in an export ────────────────────────────────────────────────────
+# The project's documents (scanned notes, photos...) that belong to the exported
+# caves travel as: docs.json (the log entries, which pages exist, cave names)
+# and one file per page image, docs_<sha256>.<ext>, flat in the zip root (the
+# app's importer keeps only known basenames, see MapStore.isDataFile). The
+# single-file viewer.html carries the same docs.json inline, plus the page
+# images themselves as base64 while they fit in DOCS_INLINE_CAP; pages past the
+# cap are read from their files beside viewer.html (an <img> loads those from
+# file:// too, so serve.bat is not needed for them).
+DOCS_INLINE_CAP = 12 * 1024 * 1024        # bytes of page images inlined in viewer.html
+DOCS_TOTAL_CAP = 400 * 1024 * 1024        # bytes of page images in one export
+DOCS_IMAGE_EXT = ('jpg', 'jpeg', 'png', 'webp')
+
+
+def docs_page_file(h, ext):
+    return f'docs_{h}.{ext}'
+
+
+def load_docs(path, progress=print):
+    """Read the job's docs input (written by export_docs.js): {project, caves,
+    entries, pages: [{h, ext, path}]}. Returns (sidecar dict, [(zip name, Path)])
+    with only pages whose file exists and fits DOCS_TOTAL_CAP."""
+    raw = json.loads(Path(path).read_text(encoding='utf-8'))
+    pages, files, total, seen = [], [], 0, set()
+    for pg in raw.get('pages') or []:
+        h, ext, fp = str(pg.get('h') or ''), str(pg.get('ext') or ''), pg.get('path')
+        if len(h) != 64 or ext not in DOCS_IMAGE_EXT or not fp or (h, ext) in seen:
+            continue
+        f = Path(fp)
+        if not f.is_file():
+            continue
+        size = f.stat().st_size
+        if total + size > DOCS_TOTAL_CAP:
+            progress(f"  Documents: page limit reached ({DOCS_TOTAL_CAP // 1048576} MB), some pages left out")
+            break
+        total += size
+        seen.add((h, ext))
+        pages.append({'h': h, 'ext': ext, 'size': size})
+        files.append((docs_page_file(h, ext), f))
+    side = {'format': 1, 'project': raw.get('project') or None, 'caves': raw.get('caves') or [],
+            'entries': raw.get('entries') or [], 'pages': pages}
+    return side, files
+
+
+def docs_inline_json(side, read_page, cap=DOCS_INLINE_CAP):
+    """The text for PLACEHOLDER_DOCS_JSON: docs.json plus `inline` {sha: base64}
+    for as many pages as fit under `cap` (smallest first). read_page(name) -> bytes.
+    None when there is nothing to carry."""
+    import base64
+    if not side or not side.get('entries'):
+        return None
+    out = dict(side)
+    inline, used = {}, 0
+    for pg in sorted(side.get('pages') or [], key=lambda p: p.get('size', 0)):
+        if used + pg.get('size', 0) > cap:
+            continue
+        try:
+            data = read_page(docs_page_file(pg['h'], pg['ext']))
+        except Exception:
+            continue
+        used += len(data)
+        inline[pg['h'] + '.' + pg['ext']] = base64.b64encode(data).decode('ascii')
+    if inline:
+        out['inline'] = inline
+    return json.dumps(out, separators=(',', ':')).replace('</', '<\\/')
+
+
 def build_inline_viewer(glb_path, tex_b64, caves_data, viewer_libs, progress=print,
-                        hs_b64=None, walls_bytes=None):
+                        hs_b64=None, walls_bytes=None, docs_json=None):
     """
     glb_path: the terrain.glb file, or its bytes.
 
@@ -84,6 +151,9 @@ def build_inline_viewer(glb_path, tex_b64, caves_data, viewer_libs, progress=pri
     # the block early. "<\/" is the same string to JavaScript.
     caves_json = caves_json.replace('</', '<\\/')
     html = html.replace('PLACEHOLDER_CAVES_JSON', caves_json)
+
+    # 6. Documents (docs.json, see above); 'null' leaves the viewer to look for docs.json beside it
+    html = html.replace('PLACEHOLDER_DOCS_JSON', docs_json or 'null')
 
     progress(f"  Viewer HTML total: {len(html)//1024} KB")
     return html

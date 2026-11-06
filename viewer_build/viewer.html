@@ -373,6 +373,8 @@
   .ffg-nav { position: fixed; top: 50%; transform: translateY(-50%); z-index: 3; background: rgba(0,0,0,.4); border: none;
     color: #fff; font-size: 34px; width: 44px; height: 64px; cursor: pointer; }
   .ffg-prev { left: 0; border-radius: 0 8px 8px 0; } .ffg-next { right: 0; border-radius: 8px 0 0 8px; }
+  #ff-gallery .ffg-ed { display: none; }
+  #ff-gallery.editing .ffg-ed { display: inline-block; }
   .ffg-tags { padding: 3px 10px 6px; font-size: 11px; opacity: .7; background: rgba(20,20,30,.95); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; z-index: 2; }
   .ff-modal-box.wide { width: min(520px, 100%); }
   .ff-choices { display: flex; flex-direction: column; gap: 6px; }
@@ -476,7 +478,9 @@
     <div class="help-row"><span class="help-icon">⋯</span><span class="help-desc">Units (ft / m), what counts as narrow, stooping, crawling or steep (Route difficulty), who is entering data, ⇄ project & sync files (share with other phones and FLEX), export project data, fullscreen, help</span></div>
     <div class="help-section">STATIONS</div>
     <div class="help-row"><span class="help-icon">👆</span><span class="help-desc">Tap: info · again: caver for scale · again: reach (what's within range along the survey) · again: off</span></div>
-    <div class="help-row"><span class="help-icon">✏️</span><span class="help-desc">On a station's card: ✏️ notes · ❓ leads (status, what it needs, air, size…) · 📄 documents tagged to the station, its survey or cave (photos, scans incl. TIFF, PDF) · 📐 survey new passage from here</span></div>
+    <div class="help-row"><span class="help-icon">✏️</span><span class="help-desc">On a station's card: ✏️ Add note is always there · 📄 documents tagged to the station, its survey or cave (the ones in the export too: scanned notes and photos; PDFs stay in FLEX). Everything else — changing a note, ❓ leads (status, size…), 📐 survey new passage from here, and in a document turning pages, tags, removing — waits behind the small <b>✎ Edit</b> button, which is off again when you close the card.</span></div>
+    <div class="help-row"><span class="help-icon">👆</span><span class="help-desc">Taps find the nearest station, lead mark, name or pin within a finger's width of the touch; a drag or a two-finger move is never a tap</span></div>
+    <div class="help-row"><span class="help-icon">💾</span><span class="help-desc">Display choices (walls, colour, wall opacity, stations, area names, terrain sliders) are remembered for this map. A new map opens with ghost walls coloured by elevation. The view stays over the map.</span></div>
   </div>
   <div id="help-dismiss">Tap anywhere to dismiss</div>
 </div>
@@ -620,6 +624,10 @@ function ffSidecarJson(name) {
 try { window.CAVES_DATA = PLACEHOLDER_CAVES_JSON; }
 catch(e) { console.error('CAVES_DATA parse error:', e); window.CAVES_DATA = {surveys:[]}; }
 </script>
+<script>
+try { window.DOCS_EXPORT = PLACEHOLDER_DOCS_JSON; }
+catch(e) { window.DOCS_EXPORT = null; }
+</script>
 <!-- ═══ THREE.JS LIBS (injected by export_terrain.py) ══════════════════════ -->
 <script src="libs/three.min.js"></script>
 <script src="libs/OrbitControls.js"></script>
@@ -693,6 +701,31 @@ const META = (CAVES_DATA && CAVES_DATA.meta) || {};
 // centre, as before.
 const MAP_KEY = window.FF_MAP_ID ? 'map:' + window.FF_MAP_ID
   : (META.name || '') + '|' + (META.center_lon || 0).toFixed(3) + '|' + (META.center_lat || 0).toFixed(3);
+
+// ── Display settings, remembered per map ────────────────────────────────────
+// Walls, colour, stations, what is shown, imagery and terrain sliders. In the
+// app they go through the library's key/value store (AndroidHost), else (and
+// as a copy) localStorage; a new map starts with ghost walls coloured by
+// elevation and walls at 60%. Every access is wrapped: storage can be off.
+const DISP_KEY = 'flex_display_v1|' + MAP_KEY;
+const DISP_APP = !!(window.FF_MAP_ID && window.AndroidHost && typeof window.AndroidHost.libKvGet === 'function');
+const DISP = (() => {
+  let raw = null;
+  try { if (DISP_APP) raw = window.AndroidHost.libKvGet(DISP_KEY) || null; } catch (_) {}
+  try { if (!raw) raw = localStorage.getItem(DISP_KEY); } catch (_) {}
+  try { const v = raw && JSON.parse(raw); return v && typeof v === 'object' ? v : {}; } catch (_) { return {}; }
+})();
+const DISP_DEFAULT = { wallMode: 1, colourMode: 1, wallAlpha: 0.6 };
+const dispGet = (k, d) => (DISP[k] !== undefined && DISP[k] !== null ? DISP[k] : (k in DISP_DEFAULT ? DISP_DEFAULT[k] : d));
+let _dispLast = JSON.stringify(DISP);
+function dispSave(patch) {
+  Object.assign(DISP, patch);
+  const txt = JSON.stringify(DISP);
+  if (txt === _dispLast) return;
+  _dispLast = txt;
+  try { if (DISP_APP) window.AndroidHost.libKvSet(DISP_KEY, txt); } catch (_) {}
+  try { localStorage.setItem(DISP_KEY, txt); } catch (_) {}
+}
 
 // ── Units: feet by default, metres switchable (⋯ More). One unit at a time
 // keeps labels short on a phone. ───────────────────────────────────────────
@@ -1921,11 +1954,13 @@ setTimeout(() => {
     document.getElementById('area-label').textContent =
       `${(dim / 1000).toFixed(1)} km across`;
 
+    dispRestoreSliders();
     applyBrightness(parseInt(brightSlider.value));
     applyFog(parseInt(fogSlider.value));
 
     setP(80, 'Loading cave lines...');
     buildCaveLines();
+    dispRestoreUi();
     setP(100, 'Ready');
     setTimeout(hideLoading, 300);
   }, (err) => {
@@ -1953,7 +1988,7 @@ scene.add(stationGroup);
 scene.add(stationHitGroup);
 
 // Station display mode: 0=none  1=end-stations only (default)  2=all
-let stationMode = 1;
+let stationMode = dispGet('stationMode', 1);
 
 // Station data — populated by buildCaveLines(), read by applyStationMode()
 let stationMap = new Map();
@@ -2055,8 +2090,8 @@ window.addEventListener('resize', sizeLeadSprites);
 // buffer — they show through the ground like the survey lines do, while still
 // hiding their own far side.
 let passageMesh = null;
-let wallMode = 0;            // 0 = as exported, 1 = ghost, 2 = off
-let wallOpacity = 0.55;
+let wallMode = dispGet('wallMode');   // 0 = on, 1 = ghost, 2 = off (a new map: ghost)
+let wallOpacity = dispGet('wallAlpha');   // walls when 'on'; ghost is thinner still
 
 function buildCavePassages() {
   if (passageMesh || buildCavePassages._started) return;   // every load path calls this
@@ -2118,7 +2153,6 @@ function buildPassageMesh(groups) {
     }
     for (let k = 0; k < I.length; k++) idx[io + k] = I[k] + vo;
     vo += n; io += I.length;
-    if (typeof g.opacity === 'number') wallOpacity = g.opacity;
   });
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -2329,6 +2363,7 @@ function buildAreaLabels() {
     sprite.material.sizeAttenuation = false;
     sprite.renderOrder = 4;
     sprite.userData.aspect = aspect;
+    sprite.userData.text = String(lb.text);
     sprite.position.set(lb.xyz[0], lb.xyz[1], lb.xyz[2]);
     areaLabelGroup.add(sprite);
   });
@@ -2490,7 +2525,7 @@ const COLOUR_MODES = [
   { key: 'cover',  name: 'Depth below ground' },
   { key: 'hard',   name: 'Difficulty (LRUD + steepness)' },
 ];
-let colourMode = 0;
+let colourMode = dispGet('colourMode');   // a new map: by elevation
 let caveLines = null;                       // one LineSegments for every shot
 const RAMP = ['#3b1c8c', '#2a5fd6', '#1fb3d6', '#35c46a', '#c6dc2f', '#ffc61a']
   .map(h => new THREE.Color(h));            // cool (low / deep) → warm (high / shallow)
@@ -3295,12 +3330,8 @@ function leadsRender() {
   items.slice(0, 300).forEach(x => {
     const f = x.it.fields || {};
     const sub = [typeof ffLeadSummary === 'function' ? ffLeadSummary(f) : '', 'at ' + (x.st.name || 'station'), isFinite(x.d) ? U.len(x.d) + ' along the survey' : 'not connected to the survey from here'].filter(Boolean).join(' · ');
-    let edit = null;
-    if (typeof ffEditLead === 'function') {
-      edit = el('button', 'fp-btn', '✏️');
-      edit.addEventListener('click', ev => { ev.stopPropagation(); ffEditLead(x.st, x.it); });
-    }
-    list.appendChild(fpRow(x.it.active ? '?' : '✓', f.desc || 'Lead', sub, () => goToStation(x.st), edit));
+    // (editing a lead: select its station, then Edit on the card)
+    list.appendChild(fpRow(x.it.active ? '?' : '✓', f.desc || 'Lead', sub, () => goToStation(x.st), null));
   });
 }
 document.querySelectorAll('#fp-leads .fp-sort button[data-sort]').forEach(b => b.addEventListener('click', () => {
@@ -4044,17 +4075,22 @@ document.getElementById('fp-form-save').addEventListener('click', () => {
 document.getElementById('fp-form-cancel').addEventListener('click', fieldFormClose);
 
 // Tap on a point marker: screen-space, like the GPS marker.
-function fieldHitTest(ndc) {
-  let best = null, bestD = 0.06;
+// Pins and tracks' points, in screen pixels: the nearest within the tap radius
+// (the pin is drawn above its foot, so it answers a little above it too).
+function fieldHitTest(ndc, wantDist) {
+  let best = null, bestD = STATION_HIT_PX * 1.2;
   const v = new THREE.Vector3();
+  const W = renderer.domElement.clientWidth || window.innerWidth, H = renderer.domElement.clientHeight || window.innerHeight;
   fieldGroup.children.forEach(o => {
-    if (!o.userData.pointId) return;
+    if (!o.userData.pointId || !o.visible) return;
     v.copy(o.position).project(camera);
     if (v.z > 1) return;
-    const d = Math.hypot(v.x - ndc.x, v.y - (ndc.y - 0.03));    // the pin sits above its foot
+    const d = Math.hypot((v.x - ndc.x) * W / 2, (v.y - ndc.y) * H / 2 + 12);
     if (d < bestD) { bestD = d; best = o.userData.pointId; }
   });
-  return best && field.points.find(p => p.id === best);
+  const pt = best && field.points.find(p => p.id === best);
+  if (wantDist) return pt ? { pt, d: bestD } : null;
+  return pt;
 }
 function fieldShowPoint(p) {
   const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -4405,6 +4441,13 @@ function renderDisplaySheet() {
   if (passageMesh || ffWallGroup.children.length) {
     sheetHead('Walls');
     sheetSeg(['On', 'Ghost', 'Off'], wallMode, i => { wallMode = i; applyWallMode(); if (routes.length) routeApplyAlpha(); rerenderSheet(); });
+    const wr = el('div', 'sh-sl');
+    const wl = el('label', '', 'Opacity'), wv = el('div', '', Math.round(wallOpacity * 100) + '%');
+    const wi = el('input'); wi.type = 'range'; wi.min = '10'; wi.max = '100'; wi.value = String(Math.round(wallOpacity * 100)); wi.id = 'wall-opacity-slider';
+    wi.style.accentColor = '#00e5ff';
+    wi.addEventListener('input', () => { wallOpacity = +wi.value / 100; wv.textContent = wi.value + '%'; applyWallMode(); if (routes.length) routeApplyAlpha(); });
+    wr.append(wl, wi, wv);
+    sheetEl.appendChild(wr);
   }
   sheetHead('Stations');
   const smap = [1, 2, 0];
@@ -4556,6 +4599,30 @@ const FF_FT = 0.3048;
 let ffDev = '', ffPid = null, ffReady = false;
 let ffEntries = { proj: [], docs: [], map: [] };
 let ffP = FL.replayProject([], ''), ffD = FL.replayDocs([]);
+// Documents carried by the export (docs.json, or inline in the single file): log
+// entries replayed together with the library's (same entry id = one entry, so a
+// project also synced on this device shows each document once), and page images
+// from the export's own files. Read only: never written to the library.
+let ffExp = null;
+async function ffExportDocsLoad() {
+  let X = window.DOCS_EXPORT || null;
+  if (!X && /^https?:$/.test(location.protocol)) {
+    try { const r = await fetch('docs.json', { cache: 'no-store' }); if (r.ok) X = await r.json(); } catch (_) {}
+  }
+  ffExp = X && Array.isArray(X.entries) && X.entries.length ? X : null;
+}
+const ffDocsAll = () => ffExp ? ffEntries.docs.concat(ffExp.entries) : ffEntries.docs;
+function ffExpPage(h) { return ffExp && (ffExp.pages || []).find(p => p.h === h) || null; }
+async function ffBlobUrl(h, ext) {
+  const x = ffExpPage(h);
+  if (x) {
+    const b64 = ffExp.inline && ffExp.inline[h + '.' + x.ext];
+    if (b64) return 'data:image/' + (x.ext === 'jpg' ? 'jpeg' : x.ext) + ';base64,' + b64;
+    return 'docs_' + h + '.' + x.ext;
+  }
+  return ffHost.blobUrl(h, ext);
+}
+const ffExpCaveName = cid => { const c = ffExp && (ffExp.caves || []).find(c => c.id === cid); return c ? c.name : null; };
 let ffSeq = {};                          // scope → this device's last seq
 let ffLinks = { byName: {}, byId: {} };  // export cave name ↔ cave id
 let ffLog = [];                          // this project's entries + its documents' + the map's, oldest first
@@ -4970,7 +5037,7 @@ function ffRecord(op, data, extra, where) {
 }
 function ffReplay() {
   ffP = FL.replayProject(ffEntries.proj, ffPid || '');
-  ffD = FL.replayDocs(ffEntries.docs);
+  ffD = FL.replayDocs(ffDocsAll());
   // Field survey and cave updates, with the export's cave names.
   ffState = { surveys: {}, order: [], caveUpdates: {} };
   ffP.order.forEach(id => {
@@ -5033,7 +5100,7 @@ function ffUndo(e) {
 // Labels for targets and entries.
 function ffTargetLabel(t) {
   const p = FL.parseTarget(t);
-  const caveName = cid => (ffP.caves[cid] && ffP.caves[cid].name) || ffCaveName(cid) || 'a cave';
+  const caveName = cid => (ffP.caves[cid] && ffP.caves[cid].name) || ffCaveName(cid) || ffExpCaveName(cid) || 'a cave';
   switch (p.kind) {
     case 'project': return p.pid === ffPid ? (ffP.name || 'this project') : 'another project';
     case 'cave': return caveName(p.cave);
@@ -5180,6 +5247,7 @@ async function ffLoadAll() {
   ffEntries.proj = ffPid ? await ffHost.read(FL.projScope(ffPid)) : [];
   ffEntries.docs = await ffHost.read(FL.DOCS);
   ffEntries.map = await ffHost.mapLog();
+  try { await ffExportDocsLoad(); } catch (e) { console.warn('export documents', e); }
   ffSeq = {};
   [[FL.projScope(ffPid), ffEntries.proj], [FL.DOCS, ffEntries.docs]].forEach(([sc, list]) =>
     list.forEach(e => { if (e.dev === ffDev && e.seq > (ffSeq[sc] || 0)) ffSeq[sc] = e.seq; }));
@@ -5204,11 +5272,11 @@ async function ffEditNote(target, noteId) {
   if (cur && cur.text === text && !cur.conflict) return;
   ffRecord('note.set', { note: cur ? cur.id : ffUid(), target, text, prev: cur ? cur.text : '', base: cur ? cur.heads : [] });
 }
-function ffNoteEl(n) {
+function ffNoteEl(n, editable) {
   const d = el('div', 'ff-note' + (n.conflict ? ' conflict' : ''));
   d.appendChild(el('div', 'ff-note-t', n.text || '(removed on one device)'));
   d.appendChild(el('div', 'ff-note-m', `${n.who || '?'} · ${ffWhen(n.t)}${n.history.length > 1 ? ' · edited' : ''}${n.conflict ? ' · ⚠ edited on two devices' : ''}`));
-  d.addEventListener('click', () => ffEditNote(n.target, n.id));
+  if (editable) d.addEventListener('click', () => ffEditNote(n.target, n.id));
   return d;
 }
 
@@ -5444,13 +5512,15 @@ async function ffDocOpen(docId, index) {
   if (!g) {
     g = el('div'); g.id = 'ff-gallery';
     g.innerHTML = '<div class="ffg-top"><span class="ffg-title"></span><span class="ffg-count"></span>' +
-      '<button class="fp-btn ffg-rl" title="Turn left">⟲</button><button class="fp-btn ffg-rr" title="Turn right">⟳</button>' +
-      '<button class="fp-btn ffg-tag">🏷 Tags</button><button class="fp-btn ffg-more">⋯</button><button class="ffg-x">✕</button></div>' +
+      '<button class="fp-btn ffg-edit" title="Show the edit actions for this document">✎ Edit</button>' +
+      '<button class="fp-btn ffg-rl ffg-ed" title="Turn left">⟲</button><button class="fp-btn ffg-rr ffg-ed" title="Turn right">⟳</button>' +
+      '<button class="fp-btn ffg-tag ffg-ed">🏷 Tags</button><button class="fp-btn ffg-more ffg-ed">⋯</button><button class="ffg-x">✕</button></div>' +
       '<div class="ffg-tags"></div>' +
       '<div class="ffg-stage"><img class="ffg-img" alt=""><div class="ffg-empty"></div></div>' +
       '<button class="ffg-nav ffg-prev">‹</button><button class="ffg-nav ffg-next">›</button>';
     document.body.appendChild(g);
     g.querySelector('.ffg-x').addEventListener('click', ffGalleryClose);
+    g.querySelector('.ffg-edit').addEventListener('click', () => { g.classList.toggle('editing'); g.querySelector('.ffg-edit').textContent = g.classList.contains('editing') ? '✓ Done' : '✎ Edit'; });
     g.querySelector('.ffg-prev').addEventListener('click', () => ffGalleryShow(ffGallery.i - 1));
     g.querySelector('.ffg-next').addEventListener('click', () => ffGalleryShow(ffGallery.i + 1));
     g.querySelector('.ffg-rl').addEventListener('click', () => ffRotatePage(-90));
@@ -5463,7 +5533,11 @@ async function ffDocOpen(docId, index) {
   g.classList.add('open');
   ffGalleryShow(ffGallery.i);
 }
-function ffGalleryClose() { const g = document.getElementById('ff-gallery'); if (g) g.classList.remove('open'); ffGallery = null; }
+function ffGalleryClose() {
+  const g = document.getElementById('ff-gallery');
+  if (g) { g.classList.remove('open', 'editing'); const e = g.querySelector('.ffg-edit'); if (e) e.textContent = '✎ Edit'; }
+  ffGallery = null;
+}
 async function ffGalleryShow(i) {
   const g = document.getElementById('ff-gallery'), G = ffGallery;
   if (!g || !G) return;
@@ -5479,7 +5553,7 @@ async function ffGalleryShow(i) {
   if (!n) { img.style.display = 'none'; empty.style.display = ''; empty.textContent = 'No pages. ⋯ → Add pages.'; g.querySelector('.ffg-count').textContent = ''; return; }
   G.i = ((i % n) + n) % n; G.z = 1; G.x = 0; G.y = 0;
   const pg = d.pages[G.i];
-  const url = await ffHost.blobUrl(pg.h, pg.ext);
+  const url = await ffBlobUrl(pg.h, pg.ext);
   g.querySelector('.ffg-count').textContent = `${G.i + 1} / ${n}${pg.name ? ' · ' + pg.name : ''}`;
   empty.style.display = 'none';
   if (pg.ext === 'pdf') {
@@ -5639,30 +5713,35 @@ async function ffEditTags(docId) {
 }
 
 // ── Station card additions ────────────────────────────────────────────────────
+// Adding a note is always there; every other change waits behind a small Edit
+// button, per card: a different station or closing the card turns it off.
+let ffCardEdit = false, ffCardEditFor = null;
+new MutationObserver(() => { if (!document.getElementById('info-panel').classList.contains('open')) ffCardEdit = false; })
+  .observe(document.getElementById('info-panel'), { attributes: true, attributeFilter: ['class'] });
 function ffStationCard(st) {
   const rows = document.getElementById('info-rows');
   if (!rows || !st) return;
-  const box = el('div', 'ff-card');
+  if (ffCardEditFor !== st) { ffCardEdit = false; ffCardEditFor = st; }
+  const edit = ffCardEdit;
+  const box = el('div', 'ff-card' + (edit ? ' editing' : ''));
   const target = ffStTarget(st);
   if (target) {
-    FL.notesOn(ffP, target).forEach(n => box.appendChild(ffNoteEl(n)));
+    FL.notesOn(ffP, target).forEach(n => box.appendChild(ffNoteEl(n, edit)));
     ffLeadsAt(st).forEach(it => {
       const d = el('div', 'ff-lead' + (it.active ? '' : ' closed') + (it.rec && it.rec.conflicts ? ' conflict' : ''));
       d.appendChild(el('div', 'ff-note-t', '❓ ' + (it.fields.desc || 'Lead')));
       d.appendChild(el('div', 'ff-note-m', ffLeadSummary(it.fields) + (it.rec ? ` · ${it.rec.updated.who}, ${ffWhen(it.rec.updated.t)}` : ' · from the export')));
-      d.addEventListener('click', () => ffEditLead(st, it));
+      if (edit) d.addEventListener('click', () => ffEditLead(st, it));
       box.appendChild(d);
     });
   } else if (st.name && ffPid) {
     box.appendChild(el('div', 'fp-note', 'This cave isn’t linked to the project: ⋯ More → Project & sync.'));
   }
   const row = el('div', 'fp-row');
-  const nb = el('button', 'fp-btn', '✏️ Note');
+  const nb = el('button', 'fp-btn active', '✏️ Add note');
+  nb.id = 'ff-add-note';
   nb.addEventListener('click', () => target ? ffEditNote(target) : showToast('No project / cave link for this station'));
   row.appendChild(nb);
-  const lb = el('button', 'fp-btn', '❓ Lead');
-  lb.addEventListener('click', () => ffEditLead(st, null));
-  row.appendChild(lb);
   const fb = el('button', 'fp-btn', '📄 Documents');
   fb.addEventListener('click', () => ffOpenDocs(st, 'station'));
   row.appendChild(fb);
@@ -5672,10 +5751,22 @@ function ffStationCard(st) {
     if (n) fb.textContent = `📄 Documents · ${n}`;
   }
   const fsv = st._ff && ffState.surveys[st._ff];
-  const sb = el('button', 'fp-btn', fsv ? '📐 ' + fsv.name : '📐 Survey from here');
-  sb.addEventListener('click', () => fsv ? ffOpenPanel(fsv.id) : ffNewSurvey(st));
-  row.appendChild(sb);
-  box.appendChild(row);
+  const eb = el('button', 'fp-btn ff-edit-btn' + (edit ? ' active' : ''), edit ? '✓ Done' : '✎ Edit');
+  eb.id = 'ff-edit-btn'; eb.title = 'Show the edit actions for this station';
+  eb.style.cssText = 'font-size:11px;padding:4px 8px;opacity:.8';
+  eb.addEventListener('click', () => { ffCardEdit = !ffCardEdit; selectStation(st); });
+  row.appendChild(eb);
+  if (edit) {
+    const row2 = el('div', 'fp-row ff-edit-actions');
+    const lb = el('button', 'fp-btn', '❓ Lead');
+    lb.addEventListener('click', () => ffEditLead(st, null));
+    row2.appendChild(lb);
+    const sb = el('button', 'fp-btn', fsv ? '📐 ' + fsv.name : '📐 Survey from here');
+    sb.addEventListener('click', () => fsv ? ffOpenPanel(fsv.id) : ffNewSurvey(st));
+    row2.appendChild(sb);
+    box.appendChild(row);
+    box.appendChild(row2);
+  } else box.appendChild(row);
   rows.insertBefore(box, rows.children[2] || null);
 }
 
@@ -5926,7 +6017,7 @@ function ffBuildWalls() {
 function ffApplyWallMode() {
   ffWallGroup.visible = wallMode !== 2;
   ffWallGroup.children.forEach(m => {
-    m.material.opacity = wallMode === 1 ? 0.2 : 0.55;
+    m.material.opacity = wallMode === 1 ? Math.min(wallOpacity, 0.2) : wallOpacity;
     m.material.depthWrite = wallMode !== 1;
     m.material.needsUpdate = true;
   });
@@ -6827,7 +6918,10 @@ function isStationVisible(st) {
 // Station dots and names, made on first show. One material per dot, since
 // colour modes, reach and routes tint and fade each on its own.
 let _stGeo = null, _stR = 0.3, _lblH = 0.8;
-const STATION_HIT_PX = 24;        // tap target: a circle this many CSS pixels in radius round the dot
+const COARSE_POINTER = (() => { try { return matchMedia('(pointer: coarse)').matches; } catch (_) { return false; } })();
+const STATION_HIT_PX = COARSE_POINTER ? 32 : 24;   // tap target: a circle this many CSS pixels in radius round the dot (a finger is bigger than a mouse)
+const TAP_MOVE_PX = COARSE_POINTER ? 12 : 8;       // a touch that travels further than this is a pan, not a tap
+const TAP_MAX_MS = 500;                            // …and so is one held longer
 const STATION_SHOW_CAP = 8000;    // dots shown at once; past it, those nearest the view
 const STATION_LABEL_CAP = 1500;   // names shown at once (each is its own texture), nearest first
 let _stationCapped = false, _stationCapTimer = null;
@@ -6928,6 +7022,46 @@ function stationRayHits() {
       point: ray.at(dist, new THREE.Vector3()) });
   });
   return out.sort((a, b) => a.miss - b.miss || a.distance - b.distance);
+}
+
+// Names and marks a finger can land on without touching the dot: a station's
+// name, its lead "?", an area name. { station } or { area } (nearest first).
+function labelPick(px, py, rect) {
+  const W = rect.width, H = rect.height, tanH = 2 * Math.tan(camera.fov * Math.PI / 360);
+  const pad = Math.max(6, STATION_HIT_PX * 0.4);
+  const v = new THREE.Vector3();
+  let best = null, bestD = Infinity;
+  const proj = pos => { v.copy(pos).project(camera); return v.z > 1 ? null : [(v.x + 1) / 2 * W, (1 - v.y) / 2 * H]; };
+  const consider = (kind, obj, d) => { if (d < bestD) { bestD = d; best = { [kind]: obj }; } };
+  stationMap.forEach(st => {
+    const sp = st._sprite;
+    if (sp && sp.visible && stationNamed(st)) {                       // the name's box
+      const c = proj(sp.position);
+      if (c) {
+        const depth = Math.max(0.01, camera.position.distanceTo(sp.position));
+        const ph = sp.scale.y * H / (tanH * depth), pw = sp.scale.x * H / (tanH * depth);
+        const dx = Math.max(0, Math.abs(px - c[0]) - pw / 2), dy = Math.max(0, Math.abs(py - c[1]) - ph / 2);
+        if (dx <= pad && dy <= pad) consider('station', st, Math.hypot(dx, dy));
+      }
+    }
+    if (st._leadSprite && st._leadSprite.visible) {                    // the lead mark
+      const c = proj(st._leadSprite.getWorldPosition(v.clone()));
+      if (c) { const d = Math.hypot(px - c[0], py - c[1]); if (d <= STATION_HIT_PX) consider('station', st, d); }
+    }
+  });
+  if (areaLabelGroup.visible) areaLabelGroup.children.forEach(sp => {
+    if (!sp.visible) return;
+    const c = proj(sp.position); if (!c) return;
+    const hw = (AREA_LABEL_PX * (sp.userData.aspect || 3)) / 2, hh = AREA_LABEL_PX / 2;
+    const dx = Math.max(0, Math.abs(px - c[0]) - hw), dy = Math.max(0, Math.abs(py - c[1]) - hh);
+    if (dx <= pad && dy <= pad) consider('area', sp, Math.hypot(dx, dy) + 0.5);
+  });
+  return best;
+}
+function areaLabelInfo(sp) {
+  clearStationHighlight();
+  const rows = [['Elevation', U.z(sp.position.z)]];
+  showInfo(sp.userData.text || 'Area', 'Area name', rows);
 }
 
 function applyStationMode() {
@@ -7162,11 +7296,19 @@ function onPointerTap(e) {
   }
   if (routePickTap()) return;
   if (measureOn) { measureTap(); return; }
-  const fpHit = fieldHitTest(ndc);
-  if (fpHit) { fieldShowPoint(fpHit); return; }
-
-  // Stations along the tap ray
+  // What is under the finger: the nearest of a station dot, a pin, and (when
+  // none of those) a station's name, a lead mark or an area name, all judged in
+  // screen pixels round the tap.
   const hits = stationRayHits();
+  const fpd = fieldHitTest(ndc, true);
+  if (fpd) {
+    let stD = Infinity;
+    if (hits.length) { const q = hits[0].object._station.pos.clone().project(camera); stD = Math.hypot((q.x - ndc.x) * rect.width / 2, (q.y - ndc.y) * rect.height / 2); }
+    if (fpd.d <= stD) { fieldShowPoint(fpd.pt); return; }
+  }
+  const lbl = hits.length ? null : labelPick(clientX - rect.left, clientY - rect.top, rect);
+  if (lbl && lbl.area) { areaLabelInfo(lbl.area); return; }
+  if (lbl && lbl.station) hits.push({ object: { _station: lbl.station }, distance: 0 });
   if (hits.length) {
     const st = hits[0].object._station;
     if (_selMesh && _selMesh._station === st) {
@@ -7184,13 +7326,26 @@ function onPointerTap(e) {
 }
 
 // Drag detection
+// A tap is one finger, short, and still: a second finger down (pinch, two-finger
+// pan) or any travel past TAP_MOVE_PX during the touch cancels it.
 let _tapStart = null;
-renderer.domElement.addEventListener('pointerdown', e => { _tapStart = {x: e.clientX, y: e.clientY}; });
-renderer.domElement.addEventListener('pointerup',   e => {
-  if (!_tapStart) return;
-  const moved = Math.hypot(e.clientX - _tapStart.x, e.clientY - _tapStart.y);
-  if (moved < 8) onPointerTap(e);
-  _tapStart = null;
+const _tapPtrs = new Set();
+const _tapEl = renderer.domElement;
+_tapEl.addEventListener('pointerdown', e => {
+  _tapPtrs.add(e.pointerId);
+  _tapStart = _tapPtrs.size === 1 ? { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId, bad: false } : (_tapStart && Object.assign(_tapStart, { bad: true }));
+});
+_tapEl.addEventListener('pointermove', e => {
+  if (_tapStart && e.pointerId === _tapStart.id && Math.hypot(e.clientX - _tapStart.x, e.clientY - _tapStart.y) > TAP_MOVE_PX) _tapStart.bad = true;
+});
+_tapEl.addEventListener('pointercancel', e => { _tapPtrs.delete(e.pointerId); _tapStart = null; });
+_tapEl.addEventListener('pointerup', e => {
+  _tapPtrs.delete(e.pointerId);
+  const t = _tapStart;
+  if (!t) return;
+  if (e.pointerId === t.id && !t.bad && !_tapPtrs.size && performance.now() - t.t < TAP_MAX_MS &&
+      Math.hypot(e.clientX - t.x, e.clientY - t.y) <= TAP_MOVE_PX) onPointerTap(e);
+  if (!_tapPtrs.size) _tapStart = null;
 });
 
 // ── Toolbar ───────────────────────────────────────────────────────────────────
@@ -7885,6 +8040,39 @@ function userIsDrivingCamera() {
 }
 window.addEventListener('resize', () => { requestRender(); wakeRender(); });
 
+// ── Display settings: restore and keep ────────────────────────────────────────
+// Everything above is read once at start (DISP). Sliders and group visibility
+// need the scene, so they are put back here after the terrain and caves are
+// built; any tap or slider move afterwards saves the lot (debounced).
+function dispRestoreSliders() {
+  [['terrain-opacity-slider', 'opacity'], ['terrain-bright-slider', 'bright'], ['terrain-fog-slider', 'fog']].forEach(([id, k]) => {
+    const v = DISP[k], n = document.getElementById(id);
+    if (n && isFinite(v)) { n.value = String(v); if (k === 'opacity') n.dispatchEvent(new Event('input')); }
+  });
+}
+let _dispRestored = false;
+function dispRestoreUi() {
+  _dispRestored = true;
+  if (DISP.annot != null && ANNOT_MODES[DISP.annot]) { annotMode = DISP.annot; if (setupAnnotButton._done) applyAnnotMode(); }
+  if (DISP.tracks === false) fieldGroup.visible = false;
+  const cb = document.getElementById('btn-cave');
+  if (cb) { cb.classList.toggle('off', stationMode === 0); cb.classList.toggle('active', stationMode === 2); }
+  if (colourMode === 2 && !_hgrid) colourMode = 1;
+  if (colourMode) applyColourMode();
+  applyWallMode();
+  requestRender(); wakeRender();
+}
+function dispCapture() {
+  const sl = id => { const n = document.getElementById(id); return n ? +n.value : undefined; };
+  dispSave({ wallMode, colourMode, wallAlpha: wallOpacity, stationMode, annot: annotMode, tracks: fieldGroup.visible,
+             opacity: sl('terrain-opacity-slider'), bright: sl('terrain-bright-slider'), fog: sl('terrain-fog-slider') });
+}
+let _dispTimer = null;
+['click', 'input', 'change'].forEach(ev => document.addEventListener(ev, () => {
+  clearTimeout(_dispTimer); _dispTimer = setTimeout(() => { if (_dispRestored) dispCapture(); }, 150);
+}, true));
+window.addEventListener('pagehide', () => { try { if (_dispRestored) dispCapture(); } catch (_) {} });
+
 // ── Orbit clamp ───────────────────────────────────────────────────────────────
 // The orbit centre (controls.target) is held between the lowest and highest
 // thing in the export -- terrain and cave stations -- plus ORBIT_Z_PAD, so a
@@ -7926,13 +8114,29 @@ function updateOrbitZRange() {
 
 // Pull the orbit centre back into the band. moveCamera keeps the view rigid
 // (camera follows the target); without it only the target moves (re-aims).
+// X/Y too: the target stays over the map (terrain and caves) plus a margin of
+// 5% of its size (at least 25 m), so a pan cannot drift off into nothing. The
+// camera moves with it, so the view keeps its distance and tilt.
+const ORBIT_XY_PAD_FRAC = 0.05, ORBIT_XY_PAD_MIN = 25;
+function orbitXYPad() {
+  return Math.max(ORBIT_XY_PAD_MIN, ORBIT_XY_PAD_FRAC * Math.max(_orbitXY[2] - _orbitXY[0], _orbitXY[3] - _orbitXY[1]));
+}
 function clampOrbitTarget(moveCamera) {
-  const z = controls.target.z;
+  const t = controls.target;
+  let moved = false;
+  const z = t.z;
   const c = z < _orbitZMin ? _orbitZMin : z > _orbitZMax ? _orbitZMax : z;
-  if (c === z) return false;
-  controls.target.z = c;
-  if (moveCamera) camera.position.z += c - z;
-  return true;
+  if (c !== z) { t.z = c; if (moveCamera) camera.position.z += c - z; moved = true; }
+  if (_orbitXY) {
+    const pad = orbitXYPad();
+    const cx = Math.min(_orbitXY[2] + pad, Math.max(_orbitXY[0] - pad, t.x));
+    const cy = Math.min(_orbitXY[3] + pad, Math.max(_orbitXY[1] - pad, t.y));
+    if (cx !== t.x || cy !== t.y) {
+      if (moveCamera) { camera.position.x += cx - t.x; camera.position.y += cy - t.y; }
+      t.x = cx; t.y = cy; moved = true;
+    }
+  }
+  return moved;
 }
 
 // A point `dist` along a view ray, moved into the band. Where the ray itself
@@ -8057,6 +8261,11 @@ let _t = 0;
       _right.crossVectors(_fwd, _up3).normalize();
       camera.position.addScaledVector(_fwd,   -joy.L.dy * speed);
       camera.position.addScaledVector(_right,   joy.L.dx * speed);
+    }
+    if (_orbitXY) {        // fly / crane: the camera stays over the map too
+      const p = orbitXYPad();
+      camera.position.x = Math.min(_orbitXY[2] + p, Math.max(_orbitXY[0] - p, camera.position.x));
+      camera.position.y = Math.min(_orbitXY[3] + p, Math.max(_orbitXY[1] - p, camera.position.y));
     }
 
     updateJoyCanvas();

@@ -817,6 +817,23 @@
     return out;
   }
 
+  // ── Documents: how many the export would carry ───────────────────────────
+  // Shown beside "Include documents" when the export panel opens or the project changes.
+  async function _refreshDocsCount() {
+    const lab = document.getElementById('export_docs_count'), cb = document.getElementById('export_docs_on');
+    if (!lab) return;
+    const pjx = window._pjExport ? window._pjExport() : null;
+    const pid = pjx && pjx.project && pjx.project.id;
+    if (!pid) { lab.textContent = '(open a project to include its documents)'; if (cb) cb.disabled = true; return; }
+    if (cb) cb.disabled = false;
+    try {
+      const r = await (await fetch('/api/export/docs-info?project=' + encodeURIComponent(pid))).json();
+      lab.textContent = r.ok ? `(${r.docs} document${r.docs === 1 ? '' : 's'}, ${r.pages} page${r.pages === 1 ? '' : 's'}, ${(r.bytes / 1048576).toFixed(1)} MB)` : '';
+    } catch (_) { lab.textContent = ''; }
+  }
+  if (_exportCollapsible) new MutationObserver(() => { if (_exportCollapsible.classList.contains('show')) _refreshDocsCount(); })
+    .observe(_exportCollapsible, { attributes: true, attributeFilter: ['class'] });
+
   // ── Run export ───────────────────────────────────────────────────────────
   // ── Live HAG filter controls ─────────────────────────────────────────────
 
@@ -1126,7 +1143,16 @@
     const caves = cavesMode === 'none' ? { surveys: [] }
                 : _collectCavesInBbox(w, s, e, n, { walls: cavesMode === 'walls', poly });
 
+    // The open project's documents for these caves (export_docs.js on the server)
+    const docsOn = document.getElementById('export_docs_on');
+    const docsBody = {};
+    if (caves.project && caves.project.id && (!docsOn || docsOn.checked) && cavesMode !== 'none') {
+      docsBody.docs_project = caves.project.id;
+      docsBody.docs_caves = (caves.cave_ids || []).map(c => c.id);
+    }
+
     const body = {
+      ...docsBody,
       bbox: [w, s, e, n],
       polygon: poly,                 // null: the whole box
       eptPath,
