@@ -233,6 +233,9 @@ ok('a missing From is the To above (flagged)', sh[1].shot.from === 'X1' && /row 
 ok('ditto marks copy the cell above (flagged)', sh[1].shot.l === '2' && sh[1].shot.r === '3' && /ditto/.test(cellText(t, 2, 'l').flags.join()), [sh[1].shot, cellText(t, 2, 'l')]);
 ok('a notes-only row joins the notes above', sh.length === 4 && sh[2].shot.note === 'ends in a small room', sh.map(s => s.shot.note));
 ok('"X 3" → X3', sh[3].shot.from === 'X3', sh[3].shot);
+t = S.buildTable(makeOcr([['A1', 'A2', '10.0', '120', '-5', '2', '3'], ['A2', 'A3', '12.0', '"', '"', '"', '4'], ['A3', 'A4', '8.0', '131', '+2', '1', '1']], { colX: [60, 190, 320, 450, 590, 720, 800], seed: 25 }));
+sh = shotsOf(t);
+ok('ditto marks under the first row of a table without a header', sh[1].shot.az === '120' && sh[1].shot.inc === '-5' && sh[1].shot.l === '2', sh.map(x => x.shot));
 const rows9b = [H1, ['a4', 'XlO', '12.5', '245', '-5', '', '', '', '', ''], ['X1O', 'X11', '8.3', '260', '+2', '', '', '', '', '']];
 t = S.buildTable(makeOcr(rows9b, { colX: X1, seed: 21 }));
 sh = shotsOf(t, { known: ['A4', 'A5', 'B1'] });

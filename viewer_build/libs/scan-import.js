@@ -795,7 +795,7 @@
         const base = cell.edited ? String(cell.text || '') : String(cell.raw || '');
         let text = base.trim(), fixes = [];
         if (!cell.edited) {
-          if (DITTO.test(text) && prevRow && (f !== 'skip')) {
+          if (DITTO.test(text) && prevRow != null && f !== 'skip') {
             text = out.cells[prevRow][k].text;
             fixes = ['ditto: same as above'];
           } else if (f === 'from' || f === 'to') ({ text, fixes } = fixStation(text, known));
@@ -834,7 +834,7 @@
         if (shot.note && prev) { prev.shot.note = (prev.shot.note ? prev.shot.note + ' ' : '') + shot.note; flag(idx.note, 'joined to the notes of the row above', DOUBT); }
         return;                                             // an empty row
       }
-      if (!has('from') && prev && has.call(null, 'to') && String(prev.shot.to || '').trim()) {
+      if (!has('from') && prev && has('to') && String(prev.shot.to || '').trim()) {
         shot.from = String(prev.shot.to).trim();
         if (idx.from != null) { rc[idx.from].text = shot.from; flag(idx.from, 'From filled in from the row above', DOUBT); }
       }
