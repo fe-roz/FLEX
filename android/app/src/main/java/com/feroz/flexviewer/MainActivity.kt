@@ -134,12 +134,13 @@ class MainActivity : AppCompatActivity() {
     private var photoCtx: String? = null
     private val photoLock = Any()
     private var photoDone: String? = null
-    private val photoTaker = registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+    private val photoTaker = registerForActivityResult(ActivityResultContracts.TakePicture()) { _ ->
+        // The photo counts if the camera app wrote it (a few report "cancelled" even so).
         val f = photoPath?.let { File(it) }
         val ctx = photoCtx ?: "{}"
         photoPath = null
         photoCtx = null
-        if (!ok || f == null || !f.isFile || f.length() == 0L) {
+        if (f == null || !f.isFile || f.length() == 0L) {
             f?.delete()
             photoReady(ctx, JSONObject().put("pages", JSONArray()).put("cancelled", true))
             return@registerForActivityResult
