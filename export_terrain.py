@@ -1524,6 +1524,77 @@ def get_viewer_libs(progress=print):
 # Cave coordinate conversion
 # ──────────────────────────────────────────────────────────────────────────────
 
+INV_PHOTO_EXT = ('jpg', 'jpeg', 'png', 'webp')       # the page images an export can carry (viewer_inline.DOCS_IMAGE_EXT)
+
+
+def convert_inventories(raw, utm_center_e, utm_center_n, zone):
+    """
+    Inventories as FLEX sends them (lon/lat/elev of the station or surface point, plus the record: name, mode,
+    contents worked out from the log, the log itself) -> the viewer's form: xyz in the scene frame, the rest kept.
+
+        in:  {"id", "station"?, "cave"?, "target", "lon", "lat", "elev", "name", "desc", "mode": "log"|"list", "list",
+              "contents": [{"name","qty","changed","checked","since","stale"}], "checked", "stale", "kept": "project"|"mine",
+              "log": [{"id","date","by","action": left|took|checked|note,"items": [{"name","qty"}],"all","photos": [{"h","ext"}],"text"}]}
+        out: the same without lon/lat/elev, with "xyz": [x, y, z]
+
+    An inventory at a station has "station" (and the export's cave name); one at a surface point has a target
+    "feature:<id>" and no station. Photos travel as docs_<sha256>.<ext> beside the other page images (docs.json "pages").
+    Anything malformed is left out rather than guessed at; the log is kept whole and in the order FLEX sent (by date).
+    """
+    def s(v, n):
+        return '' if v is None else str(v)[:n]
+
+    def num(v, default=0.0):
+        try:
+            x = float(v)
+            if not math.isfinite(x):
+                return default
+            return int(x) if x == int(x) and abs(x) < 1e9 else x
+        except (TypeError, ValueError):
+            return default
+
+    out = []
+    for iv in raw or []:
+        if not isinstance(iv, dict) or not iv.get("id"):
+            continue
+        ie, inn, _ = latlon_to_utm(num(iv.get("lat")), num(iv.get("lon")), zone)
+        entry = {"id": s(iv["id"], 40),
+                 "xyz": [ie - utm_center_e, inn - utm_center_n, num(iv.get("elev"))],
+                 "name": s(iv.get("name"), 80), "mode": "list" if iv.get("mode") == "list" else "log"}
+        for key, n in (("station", 120), ("cave", 120), ("target", 200), ("desc", 2000), ("list", 8000), ("checked", 30)):
+            if iv.get(key):
+                entry[key] = s(iv[key], n)
+        if iv.get("kept") in ("project", "mine"):
+            entry["kept"] = iv["kept"]
+        if iv.get("stale"):
+            entry["stale"] = True
+        contents = []
+        for c in iv.get("contents") or []:
+            if isinstance(c, dict) and c.get("name"):
+                contents.append({"name": s(c["name"], 80), "qty": num(c.get("qty"), 1), "changed": s(c.get("changed"), 30),
+                                 "checked": s(c.get("checked"), 30), "since": s(c.get("since"), 30), "stale": bool(c.get("stale"))})
+        entry["contents"] = contents
+        log = []
+        for e in (iv.get("log") or [])[:5000]:
+            if not isinstance(e, dict) or not e.get("id"):
+                continue
+            le = {"id": s(e["id"], 40), "date": s(e.get("date"), 30), "by": s(e.get("by"), 80),
+                  "action": e.get("action") if e.get("action") in ("left", "took", "checked", "note") else "note",
+                  "items": [{"name": s(i["name"], 80), "qty": num(i.get("qty"), 1)} for i in (e.get("items") or []) if isinstance(i, dict) and i.get("name")],
+                  "text": s(e.get("text"), 4000)}
+            if e.get("all"):
+                le["all"] = True
+            photos = [{"h": p["h"], "ext": p.get("ext", "jpg")} for p in (e.get("photos") or [])
+                      if isinstance(p, dict) and isinstance(p.get("h"), str) and len(p["h"]) == 64 and all(ch in "0123456789abcdef" for ch in p["h"])
+                      and p.get("ext", "jpg") in INV_PHOTO_EXT]
+            if photos:
+                le["photos"] = photos
+            log.append(le)
+        entry["log"] = log
+        out.append(entry)
+    return out
+
+
 def convert_caves(caves_path, utm_center_e, utm_center_n, progress=print, zone=None):
     """
     Convert caves.json (lon/lat/alt from FLEX) to terrain-centred XYZ.
@@ -1631,6 +1702,10 @@ def convert_caves(caves_path, utm_center_e, utm_center_n, progress=print, zone=N
                            "xyz": [le - utm_center_e, ln - utm_center_n, lb.get("elev", 0)]})
     if labels_out:
         out["labels"] = labels_out
+    # Inventories (a chest at a station or a surface point, with its dated log): see convert_inventories().
+    invs_out = convert_inventories(raw.get("inventories"), utm_center_e, utm_center_n, zone)
+    if invs_out:
+        out["inventories"] = invs_out
     # The FLEX project these caves belong to, and each cave's id (doc 11): the
     # phone links them without asking. Ids are random, names as the user typed.
     proj = raw.get("project")
@@ -2531,7 +2606,7 @@ def main():
             docs_json = None
             if args.docs and os.path.exists(args.docs):
                 docs_side, docs_files = load_docs(args.docs, progress=lambda m: print(f"[6/7] {m}"))
-                if docs_side['entries']:
+                if docs_side['entries'] or docs_side['pages']:          # pages alone: the photos of inventories
                     zf.writestr('docs.json', json.dumps(docs_side, separators=(',', ':')))
                     for zname, fpath in docs_files:
                         zf.write(fpath, zname, compress_type=zipfile.ZIP_STORED)

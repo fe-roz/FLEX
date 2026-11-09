@@ -54,6 +54,7 @@
       if (!pj.pid) b.appendChild(el('div', 'pj-note', 'A project is an area: its caves (survey files and where they are placed), point clouds, CalTopo map, documents, notes, leads and field survey — opened together, saved together, shared with friends and FLEX Field by sync files. Without one, FLEX works as usual.'));
     });
     if (!pj.pid && window._flexLeads) section(leadsRoot, 'Leads (My data)', true, b => window._flexLeads.panel(b, true));
+    if (!pj.pid && window._inventory) window._inventory.paneSection(leadsRoot, section);           // ❓ Leads also lists the inventories (inventory.js)
     if (!pj.pid) { if (!window._pjx) section(root, 'Sync files', true, b => b.appendChild(btn(['download', 'Import a sync file…'], () => importSync()))); return; }
     const q = FL.reviewQueue(pj.P, pj.D);
     section(revRoot, `Suggestions (${q.length})`, true, b => {
@@ -100,6 +101,7 @@
       b.appendChild(btn(['download', 'CSV'], leadsCsv, 'small'));
       if (window._flexLeads) window._flexLeads.panel(b, false);        // My data's leads (caves outside the project)
     });
+    if (window._inventory) window._inventory.paneSection(leadsRoot, section);
     if (window._pjDocs && docsRoot !== root) window._pjDocs.tree(docsRoot, section);
     section(docsRoot, 'Documents', true, b => {
       const all = FL.docsOf(pj.D, pj.P);

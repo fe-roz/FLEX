@@ -38,6 +38,18 @@
         : e.fields ? ': ' + Object.keys(e.fields).map(k => k === 'status' ? FL.statusLabel(e.fields.status) : k).join(', ') : '') + (e.sighting ? ' (sighting)' : ''),
       'lead.del': () => 'Removed lead at ' + at(pj.P.leads, e.lead),
       'lead.restore': () => 'Restored lead at ' + at(pj.P.leads, e.lead),
+      // Inventories (inv.set / inv.log / inv.del / inv.restore): a cache at a station or a surface point and its dated log
+      'inv.set': () => { const I = pj.P.inventories[e.inv] || {}, nm = (e.fields && e.fields.name) || I.name || 'inventory';
+        if (e.prev === null) return `New inventory “${nm}” at ${at(pj.P.inventories, e.inv)}`;
+        const f = e.fields || {}, parts = [f.name != null ? 'name' : '', f.desc != null ? 'description' : '', f.mode === 'list' ? 'kept as a simple list' : f.mode === 'log' ? 'kept as a dated log' : '', f.list != null ? 'the list' : '', e.target ? 'moved to ' + targetLabel(e.target) : ''].filter(Boolean);
+        return `Inventory “${I.name || nm}”` + (parts.length ? ': ' + parts.join(', ') : ' edited'); },
+      'inv.log': () => { const I = pj.P.inventories[e.inv] || {}, nm = '“' + (I.name || 'inventory') + '”', items = (e.items || []).map(i => `${i.qty} ${i.name}`).join(', '), ph = (e.photos || []).length;
+        if (e.removed === true) return `Removed an entry of inventory ${nm}`;
+        if (e.removed === false) return `Brought back an entry of inventory ${nm}`;
+        if (e.prev === null) return `Inventory ${nm}: ${FL.INV.labels[e.action] ? FL.INV.labels[e.action].toLowerCase() : 'entry'}${items ? ' ' + items : ''}${e.action === 'note' && e.text ? ' — ' + String(e.text).slice(0, 50) : ''}${ph ? ` (${ph} photo${ph === 1 ? '' : 's'})` : ''}${e.date ? ' · ' + e.date : ''}`;
+        return `Edited an entry of inventory ${nm}`; },
+      'inv.del': () => 'Removed inventory “' + ((pj.P.inventories[e.inv] || {}).name || 'inventory') + '”',
+      'inv.restore': () => 'Restored inventory “' + ((pj.P.inventories[e.inv] || {}).name || 'inventory') + '”',
       'doc.add': () => `Document ${doc(e.doc)}, ${(e.pages || []).length} page(s)`,
       'doc.pages': () => `Added ${(e.add || []).length} page(s) to ${doc(e.doc)}`,
       'doc.droppage': () => `Removed a page from ${doc(e.doc)}`,
@@ -81,6 +93,7 @@
       case 'lead.set': return e.prev ? { op: 'lead.set', lead: e.lead, fields: e.prev, prev: e.fields, base: [e.id] } : null;
       case 'lead.del': return { op: 'lead.restore', lead: e.lead, base: [e.id] };
       case 'lead.restore': return { op: 'lead.del', lead: e.lead, base: [e.id] };
+      case 'inv.set': case 'inv.log': case 'inv.del': case 'inv.restore': return FL.invUndo(e);
       case 'doc.add': return { op: 'doc.del', doc: e.doc, _w: 'docs' };
       case 'doc.del': return { op: 'doc.restore', doc: e.doc, _w: 'docs' };
       case 'doc.restore': return { op: 'doc.del', doc: e.doc, _w: 'docs' };
