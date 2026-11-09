@@ -103,6 +103,13 @@
     return { surveys: surveys.sort((a, b) => natural(a.code, b.code)), all: [...all].sort(natural) };
   }
 
+  // What was typed with each station spelt the way the cave spells it ("t6~t8" for stations T6, T7, T8 is "T6~T8"); words that are
+  // no station of the cave stay as typed.
+  function matchCase(text, names) {
+    const by = new Map();
+    (names || []).forEach(n => { const k = String(n).toLowerCase(); if (!by.has(k)) by.set(k, n); });
+    return by.size ? String(text).replace(/[A-Za-z0-9_.]+/g, w => by.get(w.toLowerCase()) || w) : String(text);
+  }
   // Tag suggestions: what was typed first (a range, a list, a station), then stations of the chosen cave and survey, then the rest.
   // o: { text, cave: { id, name } | null, info: stationInfo(), survey: code, has(target), others: [{ label, target }] } → [{ target, label, sub }] (40 at most)
   function suggest(o) {
@@ -112,13 +119,14 @@
     const svRec = o.survey ? inf.surveys.find(s => s.code === o.survey) : null;
     const pool = svRec ? svRec.stations : inf.all;
     const typed = [], sts = [], rest = [];
+    const written = matchCase(text, inf.all);                 // the text with the cave's own spelling of its stations
     if (cave && text) {
-      const spec = FL.normalizeSpec(text, inf.all);
+      const spec = FL.normalizeSpec(written, inf.all);
       const rangeText = (head, a, n) => FL.normalizeSpec(head + a + '~' + n, inf.all);
       const label = sp => `Stations ${sp.replace(/~/g, '–').replace(/,/g, ', ')} · ${cave.name}`;
       const cover = sp => { const cov = FL.areaStations(sp, inf.all); return cov.length ? `${cov.length} station${cov.length === 1 ? '' : 's'}: ${cov.slice(0, 6).join(', ')}${cov.length > 6 ? '…' : ''}` : ''; };
       // the end of a range being typed ("A6~", "A6~A"): offer the stations that can finish it
-      const li = text.lastIndexOf(','), head = li >= 0 ? text.slice(0, li + 1) : '', tail = text.slice(li + 1).trim();
+      const li = written.lastIndexOf(','), head = li >= 0 ? written.slice(0, li + 1) : '', tail = written.slice(li + 1).trim();
       const rm = /^(.+?)\s*(?:~|–|—|\s+to\s+)\s*([^~]*)$/i.exec(tail);
       const ends = [];
       if (rm && pool.length) {
@@ -137,7 +145,7 @@
       const hits = pool.filter(n => !text || n.toLowerCase().includes(tl));
       hits.sort((a, b) => (b.toLowerCase().startsWith(tl) ? 1 : 0) - (a.toLowerCase().startsWith(tl) ? 1 : 0));
       hits.slice(0, 30).forEach(n => add(sts, FL.T.station(cave.id, n), `Station ${n} · ${cave.name}`, ''));
-      const spec = text ? FL.normalizeSpec(text, inf.all) : '';
+      const spec = text ? FL.normalizeSpec(written, inf.all) : '';
       if (spec && !/[~,]/.test(spec) && !hits.length) add(typed, FL.T.station(cave.id, spec), `Station ${spec} · ${cave.name}`, inf.all.length ? 'not in the loaded survey' : 'taken as typed (the survey file is not loaded)');
     }
     const mine = c => (cave && c.target.includes(':' + cave.id) ? 0 : 1);
@@ -568,6 +576,20 @@
     const c = targets.map(t => FL.parseTarget(t).cave).find(Boolean);
     if (c) lsSet(LASTCAVE, c);
   }
+  // What is selected on the map right now, as tags one tap away: the station and its survey, or the survey / cave card that is open.
+  function selectedTargets() {
+    const out = [], sel = typeof _selMesh !== 'undefined' && _selMesh && _selMesh._station;
+    if (sel && sel.name && ffStCave(sel)) {
+      out.push({ target: FL.T.station(ffStCave(sel), sel.name), text: sel.name + ' (selected)' });
+      const code = ffStCodes(sel)[0];
+      if (code) out.push({ target: FL.T.survey(ffStCave(sel), code), text: 'survey ' + code });
+    } else if (CARD && caveIdOf(CARD.cave)) {
+      const cid = caveIdOf(CARD.cave);
+      if (CARD.kind === 'survey') out.push({ target: FL.T.survey(cid, CARD.code), text: 'survey ' + CARD.code + ' (open)' });
+      else out.push({ target: FL.T.cave(cid), text: projectCaveName(cid) + ' (open)' });
+    }
+    return out;
+  }
   // What a document can be tagged to besides stations: the project, its caves and surveys, surface points, leads.
   function otherChoices(idx) {
     const out = [];
@@ -603,7 +625,7 @@
     const caveSel = mk('select', 'ffd-cave'), surSel = mk('select', 'ffd-survey');
     const q = mk('input', 'ff-input ffd-q');
     q.placeholder = 'Station, or a range like A6~A8';
-    q.autocomplete = 'off'; q.setAttribute('autocapitalize', 'characters'); q.setAttribute('enterkeyhint', 'done');
+    q.autocomplete = 'off'; q.spellcheck = false; q.setAttribute('autocapitalize', 'off'); q.setAttribute('autocorrect', 'off'); q.setAttribute('enterkeyhint', 'done');
     const sug = mk('div', 'ffd-sug'), hint = mk('div', 'ffd-hint');
     const addBtn = mk('button', 'fp-btn active ffd-add', '＋ Add');
     addBtn.title = 'Add the station or range typed; with nothing typed, the survey chosen, else the cave';
@@ -636,10 +658,13 @@
     }
     function paintRecent() {
       recentBox.textContent = '';
-      const r = recentTags().filter(t => !has(t)).slice(0, 6);
+      const chip = (t, text) => { const b = mk('button', 'fp-btn ff-chip', '＋ ' + text); b.dataset.target = t; b.addEventListener('click', () => addTag(t)); recentBox.appendChild(b); };
+      const here = selectedTargets().filter(x => !has(x.target));
+      if (here.length) { recentBox.appendChild(mk('span', 'ffd-lbl', 'Selected')); here.forEach(x => chip(x.target, x.text)); }
+      const r = recentTags().filter(t => !has(t) && !here.some(x => x.target === t)).slice(0, 6);
       if (!r.length) return;
       recentBox.appendChild(mk('span', 'ffd-lbl', 'Recent'));
-      r.forEach(t => { const b = mk('button', 'fp-btn ff-chip', '＋ ' + label(t)); b.dataset.target = t; b.addEventListener('click', () => addTag(t)); recentBox.appendChild(b); });
+      r.forEach(t => chip(t, label(t)));
     }
     function paintSelects() {
       caveSel.textContent = ''; surSel.textContent = '';
@@ -731,7 +756,7 @@
 
   return {
     // rules
-    shortLabel, pageNote, subOf, groupHeading, count, surveyIndex, stationInfo, suggest, tagOps, recentKeep, scanSources, kindForPages, descOf,
+    shortLabel, pageNote, subOf, groupHeading, count, surveyIndex, stationInfo, matchCase, suggest, tagOps, recentKeep, scanSources, kindForPages, descOf,
     GROUP_KIND, GROUP_ICON,
     // page
     stationDocs, surveyDocs, caveDocs, stationCard, openSurvey, openCave, refresh, fillList, galleryInit, galleryCaption,

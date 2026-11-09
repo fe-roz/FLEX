@@ -46,6 +46,8 @@ const sg = (text, o) => VD.suggest(Object.assign({ text, cave, info, survey: '',
   const first = sg(t)[0];
   ok(`typed “${t}”: the first suggestion is what FlexLib.specTarget makes of it, with the stations it covers`, first && first.target === FL.specTarget(C, t, info.all) && first.target === FL.T.area(C, 'A2~A3') && first.sub === '2 stations: A2, A3', first);
 });
+ok('typed in the wrong case, a range and a station are still the cave’s own names', ['a2~a3', 'A2~a3', 'a2 TO a3'].every(x => sg(x)[0].target === FL.T.area(C, 'A2~A3')) && sg('a1')[0].target === FL.T.station(C, 'A1') && sg('a1~')[0].target === FL.T.area(C, 'A1~A2'), [sg('a2~a3')[0], sg('a1')[0]]);
+ok('…names the cave does not have are left as typed', VD.matchCase('z9~z10, a1', info.all) === 'z9~z10, A1' && VD.matchCase('t6', []) === 't6');
 ok('a station typed that exists is a station', sg('A10')[0].target === FL.T.station(C, 'A10') && sg('a1')[0].label === 'Station A1 · Cave Ridge');
 ok('a list is an area too', sg('A1, A3')[0].target === FL.specTarget(C, 'A1, A3', info.all) && sg('A1, A3')[0].target === FL.T.area(C, 'A1,A3'));
 ok('the end of a range being typed: the stations that can finish it', sg('A1~').map(s => s.target).slice(0, 3).join() === [FL.T.area(C, 'A1~A2'), FL.T.area(C, 'A1~A3'), FL.T.area(C, 'A1~A10')].join(), sg('A1~').map(s => s.label));
