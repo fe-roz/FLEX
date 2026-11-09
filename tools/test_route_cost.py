@@ -199,7 +199,9 @@ if rL:
     ex, ny_, _ = et.latlon_to_utm(lat, lon, zone)
     check('start line: leaves the road near the cliff gap (north)',
           ny_ - n0 > 130 and abs(ex - e0 - 10) < 4, (ex - e0, ny_ - n0))
-    check('start line: label names the road', 'West road' in rL['properties']['label'])
+    check('start line: label "from road: <name>"',
+          rL['properties']['label'].startswith('from road: West road - '), rL['properties']['label'])
+    check('start line: start_index after the point starts', rL['properties']['start_index'] == 0)
 pl2 = dict(pl, start_lines={'type': 'FeatureCollection', 'features': [
     road((10, 5), (10, 195), name='West road'), road((150, 3), (238, 3), name='East road')]})
 _, fcL2, _ = run('cliff', pl2, out=outA)
@@ -327,6 +329,49 @@ if shady:
     check('shade lowers sun_pct', shady['properties']['stats']['sun_pct'] + 30 <
           sunny['properties']['stats']['sun_pct'],
           (shady['properties']['stats']['sun_pct'], sunny['properties']['stats']['sun_pct']))
+
+# ---------------------------------------------------------------- EPT path
+# The tiled EPT reader with ept_also, PDAL replaced by a stand-in reader that
+# serves two synthetic clouds (west and east halves) by URL.
+import types
+W, H = 200.0, 140.0
+e0, n0, zone = rc.example_origin()
+xa, ya, za, ca = rc.synth_cloud(W / 2, H, lambda x, y: 100 + 0 * x, density=3.0, seed=8)
+xb, yb, zb, cb = rc.synth_cloud(W / 2, H, lambda x, y: 100 + 0 * x, density=3.0, seed=9)
+clouds = {'https://example.org/a/ept.json': (xa + e0, ya + n0, za, ca),
+          'https://example.org/b/ept.json': (xb + e0 + W / 2, yb + n0, zb, cb)}
+calls = []
+
+
+def fake_read(url, box, cover, zone=None, south=False, progress=None):
+    calls.append(url)
+    x, y, z, c = clouds[url]
+    k = (x >= box[0]) & (x <= box[2]) & (y >= box[1]) & (y <= box[3])
+    if not k.any():
+        raise SystemExit('ERROR: no points returned from EPT for this bbox')
+    return x[k], y[k], z[k], c[k], 32600 + zone
+
+
+real_read = rc.ld.read_ept_all_classes
+had_pdal = 'pdal' in sys.modules
+sys.modules.setdefault('pdal', types.ModuleType('pdal'))
+rc.ld.read_ept_all_classes = fake_read
+try:
+    pe = base_params(None, W, H, (185, 70), [(15, 70)])
+    pe['source'] = {'ept': 'https://example.org/a/ept.json',
+                    'ept_also': ['https://example.org/b/ept.json']}
+    pe['read_tile_m'] = 60      # 4 x 3 tiles
+    sE2 = rc.run(pe, os.path.join(TMP, 'ept'), say=QUIET)
+    n_in = sum(int(((v[0] >= e0) & (v[0] <= e0 + W) & (v[1] >= n0) & (v[1] <= n0 + H)).sum())
+               for v in clouds.values())
+    check('ept_also: both clouds read, per tile', set(calls) == set(clouds) and len(calls) >= 12, len(calls))
+    check('ept: every point in the area read once (tiles do not double)',
+          abs(sE2['counts']['points'] - n_in) <= 4, (sE2['counts']['points'], n_in))
+    check('ept: a route over both clouds', sE2['counts']['routes'] >= 1)
+finally:
+    rc.ld.read_ept_all_classes = real_read
+    if not had_pdal:
+        sys.modules.pop('pdal', None)
 
 # ---------------------------------------------------------------- contract shape
 STAT_KEYS = ('length_m', 'climb_m', 'descent_m', 'time_min', 'time_breakdown',

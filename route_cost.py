@@ -22,7 +22,10 @@ other lines are kept when within 1.5 x the best), `start_line_buffer_m` (2),
 `dem_method` ("csf", or "export" = export_terrain.build_dem for comparison),
 `cache_dir` (or --cache-dir / env FLEX_ROUTE_CACHE: grid sets shared between
 output folders, newest `cache_keep` = 8 kept), `area_margin_m`,
-`connectivity` (8, 16 or "auto"). Route properties add start_kind,
+`connectivity` (8, 16 or "auto"), `source.ept_also` (extra EPT clouds read
+with the main one). Line starts get start_index = number of point starts +
+line index (so each line has its own), labels "from road: <name> - ...".
+Route properties add start_kind,
 start_lonlat (where the walk leaves the road), and for lines start_line,
 start_name and best.
 
@@ -1093,6 +1096,10 @@ def read_points(source, utm_bbox, zone, south, say, tile_m=600.0):
                                "conda-forge python-pdal), as for Generate")
         tiles = list(_tiles(utm_bbox, tile_m))
         files = None
+        # ept_also: extra clouds read with the main one, like export_terrain's
+        # --also-ept (overlaps simply add their returns).
+        epts = [source["ept"]] if "ept" in source else []
+        epts += [u for u in (source.get("ept_also") or []) if u]
         if "las" in source:
             files = source["las"] if isinstance(source["las"], list) else [source["las"]]
         for ti, box in enumerate(tiles):
@@ -1103,18 +1110,21 @@ def read_points(source, utm_bbox, zone, south, say, tile_m=600.0):
                 if r is None:
                     continue
                 x, y, z, c = r
+                add(x, y, z, c, box)
+                del x, y, z, c
             else:
                 cover = et().latlon_box_covering(box, zone, south)
-                try:
-                    x, y, z, c, _ = ld.read_ept_all_classes(
-                        source["ept"], box, cover, zone=zone, south=south,
-                        progress=lambda m: None)
-                except SystemExit as e:
-                    if "no points" in str(e.code):
-                        continue
-                    raise
-            add(x, y, z, c, box)
-            del x, y, z, c
+                for url in epts:
+                    try:
+                        x, y, z, c, _ = ld.read_ept_all_classes(
+                            url, box, cover, zone=zone, south=south,
+                            progress=lambda m: None)
+                    except SystemExit as e:
+                        if "no points" in str(e.code):
+                            continue
+                        raise
+                    add(x, y, z, c, box)
+                    del x, y, z, c
     else:
         raise RuntimeError("params.source needs 'ept' or 'las'")
     P.finish()
@@ -1401,7 +1411,8 @@ def run(params, out_dir, cache_dir=None, say=ascii_say):
         say(f"[1/4] Reading points (UTM zone {zone}{'S' if south else 'N'}, "
             f"{(need[2] - need[0]):.0f} x {(need[3] - need[1]):.0f} m)")
         t0 = time.time()
-        P = read_points(src, need, zone, south, say)
+        P = read_points(src, need, zone, south, say,
+                        tile_m=float(params.get("read_tile_m", 600.0)))
         timings["read_s"] = round(time.time() - t0, 2)
         area = (need[2] - need[0]) * (need[3] - need[1])
         ng = int((P.cls == GROUND_CLASS).sum()) if P.cls is not None else len(P)
@@ -1460,7 +1471,8 @@ def run(params, out_dir, cache_dir=None, say=ascii_say):
         rr, cc = np.nonzero(m)
         er, ec = rc_of(end_xy)
         i = int(np.argmin((rr - er) ** 2 + (cc - ec) ** 2))
-        line_t.append((li, name or f"{kind} {li + 1}", kind, m, dmap,
+        line_t.append((li, f"{kind}: {name}" if name else f"{kind} {li + 1}",
+                       kind, m, dmap,
                        (int(rr[i]), int(cc[i]))))
     n_pt = len(start_xy)
     if slines and not line_t and not n_pt:
@@ -1562,7 +1574,7 @@ def run(params, out_dir, cache_dir=None, say=ascii_say):
         label = (f"{OPTION_NAMES[name]}: {fmt_len(stats['length_m'], units)}, "
                  f"{fmt_time(stats['time_min'])}")
         if is_line(si):
-            label = f"From {line_names[si]} - " + label
+            label = f"from {line_names[si]} - " + label
         elif n_pt > 1 or line_t:
             label = f"Start {si + 1} - " + label
         sx = grid.minx + (c[1] + 0.5) * grid.cell
@@ -1576,7 +1588,7 @@ def run(params, out_dir, cache_dir=None, say=ascii_say):
                                   round(float(slat[0]), 7)]}
         if is_line(si):
             props["start_line"] = si - n_pt
-            props["start_name"] = line_names[si]
+            props["start_name"] = slines[si - n_pt][0]    # the line's own name
             props["best"] = bool(is_best_line)
         feats.append({"type": "Feature", "properties": props,
                       "geometry": {"type": "LineString", "coordinates": coords}})
