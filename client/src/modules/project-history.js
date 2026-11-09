@@ -12,6 +12,8 @@
   const refreshCard = (...a) => X.refreshCard(...a);
   const drawField = (...a) => X.drawField(...a);
   const drawLeads = (...a) => X.drawLeads(...a);
+  // One JSON entry per line (the logs inside a sync file); bad lines are skipped.
+  const parseLines = t => String(t || '').split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch (_) { return null; } }).filter(Boolean);
 
   // ── History and undo ───────────────────────────────────────────────────────
   function describe(e) {
@@ -232,6 +234,10 @@
   async function importSync(file) {
     file = file || (await pickFiles('.zip,application/zip', false))[0];
     if (!file) return;
+    if (/\.jsonl$/i.test(file.name || '')) {   // a phone's log file on its own: it doesn't say which project it belongs to
+      dialog({ title: 'Not a sync file', text: `“${file.name}” is one device's log, not a sync file. On the phone use ⇄ Project & sync → Sync file, and import the FLEX-sync-….zip it makes.`, buttons: [{ label: 'OK', value: 'ok', primary: true }] });
+      return;
+    }
     if (!(await zipLib())) return;
     // The Jobs panel (jobs-panel.js): this import as a job; Retry reads the same file again
     const job = window._jobs ? window._jobs.add({ id: 'sync.' + Date.now().toString(36), kind: 'sync', name: 'Import sync file: ' + (file.name || 'sync.zip'), retry: () => importSync(file) }) : null;
@@ -246,7 +252,7 @@
       for (const n of Object.keys(z.files)) {
         const m = /^logs\/([^/]+)\/log-([^/]+)\.jsonl$/.exec(n);
         if (!m || !/^(docs|p-[A-Za-z0-9_-]{1,40})$/.test(m[1])) continue;
-        (scopes[m[1]] || (scopes[m[1]] = [])).push(...parseLines(await z.file(n).async('string')));
+        (scopes[m[1]] || (scopes[m[1]] = [])).push(...parseLines(await z.file(n).async('string')).map(e => (FL.fixLegacy ? FL.fixLegacy(e) : e)));   // older phones wrote survey ids over the entry id
       }
       // The project first (a new one gets its folder), then its pages, so no entry points at a
       // page that isn't here, then the entries — all into that project's folder.
