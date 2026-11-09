@@ -43,6 +43,10 @@ ok('clean: corridor capped, presets filtered, units, nothing extra', c.corridor_
 ok('clean: no source / end / starts are errors', !!routeApi.clean({ end: [1, 1], starts: [[1, 1]] }).error && !!routeApi.clean({ source: good.source, starts: [[1, 1]] }).error && !!routeApi.clean(Object.assign({}, good, { starts: [] })).error);
 ok('clean: a local path is not a source', !!routeApi.clean(Object.assign({}, good, { source: { las: ['/tmp/a.laz'] } })).error);
 
+const sl = routeApi.clean(Object.assign({}, good, { starts: [], start_lines: { features: [{ geometry: { type: 'LineString', coordinates: [[-100.57, 45.12], [-100.569, 45.121]] }, properties: { kind: 'road', name: 'Cave Ridge Rd' } }, { geometry: { type: 'LineString', coordinates: [[1, 99]] } }] } }));
+ok('clean: start_lines alone are enough (no point start), kept as road/trail lines', sl.params && sl.params.starts.length === 0 && sl.params.start_lines.features.length === 1 && sl.params.start_lines.features[0].properties.kind === 'road', sl);
+ok('clean: no start_lines key when there are none', !('start_lines' in c));
+
 const srv = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x'), p = decodeURIComponent(u.pathname);
   if (p.startsWith('/api/route/')) return routeApi.handle(req, res, p.slice('/api/route/'.length), Object.fromEntries(u.searchParams));
