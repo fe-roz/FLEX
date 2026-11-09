@@ -538,6 +538,7 @@ const pid = 'proj1', cid = 'cave1', cid2 = 'cave2';
   ok('survey W, no docs of its own: the pages/docs of its stations (within), range or station', L.docsFor(D2, S, L.T.survey(c1, 'W'), { stations: ['W1', 'W2', 'W3'] }).level === 'within'
      && ids(L.docsFor(D2, S, L.T.survey(c1, 'W'), { stations: ['W1', 'W2', 'W3'] })).split(',').sort().join() === 'only-range,only-station', ids(L.docsFor(D2, S, L.T.survey(c1, 'W'), { stations: ['W1', 'W2', 'W3'] })));
   ok('…without the survey’s station list it falls back to the cave', L.docsFor(D2, S, L.T.survey(c1, 'W'), {}).level === 'cave');
+  ok('opts.within = false: a survey / cave goes straight to the parent', L.docsFor(D2, S, L.T.survey(c1, 'W'), { stations: ['W1', 'W2', 'W3'], within: false }).level === 'cave' && L.docsFor(D, S, L.T.cave(c3), { within: false }).level === 'project');
   const cv = L.docsFor(D, S, L.T.cave(c1), {});
   ok('cave: its own documents only', cv.level === 'cave' && cv.own && ids(cv).split(',').sort().join() === 'cave-map,cave-sk', ids(cv));
   const cv3 = L.docsFor(D, S, L.T.cave(c3), {});
@@ -601,6 +602,14 @@ const pid = 'proj1', cid = 'cave1', cid2 = 'cave2';
   ok('areaHas still reads what normalizeSpec wrote', L.areaHas(L.normalizeSpec('T6-8'), 'T7') && !L.areaHas(L.normalizeSpec('T6-8'), 'T9'));
   ok('area span: a range counts its numbers', L.areaSpan('T6~T8') === 3 && L.areaSpan('T5~T12') === 8 && L.areaSpan('A1,B2') === 2 && L.areaSpan('A10~A22,B3') === 14);
   ok('stations an area covers, from a list', L.areaStations('T6~T8', ['T5', 'T6', 'T7', 'T8', 'T9', 'U7']).join() === 'T6,T7,T8');
+  // areaTouches over a prepared index gives the same answer as asking areaHas name by name
+  (() => {
+    const names = ['A1', 'A2', 'A10', 'A10a', 'A22', 'B3', 'T6', 'T7', 'T8', 'X-1', '12', 'C5b'], ix = L.areaIndex(names);
+    const specs = ['A1', 'A10~A22', 'A22~A10', 'A5~A9', 'A2~A5,B3', 'B3', 'B4~B9', 'T6~T8', 'T9~T12', 'U1~U4', 'X-1', 'C1~C9', '12', '', ' , ', 'A1~', '~A5', 'A~B', 'T6~8', 'A10a', 'A10a~A10a'];
+    const bad = specs.filter(sp => L.areaTouches(sp, ix) !== names.some(n => L.areaHas(sp, n)));
+    ok('areaTouches (prepared index) agrees with areaHas for every spec and station', bad.length === 0, bad);
+    ok('areaIndex ignores blanks and repeats', L.areaTouches('Q1', L.areaIndex(['', ' ', 'Q1', 'Q1'])) && !L.areaTouches('Q1', L.areaIndex([])) && !L.areaTouches('Q1', L.areaIndex(null)));
+  })();
 
   // Groups
   ok('four groups, in order', L.DOC_GROUPS.map(g => g.id).join() === 'notes,sketches,media,other' && L.DOC_GROUPS.map(g => g.label).join() === 'Survey notes,Sketches,Media,Other');

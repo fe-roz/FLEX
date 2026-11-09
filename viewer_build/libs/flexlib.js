@@ -785,7 +785,8 @@
   // documents of other surveys, other stations or other caves. A survey: its documents, else (its stations'), else
   // the cave's, else the project's; a cave: its own, else its surveys' and stations', else the project's.
   // One exception, for a station only: Survey notes and Sketches it has none of at its own level are taken from its
-  // segment or survey (a photo of the station does not hide the survey's sketches). opts.topUp = false turns that off.
+  // segment or survey (a photo of the station does not hide the survey's sketches). opts.topUp = false turns that off;
+  // opts.within = false leaves out "what is tagged inside it" for a survey, segment or cave.
   const LEVEL_RANK = { own: 0, station: 0, area: 1, segment: 2, survey: 3, within: 4, cave: 5, project: 6 };
   // How many stations an area spec names (a range counts its numbers): narrower = more specific.
   function areaSpan(spec) {
@@ -828,12 +829,32 @@
   }
   // The names of `names` that an area spec covers (to show "= T6, T7, T8" while it is being typed).
   const areaStations = (spec, names) => (names || []).filter(n => areaHas(spec, n));
+  // Does an area spec cover any of a set of stations? areaIndex(names) prepares the set once (names split into prefix and
+  // number), so asking about many specs (every document of a cave) stays cheap. The same answer as areaHas for each name.
+  function areaIndex(names) {
+    const set = new Set(), parts = [];
+    (names ? [...names] : []).forEach(n => { n = String(n).trim(); if (!n || set.has(n)) return; set.add(n); const m = /^(.*?)(\d+)([^\d]*)$/.exec(n); if (m) parts.push({ pre: m[1], num: +m[2] }); });
+    return { set, parts };
+  }
+  function areaTouches(spec, ix) {
+    const split = x => { const m = /^(.*?)(\d+)([^\d]*)$/.exec(String(x).trim()); return m ? { pre: m[1], num: +m[2] } : null; };
+    return String(spec || '').split(',').some(item => {
+      item = item.trim();
+      if (!item) return false;
+      const k = item.indexOf('~');
+      if (k < 0) return ix.set.has(item);
+      const a = split(item.slice(0, k)), b = split(item.slice(k + 1));
+      if (!a || !b || a.pre !== b.pre) return false;
+      const lo = Math.min(a.num, b.num), hi = Math.max(a.num, b.num);
+      return ix.parts.some(x => x.pre === a.pre && x.num >= lo && x.num <= hi);
+    });
+  }
   // Which level of a selection a tag stands for: { kind, tiers: [[levels]…] (most specific first), levelOf(tag) → level | null }.
   function docsCtx(S, target, opts) {
     const t = parseTarget(target), kind = t.kind;
     const pid = (S && S.id) || (kind === 'project' ? t.pid : '');
-    const names = opts.stations ? new Set(opts.stations) : null;
-    const covers = spec => !!names && [...names].some(n => areaHas(spec, n));
+    const names = opts.stations ? new Set(opts.stations) : null, ix = names ? areaIndex(names) : null;
+    const covers = spec => !!ix && areaTouches(spec, ix);
     const ctx = { kind, pid, tiers: null, levelOf: () => null, target };
     if (kind === 'station') {
       const codes = [].concat(opts.codes || []);
@@ -849,7 +870,7 @@
         return p.kind === 'project' && p.pid === pid ? 'project' : null;
       };
     } else if (kind === 'survey' || kind === 'segment') {
-      ctx.tiers = [[kind], ['within'], ['cave'], ['project']];
+      ctx.tiers = opts.within === false ? [[kind], ['cave'], ['project']] : [[kind], ['within'], ['cave'], ['project']];
       ctx.levelOf = tag => {
         const p = parseTarget(tag);
         if (p.kind === kind) return p.cave === t.cave && (kind === 'survey' ? p.code === t.code : p.seg === t.seg) ? kind : null;
@@ -859,11 +880,11 @@
         return p.kind === 'project' && p.pid === pid ? 'project' : null;
       };
     } else if (kind === 'cave') {
-      ctx.tiers = [['cave'], ['within'], ['project']];
+      ctx.tiers = opts.within === false ? [['cave'], ['project']] : [['cave'], ['within'], ['project']];
       ctx.levelOf = tag => {
         const p = parseTarget(tag);
         if (p.kind === 'cave') return p.cave === t.cave ? 'cave' : null;
-        if (p.kind === 'survey' || p.kind === 'station' || p.kind === 'area' || p.kind === 'segment') return p.cave === t.cave ? 'within' : null;
+        if (p.kind === 'survey' || p.kind === 'station' || p.kind === 'area' || p.kind === 'segment') return opts.within === false ? null : p.cave === t.cave ? 'within' : null;
         return p.kind === 'project' && p.pid === pid ? 'project' : null;
       };
     } else if (kind === 'project') {
@@ -1687,7 +1708,7 @@
     T, parseTarget, areaHas, DOC_KINDS, DOC_KIND_LABELS, docMedia, dateKey, resolveProposals, reviewQueue, causalOrder, LEAD, LEAD_FIELDS, leadLists, statusLabel, leadActive, heads,
     replayProject, replayDocs, caveForName, liveCaves, notesOn, leadsOn,
     docInProject, docInbox, docsOf, docsForStation, docsForTarget, pageFor,
-    DOC_GROUPS, docGroup, docGroupOf, pageGroup, groupDocs, groupLabel, suggestKind, exifCamera, docTargets, hasPageTags, docsFor, pagesCovering, areaSpan, normalizeSpec, specTarget, areaStations,
+    DOC_GROUPS, docGroup, docGroupOf, pageGroup, groupDocs, groupLabel, suggestKind, exifCamera, docTargets, hasPageTags, docsFor, pagesCovering, areaSpan, normalizeSpec, specTarget, areaStations, areaIndex, areaTouches,
     segmentsOf, segmentIndex, segmentsAt, proposalTarget, segmentStates, liveCavefiles, liveLayers, areaLabelsOf, areaLabelId, areaLabelState, areaLabelUndo,
     tripState, tripEdit, tripUndo, tripsOf, tripsFor, tripGroups, tripMoves, tripDays, fullDay, TRIP_NONE,
     snapshotTime, entriesAt, replayProjectAt, replayDocsAt, changeDays, caveBundle, moveRenames, caveMoveEntries, caveMoveClear, moveRecord, movesOf,

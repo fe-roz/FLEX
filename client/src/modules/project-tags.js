@@ -161,11 +161,24 @@
       const typed = [], sts = [], rest = [];
       if (cave && text) {
         const spec = FL.normalizeSpec(text, inf.all);
-        if (/[~,]/.test(spec)) {                                         // a range or a list
-          const cov = FL.areaStations(spec, inf.all);
-          add(typed, FL.T.area(S.cave, spec), `Stations ${spec.replace(/~/g, '–').replace(/,/g, ', ')} · ${cave.name}`,
-              cov.length ? `${cov.length} station${cov.length === 1 ? '' : 's'}: ${cov.slice(0, 6).join(', ')}${cov.length > 6 ? '…' : ''}` : inf.all.length ? 'no station of the loaded survey matches this' : 'taken as typed (the survey file is not loaded)');
+        const rangeText = (head, a, n) => FL.normalizeSpec(head + a + '~' + n, inf.all);
+        const label = sp => `Stations ${sp.replace(/~/g, '–').replace(/,/g, ', ')} · ${cave.name}`;
+        const cover = sp => { const cov = FL.areaStations(sp, inf.all); return cov.length ? `${cov.length} station${cov.length === 1 ? '' : 's'}: ${cov.slice(0, 6).join(', ')}${cov.length > 6 ? '…' : ''}` : ''; };
+        // the end of a range being typed ("T6~", "T6~T"): offer the stations that can finish it
+        const li = text.lastIndexOf(','), head = li >= 0 ? text.slice(0, li + 1) : '', tail = text.slice(li + 1).trim();
+        const rm = /^(.+?)\s*(?:~|–|—|\s+to\s+)\s*([^~]*)$/i.exec(tail);
+        const ends = [];
+        if (rm && pool.length) {
+          const a = rm[1].trim(), b = rm[2].trim().toLowerCase(), ai = pool.indexOf(a);
+          const pre = x => { const m = /^(.*?)\d+[^\d]*$/.exec(x); return m ? m[1] : null; };           // a range is stations with one prefix: T6~T8
+          (ai >= 0 ? pool.slice(ai + 1) : pool).filter(n => n !== a && pre(n) === pre(a) && (!b || n.toLowerCase().startsWith(b))).slice(0, 12).forEach(n => ends.push(rangeText(head, a, n)));
+        }
+        const partial = !!rm && ends.length > 0 && !pool.includes(rm[2].trim());          // what follows the dash is not a whole station yet
+        if (/[~,]/.test(spec) && !/~$/.test(spec) && !partial) {                         // a range or a list, as typed
+          const cov = cover(spec);
+          add(typed, FL.T.area(S.cave, spec), label(spec), cov || (inf.all.length ? 'no station of the loaded survey matches this' : 'taken as typed (the survey file is not loaded)'));
         } else if (spec && pool.includes(spec)) add(typed, FL.T.station(S.cave, spec), `Station ${spec} · ${cave.name}`, '');
+        ends.forEach(sp => add(typed, FL.T.area(S.cave, sp), label(sp), cover(sp)));
       }
       if (cave) {
         const hits = pool.filter(n => !text || n.toLowerCase().includes(tl));
