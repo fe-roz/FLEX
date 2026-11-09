@@ -126,5 +126,70 @@ with tempfile.TemporaryDirectory() as tmp:
         check('export: the single-file viewer carries the pages inline and the inventories', 'window.DOCS_EXPORT = {"format":1' in html and '"inline"' in html and 'Rope cache' in html and 'Blue barrel behind the boulder' in html)
         check('export: the project is named for FLEX Field to link', caves['meta']['project']['id'] == 'pjtest0001')
 
+
+# ── a whole export through main(): chests in caves.json, photos as pages, the viewer rebuilt from its parts ──
+try:
+    import numpy as np, math, zipfile
+    from PIL import Image
+    have_stack = True
+except Exception:                                     # (no numpy / Pillow here: the parts above stand on their own)
+    have_stack = False
+if have_stack:
+    BBOX = (LON - 0.004, LAT - 0.003, LON + 0.004, LAT + 0.003)
+    CELL = 10.0
+    def ground(lat, lon):
+        return 1400 + 900 * (lat - LAT) - 600 * (lon - LON) + 20 * np.sin((lon - LON) * 900)
+    # the lon/lat grid FLEX samples its map terrain on (index.html _sampleMapTerrain), padded a little
+    mLat, mLon = 111320.0, 111320.0 * math.cos(LAT * math.pi / 180)
+    W, H = (BBOX[2] - BBOX[0]) * mLon, (BBOX[3] - BBOX[1]) * mLat
+    pad = 0.06 * max(W, H) + 3 * CELL
+    nx, ny = math.ceil((W + 2 * pad) / CELL) + 1, math.ceil((H + 2 * pad) / CELL) + 1
+    lon0, lat0, dlon, dlat = BBOX[0] - pad / mLon, BBOX[1] - pad / mLat, CELL / mLon, CELL / mLat
+    LONS, LATS = np.meshgrid(lon0 + np.arange(nx) * dlon, lat0 + np.arange(ny) * dlat)
+    with tempfile.TemporaryDirectory() as tmp:
+        open(os.path.join(tmp, 'dem.bin'), 'wb').write(ground(LATS, LONS).astype('<f4').tobytes())
+        json.dump(dict(lon0=lon0, lat0=lat0, dlon=dlon, dlat=dlat, nx=nx, ny=ny, cell=CELL, file='dem.bin'), open(os.path.join(tmp, 'dem.json'), 'w'))
+        # a cave with two stations, a chest at one of them and one at a surface point; a photo page of each
+        import hashlib, io
+        def page(color):
+            b = io.BytesIO(); Image.new('RGB', (40, 30), color).save(b, 'JPEG'); data = b.getvalue()
+            h = hashlib.sha256(data).hexdigest(); f = os.path.join(tmp, h + '.jpg'); open(f, 'wb').write(data)
+            return h, f, len(data)
+        (p1, f1, n1), (p2, f2, n2) = page((200, 90, 60)), page((60, 90, 200))
+        payload = {'surveys': [{'name': 'A - Cave Ridge', 'code': 'A', 'cave': 'Cave Ridge', 'color': '#00e5ff', 'shots': [{'from': [LON, LAT, 1500.0], 'to': [LON + 0.0001, LAT, 1498.0], 'from_name': 'A1', 'to_name': 'A2'}],
+                                'stations': [{'name': 'A1', 'lon': LON, 'lat': LAT, 'elev': 1500.0}, {'name': 'A2', 'lon': LON + 0.0001, 'lat': LAT, 'elev': 1498.0}]}],
+                   'inventories': [dict(inv, log=[dict(inv['log'][0]), dict(inv['log'][1], photos=[{'h': p1, 'ext': 'jpg'}])]),
+                                   dict(surf, log=[{'id': 'e1', 'date': '2026-05-01', 'by': 'Bo', 'action': 'note', 'items': [], 'text': 'Lid', 'photos': [{'h': p2, 'ext': 'jpg'}, {'h': p1, 'ext': 'jpg'}]}])]}
+        json.dump(payload, open(os.path.join(tmp, 'caves.json'), 'w'))
+        json.dump({'project': None, 'caves': [], 'entries': [], 'pages': [{'h': p1, 'ext': 'jpg', 'path': f1, 'size': n1}, {'h': p2, 'ext': 'jpg', 'path': f2, 'size': n2}]}, open(os.path.join(tmp, 'docs_input.json'), 'w'))
+        et.fetch_ept_points = lambda *a, **k: (_ for _ in ()).throw(AssertionError('the map-terrain export must not read a point cloud'))
+        et.fetch_satellite_texture = lambda grid, tex_size=8192, source='esri', progress=print: Image.new('RGB', grid.tex_dims(256), (90, 110, 80))
+        out = os.path.join(tmp, 'out.zip')
+        argv, stdout, log = sys.argv, sys.stdout, io.StringIO()
+        sys.argv = ['export_terrain.py', '--dem-grid', os.path.join(tmp, 'dem.json'), '--bbox', *map(str, BBOX), '--out', out, '--name', 'Test', '--max-triangles', '100000', '--tex-size', '512',
+                    '--caves', os.path.join(tmp, 'caves.json'), '--docs', os.path.join(tmp, 'docs_input.json')]
+        try:
+            sys.stdout = log
+            et.main()
+        finally:
+            sys.stdout, sys.argv = stdout, argv
+        check('main(): the export is written', os.path.exists(out), log.getvalue()[-600:])
+        if os.path.exists(out):
+            z = zipfile.ZipFile(out)
+            names = set(z.namelist())
+            caves = json.loads(z.read('caves.json'))
+            docs = json.loads(z.read('docs.json')) if 'docs.json' in names else None
+            sts = {st['name']: st['xyz'] for sv in caves['surveys'] for st in sv['stations']}
+            ivs = {i['name']: i for i in caves.get('inventories', [])}
+            check('main(): the chest at A2 is at A2 in the scene frame, the surface chest is there too', ivs.get('Rope cache') and all(abs(ivs['Rope cache']['xyz'][k] - sts['A2'][k]) < 1e-6 for k in range(3)) and ivs.get('Dig tools') and ivs['Dig tools']['mode'] == 'list', list(ivs))
+            check('main(): docs.json has the photos as pages and no entries', docs is not None and docs['entries'] == [] and sorted(p['h'] for p in docs['pages']) == sorted([p1, p2]), docs)
+            check('main(): each photo is a docs_<sha>.jpg file in the zip', {f'docs_{p1}.jpg', f'docs_{p2}.jpg'} <= names, sorted(n for n in names if n.startswith('docs')))
+            html = z.read('viewer.html').decode('utf-8')
+            check('main(): the single-file viewer carries the photos inline and the chests', 'window.DOCS_EXPORT = {"format":1' in html and '"inline"' in html and 'Rope cache' in html and 'Dig tools' in html)
+            import subprocess
+            rebuilt = os.path.join(tmp, 'rebuilt.zip')
+            r = subprocess.run([sys.executable, os.path.join(HERE, 'rebuild_viewer.py'), out, '-o', rebuilt], capture_output=True, text=True)
+            check('rebuild_viewer takes such an export (pages without entries) and remakes the same viewer.html', r.returncode == 0 and os.path.exists(rebuilt) and zipfile.ZipFile(rebuilt).read('viewer.html') == z.read('viewer.html'), r.stderr[-400:])
+
 print(f'{passes} passed, {fails} failed')
 sys.exit(1 if fails else 0)
