@@ -220,6 +220,28 @@ pa3 = dict(pa2, brush_band=[0.3, 1.5])
 sD = rc.run(pa3, os.path.join(TMP, 'cD'), cache_dir=cache, say=QUIET)
 check('cache: another brush band rebuilds', not sD['grid_reused'])
 
+# dem_method export: export_terrain.build_dem as Generate uses it, cached apart.
+pe = dict(pa, dem='below', dem_method='export')
+sE, _, outE = run('cliff_export', pe)
+check('dem_method export: own cache key', sE['grid_cache_key'] != sA['grid_cache_key'])
+g_csf = np.load(os.path.join(gA, 'ground.npy'))
+g_exp = np.load(os.path.join(outE, 'grids', 'ground.npy'))
+check('dem_method export: same grid', g_csf.shape == g_exp.shape)
+top = np.abs(g_exp[60:150, 92:99] - g_csf[60:150, 92:99]).max()
+check('dem_method export: build_dem sinks the cliff top (> 1 m)', top > 1.0, top)
+check('cloth csf vs export agree away from the cliff',
+      np.abs(g_exp[60:150, 20:60] - g_csf[60:150, 20:60]).max() < 0.3)
+
+# Cache pruning keeps the newest sets.
+pc_dir = os.path.join(TMP, 'prune')
+os.makedirs(pc_dir)
+for i in range(4):
+    d = os.path.join(pc_dir, f'k{i}'); os.makedirs(d)
+    open(os.path.join(d, 'grid.json'), 'w').write('{}')
+    os.utime(d, (1000 + i, 1000 + i))
+rc.prune_cache(pc_dir, keep=2, say=QUIET)
+check('cache prune keeps the newest', sorted(os.listdir(pc_dir)) == ['k2', 'k3'])
+
 # ---------------------------------------------------------------- brush scene
 W, H = 200.0, 140.0
 x, y, z, c = rc.synth_cloud(W, H, lambda x, y: 100 + 0.02 * x, density=4.0,

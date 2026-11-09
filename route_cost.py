@@ -432,8 +432,12 @@ def points_from_arrays(x, y, z, cls):
     return P.finish()
 
 
-def build_grids(P, grid, band, dem_mode, lat, say=ascii_say):
-    """All cached cost inputs from a Points cloud in UTM metres."""
+def build_grids(P, grid, band, dem_mode, lat, say=ascii_say, method="csf"):
+    """All cached cost inputs from a Points cloud in UTM metres.
+
+    method "csf": the cloths in this file; "export": export_terrain.build_dem
+    as Generate uses it (cloth from below without the restoring force) for
+    the below DEM -- kept for comparison, it sinks cliff tops."""
     t0 = time.time()
     n_ground = int((P.cls == GROUND_CLASS).sum()) if P.cls is not None else 0
     use_class = n_ground >= 50
@@ -466,7 +470,18 @@ def build_grids(P, grid, band, dem_mode, lat, say=ascii_say):
     say(f"  ground cells with returns: {valid.mean() * 100:.1f}% "
         f"({time.time() - t0:.1f} s)")
     out = {"valid": valid}
-    if dem_mode in ("below", "both"):
+    if dem_mode in ("below", "both") and method == "export":
+        say("  export_terrain.build_dem (cloth from below, as Generate)")
+        xs, ys, zs = [], [], []
+        for x, y, z, _c in P.chunks(ground_sel):
+            xs.append(x); ys.append(y); zs.append(z)
+        cl, _xb, _yb, _x0, _y0 = et().build_dem(
+            np.concatenate(xs), np.concatenate(ys), np.concatenate(zs),
+            grid.cell, progress=lambda m: None,
+            extent=(grid.minx, grid.miny, grid.maxx, grid.maxy))
+        del xs, ys, zs
+        out["below"] = np.ascontiguousarray(cl.T[::-1]).astype(np.float32)
+    elif dem_mode in ("below", "both"):
         say(f"  cloth from below ({CLOTH_ITERS} passes, {grid.nx}x{grid.ny})")
         out["below"] = cloth_below(zmin, grid.cell)
     if dem_mode in ("above", "both"):
@@ -1129,9 +1144,10 @@ def source_id(source):
     return json.dumps(s, sort_keys=True)
 
 
-def cache_key(src_id, bbox, cell_spec, band, dem):
+def cache_key(src_id, bbox, cell_spec, band, dem, method="csf"):
     k = json.dumps([VERSION, src_id, [round(v, 1) for v in bbox], str(cell_spec),
-                    [round(b, 3) for b in band], dem], sort_keys=True)
+                    [round(b, 3) for b in band], dem]
+                   + ([method] if method != "csf" else []), sort_keys=True)
     return hashlib.sha1(k.encode()).hexdigest()[:16]
 
 
@@ -1139,7 +1155,7 @@ def dem_ok(cached, wanted):
     return cached == wanted or (cached == "both" and wanted in ("below",))
 
 
-def find_cached(dirs, src_id, need_bbox, cell_spec, band, dem):
+def find_cached(dirs, src_id, need_bbox, cell_spec, band, dem, method="csf"):
     """A cached grid set with the same source, cell, band and dem whose area
     covers the bbox needed now (so moved starts / end reuse it)."""
     for d in dirs:
@@ -1159,6 +1175,8 @@ def find_cached(dirs, src_id, need_bbox, cell_spec, band, dem):
         if [round(b, 3) for b in k.get("band", [])] != [round(b, 3) for b in band]:
             continue
         if not dem_ok(k.get("dem"), dem):
+            continue
+        if k.get("method", "csf") != method:
             continue
         if not all(os.path.exists(os.path.join(d, f)) for f in GRID_FILES):
             continue
@@ -1248,6 +1266,19 @@ def grid_meta(grid, zone, south, key, cache):
             "cache_key": key, "cache": cache}
 
 
+def prune_cache(cache_dir, keep=8, say=ascii_say):
+    """Keep the newest `keep` grid sets in a shared cache folder."""
+    import shutil
+    sets = []
+    for n in os.listdir(cache_dir):
+        d = os.path.join(cache_dir, n)
+        if os.path.exists(os.path.join(d, "grid.json")):
+            sets.append((os.path.getmtime(d), d))     # dir mtime = last use
+    for _t, d in sorted(sets, reverse=True)[keep:]:
+        shutil.rmtree(d, ignore_errors=True)
+        say(f"  cache: removed an old grid set ({os.path.basename(d)})")
+
+
 def link_or_copy(src, dst):
     import shutil
     if os.path.abspath(src) == os.path.abspath(dst):
@@ -1280,6 +1311,11 @@ def run(params, out_dir, cache_dir=None, say=ascii_say):
     if dem not in ("below", "above", "both"):
         raise RuntimeError("dem must be below, above or both")
     band = [float(v) for v in params.get("brush_band", [0.5, 2.0])]
+    dem_method = params.get("dem_method", "csf")
+    if dem_method not in ("csf", "export"):
+        raise RuntimeError("dem_method must be csf or export")
+    cache_dir = cache_dir or params.get("cache_dir") or \
+        os.environ.get("FLEX_ROUTE_CACHE") or None
     weights = dict(DEFAULT_WEIGHTS)
     weights.update(params.get("weights") or {})
     corridor_m = float(params.get("corridor_m", 300))
@@ -1330,7 +1366,7 @@ def run(params, out_dir, cache_dir=None, say=ascii_say):
     if cache_dir:
         if os.path.isdir(cache_dir):
             look += [os.path.join(cache_dir, n) for n in sorted(os.listdir(cache_dir))]
-    found, meta = find_cached(look, sid, need, cell_spec, band, dem)
+    found, meta = find_cached(look, sid, need, cell_spec, band, dem, dem_method)
     counts = {}
     if found:
         say(f"[1/4] Reusing cost grids ({meta['cache_key']}), "
@@ -1338,6 +1374,11 @@ def run(params, out_dir, cache_dir=None, say=ascii_say):
         grid = ld.Grid(meta["minx"], meta["miny"], meta["maxx"], meta["maxy"],
                        meta["cell"])
         G = load_grids(found, meta)
+        if found != gdir:
+            try:
+                os.utime(found)        # last use, for prune_cache
+            except OSError:
+                pass
         key = meta["cache_key"]
         reused = True
         if found != gdir:
@@ -1362,12 +1403,12 @@ def run(params, out_dir, cache_dir=None, say=ascii_say):
         grid = ld.Grid(need[0], need[1], need[2], need[3], cell)
         say(f"[2/4] Cost grids {grid.nx}x{grid.ny} @ {cell} m, dem {dem}")
         t0 = time.time()
-        G = build_grids(P, grid, band, dem, lat0, say)
+        G = build_grids(P, grid, band, dem, lat0, say, method=dem_method)
         timings["grids_s"] = round(time.time() - t0, 2)
         counts.update(points=int(len(P)), ground_points=ng)
-        key = cache_key(sid, need, cell_spec, band, dem)
+        key = cache_key(sid, need, cell_spec, band, dem, dem_method)
         cache = {"version": VERSION, "source": sid, "cell_spec": str(cell_spec),
-                 "band": band, "dem": dem}
+                 "band": band, "dem": dem, "method": dem_method}
         meta = grid_meta(grid, zone, south, key, cache)
         meta["counts"] = dict(counts)
         if dem == "both":
@@ -1375,6 +1416,8 @@ def run(params, out_dir, cache_dir=None, say=ascii_say):
                                               zone, south)
         target = os.path.join(cache_dir, key) if cache_dir else gdir
         write_grids(target, G, grid, meta, say)
+        if cache_dir:
+            prune_cache(cache_dir, keep=int(params.get("cache_keep", 8)), say=say)
         if cache_dir:
             os.makedirs(gdir, exist_ok=True)
             for f in os.listdir(target):
