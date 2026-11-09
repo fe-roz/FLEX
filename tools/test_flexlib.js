@@ -274,6 +274,18 @@ const pid = 'proj1', cid = 'cave1', cid2 = 'cave2';
     && pay.log[3].photos[0].h === H(1) && pay.log[0].by === 'Ana' && pay.log[1].by === 'Bo and Cy' && pay.contents[0].checked === '2026-03-02' && pay.contents[0].since === '2026-03-02' && pay.contents[1].since === '2026-01-10' && !('created' in pay.log[0]), pay);
   ok('invPayload: it survives JSON (it goes into caves.json)', JSON.stringify(JSON.parse(JSON.stringify(pay))) === JSON.stringify(pay));
 
+  // entries made by something else (a sync file, an older build, a bug) must never stop the log from replaying
+  {
+    const J = (op, d) => Object.assign({ id: 'j.' + Math.random().toString(36).slice(2), dev: 'j', seq: 1, t: '2026-06-01T00:00:00Z', who: 'x', op }, d);
+    const junk = [J('inv.set', { inv: 'ij', target: 5, fields: 'nope' }), J('inv.set', { inv: 'ij', target: 'station:c:A', fields: { name: null, mode: 7, list: { a: 1 } } }),
+      J('inv.log', { inv: 'ij', log: 'x1', items: 'rope', photos: 'p', date: {}, action: 3, text: 9, by: [] }), J('inv.log', { inv: 'ij', log: 'x2', items: [null, 4, { name: {}, qty: 'q' }, { name: 'ok', qty: -2 }], photos: [null, 3, { h: 5 }], date: '2026-02-30' }),
+      J('inv.log', { inv: 'ij', items: [{ name: 'a', qty: 1 }], action: 'left' }), J('inv.log', { inv: '', log: 'x3' }), J('inv.log', { log: 'x4' }), J('inv.del', { inv: 'ij' }), J('inv.restore', { inv: 'nowhere' }),
+      J('inv.log', { inv: 'ij', log: 'x5', removed: 'yes' })];
+    let S = null, threw = null;
+    try { S = L.replayProject(junk, pid); L.liveInventories(S).forEach(i => { L.invPayload(i); L.invLine(i); L.invMark(i, { now: 0 }); }); } catch (e) { threw = e; }
+    ok('junk inv.* entries replay without an error (bad ones are tamed or skipped)', !threw && S && S.inventories.ij && S.inventories.ij.log.every(e => ['left', 'took', 'checked', 'note'].includes(e.action) && Array.isArray(e.items)), threw && String(threw.stack).slice(0, 300));
+  }
+
   // any order of reading the same entries gives the same inventory (what devices merge into must not depend on file order)
   {
     const mixed = [set, left, took, chk, back, over, edit, rm, unrm, e2a, e2b, toList, back2, ph, prop, acc, del, res];
