@@ -11,7 +11,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'flex-route-'));
 const script = path.join(tmp, 'stub.py');
 fs.writeFileSync(script, `
 import json, os, sys, argparse
-ap = argparse.ArgumentParser(); ap.add_argument('--params'); ap.add_argument('--out'); a = ap.parse_args()
+ap = argparse.ArgumentParser(); ap.add_argument('--params'); ap.add_argument('--out'); ap.add_argument('--cache-dir'); a = ap.parse_args()
 P = json.load(open(a.params)); os.makedirs(a.out + '/grids', exist_ok=True)
 print('[1/2] reading')
 if 'fail' in P['source']['ept']:
@@ -21,7 +21,7 @@ if 'crash' in P['source']['ept']:
 reused = os.path.exists(a.out + '/grids/grid.json')
 if not reused: open(a.out + '/grids/grid.json', 'w').write('{"nx": 2}'); open(a.out + '/grids/brush.png', 'wb').write(b'\\x89PNG')
 open(a.out + '/routes.geojson', 'w').write(json.dumps({'type': 'FeatureCollection', 'features': [{'type': 'Feature', 'geometry': {'type': 'LineString', 'coordinates': [[-100.5678, 45.1234, 1]] * 2}, 'properties': {'id': 'a', 'option': 'recommended', 'reused': reused}}]}))
-open(a.out + '/summary.json', 'w').write(json.dumps({'cell': 1, 'grid_reused': reused}))
+open(a.out + '/summary.json', 'w').write(json.dumps({'cell': 1, 'grid_reused': reused, 'cache_dir': a.cache_dir}))
 print('[2/2] done')
 `);
 const routeApi = require('../route_api')({ python: 'python3', script, outRoot: path.join(tmp, 'jobs', 'route') });
@@ -88,6 +88,19 @@ const until = async (f, ms = 15000) => { const t0 = Date.now(); while (Date.now(
   ok('reuse: the script saw grids/ (reused = true)', r.json.ok && r.json.routes.features[0].properties.reused === true && r.json.summary.grid_reused === true, r.json);
   r = await call('POST', '/api/route/plan', { params: good, reuse: '../../etc' });
   ok('reuse of a bad id is ignored, not fatal', r.json.ok && r.json.reused === false, r.json);
+  // With a shared cache folder the script is given --cache-dir and the server does not link grids itself
+  const routeApi2 = require('../route_api')({ python: 'python3', script, outRoot: path.join(tmp, 'jobs2', 'route'), cacheDir: path.join(tmp, 'cache') });
+  ok('cacheDir: pruning never touches a folder starting with _ and dem_method / connectivity are passed on', routeApi2.clean(Object.assign({}, good, { dem_method: 'export', connectivity: 16 })).params.dem_method === 'export' && routeApi2.clean(Object.assign({}, good, { connectivity: 5 })).params.connectivity === 'auto' && routeApi2.clean(good).params.dem_method === 'csf');
+  const srv2 = http.createServer((req, res) => { const u = new URL(req.url, 'http://x'); routeApi2.handle(req, res, decodeURIComponent(u.pathname).slice('/api/route/'.length), Object.fromEntries(u.searchParams)); });
+  await new Promise(r => srv2.listen(0, '127.0.0.1', r));
+  const call2 = (m, p, b) => new Promise(r => { const q = http.request({ host: '127.0.0.1', port: srv2.address().port, path: p, method: m, headers: { 'Content-Type': 'application/json' } }, x => { let s = ''; x.on('data', d => s += d); x.on('end', () => r(JSON.parse(s))); }); q.end(b ? JSON.stringify(b) : undefined); });
+  let c1 = await call2('POST', '/api/route/plan', { params: good });
+  await until(async () => (await call2('GET', '/api/route/status/' + c1.jobId)).status !== 'running');
+  c1 = await call2('POST', '/api/route/plan', { params: good, reuse: c1.jobId });
+  await until(async () => (await call2('GET', '/api/route/status/' + c1.jobId)).status !== 'running');
+  const rr = await call2('GET', '/api/route/result?id=' + c1.jobId);
+  ok('cacheDir: the script got --cache-dir; the server did not link grids (reused false, the script decides)', c1.reused === false && rr.summary.cache_dir === path.join(tmp, 'cache') && rr.routes.features[0].properties.reused === false, [c1, rr.summary]);
+  srv2.close();
   // Errors
   r = await call('POST', '/api/route/plan', { params: Object.assign({}, good, { source: { ept: 'http://localhost:1/fail/ept.json' } }) });
   let s = await until(async () => { const x = await call('GET', '/api/route/status/' + r.json.jobId); return x.json.status !== 'running' ? x.json : null; });
