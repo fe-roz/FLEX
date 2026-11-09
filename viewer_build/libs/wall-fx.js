@@ -76,7 +76,7 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
 }
 `;
   const WALL_VARS_VERT = 'varying vec3 vFxN;\nvarying vec3 vFxP;\n';
-  const WALL_VARS_FRAG = 'varying vec3 vFxN;\nvarying vec3 vFxP;\nuniform float uFxEdge;\nuniform float uFxPass;\n';
+  const WALL_VARS_FRAG = 'varying vec3 vFxN;\nvarying vec3 vFxP;\nuniform float uFxEdge;\nuniform float uFxPass;\nuniform float uFxFace;\n';
   const WALL_FRAG = `
   {
     float fxF = fxFocus(vFxW);
@@ -91,7 +91,10 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
       float fxNV = fxL > 0.00001 ? abs(dot(vFxN / fxL, normalize(-vFxP))) : 1.0;
       float fxE = clamp(1.0 - fxNV, 0.0, 1.0);
       float fxRim = fxE * fxE;
-      float fxA = mix(opacity * (1.0 - 0.55 * uFxEdge), min(0.95, opacity + 0.55 * uFxEdge), fxRim);
+      // Edges lift the alpha towards solid at the silhouette; in ghost (uFxFace 1) they also thin the faces
+      // that look straight at you, so the rims stand out. In On the face-on alpha stays the slider's.
+      float fxK = 0.65 * uFxEdge;
+      float fxA = mix(opacity * (1.0 - fxK * uFxFace * (1.0 - opacity)), opacity + (1.0 - opacity) * fxK, fxRim);
       diffuseColor.a = fxA * fxPart;
       if (diffuseColor.a < 0.004) discard;
     }
@@ -120,6 +123,7 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
     share(shader);
     shader.uniforms.uFxEdge = U.edge;
     shader.uniforms.uFxPass = { value: this.userData.fxPass || 0 };
+    shader.uniforms.uFxFace = this.userData.fxFace;
     inject(shader, GLSL_VARS_VERT + WALL_VARS_VERT,
       'vFxW = (modelMatrix * vec4(transformed, 1.0)).xyz; vFxN = transformedNormal; vFxP = mvPosition.xyz;',
       GLSL_VARS_FRAG + WALL_VARS_FRAG, WALL_FRAG);
@@ -147,6 +151,7 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
       edge: { value: S.edge },
     };
     FX.uniforms = U;
+    prev.fill(NaN);                // the first update writes everything
     restore(c.saved);
     // Every render call: bring the uniforms up to date (only if something moved).
     c.scene.onBeforeRender = () => update();
@@ -244,6 +249,7 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
         polygonOffset: pass === 1, polygonOffsetFactor: 0, polygonOffsetUnits: 1,
       });
       m.userData.fxPass = pass;
+      m.userData.fxFace = { value: 1 };          // 1: edges thin the faces (ghost); 0: they only lift the rims (On)
       m.onBeforeCompile = patchWall;
       return m;
     };
@@ -252,6 +258,7 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
     pre.renderOrder = order; rest.renderOrder = order + 0.05; col.renderOrder = order + 0.1;
     col.onBeforeRender = pre.onBeforeRender = clearOnce;
     col.add(rest);                                      // a child, so the set is still [colour, pre-pass]
+    col.addEventListener('removed', () => rest.material.dispose());
     sets.push({ col, pre, rest });
     return [col, pre];
   }
@@ -266,6 +273,7 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
       const layered = ghost && LIMITS.layered && tris <= LIMITS.layeredMaxTris;
       col.material.opacity = pre.material.opacity = a;
       rest.material.opacity = a * LIMITS.restShare;
+      col.material.userData.fxFace.value = rest.material.userData.fxFace.value = pre.material.userData.fxFace.value = ghost ? 1 : 0;
       col.material.depthTest = !ghost || layered;   // On, layered ghost: against the pre-pass; big ghost: every layer
       pre.visible = (!ghost || layered) && mode !== 2;
       rest.visible = layered;
@@ -305,7 +313,9 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
     }
   }
   const toggleFocus = () => setFocus(!S.focus);
+  let paintFocus = null;                   // set by sheetFocus: repaints its rows when the sheet is open
   function syncUi() {
+    if (paintFocus) paintFocus();
     const b = root.document && root.document.getElementById('tb-focus');
     if (b) { b.classList.toggle('focus-on', focusActive()); b.setAttribute('aria-pressed', S.focus ? 'true' : 'false'); }
   }
@@ -342,13 +352,25 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
   function sheetFocus(H) {
     const len = H.units && H.units.len ? m => H.units.len(m) : m => Math.round(m) + ' m';
     H.head('Focus');
-    H.row('🎯', 'Focus mode', 'near the orbit point only', () => { toggleFocus(); H.rerender(); }, S.focus);
+    const row = H.row('🎯', 'Focus mode', 'near the orbit point only', toggleFocus, S.focus);
+    // The two parts; with both off, focus mode has nothing to do, so it turns itself off.
     H.chips([
-      ['⭕', 'Near centre', S.around, on => { S.around = on; changed(); }],
-      ['✂️', 'Cut in front', S.cut, on => { S.cut = on; changed(); }],
+      ['⭕', 'Near centre', S.around, on => { S.around = on; if (!S.around && !S.cut) S.focus = false; changed(); }],
+      ['✂️', 'Cut in front', S.cut, on => { S.cut = on; if (!S.around && !S.cut) S.focus = false; changed(); }],
     ]);
-    slider(H, 'focus-radius-slider', 'Radius', 0, 100, toT(getR(), rRange()), t => len(fromT(t, rRange())), t => { S.r = fromT(t, rRange()); changed(); });
-    slider(H, 'focus-cut-slider', 'Cut radius', 0, 100, toT(getCutR(), cRange()), t => len(fromT(t, cRange())), t => { S.cutR = fromT(t, cRange()); changed(); });
+    const grid = H.sheet.lastElementChild, chips = grid.querySelectorAll('.sh-chip');
+    const rs = slider(H, 'focus-radius-slider', 'Radius', 0, 100, toT(getR(), rRange()), t => len(fromT(t, rRange())), t => { S.r = fromT(t, rRange()); changed(); });
+    const cs = slider(H, 'focus-cut-slider', 'Cut radius', 0, 100, toT(getCutR(), cRange()), t => len(fromT(t, cRange())), t => { S.cutR = fromT(t, cRange()); changed(); });
+    // Repainted in place (the sheet keeps its scroll position): the switch row, the chips and the
+    // sliders dim when they have no effect (focus off, or that part off).
+    paintFocus = () => {
+      row.classList.toggle('a', S.focus);
+      chips[0].classList.toggle('a', S.around); chips[1].classList.toggle('a', S.cut);
+      grid.style.opacity = S.focus ? '' : '.55';
+      rs.parentNode.style.opacity = S.focus && S.around ? '' : '.45';
+      cs.parentNode.style.opacity = S.focus && S.cut ? '' : '.45';
+    };
+    paintFocus();
   }
 
   // Taps: a station, name, lead or area name that the focus has faded or cut away cannot be tapped
