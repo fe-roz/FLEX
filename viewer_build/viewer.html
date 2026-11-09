@@ -5244,7 +5244,7 @@ function ffDescribeOp(e) {
     case 'doc.untag':    return `Untagged ${docName(e.doc)}: ${ffTargetLabel(e.target)}`;
     case 'doc.pagetag':   return `Tagged a page of ${docName(e.doc)}: ${ffTargetLabel(e.target)}`;
     case 'doc.pageuntag': return `Untagged a page of ${docName(e.doc)}: ${ffTargetLabel(e.target)}`;
-    case 'doc.set':     return `Edited ${docName(e.doc)} (${Object.keys(e.fields || {}).join(', ')})`;
+    case 'doc.set':      return `Edited ${docName(e.doc)} (${Object.keys(e.fields || {}).join(', ')})`;
     case 'doc.del':      return `Deleted ${docName(e.doc)}`;
     case 'doc.restore':  return `Restored ${docName(e.doc)}`;
     case 'survey.add':   return `New field survey “${e.survey.name}”`;
