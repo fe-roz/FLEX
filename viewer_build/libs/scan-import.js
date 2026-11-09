@@ -1130,7 +1130,7 @@ body.scan-open #mode-toast { z-index: 95; bottom: 96px; font-size: 14px; }
     try { ctx = JSON.parse(o.ctx || '{}'); } catch (_) {}
     if (res.error) { toast(res.error); return; }
     const pg = (res.pages || [])[0];
-    if (!pg) { if (!res.cancelled) toast('No photo'); return; }
+    if (!pg) { if (!res.cancelled) toast((res.failed || []).length ? 'Could not read the photo' : 'No photo'); return; }
     const sv = survey(ctx.sid);
     const tags = [FL.T.project(pid())];
     const cid = sv && typeof ffCaveId === 'function' ? ffCaveId(sv.cave || '') : null;
@@ -1433,7 +1433,7 @@ body.scan-open #mode-toast { z-index: 95; bottom: 96px; font-size: 14px; }
     const local = e => { const r = stage.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
     stage.addEventListener('pointerdown', e => {
       if (!S || !S.sw || e.target.closest('.sr-zoom')) return;
-      stage.setPointerCapture(e.pointerId);
+      try { stage.setPointerCapture(e.pointerId); } catch (_) {}
       pts.set(e.pointerId, local(e));
       if (pts.size === 1) { moved = false; t0 = Date.now(); }
       rebase();
