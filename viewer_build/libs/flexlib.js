@@ -343,11 +343,12 @@
   }
   function replayProject(entries, pid) {
     const S = emptyProject(pid);
-    const recs = { note: {}, lead: {}, inv: [] };
+    const recs = { note: {}, lead: {} };
     const ordered = causalOrder(dedupe(entries));   // the same entry merged twice counts once
     ordered.forEach(e => { S.byId.set(e.id, e); S.log.push(e); });
     const R = resolveProposals(ordered);
     S.proposals = R.proposals;
+    const invEntries = [];                        // inventories (inv.* records): replayed by replayInventories, see the section at the end
     R.effective.forEach(e => {
       if (applyFieldSurvey(e, S)) return;
       switch (e.op) {
@@ -523,7 +524,7 @@
         case 'note.set': (recs.note[e.note] || (recs.note[e.note] = { id: e.note, entries: [] })).entries.push(e); break;
         case 'lead.set': case 'lead.del': case 'lead.restore':
           (recs.lead[e.lead] || (recs.lead[e.lead] = { id: e.lead, entries: [] })).entries.push(e); break;
-        case 'inv.set': case 'inv.log': case 'inv.del': case 'inv.restore': recs.inv.push(e); break;      // inventories: see the section at the end
+        case 'inv.set': case 'inv.log': case 'inv.del': case 'inv.restore': invEntries.push(e); break;
         default: break;                       // map.* and anything newer: history only
       }
     });
@@ -567,7 +568,7 @@
       L.updated = { who: r.entries[r.entries.length - 1].who, t: r.entries[r.entries.length - 1].t };
       S.leads[r.id] = L;
     });
-    S.inventories = replayInventories(recs.inv);
+    S.inventories = replayInventories(invEntries);
     return S;
   }
   // The cave an export's cave name stands for (an alias, else a cave of that name).
