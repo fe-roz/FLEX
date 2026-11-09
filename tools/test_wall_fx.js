@@ -127,6 +127,32 @@ ok('focus off: every tap factor is 1', FX.tapFactor({ x: 999, y: 999, z: 999 }) 
 S.focus = true; S.around = true; S.cut = true; FX.update(true);
 ok('focus on: a far station cannot be tapped, the near one can', FX.tapFactor({ x: 200, y: 0, z: 0 }) === 0 && FX.tapFactor({ x: 3, y: 2, z: 1 }) > 0.99);
 
+// ── The terrain: only the cut applies, with the walls' own maths ────────────
+S.around = true; S.cut = true; S.terr = true; S.focus = true; FX.update(true);
+ok('terrain: the cone cuts ground on the view axis, far to the side stays', FX.terrainAt(0, -50, 0) < 0.01 && FX.terrainAt(60, 0, 0) === 1, FX.terrainAt(0, -50, 0));
+ok('terrain: the near-centre fade does not touch it (far off the target, outside the cone: 1)', FX.terrainAt(0, 500, 0) === 1 && FX.terrainAt(300, 0, 0) === 1);
+ok('terrain: same value as the cut part of focusAt', near(FX.terrainAt(2, -40, 0), FX.cutAt(2, -40, 0)));
+S.around = false; FX.update(true);
+ok('terrain: same hole as the walls with near-centre off', near(FX.terrainAt(2, -40, 0), FX.focusAt(2, -40, 0)));
+S.terr = false; FX.update(true);
+ok('terrain switch off: nothing is cut, walls still are', FX.terrainAt(0, -50, 0) === 1 && FX.focusAt(0, -50, 0) < 0.01 && !FX.terrainCutActive() && U.cut.value.w === 0);
+S.terr = true; S.cut = false; FX.update(true);
+ok('cut off: the ground is not cut', FX.terrainAt(0, -50, 0) === 1 && !FX.terrainCutActive());
+S.cut = true; S.focus = false; FX.update(true);
+ok('focus off: the ground is not cut', FX.terrainAt(0, -50, 0) === 1);
+FX.restore({ terr: false }); ok('terr is restored and serialised', S.terr === false && FX.serialize().terr === false);
+FX.restore({ terr: 'x' }); ok('a wrong type is ignored', S.terr === false);
+FX.restore({ terr: true }); ok('terr defaults to on and restores', S.terr === true && FX.defaults.terr === true);
+{
+  const m = FX.patchTerrain(new THREE.MeshStandardMaterial());
+  const sh = shaderOf('physical'); m.onBeforeCompile(sh, null);
+  const f = sh.fragmentShader, v = sh.vertexShader;
+  ok('terrain shader: cut only (no fxFocus call), rim, one discard, uniforms shared, braces balance',
+    count(f, 'fxCutOnly(vFxW)') === 1 && count(f, 'fxFocus(vFx') === 0 && /fxRim/.test(f) && sh.uniforms.uFxCut === FX.uniforms.cut && count(v, 'vFxW =') === 1 &&
+    [v, f].every(s => count(s, '{') === count(s, '}') && count(s, '(') === count(s, ')')));
+  ok('terrain patch is applied once', FX.patchTerrain(m) === m);
+}
+
 // ── setFocus: with no part on, it turns both on ──────────────────────────────
 S.focus = false; S.around = false; S.cut = false;
 let toast = null; FX.init({ THREE, scene, camera: cam, controls: { target: tgt }, toast: m => { toast = m; }, nearestStation: () => 500, units: { len: m => Math.round(m) + ' m' }, caveBox: () => null });

@@ -33,6 +33,9 @@
  *         are cut away, except a small sphere round the target. Uniforms are written when a frame
  *         is drawn (scene.onBeforeRender) and only if the camera or a setting moved, so a static
  *         scene still does no work.
+ *         The terrain takes only the cut (not the near-centre fade): the same cone maths (fxCutOnly), a
+ *         soft edge with a thin light rim, switchable with S.terr ("Cut the ground", default on). Taps use
+ *         terrainAt() to skip ground that is cut away.
  */
 (function (root) {
   'use strict';
@@ -42,7 +45,7 @@
   const num = (v, d) => (typeof v === 'number' && isFinite(v) ? v : d);
 
   // ── Settings (saved per map by the viewer, under DISP.fx) ───────────────────
-  const DEFAULTS = { ghost: 0.2, edge: 0.7, fade: 0.35, focus: false, around: true, cut: true, r: null, cutR: null };
+  const DEFAULTS = { ghost: 0.2, edge: 0.7, fade: 0.35, focus: false, around: true, cut: true, terr: true, r: null, cutR: null };
   const S = Object.assign({}, DEFAULTS);
   // Ghost draws the nearest wall layer at the ghost strength and every layer behind it at restShare of
   // that, in three passes (depth pre-pass, the layers behind, the nearest). Past layeredMaxTris
@@ -57,12 +60,11 @@ uniform vec3 uFxCam;
 uniform vec3 uFxTgt;
 uniform vec4 uFxAxis;   // xyz: unit vector camera -> target, w: its length
 uniform vec4 uFxFoc;    // x: around on, y: radius, z: soft width, w: depth fade
-uniform vec4 uFxCut;    // x: cut on, y: hole radius at the target, z: kept sphere round the target
+uniform vec4 uFxCut;    // x: cut on, y: hole radius at the target, z: kept sphere round the target, w: the cut also applies to the terrain
 varying vec3 vFxW;
-float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
+float fxCutOnly(vec3 X) {          // the cut cone alone: 1 drawn, 0 cut away (terrain uses this, never the near-centre fade)
   float f = 1.0;
-  if (uFxFoc.x > 0.5) f *= 1.0 - smoothstep(uFxFoc.y, uFxFoc.y + uFxFoc.z, distance(X, uFxTgt));
-  if (uFxCut.x > 0.5) {
+  {
     vec3 v = X - uFxCam;
     float D = max(uFxAxis.w, 1.0);
     float s = dot(v, uFxAxis.xyz);
@@ -72,6 +74,12 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
     float ahead = 1.0 - smoothstep(D - uFxCut.z, D - 0.25 * uFxCut.z, s);
     f *= 1.0 - inHole * ahead;
   }
+  return f;
+}
+float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
+  float f = 1.0;
+  if (uFxFoc.x > 0.5) f *= 1.0 - smoothstep(uFxFoc.y, uFxFoc.y + uFxFoc.z, distance(X, uFxTgt));
+  if (uFxCut.x > 0.5) f *= fxCutOnly(X);
   return f;
 }
 `;
@@ -106,6 +114,19 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
   { float fxF = fxFocus(vFxW); diffuseColor.a *= fxF; if (diffuseColor.a < 0.004) discard; }
 `;
 
+  // The terrain: only the cut applies (the ground far from the target stays). The hole is the walls' own
+  // (fxCutOnly, same uniforms), so it lines up exactly; its edge fades over the same soft band, with a
+  // thin light rim in the middle of it so the cut ground reads as a cut and not a glitch.
+  const TERRAIN_FRAG = `
+  if (uFxCut.x > 0.5 && uFxCut.w > 0.5) {
+    float fxC = fxCutOnly(vFxW);
+    if (fxC < 0.03) discard;
+    float fxRim = pow(4.0 * fxC * (1.0 - fxC), 3.0);
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.8, 0.95, 1.0), 0.45 * fxRim);
+    diffuseColor.a = mix(diffuseColor.a * fxC, max(diffuseColor.a * fxC, 0.7 * fxRim), 0.5);
+  }
+`;
+
   let U = null;                    // the shared uniform objects, made in init
   const share = shader => {
     shader.uniforms.uFxCam = U.cam; shader.uniforms.uFxTgt = U.tgt; shader.uniforms.uFxAxis = U.axis;
@@ -133,6 +154,10 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
   function patchBasic(shader) {            // lines and dots (MeshBasic / LineBasic share a shader)
     share(shader);
     inject(shader, GLSL_VARS_VERT, 'vFxW = (modelMatrix * vec4(transformed, 1.0)).xyz;', GLSL_VARS_FRAG, BASIC_FRAG);
+  }
+  function patchTerrain(shader) {          // the terrain's lit material (one mesh, or one per 5 km tile): the cut only
+    share(shader);
+    inject(shader, GLSL_VARS_VERT, 'vFxW = (modelMatrix * vec4(transformed, 1.0)).xyz;', GLSL_VARS_FRAG, TERRAIN_FRAG);
   }
   function patchSprite(shader) {           // names, leads, area names: faded by the sprite's centre
     share(shader);
@@ -163,11 +188,11 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
   function restore(saved) {
     if (!saved || typeof saved !== 'object') return;
     ['ghost', 'edge', 'fade'].forEach(k => { S[k] = clamp(num(saved[k], S[k]), RANGE[k][0], RANGE[k][1]); });
-    ['focus', 'around', 'cut'].forEach(k => { if (typeof saved[k] === 'boolean') S[k] = saved[k]; });
+    ['focus', 'around', 'cut', 'terr'].forEach(k => { if (typeof saved[k] === 'boolean') S[k] = saved[k]; });
     ['r', 'cutR'].forEach(k => { S[k] = saved[k] == null ? null : clamp(num(saved[k], DEFAULTS[k] == null ? 10 : DEFAULTS[k]), RANGE[k][0], RANGE[k][1]); });
     if (U) U.edge.value = S.edge;
   }
-  const serialize = () => ({ ghost: S.ghost, edge: S.edge, fade: S.fade, focus: S.focus, around: S.around, cut: S.cut, r: S.r, cutR: S.cutR });
+  const serialize = () => ({ ghost: S.ghost, edge: S.edge, fade: S.fade, focus: S.focus, around: S.around, cut: S.cut, terr: S.terr, r: S.r, cutR: S.cutR });
 
   // The cave's size sets the default focus radius (and the range of its slider).
   let _size = 0;
@@ -194,13 +219,13 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
     if (D < 1e-6) { dx = 0; dy = 1; dz = 0; D = 1; } else { dx /= D; dy /= D; dz /= D; }
     const R = getR(), hole = clamp(getCutR(), 0.09 * D, 0.36 * D);   // a hole of at least ~5 degrees, at most ~20 degrees round the view axis
     cur[0] = cam.x; cur[1] = cam.y; cur[2] = cam.z; cur[3] = tgt.x; cur[4] = tgt.y; cur[5] = tgt.z;
-    cur[6] = on && S.around ? 1 : 0; cur[7] = on && S.cut ? 1 : 0; cur[8] = R; cur[9] = hole; cur[10] = S.fade; cur[11] = S.edge;
-    if (!force) { let same = true; for (let i = 0; i < 12; i++) if (cur[i] !== prev[i]) { same = false; break; } if (same) return; }
+    cur[6] = on && S.around ? 1 : 0; cur[7] = on && S.cut ? 1 : 0; cur[8] = R; cur[9] = hole; cur[10] = S.fade; cur[11] = S.edge; cur[12] = S.terr ? 1 : 0;
+    if (!force) { let same = true; for (let i = 0; i < 13; i++) if (cur[i] !== prev[i]) { same = false; break; } if (same) return; }
     prev.set(cur);
     U.cam.value.set(cam.x, cam.y, cam.z); U.tgt.value.set(tgt.x, tgt.y, tgt.z);
     U.axis.value.set(dx, dy, dz, D);
     U.foc.value.set(cur[6], R, Math.max(0.6 * R, 3), S.fade);
-    U.cut.value.set(cur[7], hole, clamp(0.35 * hole, 2.5, 25), 0);
+    U.cut.value.set(cur[7], hole, clamp(0.35 * hole, 2.5, 25), cur[12]);
     U.edge.value = S.edge;
   }
 
@@ -212,16 +237,25 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
       const t = U.tgt.value, R = U.foc.value.y;
       f *= 1 - smooth(R, R + U.foc.value.z, Math.hypot(x - t.x, y - t.y, z - t.z));
     }
-    if (U.cut.value.x > 0.5) {
-      const c = U.cam.value, a = U.axis.value, D = Math.max(a.w, 1);
-      const vx = x - c.x, vy = y - c.y, vz = z - c.z, s = vx * a.x + vy * a.y + vz * a.z;
-      const r = Math.hypot(vx - a.x * s, vy - a.y * s, vz - a.z * s);
-      const hole = Math.max(U.cut.value.y * clamp(s / D, 0, 1), 0.001), keep = U.cut.value.z;
-      const inHole = 1 - smooth(hole * 0.65, hole, r), ahead = 1 - smooth(D - keep, D - 0.25 * keep, s);
-      f *= 1 - inHole * ahead;
-    }
+    if (U.cut.value.x > 0.5) f *= cutAt(x, y, z);
     return f;
   }
+  // The cut cone alone (what the shaders' fxCutOnly computes; uniforms must be current).
+  function cutAt(x, y, z) {
+    const c = U.cam.value, a = U.axis.value, D = Math.max(a.w, 1);
+    const vx = x - c.x, vy = y - c.y, vz = z - c.z, s = vx * a.x + vy * a.y + vz * a.z;
+    const r = Math.hypot(vx - a.x * s, vy - a.y * s, vz - a.z * s);
+    const hole = Math.max(U.cut.value.y * clamp(s / D, 0, 1), 0.001), keep = U.cut.value.z;
+    const inHole = 1 - smooth(hole * 0.65, hole, r), ahead = 1 - smooth(D - keep, D - 0.25 * keep, s);
+    return 1 - inHole * ahead;
+  }
+  // The terrain at a point: 1 drawn, 0 cut away (taps on the ground ignore what is cut).
+  function terrainAt(x, y, z) {
+    if (!U) return 1;
+    update();
+    return U.cut.value.x > 0.5 && U.cut.value.w > 0.5 ? cutAt(x, y, z) : 1;
+  }
+  const terrainCutActive = () => { if (!U) return false; update(); return U.cut.value.x > 0.5 && U.cut.value.w > 0.5; };
   const focusActive = () => !!(S.focus && !(ctx.isFly && ctx.isFly()) && (S.around || S.cut));
 
   // ── Walls ───────────────────────────────────────────────────────────────────
@@ -286,6 +320,13 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
   // ── Other materials ─────────────────────────────────────────────────────────
   // Lines, station dots, names, leads, area names: fade with the focus. Dots are made transparent
   // for good (reach and routes switch `transparent` off at full strength, which would stop alpha).
+  function patchTerrainMaterial(m) {
+    if (!m || (m.userData && m.userData.fxPatched)) return m;
+    m.userData.fxPatched = true;
+    m.onBeforeCompile = patchTerrain;
+    m.needsUpdate = true;
+    return m;
+  }
   function patch(m, opts) {
     if (!m || (m.userData && m.userData.fxPatched)) return m;
     m.userData.fxPatched = true;
@@ -311,7 +352,7 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
       const near = ctx.nearestStation ? ctx.nearestStation(ctx.controls.target) : null;
       ctx.toast(near != null && S.around && near > 1.6 * getR()
         ? 'Focus on, but nothing is within ' + fmt(getR()) + ' of the orbit point: pan to a passage or widen the radius'
-        : 'Focus on' + (S.around ? ' · radius ' + fmt(getR()) : '') + (S.cut ? ' · cutting away what is in front' : ''));
+        : 'Focus on' + (S.around ? ' · radius ' + fmt(getR()) : '') + (S.cut ? ' · cutting away what is in front' + (S.terr ? ', the ground too' : '') : ''));
     }
   }
   const toggleFocus = () => setFocus(!S.focus);
@@ -366,6 +407,13 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
     };
     chip('⭕', 'Near centre', () => S.around, v => { S.around = v; });
     chip('✂️', 'Cut in front', () => S.cut, v => { S.cut = v; });
+    // The ground is cut with the passages (default on); it has no meaning without the cut, and turning it off
+    // never turns focus off.
+    const tchip = H.el('button', 'sh-chip');
+    tchip.append(H.el('span', '', '⛰️'), H.el('span', '', 'Cut the ground')); tchip.title = 'Cut the ground too, to see the cave below it';
+    tchip.addEventListener('click', () => { S.terr = !S.terr; changed(); });
+    tchip.id = 'focus-terr-chip';
+    grid.appendChild(tchip);
     H.sheet.appendChild(grid);
     const rs = slider(H, 'focus-radius-slider', 'Radius', 0, 100, toT(getR(), rRange()), t => len(fromT(t, rRange())), t => { S.r = fromT(t, rRange()); changed(); });
     const cs = slider(H, 'focus-cut-slider', 'Cut radius', 0, 100, toT(getCutR(), cRange()), t => len(fromT(t, cRange())), t => { S.cutR = fromT(t, cRange()); changed(); });
@@ -374,6 +422,7 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
     paintFocus = () => {
       row.classList.toggle('a', S.focus);
       chips[0].classList.toggle('a', S.around); chips[1].classList.toggle('a', S.cut);
+      tchip.classList.toggle('a', S.terr); tchip.style.opacity = S.cut ? '' : '.45';
       grid.style.opacity = S.focus ? '' : '.55';
       rs.parentNode.style.opacity = S.focus && S.around ? '' : '.45';
       cs.parentNode.style.opacity = S.focus && S.cut ? '' : '.45';
@@ -386,7 +435,7 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
   const tapFactor = p => (focusActive() ? focusAt(p.x, p.y, p.z) : 1);
 
   const FX = {
-    init, restore, serialize, update, patch, makeWalls, applyWalls,
+    init, restore, serialize, update, patch, patchTerrain: patchTerrainMaterial, terrainAt, terrainCutActive, cutAt, makeWalls, applyWalls,
     state: S, defaults: DEFAULTS, limits: LIMITS, uniforms: null, range: RANGE,
     setFocus, toggleFocus, focusActive, focusAt, tapFactor, bindButton, syncUi, sheetWalls, sheetFocus,
     radius: getR, cutRadius: getCutR, defaultRadius: defaultR, caveSize,
