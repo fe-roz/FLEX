@@ -6,7 +6,7 @@
   'use strict';
   const X = window._pjParts;
   if (!X) return;                          // project-ui-kit.js found no flexlib.js
-  const { imps, caveFor, pj, $, el, caveName, btn, choose, linkFile, history, FL, noteEl, leadsAt, leadEl, docEl, editNote, editLead, addPages, partsOf, describe, when, inverse, record, allLeads, leadSummary, toast, targetLabel, docSub, stationPos, stationsOf } = X;
+  const { imps, caveFor, pj, $, el, caveName, btn, choose, linkFile, history, FL, noteEl, leadsAt, leadEl, docEl, docGroupsInto, editNote, editLead, addPages, partsOf, describe, when, inverse, record, allLeads, leadSummary, toast, targetLabel, docSub, stationPos, stationsOf } = X;
 
   // ── Station card ───────────────────────────────────────────────────────────
   function onSelect(entity) {
@@ -68,15 +68,9 @@
     if (!c.survey) {
       const ls = leadsAt(c.cid, c.name);
       sec('Leads', ls.map(x => leadEl(c.cid, c.name, x)));
-      const fs = FL.docsForStation(pj.D, pj.P, c.cid, c.name, c.code ? [c.code] : []);
-      sec('Documents · this station', fs.station.map(d => docEl(d)));
-      sec('Documents · pages covering this area', (fs.area || []).map(d => docEl(d)));
-      if (!window._pjSeg || window._pjSeg.on()) sec('Documents · its segment', (fs.segment || []).map(d => docEl(d, d.tagList.find(t => t.startsWith('segment:' + c.cid + ':')))));
-      sec('Documents · survey ' + (c.code || ''), fs.survey.map(d => docEl(d)));
-      if (!(window._pjSeg && window._pjSeg.on())) sec('Documents · the cave', fs.cave.map(d => docEl(d)));   // with segments: the side panel has the segment's
+      docGroupsInto(box, docsForCard(c));          // the most specific level that has any, by group (flexlib docsFor)
     } else {
-      sec('Documents · this survey', FL.docsForTarget(pj.D, target).map(d => docEl(d)));
-      if (!(window._pjSeg && window._pjSeg.on())) sec('Documents · the cave', FL.docsForTarget(pj.D, FL.T.cave(c.cid)).filter(d => !d.tags[target]).map(d => docEl(d)));
+      docGroupsInto(box, docsForCard(c));
       if (c.ends.length) { const r = el('div', 'pj-row'); c.ends.forEach(n => r.appendChild(btn(['pin', n], () => openCard({ imp: c.imp, code: c.code, cid: c.cid, name: n }), 'small'))); box.appendChild(r); }
     }
     const row = el('div', 'pj-row pj-card-btns');
@@ -97,6 +91,17 @@
       (imp.parsed.segments || []).forEach(sg => { if ((sg.survey || '') === code) sg.points.forEach(q => { if (q.name) out.add(q.name); }); });
     });
     return out;
+  }
+  /**
+   * The documents of a card's selection (a cave, a survey or a station), the most specific level that has any, by group
+   * (flexlib docsFor). Segments are looked at only when the project uses them (📁 Project → Segments).
+   */
+  function docsForCard(c) {
+    if (!pj.pid || !pj.D || !c || !c.cid) return null;
+    const seg = window._pjSeg && !window._pjSeg.on() ? { segments: [] } : {};
+    if (c.level === 'cave') return FL.docsFor(pj.D, pj.P, FL.T.cave(c.cid), {});
+    if (c.survey) return FL.docsFor(pj.D, pj.P, FL.T.survey(c.cid, c.code), Object.assign({ stations: [...stationsOfSurvey(c.cid, c.code)] }, seg));
+    return FL.docsFor(pj.D, pj.P, FL.T.station(c.cid, c.name), Object.assign({ codes: c.code ? [c.code] : [] }, seg));
   }
   /** Is a target string (tag, note, lead…) below the selected thing? */
   function belowOf(c) {
@@ -189,7 +194,7 @@
       r.addEventListener('click', () => flyTo(c.cid, t.name));
       return r;
     }));
-    sec('Documents · the cave', FL.docsForTarget(pj.D, target).map(d => docEl(d)));
+    docGroupsInto(box, docsForCard({ level: 'cave', cid: c.cid }));
     const row = el('div', 'pj-row pj-card-btns');
     row.appendChild(btn(['pencil', 'Note'], () => editNote(target)));
     row.appendChild(btn(['doc', 'Add pages'], () => addPages({ tags: [target] })));
@@ -213,6 +218,6 @@
 
 
   Object.assign(X, {
-    onSelect, openCard, closeCard, refreshCard, cardTarget, flyTo,
+    onSelect, openCard, closeCard, refreshCard, cardTarget, flyTo, docsForCard, stationsOfSurvey,
   });
 })();

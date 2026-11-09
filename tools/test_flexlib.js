@@ -452,5 +452,189 @@ const pid = 'proj1', cid = 'cave1', cid2 = 'cave2';
   ok('area labels: an op a reader does not know changes nothing else', JSON.stringify(Object.keys(L.replayProject([a1, D1('arealabel.frobnicate', { label: 'l1' })], pid).arealabels)) === '["l1"]');
 }
 
+// 12) Documents: groups, the strict order for a selection, tags on one page (decided 2026-11-08)
+{
+  const DV = device('docs-pc', 'Cy'), c1 = 'cave1', c2 = 'cave2', c3 = 'cave3';
+  const H = n => String(n).repeat(64).slice(0, 64);
+  const pg = (n, extra) => Object.assign({ h: H(n), ext: 'jpg', w: 1000, ht: 1400, name: 'p' + n + '.jpg' }, extra || {});
+  const proj = [
+    DV('cave.set', { cave: c1, name: 'Cave Ridge' }), DV('cave.set', { cave: c2, name: 'Little Pit' }), DV('cave.set', { cave: c3, name: 'Third Hole' }),
+    DV('segment.set', { seg: 's1', cave: c1, name: 'Trip 1994', shots: [['T1', 'T2'], ['T2', 'T3']] }),
+  ];
+  const S = L.replayProject(proj, pid);
+  const P = L.T.project(pid);
+  const add = (doc, title, kind, tags, pages, extra) => DV('doc.add', Object.assign({ doc, title, kind, pages: pages || [pg(doc.length)], tags }, extra || {}));
+  const log = [
+    add('book', 'Sketchbook 3', 'sketch-plan', [P, L.T.survey(c1, 'T')], [pg(1), pg(2), pg(3), pg(4), pg(5)]),
+    DV('doc.pagetag', { doc: 'book', h: H(3), target: L.T.area(c1, 'T6~T8') }),
+    DV('doc.pagetag', { doc: 'book', h: H(5), target: L.T.area(c1, 'T5~T12') }),
+    add('photo', 'Passage photo', 'photo', [P, L.T.station(c1, 'T6')]),
+    add('shots', 'Shot table T', 'shot-table', [P, L.T.survey(c1, 'T')]),
+    add('seg', 'Trip report 1994', 'trip-report', [L.T.segment(c1, 's1')]),
+    add('u-sk', 'Survey U sketch', 'sketch-plan', [P, L.T.survey(c1, 'U')]),
+    add('other-cave', 'Other cave sketch', 'sketch-plan', [L.T.survey(c2, 'T')]),
+    add('other-cave2', 'Other cave map', 'map', [L.T.cave(c2)]),
+    add('cave-map', 'Cave map', 'map', [P, L.T.cave(c1)]),
+    add('cave-sk', 'Cave overview', 'sketch-plan', [L.T.cave(c1)]),
+    add('inbox', 'Unsorted scan', '', [P]),
+    add('gone', 'Deleted', 'sketch-plan', [L.T.survey(c1, 'T')]),
+    DV('doc.del', { doc: 'gone' }),
+    // a document tagged to the project only, with one page tagged to a station: found there, not in the inbox
+    add('paged', 'Loose book', 'notes', [P], [pg(6), pg(7)]),
+    DV('doc.pagetag', { doc: 'paged', h: H(7), target: L.T.station(c1, 'T9') }),
+    add('c3-sk', 'Third hole sketch', 'sketch-plan', [L.T.survey(c3, 'A')]),
+  ];
+  const D = L.replayDocs(log);
+  const ids = r => r.items.map(x => x.id).join();
+  const T7 = L.docsFor(D, S, L.T.station(c1, 'T7'), { codes: ['T'] });
+
+  // Page tags: on the page, by its content hash
+  ok('page tag lands on the page', D.docs.book.pages[2].targets.join() === L.T.area(c1, 'T6~T8') && !D.docs.book.pages[0].targets, D.docs.book.pages.map(q => q.targets));
+  ok('doc tags are unchanged by page tags', D.docs.book.tagList.join() === [P, L.T.survey(c1, 'T')].join());
+  ok('docTargets = doc tags + page tags', L.docTargets(D.docs.book).includes(L.T.area(c1, 'T6~T8')) && L.docTargets(D.docs.book).includes(P));
+
+  // Strict order
+  ok('T7: the sketchbook first, at the page that covers it (a range)', T7.level === 'area' && T7.items[0].id === 'book' && T7.items[0].page === 2 && T7.items[0].via === 'page' && T7.items[0].tag === L.T.area(c1, 'T6~T8'), T7.items[0]);
+  ok('T7: own level is station/area, not a fallback', T7.own && !T7.items[0].fallback && T7.items[0].from === 'stations T6–T8', T7.items[0]);
+  ok('T7: the survey’s shot table follows (survey notes it has none of), labelled', T7.items.length === 2 && T7.items[1].id === 'shots' && T7.items[1].fallback && T7.items[1].level === 'survey' && T7.items[1].from === 'survey T', T7.items);
+  ok('T7: never other surveys, other caves, the cave’s own, the inbox', !['u-sk', 'other-cave', 'other-cave2', 'cave-map', 'cave-sk', 'inbox', 'gone', 'seg', 'photo'].some(i => ids(T7).includes(i)), ids(T7));
+  const T6 = L.docsFor(D, S, L.T.station(c1, 'T6'), { codes: ['T'] });
+  ok('T6: the station’s photo before the range page; both are its own level', T6.items[0].id === 'photo' && T6.items[0].level === 'station' && T6.items[1].id === 'book' && T6.items[1].level === 'area' && T6.items[1].page === 2, T6.items.map(x => [x.id, x.level, x.page]));
+  ok('T6: narrower range wins the page (T6~T8 before T5~T12)', T6.items[1].pages.join() === '2,4' && T6.items[1].page === 2, T6.items[1]);
+  ok('T6: grouped Survey notes (from the survey), Sketches, Media', T6.groups.map(g => g.id).join() === 'notes,sketches,media' && T6.groups[0].fallback && T6.groups[0].from === 'survey T' && !T6.groups[1].fallback && T6.groups[2].items[0].id === 'photo', T6.groups.map(g => [g.id, g.from]));
+  ok('T6 without the top-up: only its own level', ids(L.docsFor(D, S, L.T.station(c1, 'T6'), { codes: ['T'], topUp: false })) === 'photo,book');
+  const T1 = L.docsFor(D, S, L.T.station(c1, 'T1'), { codes: ['T'] });
+  ok('T1: the segment’s documents first, then survey notes/sketches it lacks', T1.level === 'segment' && T1.items[0].id === 'seg' && T1.items.slice(1).map(x => x.id).sort().join() === 'book,shots' && T1.items[1].from === 'survey T', T1.items.map(x => [x.id, x.level]));
+  const T11 = L.docsFor(D, S, L.T.station(c1, 'T11'), { codes: ['T'] });
+  ok('T11: only the wide range covers it (page 5); the survey’s other docs follow', T11.items[0].id === 'book' && T11.items[0].page === 4 && T11.items[0].via === 'page', T11.items[0]);
+  const T20 = L.docsFor(D, S, L.T.station(c1, 'T20'), { codes: ['T'] });
+  ok('T20: nothing at its own level → the survey’s, labelled', T20.level === 'survey' && !T20.own && ids(T20).split(',').sort().join() === 'book,shots' && T20.items.every(x => x.fallback && x.from === 'survey T'), ids(T20));
+  ok('T20: the survey’s sketchbook is opened at its first page', T20.items.find(x => x.id === 'book').page === 0 && T20.items.find(x => x.id === 'book').via === 'doc');
+  const U2 = L.docsFor(D, S, L.T.station(c1, 'U2'), { codes: ['U'] });
+  ok('U2: the other survey’s own sketch only', ids(U2) === 'u-sk' && U2.level === 'survey', ids(U2));
+  const V1 = L.docsFor(D, S, L.T.station(c1, 'V1'), { codes: ['V'] });
+  ok('V1: no survey docs → the cave’s, labelled', V1.level === 'cave' && ids(V1).split(',').sort().join() === 'cave-map,cave-sk' && V1.items[0].from === 'the cave Cave Ridge', V1.items.map(x => [x.id, x.from]));
+  const W1 = L.docsFor(D, S, L.T.station(c3, 'A1'), { codes: ['A'] });
+  ok('another cave’s station: that cave’s survey only', ids(W1) === 'c3-sk', ids(W1));
+  const Z1 = L.docsFor(D, S, L.T.station('nocave', 'Z1'), { codes: ['Z'] });
+  ok('a cave with nothing → the project’s untagged documents, and no document tagged to a cave', Z1.level === 'project' && ids(Z1) === 'inbox' && !Z1.own, ids(Z1));
+  ok('the loose book (project + a tagged page) is not in the inbox, not general', !L.docInbox(D.docs.paged, S) && L.docInbox(D.docs.inbox, S) && !ids(Z1).includes('paged'));
+  const T9 = L.docsFor(D, S, L.T.station(c1, 'T9'), { codes: ['T'] });
+  ok('T9: a page tagged to the station shows its document (and the wide range page)', T9.items.map(x => x.id).slice(0, 2).join() === 'paged,book' && T9.items[0].page === 1, T9.items.map(x => [x.id, x.page]));
+  ok('docInProject through a page tag only', L.docInProject({ tagList: ['project:elsewhere'], pages: [{ targets: [L.T.station(c1, 'T9')] }] }, S) && !L.docInProject({ tagList: ['project:elsewhere'], pages: [{ targets: [L.T.station('zz', 'T9')] }] }, S));
+
+  // A survey, a cave, the project
+  const sv = L.docsFor(D, S, L.T.survey(c1, 'T'), { stations: ['T1', 'T6', 'T7', 'T8', 'T9'] });
+  ok('survey T: its own documents only (tagged to it)', sv.level === 'survey' && sv.own && ids(sv).split(',').sort().join() === 'book,shots', ids(sv));
+  ok('survey with nothing → the cave’s, never another survey’s', ids(L.docsFor(D, S, L.T.survey(c1, 'Q'), {})).split(',').sort().join() === 'cave-map,cave-sk' && L.docsFor(D, S, L.T.survey(c1, 'Q'), {}).level === 'cave');
+  const c2doc = L.docsFor(D, S, L.T.survey(c2, 'Q'), {});
+  ok('survey of a cave whose map is tagged to it: that map', c2doc.level === 'cave' && ids(c2doc) === 'other-cave2', ids(c2doc));
+  const sw = L.docsFor(D, S, L.T.survey(c3, 'B'), { stations: [] });
+  ok('survey B of a cave whose only sketch is survey A’s: never survey A’s → the project’s untagged documents', sw.level === 'project' && ids(sw) === 'inbox', ids(sw));
+  const inside = L.docsFor(D, S, L.T.survey(c1, 'U2x'), { stations: [] });
+  ok('a survey with no docs and no stations → the cave’s', inside.level === 'cave');
+  const t2 = [add('only-station', 'T3 only', 'sketch-plan', [L.T.station(c1, 'W3')]), add('only-range', 'Range', 'sketch-plan', [P], [pg(8)]), DV('doc.pagetag', { doc: 'only-range', h: H(8), target: L.T.area(c1, 'W1~W5') })];
+  const D2 = L.replayDocs(log.concat(t2));
+  ok('survey W, no docs of its own: the pages/docs of its stations (within), range or station', L.docsFor(D2, S, L.T.survey(c1, 'W'), { stations: ['W1', 'W2', 'W3'] }).level === 'within'
+     && ids(L.docsFor(D2, S, L.T.survey(c1, 'W'), { stations: ['W1', 'W2', 'W3'] })).split(',').sort().join() === 'only-range,only-station', ids(L.docsFor(D2, S, L.T.survey(c1, 'W'), { stations: ['W1', 'W2', 'W3'] })));
+  ok('…without the survey’s station list it falls back to the cave', L.docsFor(D2, S, L.T.survey(c1, 'W'), {}).level === 'cave');
+  ok('opts.within = false: a survey / cave goes straight to the parent', L.docsFor(D2, S, L.T.survey(c1, 'W'), { stations: ['W1', 'W2', 'W3'], within: false }).level === 'cave' && L.docsFor(D, S, L.T.cave(c3), { within: false }).level === 'project');
+  const cv = L.docsFor(D, S, L.T.cave(c1), {});
+  ok('cave: its own documents only', cv.level === 'cave' && cv.own && ids(cv).split(',').sort().join() === 'cave-map,cave-sk', ids(cv));
+  const cv3 = L.docsFor(D, S, L.T.cave(c3), {});
+  ok('cave with none of its own: what is tagged inside it (its surveys, stations, pages), labelled', cv3.level === 'within' && ids(cv3) === 'c3-sk' && cv3.items[0].from === 'its surveys and stations', cv3.items);
+  const pr = L.docsFor(D, S, L.T.project(pid), {});
+  ok('project: the untagged documents', pr.level === 'project' && ids(pr) === 'inbox', ids(pr));
+  ok('nothing anywhere → empty', L.docsFor(L.replayDocs([]), S, L.T.station(c1, 'T7'), { codes: ['T'] }).empty === true && L.docsFor(null, S, L.T.station(c1, 'T7'), {}).items.length === 0);
+  ok('lead / feature: exactly what is tagged to it', ids(L.docsFor(L.replayDocs([add('ld', 'Lead photo', 'photo', [L.T.lead('L1')])]), S, L.T.lead('L1'), {})) === 'ld');
+
+  // docsForStation keeps its shape and sees page tags
+  const old = L.docsForStation(D, S, c1, 'T6', ['T']);
+  ok('docsForStation: station / area / survey lists, page tags included', old.station.map(d => d.id).join() === 'photo' && old.area.map(d => d.id).join() === 'book' && old.survey.map(d => d.id).join() === 'shots' && old.cave.map(d => d.id).sort().join() === 'cave-map,cave-sk' && old.segment.length === 0, old);
+  ok('docsForStation: the page-tagged station', L.docsForStation(D, S, c1, 'T9', ['T']).station.map(d => d.id).join() === 'paged');
+
+  // pageFor sees ranges
+  ok('pageFor: exact page tag, a range covering a station, else the first', L.pageFor(D.docs.book, L.T.area(c1, 'T6~T8')) === 2 && L.pageFor(D.docs.book, L.T.station(c1, 'T7')) === 2 && L.pageFor(D.docs.book, L.T.station(c1, 'T11')) === 4 && L.pageFor(D.docs.book, L.T.station(c1, 'T1')) === 0);
+  ok('pagesCovering: every page that has the station', L.pagesCovering(D.docs.book, L.T.station(c1, 'T7')).join() === '2,4');
+
+  // Page tags through the log: untag, reorder, remove and put back, a tag before its page, old entries
+  const more = [DV('doc.pageuntag', { doc: 'book', h: H(5), target: L.T.area(c1, 'T5~T12') }), DV('doc.pagetag', { doc: 'book', h: H(2), target: L.T.station(c1, 'T2') })];
+  let D3 = L.replayDocs(log.concat(more));
+  ok('untagging a page removes only that tag', D3.docs.book.pages[4].targets.length === 0 && D3.docs.book.pages[2].targets.length === 1 && D3.docs.book.pages[1].targets.join() === L.T.station(c1, 'T2'));
+  const re = DV('doc.order', { doc: 'book', order: [H(5), H(4), H(3), H(2), H(1)] });
+  D3 = L.replayDocs(log.concat(more, [re]));
+  ok('reordering pages: the tags stay with their pages (by hash, not by position)', D3.docs.book.pages.map(q => q.h[0]).join('') === '54321' && D3.docs.book.pages[2].targets.join() === L.T.area(c1, 'T6~T8') && D3.docs.book.pages[3].targets.join() === L.T.station(c1, 'T2') && L.pageFor(D3.docs.book, L.T.station(c1, 'T7')) === 2);
+  const drop = DV('doc.droppage', { doc: 'book', h: H(3), page: D.docs.book.pages[2], at: 2 });
+  const undo = DV('doc.pages', { doc: 'book', add: [D.docs.book.pages[2]], at: 2 });
+  D3 = L.replayDocs(log.concat([drop]));
+  ok('removing a page takes its tag with it', D3.docs.book.pages.length === 4 && L.docsFor(D3, S, L.T.station(c1, 'T7'), { codes: ['T'] }).items[0].page === 3 && L.docsFor(D3, S, L.T.station(c1, 'T7'), { codes: ['T'] }).items[0].tag === L.T.area(c1, 'T5~T12'));
+  D3 = L.replayDocs(log.concat([drop, undo]));
+  ok('putting the page back (undo) brings its tag back', D3.docs.book.pages.length === 5 && D3.docs.book.pages[2].h === H(3) && D3.docs.book.pages[2].targets.join() === L.T.area(c1, 'T6~T8'));
+  const early = DV('doc.pagetag', { doc: 'late', h: H(9), target: L.T.station(c1, 'T4') }), lateAdd = DV('doc.pages', { doc: 'late', add: [pg(9)] });
+  D3 = L.replayDocs([add('late', 'Late page', 'sketch-plan', [P], [pg(8)]), Object.assign({}, early, { t: '2026-10-25T09:00:00.000Z' }), lateAdd]);
+  ok('a page tag that arrives before its page waits for it', D3.docs.late.pages.length === 2 && D3.docs.late.pages[1].targets && D3.docs.late.pages[1].targets.join() === L.T.station(c1, 'T4'), D3.docs.late.pages);
+  ok('tagging twice is one tag; a tag without a target is ignored', (() => { const d = L.replayDocs([add('x', 'x', '', [P], [pg(1)]), DV('doc.pagetag', { doc: 'x', h: H(1), target: 'station:c:Q' }), DV('doc.pagetag', { doc: 'x', h: H(1), target: 'station:c:Q' }), DV('doc.pagetag', { doc: 'x', h: H(1) })]); return d.docs.x.pages[0].targets.length === 1; })());
+  // An old reader's view: a log without any of the new ops replays as before; old entries with page targets (segments) still work
+  const oldLog = [DV('doc.add', { doc: 'o1', title: 'Book', pages: [{ h: 'aa', ext: 'jpg' }, { h: 'bb', ext: 'jpg', targets: [L.T.segment(c1, 's1')] }], tags: [L.T.segment(c1, 's1')] })];
+  const Do = L.replayDocs(oldLog);
+  ok('old entries replay unchanged (page targets from doc.add, no new fields)', Do.docs.o1.pages[1].targets.join() === L.T.segment(c1, 's1') && Do.docs.o1.pages[0].targets === undefined && L.pageFor(Do.docs.o1, L.T.segment(c1, 's1')) === 1);
+  ok('…and a segment’s page still opens first for a station in it', L.docsFor(Do, S, L.T.station(c1, 'T2'), { codes: ['T'] }).items[0].page === 1);
+  ok('an op the reader does not know about a page changes nothing', L.replayDocs(oldLog.concat([DV('doc.pagefrob', { doc: 'o1', h: 'bb' })])).docs.o1.pages.length === 2);
+  // proposals: a suggested page tag changes nothing until accepted
+  const prop = DV('doc.pagetag', { doc: 'book', h: H(1), target: L.T.station(c1, 'T4'), proposed: { by: 'archive', confidence: 0.7 } });
+  D3 = L.replayDocs(log.concat([prop]));
+  ok('a suggested page tag is not applied; accepted it is', !D3.docs.book.pages[0].targets && L.reviewQueue(null, D3).length === 1
+     && L.replayDocs(log.concat([prop, DV('accept', { ref: prop.id, base: [prop.id] })])).docs.book.pages[0].targets.join() === L.T.station(c1, 'T4'));
+  // sync and moving a cave carry page tags
+  const selA = L.selectForSync(S.log, log, S, D, null, 'all');
+  ok('a sync file carries the page-tag entries of the project’s documents', selA.entries.docs.filter(e => e.op === 'doc.pagetag').length === 3, selA.entries.docs.map(e => e.op));
+  const oneDoc = L.replayDocs([add('pg-only', 'Pages only', 'sketch-plan', ['project:zzz'], [pg(3)]), DV('doc.pagetag', { doc: 'pg-only', h: H(3), target: L.T.station(c1, 'T3') })]);
+  ok('moving a cave takes along documents that only have a page tagged to it', L.caveBundle(S, oneDoc, c1).docs.join() === 'pg-only');
+  ok('segment counts include documents with a tagged page', L.segmentStates(S, L.replayDocs([add('sgd', 's', '', [P], [pg(1)]), DV('doc.pagetag', { doc: 'sgd', h: H(1), target: L.T.segment(c1, 's1') })]), c1).s1.docs === 1);
+
+  // The tag a person types: one name is a station, a range or a list is an area
+  const sp = x => L.specTarget(c1, x);
+  ok('typed station → station tag', sp('T6') === L.T.station(c1, 'T6') && sp('  T6 ') === L.T.station(c1, 'T6'));
+  ok('typed ranges → area tag, the same spec however it is written', ['T6~T8', 'T6 to T8', 'T6–T8', 'T6 - T8', 'T6~8', 'T6-8'].every(x => sp(x) === L.T.area(c1, 'T6~T8')), ['T6~T8', 'T6 to T8', 'T6–T8', 'T6 - T8', 'T6~8', 'T6-8'].map(sp));
+  ok('typed list → area tag', sp('T6~T8, T12') === L.T.area(c1, 'T6~T8,T12') && sp('T6,T9') === L.T.area(c1, 'T6,T9'));
+  ok('a known station with a hyphen stays a station', L.specTarget(c1, 'A1-2', ['A1-2']) === L.T.station(c1, 'A1-2') && L.specTarget(c1, 'A1-2', []) === L.T.area(c1, 'A1~A2'));
+  ok('nothing typed → no tag', sp('') === null && sp('  ,  ') === null);
+  ok('areaHas still reads what normalizeSpec wrote', L.areaHas(L.normalizeSpec('T6-8'), 'T7') && !L.areaHas(L.normalizeSpec('T6-8'), 'T9'));
+  ok('area span: a range counts its numbers', L.areaSpan('T6~T8') === 3 && L.areaSpan('T5~T12') === 8 && L.areaSpan('A1,B2') === 2 && L.areaSpan('A10~A22,B3') === 14);
+  ok('stations an area covers, from a list', L.areaStations('T6~T8', ['T5', 'T6', 'T7', 'T8', 'T9', 'U7']).join() === 'T6,T7,T8');
+  // areaTouches over a prepared index gives the same answer as asking areaHas name by name
+  (() => {
+    const names = ['A1', 'A2', 'A10', 'A10a', 'A22', 'B3', 'T6', 'T7', 'T8', 'X-1', '12', 'C5b'], ix = L.areaIndex(names);
+    const specs = ['A1', 'A10~A22', 'A22~A10', 'A5~A9', 'A2~A5,B3', 'B3', 'B4~B9', 'T6~T8', 'T9~T12', 'U1~U4', 'X-1', 'C1~C9', '12', '', ' , ', 'A1~', '~A5', 'A~B', 'T6~8', 'A10a', 'A10a~A10a'];
+    const bad = specs.filter(sp => L.areaTouches(sp, ix) !== names.some(n => L.areaHas(sp, n)));
+    ok('areaTouches (prepared index) agrees with areaHas for every spec and station', bad.length === 0, bad);
+    ok('areaIndex ignores blanks and repeats', L.areaTouches('Q1', L.areaIndex(['', ' ', 'Q1', 'Q1'])) && !L.areaTouches('Q1', L.areaIndex([])) && !L.areaTouches('Q1', L.areaIndex(null)));
+  })();
+
+  // Groups
+  ok('four groups, in order', L.DOC_GROUPS.map(g => g.id).join() === 'notes,sketches,media,other' && L.DOC_GROUPS.map(g => g.label).join() === 'Survey notes,Sketches,Media,Other');
+  const gr = { 'shot-table': 'notes', notes: 'notes', topodroid: 'notes', 'sketch-plan': 'sketches', 'sketch-profile': 'sketches', 'cross-sections': 'sketches', photo: 'media', video: 'media',
+    'trip-report': 'other', map: 'other', letter: 'other', other: 'other', '': 'other', 'something new': 'other', 'Survey Notes': 'notes', 'field notes': 'notes', Sketch: 'sketches', Photos: 'media' };
+  ok('every kind has its group; old and free-typed kinds are mapped, unknown is Other', Object.keys(gr).every(k => L.docGroup(k) === gr[k]), Object.keys(gr).filter(k => L.docGroup(k) !== gr[k]));
+  ok('every kind the list offers is in a group', L.DOC_KINDS.every(k => L.DOC_GROUPS.some(g => g.kinds.includes(k))));
+  const gd = k => ({ kind: k, pages: [], tags: {}, tagList: [] });
+  ok('a document with no kind: photo images are Media, a PDF is Other', L.docGroupOf({ kind: '', pages: [{ name: 'a.jpg' }, { name: 'b.png' }] }) === 'media' && L.docGroupOf({ kind: '', pages: [{ name: 'a.pdf' }] }) === 'other' && L.docGroupOf(gd('')) === 'other');
+  ok('a video file is Media whatever the kind', L.docGroupOf({ kind: 'trip-report', file: { ext: 'mp4' }, pages: [] }) === 'media');
+  ok('a page’s own kind wins for the page', L.pageGroup({ kind: 'notes', pages: [] }, { kind: 'sketch-plan' }) === 'sketches' && L.pageGroup({ kind: 'notes', pages: [] }, {}) === 'notes');
+  ok('a kind on the pages only decides the document', L.docGroupOf({ kind: '', pages: [{ name: 'a.jpg', kind: 'shot-table' }] }) === 'notes');
+  ok('groupDocs: groups in order, empty ones left out (or all)', L.groupDocs([D.docs.photo, D.docs.book, D.docs.shots, D.docs['cave-map']]).map(g => g.id + ':' + g.docs.map(d => d.id).join('+')).join() === 'notes:shots,sketches:book,media:photo,other:cave-map' && L.groupDocs([], { all: true }).length === 4 && L.groupDocs([]).length === 0);
+  ok('an item takes the group of the page it was found by', (() => { const dd = L.replayDocs([add('mix', 'Mixed', 'sketch-plan', [P], [pg(1), pg(2, { kind: 'shot-table' })]), DV('doc.pagetag', { doc: 'mix', h: H(2), target: L.T.station(c1, 'M1') })]); const r = L.docsFor(dd, S, L.T.station(c1, 'M1'), {}); return r.items[0].group === 'notes' && r.items[0].page === 1; })());
+  // New documents: a sensible kind
+  const sk = (name, type, camera) => L.suggestKind({ name, type, camera });
+  ok('suggested kinds: camera photo → Media, scan → Survey notes, video, TopoDroid export', sk('IMG_0412.jpg') === 'photo' && sk('PXL_2026.jpg') === 'photo' && sk('whatever.jpg', 'image/jpeg', true) === 'photo' && sk('scan 12.tif') === 'notes'
+     && sk('Survey book p3.jpg') === 'notes' && sk('T6 sketch.png') === 'sketch-plan' && sk('clip.mp4', 'video/mp4') === 'video' && sk('plot.dxf') === 'topodroid' && sk('report.pdf') === 'other' && sk('field notes.pdf') === 'notes' && sk('cave.jpg', 'image/jpeg') === 'photo', ['IMG_0412.jpg', 'scan 12.tif', 'Survey book p3.jpg', 'T6 sketch.png', 'clip.mp4', 'plot.dxf', 'report.pdf', 'cave.jpg'].map(n => sk(n)));
+  ok('suggested kinds always belong to a group', ['photo', 'notes', 'sketch-plan', 'video', 'topodroid', 'other'].every(k => L.DOC_KINDS.includes(k)));
+  // exifCamera: a JPEG with an Exif block that has a Make tag
+  const jpeg = (withMake) => { const tiff = [0x49, 0x49, 0x2a, 0, 8, 0, 0, 0, 1, 0, withMake ? 0x0f : 0x12, withMake ? 0x01 : 0x01, 2, 0, 2, 0, 0, 0, 0x41, 0, 0, 0, 0, 0, 0, 0];
+    const body = [0x45, 0x78, 0x69, 0x66, 0, 0].concat(tiff), len = body.length + 2;
+    return Uint8Array.from([0xff, 0xd8, 0xff, 0xe1, len >> 8, len & 255].concat(body, [0xff, 0xd9])); };
+  ok('exifCamera: Make present → camera; no Make or not a JPEG → not', L.exifCamera(jpeg(true)) === true && L.exifCamera(jpeg(false)) === false && L.exifCamera(Uint8Array.from([1, 2, 3])) === false && L.exifCamera(null) === false);
+}
+
 console.log((fail ? 'FAILED ' : 'ok ') + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

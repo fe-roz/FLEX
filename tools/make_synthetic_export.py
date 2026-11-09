@@ -18,6 +18,8 @@ example coordinates.
                              page images, written the way the export does (docs.json, docs_<sha>.jpg,
                              inline in viewer.html); docs_input.json beside the export is what the
                              server would have handed the exporter
+        [--docs-input FILE]  with --docs: use this docs input (what export_docs.js collect() writes) instead of
+                             the three made-up documents; its pages' files must exist
         [--docs-inline-cap N] bytes of page images inlined in viewer.html (default: the exporter's)
         [--field-fixture]    extra data for tools/test_viewer_field.js: leads whose
                              survey order differs from the straight-line one, shots
@@ -245,6 +247,7 @@ def main():
     ap.add_argument('--extent-km', type=float, default=0, help='terrain size, long side (default 1 km x 0.8 km)')
     ap.add_argument('--field-fixture', action='store_true')
     ap.add_argument('--docs', action='store_true', help='a project with documents (see above)')
+    ap.add_argument('--docs-input', default=None, help='with --docs: a docs input file (export_docs.js collect()) instead of the made-up documents')
     ap.add_argument('--docs-inline-cap', type=int, default=DOCS_INLINE_CAP)
     ap.add_argument('--flex-leads', action='store_true', help='a lead kept in FLEX (source flex, status, id, priority) on the main line')
     a = ap.parse_args()
@@ -297,7 +300,7 @@ def main():
     hs_b64 = base64.b64encode((out / 'tex_hs.jpg').read_bytes()).decode('ascii') if tiles else None
     docs_files, docs_json = [], None
     if a.docs:
-        din = make_docs(out)
+        din = json.loads(Path(a.docs_input).read_text(encoding='utf-8')) if a.docs_input else make_docs(out)
         (out / 'docs_input.json').write_text(json.dumps(din), encoding='utf-8')
         side, docs_files = load_docs(out / 'docs_input.json', progress=lambda m: None)
         (out / 'docs.json').write_text(json.dumps(side, separators=(',', ':')), encoding='utf-8')

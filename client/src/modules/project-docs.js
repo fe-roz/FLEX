@@ -6,34 +6,68 @@
   'use strict';
   const X = window._pjParts;
   if (!X) return;                          // project-ui-kit.js found no flexlib.js
-  const { pj, FL, targetLabel, $, el, blobUrl, PAGE_PX, api, PDFJS, toast, ensureAuthor, record, esc, API, btn, editNote, when, choose, dialog, partsOf } = X;
+  const { pj, FL, targetLabel, $, el, blobUrl, PAGE_PX, api, PDFJS, toast, ensureAuthor, record, esc, API, btn, editNote, when, choose, dialog, partsOf, editTags, askNewDoc } = X;
   // defined in a later part: called only after every part has loaded
   const render = (...a) => X.render(...a);
   const history = (...a) => X.history(...a);
 
   // ── Documents ──────────────────────────────────────────────────────────────
   const docByPage = h => h && Object.values(pj.D.docs).find(d => !d.deleted && d.pages.some(p => p.h === h));
-  function docSub(d) {
+  function docSub(d, skipPages) {
     const tags = d.tagList.filter(t => t !== FL.T.project(pj.pid)).map(targetLabel);
     const m = FL.docMedia(d);
     const what = m === 'video' ? 'Video' : m === 'photo' ? `${d.pages.length > 1 ? d.pages.length + ' photos' : 'Photo'}`
       : `${d.pages.length} page${d.pages.length === 1 ? '' : 's'}${d.kind ? ' · ' + (FL.DOC_KIND_LABELS[d.kind] || d.kind) : ''}`;
+    const pt = d.pages.filter(p => p.targets && p.targets.length).length;
     return `${what}${d.date ? ' · ' + d.date : ''} · ` +
-      (tags.length ? tags.slice(0, 3).join(', ') + (tags.length > 3 ? ` +${tags.length - 3}` : '') : 'inbox') +
+      (tags.length ? tags.slice(0, 3).join(', ') + (tags.length > 3 ? ` +${tags.length - 3}` : '') : pt ? 'pages tagged' : 'inbox') +
+      (pt && !skipPages ? ` · ${pt} page${pt === 1 ? '' : 's'} tagged` : '') +
       (d.has_coordinates ? ' · shows coordinates' : '') + (d.conflicts ? ' · edited on two devices' : '');
   }
-  function docEl(d, target) {
+  // " · page 3: stations T6–T8": the page a lookup (FL.docsFor) found a document by.
+  function pageNote(d, i, item) {
+    const p = d.pages[i], ts = p && p.targets && p.targets.length ? p.targets.map(targetLabel) : [];
+    return item && item.via === 'page' && ts.length ? ` · page ${i + 1}: ${ts.slice(0, 2).join(', ')}` : '';
+  }
+  // item: what FL.docsFor found it by ({ page, via, … }): opens at that page and says why; else target: the page covering it.
+  function docEl(d, target, item) {
     const r = el('div', 'pj-item pj-doc');
-    const at = target ? FL.pageFor(d, target) : 0;
+    const at = item && item.page != null ? item.page : target ? FL.pageFor(d, target) : 0;
     const p = d.pages[at];
     const vid = FL.docMedia(d) === 'video';
     if (p && p.ext !== 'pdf') { const im = el('img', 'pj-thumb'); im.loading = 'lazy'; im.src = blobUrl(p); if (p.rot) im.style.transform = `rotate(${p.rot}deg)`; r.appendChild(im); }
     else r.appendChild(el('div', 'pj-thumb pj-thumb-x', vid ? ['video'] : p ? 'PDF' : '—'));
     if (vid) r.classList.add('pj-doc-video');
-    const t = el('div'); t.appendChild(el('div', 'pj-item-t', d.title || 'Untitled')); t.appendChild(el('div', 'pj-sub', docSub(d)));
+    const t = el('div'); t.appendChild(el('div', 'pj-item-t', d.title || 'Untitled')); const note = pageNote(d, at, item);
+    t.appendChild(el('div', 'pj-sub', docSub(d, !!note) + note));
     r.appendChild(t);
+    r.dataset.doc = d.id;
     r.addEventListener('click', () => docOpen(d.id, at));
     return r;
+  }
+  /**
+   * A FL.docsFor result as sections: per group a heading "Survey notes (2)" — "· from survey T" when the documents are
+   * not the selection's own — and its documents, each opening at the page it was found by. A group that fell back from
+   * a wider level shows its first few; the rest behind a link.
+   */
+  function docGroupsInto(box, res, opts = {}) {
+    if (!res || res.empty) return 0;
+    const lim = opts.limit || 5;
+    res.groups.forEach(g => {
+      const h = el('div', 'pj-h pj-gh'); h.dataset.group = g.id;
+      h.appendChild(document.createTextNode(`${g.label} (${g.items.length})`));
+      if (g.from) h.appendChild(el('span', 'pj-from', ' · from ' + g.from));
+      box.appendChild(h);
+      const rows = g.items.map(it => docEl(it.doc, null, it));
+      // the project's untagged documents are the last resort: out of the way until asked for; a wider level shows a few
+      const keep = g.fallback && g.level === 'project' ? 0 : g.fallback && rows.length > lim + 1 ? lim : rows.length;
+      rows.slice(0, keep).forEach(r => box.appendChild(r));
+      if (keep < rows.length) {
+        const more = btn(keep ? `${rows.length - keep} more…` : `Show ${rows.length} not yet sorted…`, () => { rows.slice(keep).forEach(r => box.insertBefore(r, more)); more.remove(); }, 'link');
+        box.appendChild(more);
+      }
+    });
+    return res.items.length;
   }
   function fitCanvas(w, h) {
     const m = Math.max(w, h), k = m > PAGE_PX ? PAGE_PX / m : 1;
@@ -121,28 +155,69 @@
       document.body.appendChild(inp); inp.click();
     });
   }
-  /** Add files as a new document (tagged `tags`, else the project = inbox) or into `docId`. */
-  async function addPages({ tags, docId, files } = {}) {
+  /** The kind a set of files suggests (FL.suggestKind; a JPEG with camera data is a photo): the first file's. */
+  async function kindForFiles(files) {
+    const f = files[0];
+    if (!f) return '';
+    let camera = false;
+    if (/\.jpe?g$/i.test(f.name) || f.type === 'image/jpeg') { try { camera = FL.exifCamera(new Uint8Array(await f.slice(0, 65536).arrayBuffer())); } catch (_) {} }
+    return FL.suggestKind({ name: f.name, type: f.type, camera });
+  }
+  /**
+   * Add files as a new document or into `docId`. `tags`: where it is about (a card's Add pages); none = the quick tag
+   * picker asks what the files are and what they are about (Cancel adds nothing; with no tags they go to the inbox).
+   * `kind`: set by the caller; else suggested from the files (a camera photo is Media, a scan Survey notes…).
+   */
+  async function addPages({ tags, docId, files, kind } = {}) {
     if (!pj.pid) { toast('Choose or create a project first'); return; }
     if (!(await ensureAuthor())) return;
     files = files || await pickFiles('image/*,.tif,.tiff,application/pdf');
     if (!files.length) return;
+    let useTags = tags && tags.length ? tags : null, explicitKind = kind != null ? kind : null;      // explicit: the caller's, or what the picker was told
+    if (!docId && !useTags && askNewDoc) {
+      const r = await askNewDoc({ names: files.map(f => f.name), kind: kind != null ? kind : await kindForFiles(files) });
+      if (!r) return;
+      useTags = r.tags; explicitKind = r.kind;
+    }
     toast(`Adding ${files.length} file(s)…`);
-    const { pages, failed } = await filesToPages(files, n => toast('Adding ' + n));
-    failed.forEach(n => toast('Could not read ' + n));
-    if (!pages.length) return;
+    const isPdf = f => /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
+    const strip = n => n.replace(/\.[^.]*$/, '').replace(/ \(\d+\)$/, '');
+    const tagsOut = useTags && useTags.length ? useTags : [FL.T.project(pj.pid)];
+    const date = new Date().toISOString().slice(0, 10);
     if (docId && pj.D.docs[docId]) {
+      const { pages, failed } = await filesToPages(files, n => toast('Adding ' + n));
+      failed.forEach(n => toast('Could not read ' + n));
+      if (!pages.length) return;
       await record('doc.pages', { doc: docId, add: pages }, 'docs');
       toast(`Added ${pages.length} page(s)`);
       return;
     }
-    const strip = n => n.replace(/\.[^.]*$/, '').replace(/ \(\d+\)$/, '');
-    const title = pages.length === 1 || new Set(pages.map(p => strip(p.name))).size === 1 ? strip(pages[0].name) : `${strip(pages[0].name)} +${pages.length - 1}`;
-    const id = FL.uid(12);
-    await record('doc.add', { doc: id, title: title.slice(0, 80), kind: '', date: new Date().toISOString().slice(0, 10), pages,
-      tags: tags && tags.length ? tags : [FL.T.project(pj.pid)] }, 'docs');
-    toast(`New document, ${pages.length} page(s)`);
-    docOpen(id, 0);
+    // Each PDF is a document of its own, its pages turned into images (what the viewer and the export carry) and the
+    // PDF itself kept as the original (doc.file); photos and scans together are one document, as before.
+    const groups = files.filter(isPdf).map(f => [f]);
+    const rest = files.filter(f => !isPdf(f));
+    if (rest.length) groups.push(rest);
+    let first = null;
+    for (const fs of groups) {
+      const { pages, failed } = await filesToPages(fs, n => toast('Adding ' + n));
+      failed.forEach(n => toast('Could not read ' + n));
+      if (!pages.length) continue;
+      const title = pages.length === 1 || new Set(pages.map(pg => strip(pg.name))).size === 1 ? strip(pages[0].name) : `${strip(pages[0].name)} +${pages.length - 1}`;
+      const id = FL.uid(12);
+      const k = explicitKind != null ? explicitKind : await kindForFiles(fs);
+      await record('doc.add', { doc: id, title: title.slice(0, 80), kind: k || '', date, pages, tags: tagsOut }, 'docs');
+      if (fs.length === 1 && isPdf(fs[0])) {
+        try {
+          const buf = new Uint8Array(await fs[0].arrayBuffer());
+          await storeBytes(buf.buffer, 'pdf');
+          await record('doc.file', { doc: id, file: { h: FL.sha256(buf), ext: 'pdf', name: fs[0].name, path: '', size: buf.length } }, 'docs');
+        } catch (e) { console.warn('[project] original of', fs[0].name, e); toast('The pages were added, but the PDF itself could not be kept'); }
+      }
+      first = first || id;
+    }
+    if (!first) return;
+    toast(groups.length > 1 ? `${groups.length} new documents` : `New document, ${pj.D.docs[first] ? pj.D.docs[first].pages.length : ''} page(s)`);
+    docOpen(first, 0);
   }
 
   // Gallery
@@ -212,6 +287,7 @@
       bb.appendChild(btn('⟳', () => record('doc.rotate', { doc: d.id, h: p.h, rot: ((p.rot || 0) + 90) % 360, prev: p.rot || 0 }, 'docs')));
     }
     bb.appendChild(btn(['tag', 'Tags'], () => editTags(d.id)));
+    if (n) { const tp = btn(['tag', 'Tag this page…'], () => editTags(d.id, { page: G.i })); tp.dataset.act = 'tag-page'; tp.title = 'Say which station or range of stations (T6~T8) this page is about'; bb.appendChild(tp); }
     bb.appendChild(btn(['pencil', 'Details'], () => editDoc(d.id)));
     bb.appendChild(btn(['plus', 'Pages'], () => addPages({ docId: d.id })));
     bb.appendChild(btn(['note', 'Note'], () => editNote(FL.T.doc(d.id), (FL.notesOn(pj.P, FL.T.doc(d.id))[0] || {}).id)));
@@ -235,7 +311,7 @@
     }
     const tg = g.querySelector('.pjg-tags');
     const notes = FL.notesOn(pj.P, FL.T.doc(d.id));
-    tg.textContent = docSub(d) + (d.desc ? ' — ' + d.desc : '') + (notes.length ? ` · Note: ${notes[0].text}` : '');
+    tg.textContent = docSub(d) + (p && p.targets && p.targets.length ? ' · This page: ' + p.targets.map(targetLabel).join(', ') : '') + (d.desc ? ' — ' + d.desc : '') + (notes.length ? ` · Note: ${notes[0].text}` : '');
     g.querySelector('.pjg-prev').disabled = G.i <= 0;
     g.querySelector('.pjg-next').disabled = G.i >= n - 1;
   }
@@ -314,63 +390,8 @@
     Object.keys(now).forEach(k => { const old = k === 'has_coordinates' ? !!d[k] : (d[k] || ''); if (now[k] !== old) { fields[k] = now[k]; prev[k] = old; } });
     if (Object.keys(fields).length || d.conflicts) await record('doc.set', { doc: docId, fields, prev }, 'docs');
   }
-  // What a document can be tagged to: the project, its caves, their surveys and stations (loaded files), leads.
-  function tagChoices() {
-    const out = [{ label: 'Project · ' + (pj.P.name || 'this project'), target: FL.T.project(pj.pid) }];
-    FL.liveCaves(pj.P).forEach(c => {
-      out.push({ label: 'Cave · ' + c.name, target: FL.T.cave(c.id) });
-      const svs = new Map(), sts = new Set();
-      partsOf(c.id).forEach(({ imp, codes }) => {
-        (imp.parsed.surveys || []).forEach(s => { if (codes.has(s.code) && !svs.has(s.code)) svs.set(s.code, s.desc); });
-        (imp.parsed.stations || []).forEach(s => { if (s.name && codes.has(s.survey || '')) sts.add(s.name); });
-      });
-      svs.forEach((desc, code) => out.push({ label: `Survey ${code}${desc ? ' — ' + desc : ''} · ${c.name}`, target: FL.T.survey(c.id, code) }));
-      [...sts].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).forEach(n => out.push({ label: `Station ${n} · ${c.name}`, target: FL.T.station(c.id, n) }));
-    });
-    FL.liveFeatures(pj.P).forEach(f => out.push({ label: `${{ point: 'Point', line: 'Line', area: 'Area' }[f.kind] || 'Feature'} · ${f.name || '(no name)'} (surface)`, target: FL.T.feature(f.id) }));
-    Object.values(pj.P.leads).forEach(L => { if (!L.deleted) out.push({ label: 'Lead · ' + targetLabel(L.target) + (L.fields.desc ? ' — ' + L.fields.desc.slice(0, 40) : ''), target: FL.T.lead(L.id) }); });
-    return out;
-  }
-  async function editTags(docId) {
-    if (!(await ensureAuthor())) return;
-    const d = pj.D.docs[docId];
-    const want = new Set(d.tagList);
-    const body = el('div', 'pj-form');
-    const chips = el('div', 'pj-chips');
-    const all = tagChoices();
-    const paintChips = () => {
-      chips.textContent = '';
-      [...want].forEach(t => { const b = btn(targetLabel(t) + ' ✕', () => { want.delete(t); paintChips(); }, 'chip on'); chips.appendChild(b); });
-      if (!want.size) chips.appendChild(el('div', 'pj-note', 'No tags: the document is in no project.'));
-    };
-    const q = el('input', 'pj-input'); q.placeholder = 'Find a cave, survey, station, surface point or lead…';
-    const list = el('div', 'pj-list pj-taglist');
-    const paintList = () => {
-      list.textContent = '';
-      const s = q.value.trim().toLowerCase();
-      all.filter(c => !want.has(c.target) && (!s || c.label.toLowerCase().includes(s))).slice(0, 40)
-        .forEach(c => list.appendChild(btn(['plus', c.label], () => { want.add(c.target); paintChips(); paintList(); }, 'row')));
-    };
-    q.addEventListener('input', paintList);
-    const area = btn(['plus', 'Area: a set of stations…'], async () => {
-      const caves = FL.liveCaves(pj.P);
-      if (!caves.length) return;
-      const cid = caves.length === 1 ? caves[0].id : await choose('Area in which cave?', null, caves.map(c => ({ label: c.name, value: c.id })));
-      if (!cid) return;
-      const r = await dialog({ title: 'Stations this page covers', text: 'Names and ranges, comma separated: A10~A22 is A10 to A22 (same prefix). For pages that cover more than one station but not a whole survey.',
-        input: { value: '', placeholder: 'A10~A22, B3' }, buttons: [{ label: 'Cancel', value: null }, { label: 'Add', value: 'ok', primary: true }] });
-      if (r && r.value.trim()) { want.add(FL.T.area(cid, r.value.trim().replace(/\s*,\s*/g, ',').replace(/\s*~\s*/g, '~'))); paintChips(); }
-    });
-    body.append(el('div', 'pj-f-l', 'Tagged to'), chips, q, list, area);
-    paintChips(); paintList();
-    const r = await dialog({ title: 'Tags · ' + (d.title || 'document'), body, wide: true, buttons: [{ label: 'Cancel', value: null }, { label: 'Done', value: 'ok', primary: true }] });
-    if (!r) return;
-    for (const t of want) if (!d.tags[t]) await record('doc.tag', { doc: docId, target: t }, 'docs');
-    for (const t of d.tagList) if (!want.has(t)) await record('doc.untag', { doc: docId, target: t }, 'docs');
-  }
-
 
   Object.assign(X, {
-    docByPage, docSub, docEl, storeBytes, filesToPages, pickFiles, addPages, stopVideos, docOpen, fileOpen, galleryClose, galleryShow, videoEl, editTags,
+    docByPage, docSub, docEl, docGroupsInto, storeBytes, filesToPages, pickFiles, addPages, stopVideos, docOpen, fileOpen, galleryClose, galleryShow, videoEl,
   });
 })();

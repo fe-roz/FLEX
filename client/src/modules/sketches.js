@@ -209,20 +209,19 @@
   }
   let lastGen = '';
   /**
-   * The Files tab body (project.js filesTab): sketches, documents, photos, videos and generated files, then what is
+   * The Files tab body (project.js filesTab): the documents by group (Survey notes, Sketches, Media, Other) and generated files, then what is
    * further down. Returns the "Add sketch…" button for the row below, or null (the old list is drawn).
    */
   function filesList(box, c, f) {
     const target = A.cardTarget(c);
     if (!pj.pid) return null;
     tree().then(() => { const sig = generated(c).map(x => x.p + x.s).join('|'); if (sig !== lastGen) { lastGen = sig; if (pj.card === c) A.refreshCard(); } });
-    const groups = [['Sketches', d => isSketch(d)], ['Documents', d => !isSketch(d) && !FL.docMedia(d)], ['Photos', d => !isSketch(d) && FL.docMedia(d) === 'photo'], ['Videos', d => !isSketch(d) && FL.docMedia(d) === 'video']];
     const wrap = el('div', 'sk-files');
-    const paint = (list, into) => groups.forEach(([title, test]) => {
-      const ds = list.filter(test);
-      if (!ds.length) return;
-      into.appendChild(el('div', 'pj-h', `${title} (${ds.length})`));
-      ds.forEach(d => into.appendChild(docRow(d)));
+    // by group (flexlib DOC_GROUPS): Survey notes, Sketches, Media, Other
+    const paint = (list, into) => FL.groupDocs(list).forEach(g => {
+      const h = el('div', 'pj-h pj-gh', `${g.label} (${g.docs.length})`); h.dataset.group = g.id;
+      into.appendChild(h);
+      g.docs.forEach(d => into.appendChild(docRow(d)));
     });
     paint(f.own, wrap);
     const gen = generated(c);

@@ -60,6 +60,10 @@ def load_docs(path, progress=print):
         files.append((docs_page_file(h, ext), f))
     side = {'format': 1, 'project': raw.get('project') or None, 'caves': raw.get('caves') or [],
             'entries': raw.get('entries') or [], 'pages': pages}
+    # What a viewer that does not replay the entries can use: the document groups and, per document, its group and tagged pages.
+    for k in ('groups', 'summary'):
+        if raw.get(k):
+            side[k] = raw[k]
     return side, files
 
 

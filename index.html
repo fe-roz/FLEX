@@ -1596,6 +1596,22 @@
               </div>
             </div>
 
+            <!-- Documents: always on show (it used to sit in the collapsed Settings); the choice is remembered (export-ui.js) -->
+            <div class="lp-section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▾</span> Documents
+              </div>
+              <div class="lp-section-body open" id="lp-export-docs-body">
+                <label style="display:block; margin:2px 0 3px;">
+                  <input type="checkbox" id="export_docs_on" checked>
+                  Include documents <span id="export_docs_count" style="color:rgba(255,255,255,0.5);"></span>
+                </label>
+                <div style="font-size:10px; color:rgba(255,255,255,0.4);">
+                  The open project's scanned notes, sketches and photos for the caves in the area, with their tags (survey, station, a page's range), to read in the viewer and FLEX Field in the same order as here. The count is the whole project's. Page images only (PDFs stay in the project).
+                </div>
+              </div>
+            </div>
+
             <!-- Settings -->
             <div class="lp-section">
               <div class="lp-section-header" onclick="window._lpToggle(this)">
@@ -1641,13 +1657,6 @@
                   </label>
                   <div style="font-size:10px; color:rgba(255,255,255,0.4);">
                     Walls go as drawn in FLEX (Style → Passage), so a cave with walls off sends lines either way. Lines only makes a smaller export.
-                  </div>
-                  <label style="display:block; margin-top:6px;">
-                    <input type="checkbox" id="export_docs_on" checked>
-                    Include documents <span id="export_docs_count" style="color:rgba(255,255,255,0.5);"></span>
-                  </label>
-                  <div style="font-size:10px; color:rgba(255,255,255,0.4);">
-                    The open project's scanned notes and photos for these caves, to read in the viewer and FLEX Field. Page images only (PDFs stay in the project).
                   </div>
                 </div>
               </div>
@@ -2075,6 +2084,7 @@
 <script src="client/src/modules/project-ui-kit.js"></script>
 <script src="client/src/modules/project-records.js"></script>
 <script src="client/src/modules/project-caves.js"></script>
+<script src="client/src/modules/project-tags.js"></script>  <!-- the quick tag picker: cave > survey > station or range, recent tags, page tags -->
 <script src="client/src/modules/project-docs.js"></script>
 <script src="client/src/modules/project-history.js"></script>
 <script src="client/src/modules/project-field.js"></script>

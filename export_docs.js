@@ -7,6 +7,13 @@
 //
 // Only page images (jpg, png, webp) travel: PDFs, video and original files
 // stay in the project. Rules come from flexlib.js (the same file the page runs).
+//
+// What the phone needs to show a station's documents in the same order as the
+// desktop (flexlib docsFor): the log entries (doc.add with its kind, doc.tag,
+// doc.pagetag for a tag on one page), replayed there by the same flexlib; and,
+// for tools that do not replay them, `groups` (Survey notes / Sketches / Media /
+// Other with the kinds in each) and `summary` (per document: kind, group, the
+// pages that carry a tag).
 const fs = require('fs');
 const path = require('path');
 const FL = require('./viewer_build/libs/flexlib.js');
@@ -16,7 +23,7 @@ const IMAGE_EXT = new Set(['jpg', 'jpeg', 'png', 'webp']);
 /**
  * lib: the library module (read(scope) -> jsonl text, blobPath(name) -> file or null).
  * pid: the project id; caveIds: ids of the caves in the export (null = every cave).
- * Returns { project, caves, entries, pages: [{h, ext, path, size}], docs, skipped: {pdf, other, missing}, bytes }.
+ * Returns { project, caves, entries, pages: [{h, ext, path, size}], docs, groups, summary, skipped: {pdf, other, missing}, bytes }.
  */
 function collect(lib, pid, caveIds, caveNames) {
   const lines = t => String(t || '').split('\n').filter(l => l.trim()).map(l => { try { return JSON.parse(l); } catch (_) { return null; } }).filter(Boolean);
@@ -29,7 +36,7 @@ function collect(lib, pid, caveIds, caveNames) {
   const keep = d => {
     if (d.deleted || !FL.docInProject(d, S)) return false;
     if (!want) return true;
-    const caveTags = d.tagList.map(FL.parseTarget).filter(p => p.cave);
+    const caveTags = FL.docTargets(d).map(FL.parseTarget).filter(p => p.cave);                // its tags and its pages' tags
     return !caveTags.length || caveTags.some(p => want.has(p.cave));   // about no cave in particular, or about one of these
   };
   const docs = Object.values(D.docs).filter(keep);
@@ -52,7 +59,10 @@ function collect(lib, pid, caveIds, caveNames) {
     pages.push({ h: pg.h, ext, path: f, size });
   }));
   const caves = Object.values(S.caves).filter(c => !want || want.has(c.id)).map(c => ({ id: c.id, name: c.name || (caveNames && caveNames[c.id]) || '' }));
-  return { project: { id: pid, name: S.name || '' }, caves, entries, pages, docs: docs.length, skipped, bytes };
+  const groups = FL.DOC_GROUPS.map(g => ({ id: g.id, label: g.label, kinds: g.kinds.slice() }));
+  const summary = docs.map(d => ({ id: d.id, title: d.title || '', kind: d.kind || '', group: FL.docGroupOf(d), pages: d.pages.length,
+    tagged: d.pages.map((p, i) => ({ i, h: p.h, targets: (p.targets || []).slice() })).filter(x => x.targets.length) }));
+  return { project: { id: pid, name: S.name || '' }, caves, entries, pages, docs: docs.length, groups, summary, skipped, bytes };
 }
 
 module.exports = { collect };

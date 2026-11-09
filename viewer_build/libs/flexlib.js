@@ -179,9 +179,10 @@
   // ── Documents: kinds (per document, or per page when a file mixes them) ──
   // Dates may be approximate: "1994-07-16", "1994-07", "1994", "1970s", "c. 1975".
   const DOC_KINDS = ['sketch-plan', 'sketch-profile', 'cross-sections', 'shot-table', 'trip-report', 'map', 'photo', 'video',
-                     'letter', 'notes', 'other'];
+                     'letter', 'notes', 'topodroid', 'other'];
   const DOC_KIND_LABELS = { 'sketch-plan': 'Sketch (plan)', 'sketch-profile': 'Sketch (profile)', 'cross-sections': 'Cross-sections',
-    'shot-table': 'Shot table', 'trip-report': 'Trip report', map: 'Map', photo: 'Photo', video: 'Video', letter: 'Letter', notes: 'Notes', other: 'Other' };
+    'shot-table': 'Shot table', 'trip-report': 'Trip report', map: 'Map', photo: 'Photo', video: 'Video', letter: 'Letter', notes: 'Field notes',
+    topodroid: 'TopoDroid export', other: 'Other' };
   // Media, shown apart from the papers: 'video' (its kind, or the original is a
   // video file), 'photo' (its kind, or no kind and only photo images), else ''.
   const VIDEO_EXT = /^(mp4|m4v|mov|webm|mkv|avi)$/i, PHOTO_EXT = /^(jpe?g|png|webp|heic|heif|gif)$/i;
@@ -199,6 +200,87 @@
     const s = String(d || '');
     const m = /(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?/.exec(s);
     return m ? m[1] + (m[2] ? '-' + m[2] : '') + (m[3] ? '-' + m[3] : '') : '';
+  }
+
+  // ── Document groups: the four lists documents are shown in (decided 2026-11-08) ─
+  //   Survey notes  shot tables, field-note scans, TopoDroid exports
+  //   Sketches      plan, profile, cross-sections
+  //   Media         photos, videos
+  //   Other         trip reports, maps, letters, anything else (and any kind this list does not know)
+  // A document's kind says its group (a page's own kind says the page's). No kind: only photo images, or a video
+  // file, is Media; anything else is Other. The order here is the order the lists are shown in.
+  const DOC_GROUPS = [
+    { id: 'notes', label: 'Survey notes', kinds: ['shot-table', 'notes', 'topodroid'] },
+    { id: 'sketches', label: 'Sketches', kinds: ['sketch-plan', 'sketch-profile', 'cross-sections'] },
+    { id: 'media', label: 'Media', kinds: ['photo', 'video'] },
+    { id: 'other', label: 'Other', kinds: ['trip-report', 'map', 'letter', 'other'] },
+  ];
+  // Older or free-typed spellings of a kind (the details box lets a person type any text).
+  const KIND_ALIAS = { 'survey-notes': 'notes', 'field-notes': 'notes', 'survey-note': 'notes', 'shot-tables': 'notes', 'topodroid-export': 'notes', dwg: 'notes', dxf: 'notes',
+    sketch: 'sketch-plan', sketches: 'sketch-plan', 'cross-section': 'cross-sections', section: 'cross-sections', sections: 'cross-sections',
+    photos: 'photo', photograph: 'photo', image: 'photo', videos: 'video', media: 'photo', 'trip-reports': 'trip-report', report: 'trip-report', maps: 'map', letters: 'letter' };
+  const KIND_GROUP = {};
+  DOC_GROUPS.forEach(g => g.kinds.forEach(k => { KIND_GROUP[k] = g.id; }));
+  const groupLabel = id => (DOC_GROUPS.find(g => g.id === id) || DOC_GROUPS[DOC_GROUPS.length - 1]).label;
+  function docGroup(kind) {
+    const k = String(kind == null ? '' : kind).trim().toLowerCase().replace(/[\s_]+/g, '-');
+    if (KIND_GROUP[k]) return KIND_GROUP[k];
+    if (KIND_ALIAS[k]) return KIND_GROUP[KIND_ALIAS[k]];
+    return 'other';
+  }
+  // The group of a document (see above), and of one of its pages (the page's own kind wins, else the document's).
+  function docGroupOf(d) {
+    if (!d) return 'other';
+    if (d.kind === 'video' || (d.file && VIDEO_EXT.test(d.file.ext || ''))) return 'media';
+    if (d.kind) return docGroup(d.kind);
+    const pk = (d.pages || []).find(p => p && p.kind);
+    if (pk) return docGroup(pk.kind);
+    return docMedia(d) ? 'media' : 'other';
+  }
+  const pageGroup = (d, p) => (p && p.kind ? docGroup(p.kind) : docGroupOf(d));
+  // Documents split by group, in the groups' order: [{ id, label, docs }]; empty groups left out unless opts.all.
+  function groupDocs(docs, opts = {}) {
+    const by = {};
+    (docs || []).forEach(d => { const g = (opts.of || docGroupOf)(d); (by[g] || (by[g] = [])).push(d); });
+    return DOC_GROUPS.map(g => ({ id: g.id, label: g.label, docs: by[g.id] || [] })).filter(g => opts.all || g.docs.length);
+  }
+  // A sensible kind for a file being added (the person can change it): { name, type, camera } → kind.
+  // `camera`: the picture carries camera data (exifCamera). A photo from a camera is Media; a scan (TIFF, a scanner
+  // app's file name, a PDF) is Survey notes or Other; a TopoDroid export is Survey notes.
+  function suggestKind(f) {
+    const name = String((f && f.name) || ''), type = String((f && f.type) || ''), ext = (name.split('.').pop() || '').toLowerCase();
+    if (VIDEO_EXT.test(ext) || /^video\//.test(type)) return 'video';
+    if (/^(dxf|dwg|th|th2)$/.test(ext)) return 'topodroid';
+    if (f && f.camera) return 'photo';
+    if (/^(IMG|DSC|PXL|MVIMG|DJI|GOPR|P\d{6})[-_ ]?\d+/i.test(name)) return 'photo';
+    if (/sketch/i.test(name)) return 'sketch-plan';
+    if (/\b(shot|table)/i.test(name)) return 'shot-table';
+    if (/scan|notes?\b|sheet|survey|book|page/i.test(name) || ext === 'tif' || ext === 'tiff' || type === 'image/tiff') return 'notes';
+    if (ext === 'pdf' || type === 'application/pdf') return 'other';
+    if (PHOTO_EXT.test(ext) || /^image\//.test(type)) return 'photo';
+    return 'other';
+  }
+  // Does a JPEG carry camera data (an Exif block with a Make or Model)? bytes: Uint8Array (the first 64 KB is enough).
+  function exifCamera(bytes) {
+    const b = bytes;
+    if (!b || b.length < 12 || b[0] !== 0xff || b[1] !== 0xd8) return false;
+    let o = 2;
+    while (o + 4 < b.length && b[o] === 0xff) {
+      const m = b[o + 1], len = (b[o + 2] << 8) | b[o + 3];
+      if (m === 0xe1 && b[o + 4] === 0x45 && b[o + 5] === 0x78 && b[o + 6] === 0x69 && b[o + 7] === 0x66) {      // "Exif"
+        const t = o + 10, le = b[t] === 0x49, u16 = i => (le ? b[i] | (b[i + 1] << 8) : (b[i] << 8) | b[i + 1]);
+        const u32 = i => (le ? (b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24)) >>> 0 : ((b[i] << 24) | (b[i + 1] << 16) | (b[i + 2] << 8) | b[i + 3]) >>> 0);
+        if (t + 8 > b.length) return false;
+        const ifd = t + u32(t + 4);
+        if (ifd + 2 > b.length) return false;
+        const n = u16(ifd);
+        for (let i = 0; i < n && ifd + 2 + i * 12 + 12 <= b.length; i++) { const tag = u16(ifd + 2 + i * 12); if (tag === 0x010f || tag === 0x0110) return true; }
+        return false;
+      }
+      if (m === 0xda || len < 2) break;
+      o += 2 + len;
+    }
+    return false;
   }
 
   // ── Proposals (the archive processor, or any helper that only suggests) ──
@@ -604,13 +686,22 @@
       r.entries = r.entries.filter(e => e.op === 'doc.add').concat(r.entries.filter(e => e.op !== 'doc.add'));
       const d = { id: r.id, title: '', kind: '', date: '', desc: '', pages: [], tags: {}, deleted: false, file: null,
                   history: r.entries.map(e => e.id) };
+      // Page tags (doc.pagetag / doc.pageuntag, a page named by its sha256 `h`) land in the page's `targets`; one that
+      // arrives before its page (another device's clock) waits here and is applied when the page is added.
+      const pend = {};
+      const setPT = (pg, t, on) => { const cur = pg.targets || (pg.targets = []), i = cur.indexOf(t); if (on && i < 0) cur.push(t); else if (!on && i >= 0) cur.splice(i, 1); };
+      const putPage = p => {
+        const q = Object.assign({ rot: 0 }, clone(p));
+        if (pend[q.h]) { pend[q.h].forEach(([t, on]) => setPT(q, t, on)); delete pend[q.h]; }
+        return q;
+      };
       r.entries.forEach(e => {
         switch (e.op) {
           case 'doc.add':
             if (!d.created) d.created = { who: e.who, t: e.t };
             ['title', 'kind', 'date', 'desc'].forEach(k => { if (e[k] != null) d[k] = String(e[k]); });
             if (e.has_coordinates != null) d.has_coordinates = !!e.has_coordinates;
-            (e.pages || []).forEach(p => { if (!d.pages.some(q => q.h === p.h)) d.pages.push(Object.assign({ rot: 0 }, clone(p))); });
+            (e.pages || []).forEach(p => { if (!d.pages.some(q => q.h === p.h)) d.pages.push(putPage(p)); });
             (e.tags || []).forEach(t => { d.tags[t] = true; });
             break;
           case 'doc.set':
@@ -620,8 +711,16 @@
           case 'doc.page': d.pages.forEach(p => { if (p.h === e.h) ['kind', 'date'].forEach(k => { if (e.fields && e.fields[k] != null) p[k] = String(e.fields[k]); }); }); break;
           case 'doc.pages': {
             const at = e.at != null && e.at >= 0 ? Math.min(e.at, d.pages.length) : d.pages.length;
-            const add = (e.add || []).filter(p => !d.pages.some(q => q.h === p.h)).map(p => Object.assign({ rot: 0 }, clone(p)));
+            const add = (e.add || []).filter(p => !d.pages.some(q => q.h === p.h)).map(putPage);
             d.pages.splice(at, 0, ...add);
+            break;
+          }
+          // A tag on one page of the document ("the sketchbook's page 5 is stations T6~T8"). The page is named by its
+          // content hash, so the tag stays with the page when pages are reordered, inserted or removed and put back.
+          case 'doc.pagetag': case 'doc.pageuntag': {
+            const t = e.target == null ? '' : String(e.target), on = e.op === 'doc.pagetag', pg = d.pages.find(q => q.h === e.h);
+            if (!t || !e.h) break;
+            if (pg) setPT(pg, t, on); else (pend[e.h] || (pend[e.h] = [])).push([t, on]);
             break;
           }
           case 'doc.droppage': d.pages = d.pages.filter(p => p.h !== e.h); break;
@@ -648,9 +747,18 @@
     });
     return D;
   }
+  // Every target a document is tagged to: its own tags (`tagList`) and its pages' tags (`pages[].targets`, from
+  // doc.pagetag, or from a doc.add that listed them). A page tag is a tag of the document too: a document with a
+  // page tagged to a station of the project is in the project.
+  function docTargets(d) {
+    const out = ((d && d.tagList) || Object.keys((d && d.tags) || {})).slice();
+    ((d && d.pages) || []).forEach(p => ((p && p.targets) || []).forEach(t => { if (!out.includes(t)) out.push(t); }));
+    return out;
+  }
+  const hasPageTags = d => ((d && d.pages) || []).some(p => p && p.targets && p.targets.length);
   // Is a document in project S (tagged to it, or to anything of it)?
   function docInProject(d, S) {
-    return d.tagList.some(t => {
+    return docTargets(d).some(t => {
       const p = parseTarget(t);
       if (p.kind === 'project') return p.pid === S.id;
       if (p.cave) return !!S.caves[p.cave] && !S.caves[p.cave].movedTo;      // a cave moved to another project takes its documents along
@@ -659,29 +767,234 @@
       return false;
     });
   }
-  // Inbox: in the project but tagged to nothing more specific than it.
-  const docInbox = (d, S) => d.tagList.every(t => t === T.project(S.id)) && d.tagList.length > 0;
+  // Inbox: in the project but tagged to nothing more specific than it (no page tagged either).
+  const docInbox = (d, S) => d.tagList.every(t => t === T.project(S.id)) && d.tagList.length > 0 && !hasPageTags(d);
   function docsOf(D, S, opts = {}) {
     return Object.values(D.docs).filter(d => (opts.deleted ? d.deleted : !d.deleted) && docInProject(d, S))
       .sort((a, b) => String(b.created && b.created.t).localeCompare(String(a.created && a.created.t)));
   }
-  // Documents for a station: tagged to the station, then to its surveys, then its cave.
+
+  // ── Documents for a selection: the most specific tags first ────────────────
+  // A station's documents, most specific first (decided 2026-11-08):
+  //   station — tagged to the station, or a page of it tagged to the station or to a range that covers it (T6~T8)
+  //   segment — then the segments the station is in (if the project uses segments)
+  //   survey  — then the survey it belongs to
+  //   cave    — then the cave
+  //   project — then the project's untagged documents (the inbox)
+  // docsFor stops at the first of these that has any (the others are not looked at), so a station never shows the
+  // documents of other surveys, other stations or other caves. A survey: its documents, else (its stations'), else
+  // the cave's, else the project's; a cave: its own, else its surveys' and stations', else the project's.
+  // One exception, for a station only: Survey notes and Sketches it has none of at its own level are taken from its
+  // segment or survey (a photo of the station does not hide the survey's sketches). opts.topUp = false turns that off;
+  // opts.within = false leaves out "what is tagged inside it" for a survey, segment or cave.
+  const LEVEL_RANK = { own: 0, station: 0, area: 1, segment: 2, survey: 3, within: 4, cave: 5, project: 6 };
+  // How many stations an area spec names (a range counts its numbers): narrower = more specific.
+  function areaSpan(spec) {
+    const split = x => { const m = /^(.*?)(\d+)([^\d]*)$/.exec(String(x).trim()); return m ? { pre: m[1], num: +m[2] } : null; };
+    let n = 0;
+    String(spec || '').split(',').forEach(item => {
+      item = item.trim();
+      if (!item) return;
+      const k = item.indexOf('~');
+      if (k < 0) { n++; return; }
+      const a = split(item.slice(0, k)), b = split(item.slice(k + 1));
+      n += a && b && a.pre === b.pre ? Math.abs(a.num - b.num) + 1 : 2;
+    });
+    return n || 1;
+  }
+  // What a person types for "these stations" as an area spec: "T6 to T8", "T6–T8", "T6 - T8", "T6~8" → "T6~T8"
+  // (a bare number after the dash takes the first station's prefix); several items by comma. `known`: station names
+  // (array or Set) that stay as typed ("A1-2" is a station when there is one). "T6-8" is read as a range only when
+  // it is not a known station.
+  function normalizeSpec(text, known) {
+    const kn = known ? (known instanceof Set ? known : new Set(known)) : null;
+    return String(text == null ? '' : text).split(/[,;\n]+/).map(x => x.trim()).filter(Boolean).map(it => {
+      if (kn && kn.has(it)) return it;
+      let m = /^(.+?)\s*(?:~|–|—|\s-\s|\s+to\s+)\s*(.+)$/i.exec(it);
+      if (!m) { const m2 = /^([A-Za-z_.]*\d+[A-Za-z]*)-(\d+[A-Za-z]*)$/.exec(it); if (m2) m = [it, m2[1], m2[2]]; }
+      if (!m) return it;
+      const a = m[1].trim();
+      let b = m[2].trim();
+      const pa = /^(.*?)\d+[^\d]*$/.exec(a), pb = /^(.*?)\d+[^\d]*$/.exec(b);
+      if (pa && pb && pb[1] === '' && pa[1] !== '') b = pa[1] + b;
+      return a + '~' + b;
+    }).join(',');
+  }
+  // A station or range typed by a person → the tag target: one plain name is a station, anything with a range or
+  // a list is an area of the cave. null for nothing typed.
+  function specTarget(cid, text, known) {
+    const spec = normalizeSpec(text, known);
+    if (!spec) return null;
+    return /[~,]/.test(spec) ? T.area(cid, spec) : T.station(cid, spec);
+  }
+  // The names of `names` that an area spec covers (to show "= T6, T7, T8" while it is being typed).
+  const areaStations = (spec, names) => (names || []).filter(n => areaHas(spec, n));
+  // Does an area spec cover any of a set of stations? areaIndex(names) prepares the set once (names split into prefix and
+  // number), so asking about many specs (every document of a cave) stays cheap. The same answer as areaHas for each name.
+  function areaIndex(names) {
+    const set = new Set(), parts = [];
+    (names ? [...names] : []).forEach(n => { n = String(n).trim(); if (!n || set.has(n)) return; set.add(n); const m = /^(.*?)(\d+)([^\d]*)$/.exec(n); if (m) parts.push({ pre: m[1], num: +m[2] }); });
+    return { set, parts };
+  }
+  function areaTouches(spec, ix) {
+    const split = x => { const m = /^(.*?)(\d+)([^\d]*)$/.exec(String(x).trim()); return m ? { pre: m[1], num: +m[2] } : null; };
+    return String(spec || '').split(',').some(item => {
+      item = item.trim();
+      if (!item) return false;
+      const k = item.indexOf('~');
+      if (k < 0) return ix.set.has(item);
+      const a = split(item.slice(0, k)), b = split(item.slice(k + 1));
+      if (!a || !b || a.pre !== b.pre) return false;
+      const lo = Math.min(a.num, b.num), hi = Math.max(a.num, b.num);
+      return ix.parts.some(x => x.pre === a.pre && x.num >= lo && x.num <= hi);
+    });
+  }
+  // Which level of a selection a tag stands for: { kind, tiers: [[levels]…] (most specific first), levelOf(tag) → level | null }.
+  function docsCtx(S, target, opts) {
+    const t = parseTarget(target), kind = t.kind;
+    const pid = (S && S.id) || (kind === 'project' ? t.pid : '');
+    const names = opts.stations ? new Set(opts.stations) : null, ix = names ? areaIndex(names) : null;
+    const covers = spec => !!ix && areaTouches(spec, ix);
+    const ctx = { kind, pid, tiers: null, levelOf: () => null, target };
+    if (kind === 'station') {
+      const codes = [].concat(opts.codes || []);
+      const segs = new Set(opts.segments ? opts.segments : (S && S.segments ? segmentsAt(S, t.cave, t.name).map(g => g.id) : []));
+      ctx.tiers = [['station', 'area'], ['segment'], ['survey'], ['cave'], ['project']];
+      ctx.levelOf = tag => {
+        const p = parseTarget(tag);
+        if (p.kind === 'station') return p.cave === t.cave && p.name === t.name ? 'station' : null;
+        if (p.kind === 'area') return p.cave === t.cave && areaHas(p.spec, t.name) ? 'area' : null;
+        if (p.kind === 'segment') return p.cave === t.cave && segs.has(p.seg) ? 'segment' : null;
+        if (p.kind === 'survey') return p.cave === t.cave && codes.includes(p.code) ? 'survey' : null;
+        if (p.kind === 'cave') return p.cave === t.cave ? 'cave' : null;
+        return p.kind === 'project' && p.pid === pid ? 'project' : null;
+      };
+    } else if (kind === 'survey' || kind === 'segment') {
+      ctx.tiers = opts.within === false ? [[kind], ['cave'], ['project']] : [[kind], ['within'], ['cave'], ['project']];
+      ctx.levelOf = tag => {
+        const p = parseTarget(tag);
+        if (p.kind === kind) return p.cave === t.cave && (kind === 'survey' ? p.code === t.code : p.seg === t.seg) ? kind : null;
+        if (p.kind === 'station') return p.cave === t.cave && !!names && names.has(p.name) ? 'within' : null;
+        if (p.kind === 'area') return p.cave === t.cave && covers(p.spec) ? 'within' : null;
+        if (p.kind === 'cave') return p.cave === t.cave ? 'cave' : null;
+        return p.kind === 'project' && p.pid === pid ? 'project' : null;
+      };
+    } else if (kind === 'cave') {
+      ctx.tiers = opts.within === false ? [['cave'], ['project']] : [['cave'], ['within'], ['project']];
+      ctx.levelOf = tag => {
+        const p = parseTarget(tag);
+        if (p.kind === 'cave') return p.cave === t.cave ? 'cave' : null;
+        if (p.kind === 'survey' || p.kind === 'station' || p.kind === 'area' || p.kind === 'segment') return opts.within === false ? null : p.cave === t.cave ? 'within' : null;
+        return p.kind === 'project' && p.pid === pid ? 'project' : null;
+      };
+    } else if (kind === 'project') {
+      ctx.tiers = [['project']];
+      ctx.levelOf = tag => { const p = parseTarget(tag); return p.kind === 'project' && p.pid === t.pid ? 'project' : null; };
+    } else if (kind === 'lead' || kind === 'feature' || kind === 'doc') {
+      ctx.tiers = [['own']];
+      ctx.levelOf = tag => (tag === target ? 'own' : null);
+    }
+    return ctx;
+  }
+  // The ways a document meets a selection: [{ level, via: 'doc' | 'page', tag, page }] (page = index, -1 for a document tag).
+  // A document tagged only to the project is "general" (the inbox) and meets the project level; one that is tagged to
+  // anything else, or has a tagged page, does not — it is about something specific, and that is not this.
+  function docHits(d, ctx) {
+    const hits = [], tl = d.tagList || Object.keys(d.tags || {});
+    const general = tl.length > 0 && tl.every(t => t === T.project(ctx.pid)) && !hasPageTags(d);
+    tl.forEach(t => { const lv = ctx.levelOf(t); if (lv && (lv !== 'project' || general)) hits.push({ level: lv, via: 'doc', tag: t, page: -1 }); });
+    (d.pages || []).forEach((p, i) => ((p && p.targets) || []).forEach(t => { const lv = ctx.levelOf(t); if (lv && lv !== 'project') hits.push({ level: lv, via: 'page', tag: t, page: i }); }));
+    return hits;
+  }
+  // Where a document came from, in words: "this station", "stations T6–T8", "survey T", "the cave Cave Ridge"…
+  function levelFrom(level, tag, ctx, S) {
+    const p = parseTarget(tag || ''), cave = cid => { const c = S && S.caves && S.caves[cid]; return c && c.name ? ' ' + c.name : ''; };
+    switch (level) {
+      case 'station': return ctx.kind === 'station' ? 'this station' : 'station ' + (p.name || '');
+      case 'area': return 'stations ' + String(p.spec || '').replace(/~/g, '–').replace(/,/g, ', ');
+      case 'segment': { const g = S && S.segments && S.segments[p.seg]; return 'segment ' + ((g && (g.name || g.id)) || p.seg || ''); }
+      case 'survey': return 'survey ' + (p.code || '');
+      case 'within': return ctx.kind === 'cave' ? 'its surveys and stations' : 'its stations';
+      case 'cave': return 'the cave' + cave(p.cave);
+      case 'project': return 'the project';
+      default: return '';
+    }
+  }
+  function docsFor(D, S, target, opts = {}) {
+    const ctx = docsCtx(S, target, opts), paper = ['notes', 'sketches'];
+    const out = { target, kind: ctx.kind || '', level: '', own: true, empty: true, items: [], docs: [], groups: [], by: {} };
+    if (!ctx.tiers || !D) return out;
+    const tierItems = ctx.tiers.map(() => []);
+    Object.values(D.docs).forEach(d => {
+      if (d.deleted) return;
+      const hits = docHits(d, ctx);
+      if (!hits.length) return;
+      ctx.tiers.forEach((levels, ti) => {
+        const h = hits.filter(x => levels.includes(x.level));
+        if (!h.length) return;
+        const best = h.reduce((a, b) => (LEVEL_RANK[b.level] < LEVEL_RANK[a.level] ? b : a));
+        const ph = h.filter(x => x.via === 'page').sort((a, b) => a.page - b.page || LEVEL_RANK[a.level] - LEVEL_RANK[b.level]);
+        const page = ph.length ? ph[0].page : 0, lead = ph.length ? ph[0] : best;
+        tierItems[ti].push({ doc: d, id: d.id, level: best.level, via: ph.length ? 'page' : 'doc', tag: lead.tag, page, pages: [...new Set(ph.map(x => x.page))].sort((a, b) => a - b),
+          group: pageGroup(d, ph.length ? d.pages[page] : null), from: levelFrom(best.level, lead.tag, ctx, S), fallback: ti > 0, tier: ti,
+          span: parseTarget(lead.tag).kind === 'area' ? areaSpan(parseTarget(lead.tag).spec) : 0 });
+      });
+    });
+    const recent = x => String((x.doc.created && x.doc.created.t) || '');
+    const cmpItem = (a, b) => LEVEL_RANK[a.level] - LEVEL_RANK[b.level] || (a.via === 'page' ? 0 : 1) - (b.via === 'page' ? 0 : 1) || a.span - b.span
+      || recent(b).localeCompare(recent(a)) || String(a.doc.title || '').localeCompare(String(b.doc.title || '')) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    tierItems.forEach(l => l.sort(cmpItem));
+    const first = tierItems.findIndex(l => l.length);
+    if (first < 0) return out;
+    let items = tierItems[first].slice();
+    if (ctx.kind === 'station' && opts.topUp !== false && first < ctx.tiers.findIndex(l => l.includes('survey'))) {
+      // Survey notes and sketches the station has none of at its own level: from its segment, else its survey.
+      const have = new Set(items.map(x => x.group)), seen = new Set(items.map(x => x.id));
+      paper.filter(g => !have.has(g)).forEach(g => {
+        for (let ti = first + 1; ti < ctx.tiers.length && !ctx.tiers[ti].includes('cave'); ti++) {
+          const more = tierItems[ti].filter(x => x.group === g && !seen.has(x.id));
+          if (more.length) { more.forEach(x => { items.push(x); seen.add(x.id); }); break; }
+        }
+      });
+    }
+    out.items = items;
+    out.level = items[0].level;
+    out.own = first === 0;
+    out.empty = false;
+    out.docs = items.map(x => x.doc).filter((d, i, a) => a.indexOf(d) === i);
+    out.groups = DOC_GROUPS.map(g => {
+      const its = items.filter(x => x.group === g.id), fb = its.length > 0 && its.every(x => x.fallback);
+      return { id: g.id, label: g.label, items: its, docs: its.map(x => x.doc), level: its[0] ? its[0].level : '', fallback: fb, from: fb ? its[0].from : '' };
+    }).filter(g => g.items.length);
+    out.groups.forEach(g => { out.by[g.id] = g.items; });
+    return out;
+  }
+  // Documents for a station, each by the most specific way it is tagged to it: { station, area, segment, survey, cave }
+  // (lists of documents, none in two). Page tags count (a page tagged to the station, or to a range covering it).
+  // docsFor is the same lookup with the strict order; this keeps the older callers (FLEX Field) working.
   function docsForStation(D, S, cave, name, codes) {
-    const st = T.station(cave, name), svs = (codes || []).map(c => T.survey(cave, c));
-    const live = Object.values(D.docs).filter(d => !d.deleted);
-    const inArea = d => d.tagList.some(t => { const p = parseTarget(t); return p.kind === 'area' && p.cave === cave && areaHas(p.spec, name); });
-    const segs = segmentsAt(S, cave, name).map(g => T.segment(cave, g.id));
-    const station = live.filter(d => d.tags[st]);
-    const area = live.filter(d => !d.tags[st] && inArea(d));
-    const segment = live.filter(d => !d.tags[st] && !area.includes(d) && segs.some(s => d.tags[s]));
-    const survey = live.filter(d => !d.tags[st] && !area.includes(d) && !segment.includes(d) && svs.some(s => d.tags[s]));
-    const caveDocs = live.filter(d => !d.tags[st] && !area.includes(d) && !segment.includes(d) && !survey.includes(d) && d.tags[T.cave(cave)]);
-    return { station, area, segment, survey, cave: caveDocs };
+    const ctx = docsCtx(S, T.station(cave, name), { codes });
+    const out = { station: [], area: [], segment: [], survey: [], cave: [] };
+    Object.values(D.docs).forEach(d => {
+      if (d.deleted) return;
+      const hits = docHits(d, ctx).filter(h => h.level !== 'project');
+      if (hits.length) out[hits.reduce((a, b) => (LEVEL_RANK[b.level] < LEVEL_RANK[a.level] ? b : a)).level].push(d);
+    });
+    return out;
+  }
+  // The pages of a document that cover a target: tagged to exactly it, or (for a station) to a range that has it.
+  function pagesCovering(d, target) {
+    const t = parseTarget(target), out = [];
+    ((d && d.pages) || []).forEach((p, i) => {
+      const ts = (p && p.targets) || [];
+      if (ts.includes(target) || (t.kind === 'station' && ts.some(x => { const q = parseTarget(x); return q.kind === 'area' && q.cave === t.cave && areaHas(q.spec, t.name); }))) out.push(i);
+    });
+    return out;
   }
   // The page of a document that covers a target (pages may list `targets`), else the first.
   function pageFor(d, target) {
-    const i = (d && d.pages || []).findIndex(p => Array.isArray(p.targets) && p.targets.includes(target));
-    return i < 0 ? 0 : i;
+    const c = pagesCovering(d, target);
+    return c.length ? c[0] : 0;
   }
 
 
@@ -722,7 +1035,7 @@
     const leadIds = new Set(leads.map(L => L.id));
     const notes = Object.values(S.notes).filter(n => !n.deleted && !n.conflict && (targetCave(n.target) === cid || (parseTarget(n.target).kind === 'lead' && leadIds.has(parseTarget(n.target).lead))));
     const labels = Object.values(S.arealabels).filter(a => !a.removed && a.text && names.includes(a.file));
-    const docs = D ? Object.values(D.docs).filter(d => !d.deleted && d.tagList.some(t => targetCave(t) === cid)) : [];
+    const docs = D ? Object.values(D.docs).filter(d => !d.deleted && docTargets(d).some(t => targetCave(t) === cid)) : [];
     const blobs = new Map();
     names.forEach(n => { const f = S.cavefiles[n]; blobs.set(f.h + '.' + (f.ext || 'plt'), { h: f.h, ext: f.ext || 'plt' }); });
     const readable = [];
@@ -1047,7 +1360,7 @@
       bump(proposalTarget(p), e.op === 'lead.set' ? 'leads' : (e.op === 'note.set' && e.kind === 'issue') || e.op === 'survey.version' ? 'open' : 'notes');
     });
     Object.values(S.notes).forEach(n => { if (!n.deleted && n.kind === 'issue') bump(n.target, 'problems'); });
-    Object.values((D && D.docs) || {}).forEach(d => { if (!d.deleted) d.tagList.forEach(t => bump(t, 'docs')); });
+    Object.values((D && D.docs) || {}).forEach(d => { if (!d.deleted) docTargets(d).forEach(t => bump(t, 'docs')); });
     Object.values(out).forEach(o => {
       const f = o.total ? o.done / o.total : 0;
       o.state = o.problems ? 'problem' : o.open ? 'review' : f >= 0.9 ? 'checked' : f > 0 ? 'partly' : 'unchecked';
@@ -1395,6 +1708,7 @@
     T, parseTarget, areaHas, DOC_KINDS, DOC_KIND_LABELS, docMedia, dateKey, resolveProposals, reviewQueue, causalOrder, LEAD, LEAD_FIELDS, leadLists, statusLabel, leadActive, heads,
     replayProject, replayDocs, caveForName, liveCaves, notesOn, leadsOn,
     docInProject, docInbox, docsOf, docsForStation, docsForTarget, pageFor,
+    DOC_GROUPS, docGroup, docGroupOf, pageGroup, groupDocs, groupLabel, suggestKind, exifCamera, docTargets, hasPageTags, docsFor, pagesCovering, areaSpan, normalizeSpec, specTarget, areaStations, areaIndex, areaTouches,
     segmentsOf, segmentIndex, segmentsAt, proposalTarget, segmentStates, liveCavefiles, liveLayers, areaLabelsOf, areaLabelId, areaLabelState, areaLabelUndo,
     tripState, tripEdit, tripUndo, tripsOf, tripsFor, tripGroups, tripMoves, tripDays, fullDay, TRIP_NONE,
     snapshotTime, entriesAt, replayProjectAt, replayDocsAt, changeDays, caveBundle, moveRenames, caveMoveEntries, caveMoveClear, moveRecord, movesOf,

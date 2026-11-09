@@ -187,6 +187,7 @@ svg.ico { vertical-align: -2px; }
   <div class="grp">Doing things</div>
   <a href="#caves">Caves</a>
   <a href="#sketches">Sketches and files</a>
+  <a href="#docs">Documents and tags</a>
   <a href="#surface">Surface features</a>
   <a href="#maplayers">Your map layers</a>
   <a href="#terrain">Terrain</a>
@@ -360,7 +361,7 @@ svg.ico { vertical-align: -2px; }
 <h3 id="leads">Leads at stations</h3>
 <p><b>Add one:</b> right-click a station (or the shot next to it) in a cave on the map and choose <b>Add lead at A1…</b>; or click the station and press <b>Lead</b> on its card. The same form opens everywhere: description, size, status, what it needs, priority, air, who found it and when. With a project open, and the cave one of its caves, the lead is a record of the project (it syncs, has a history, and Review and the CSV include it). With no project, or for a cave the project does not have, it is kept in <b>My data</b> on this computer. Click a lead's &ldquo;?&rdquo; to see it in the details panel; <b>Edit</b> there changes it, closes it (set the status to dead end, surveyed into, mop-up done or not a lead) or removes it.</p>
 <p><b>Where they show:</b> every open lead is a &ldquo;?&rdquo; at its station's own place and height in the cave, with a short label, whether it comes from the project, My data or the survey file (Breakout, Walls). The <b>Leads</b> switch in Caves hides them all; <b>Closed leads</b> draws the closed ones faded. They are listed in <svg class="ico" width="14" height="14"><use href="#i-help"/></svg> Leads. A lead from a survey file becomes a record the first time you save it, and then shows once.</p>
-<p><b>Documents in an export:</b> in the Export panel, <b>Include documents</b> (on by default, with the count and size) carries the open project's scanned notes, photos and sketches that belong to the exported caves, and the ones about the project as a whole. Page images only (PDFs and videos stay in the project). They open in the portable viewer (📚 Documents, and from a station's card) and in FLEX Field, tagged to their stations and caves. The single-file <code>viewer.html</code> carries the pages itself up to 12 MB; more pages come as <code>docs_&lt;fingerprint&gt;.jpg</code> files beside it (keep the zip's files together). If the same project is also synced on the phone, each document shows once. In the viewer, adding a note is always at hand; every other change (leads, tags, turning or removing pages) waits behind a small <b>Edit</b> button on the card, per item. The viewer remembers its display choices per map; a new map starts with ghost walls coloured by elevation.</p>
+<p><b>Documents in an export:</b> in the Export panel, <b>Include documents</b> (its own <b>Documents</b> section, always open; on by default, remembered between sessions, with the project's count and size) carries the open project's scanned notes, photos and sketches that belong to the exported caves, and the ones about the project as a whole, with their tags (a page's range too) and kinds, so the phone can show a station's documents in the same order as here. Page images only (PDFs and videos stay in the project). They open in the portable viewer (📚 Documents, and from a station's card) and in FLEX Field, tagged to their stations and caves. The single-file <code>viewer.html</code> carries the pages itself up to 12 MB; more pages come as <code>docs_&lt;fingerprint&gt;.jpg</code> files beside it (keep the zip's files together). If the same project is also synced on the phone, each document shows once. In the viewer, adding a note is always at hand; every other change (leads, tags, turning or removing pages) waits behind a small <b>Edit</b> button on the card, per item. The viewer remembers its display choices per map; a new map starts with ghost walls coloured by elevation.</p>
 <p><b>In an export:</b> the exported map carries the open leads of its caves (the project's, My data's and the file's, each once; closed or removed ones stay out) with station, position, description, size, date and status. The portable viewer and FLEX Field show them as the same &ldquo;?&rdquo; and list them under Leads. Older exports open as before.</p>
 
 
@@ -396,7 +397,7 @@ svg.ico { vertical-align: -2px; }
 </ul>
 <h3>Points, lines and areas: info first, editing second</h3>
 <ul>
-  <li>A click shows brief info in the details panel on the right: what it is, where it comes from (the project, 👤 My data, the CalTopo map or a data file), a few lines of its description, and how many photos, videos, documents, notes and leads go with it. A click never edits: use <b>Edit</b> for that.</li>
+  <li>A click shows brief info in the details panel on the right: what it is, where it comes from (the project, 👤 My data, the CalTopo map or a data file), a few lines of its description, and how many survey notes, sketches, photos, videos, other documents, notes and leads go with it. A click never edits: use <b>Edit</b> for that.</li>
   <li><b>Badges</b> next to the source: <i>waiting for CalTopo</i> (saved here, sent when FLEX is online again), <i>changed in CalTopo</i>, <i>changed in CalTopo: choose</i> (edited in both places: click it to see both versions and keep one), <i>not in CalTopo</i> (a project feature the project's CalTopo map doesn't have), <i>read-only</i>.</li>
   <li><b>More:</b> rest the pointer on the details panel for a moment (or press <b>⤢ More</b>) to open a larger panel beside it with everything:
     <ul>
@@ -412,8 +413,8 @@ svg.ico { vertical-align: -2px; }
   <li><b>Show in list</b> opens the list that holds it (<svg class="ico" width="14" height="14"><use href="#i-pin"/></svg> Surface or <svg class="ico" width="14" height="14"><use href="#i-cave"/></svg> Caves) and shows its row. While that list is open, a click on the map opens the row's folder, scrolls to it and makes it flash.</li>
   <li><b>Edit</b> opens one editor, the same for every point, line and area: name and description, folder, colour, CalTopo symbol, name on the map, and for a point its position (type latitude and longitude, or UTM zone, easting and northing). <b>Move on the map</b> lets you drag the point (or click where it goes; <kbd>Esc</kbd> cancels). <b>Delete</b> asks first.</li>
   <li>Edits go where the item comes from: the project (undo in <svg class="ico" width="14" height="14"><use href="#i-folder"/></svg> History), 👤 My data, or the CalTopo map itself. A change to a CalTopo item is <b>held</b> in FLEX (marked <i>edited</i>, <i>moved</i> or <i>deleted</i>, and drawn that way on the map) until you press <b>Send to CalTopo</b>; nothing reaches CalTopo by itself. If the CalTopo key on this computer can only read, FLEX tells you how to enter one that can write. Features from a data file are read-only: FLEX shows the file as it is.</li>
-  <li><b>Photos and videos</b> are listed apart from other documents (<svg class="ico" width="14" height="14"><use href="#i-doc"/></svg> Docs → 🖼 Photos and 🎞 Videos). A video plays in the larger panel or in the document viewer and stops as soon as you close it. If your browser can't play one (often HEVC from phones), <b>⇩ Original</b> saves it for your own player.</li>
-  <li>Documents can be tagged to a surface point, line or area too (🏷 Tags → find it by name).</li>
+  <li><b>Photos and videos</b> are the <b>Media</b> group, apart from the papers (<svg class="ico" width="14" height="14"><use href="#i-doc"/></svg> Docs → 🖼 Photos and 🎞 Videos list them on their own). A video plays in the larger panel or in the document viewer and stops as soon as you close it. If your browser can't play one (often HEVC from phones), <b>⇩ Original</b> saves it for your own player.</li>
+  <li>Documents can be tagged to a surface point, line or area too (🏷 Tags → find it by name). How documents are grouped and which ones a station, survey or cave shows is explained in <a href="#docs">Documents and tags</a>.</li>
 </ul>
 
 <!-- ═════════════════════════════════════════════════════════════════════ -->
@@ -459,9 +460,41 @@ svg.ico { vertical-align: -2px; }
 <ul>
   <li><b>Add one:</b> a cave's ⋯ menu → <b>Add sketch…</b>; or select a cave, survey or station in 3D, open its <b>Files</b> tab and press <b>Add sketch…</b>, or drop the scan on the Files tab.</li>
   <li><b>Where it is kept:</b> the scan is a document of the project, linked to what you attached it to, with the original file unchanged. In a project folder the original is filed by the folder rules: a cave's sketches in <code>Caves/&lt;cave&gt;/&lt;cave&gt; - general/</code>, a survey's (and its stations') in the survey's own folder, <code>Caves/&lt;cave&gt;/&lt;cave&gt; - &lt;code&gt; &lt;survey name&gt;/</code>. A project without a folder keeps the original inside the project.</li>
-  <li><b>The Files tab</b> of a cave, survey or station lists its sketches, documents, photos and videos, and for a cave the files FLEX generated (the survey export). What belongs to the surveys and stations below is folded under <b>more further down</b>. Click a file to open it in the viewer.</li>
+  <li><b>The Files tab</b> of a cave, survey or station lists its documents by group (Survey notes, Sketches, Media, Other, each with its count), and for a cave the files FLEX generated (the survey export). What belongs to the surveys and stations below is folded under <b>more further down</b>. Click a file to open it in the viewer.</li>
   <li>On each file: <b>rotate</b> a quarter turn, and ⋯ for <b>Rename…</b>, <b>Links…</b> (move it to another cave, survey or station, or add more), plan or profile sketch, and <b>Remove…</b>. Removing asks first, can be undone from History, and never deletes the file in the project folder.</li>
 </ul>
+
+<h2 id="docs">Documents and tags</h2>
+<p>A <b>document</b> is a scan, a photo, a video or a report kept in the project: its pages are stored once, and the original file is kept beside them. What it is about is its <b>tags</b>. Nothing is filed by folder name; tagging replaces that.</p>
+<h3>The four groups</h3>
+<p>Wherever documents are listed (a station, survey or cave card, the larger details panel, the Files tab, <svg class="ico" width="14" height="14"><use href="#i-doc"/></svg> Docs) they are split by what they are, with a count on each:</p>
+<ul>
+  <li><b>Survey notes</b>: shot tables, scans of field notes, TopoDroid exports.</li>
+  <li><b>Sketches</b>: plan, profile and cross-section sketches.</li>
+  <li><b>Media</b>: photos and videos.</li>
+  <li><b>Other</b>: trip reports, maps, letters, anything else (and any kind FLEX does not know).</li>
+</ul>
+<p>A document's group follows its <b>kind</b> (Details → Kind; a page can have its own kind when one file mixes sheets). When you add files FLEX suggests it: a photo that carries camera data is Media, a scan (a TIFF, or a name like &ldquo;scan 4&rdquo; or &ldquo;survey book&rdquo;) is Survey notes, a PDF is Other. Check it in the box that opens when you add files from <svg class="ico" width="14" height="14"><use href="#i-doc"/></svg> Docs, or change it later in Details.</p>
+<h3>What a station, survey or cave shows</h3>
+<p>Not everything in the project: the most specific documents first, and a wider level only when there are none at the narrower one.</p>
+<ul>
+  <li><b>A station</b> (say T6): documents tagged to that station, and pages tagged to a range that includes it (T6~T8). If there are none, the stations' segment, then its survey, then the cave, then the project's untagged documents. Each group says where its documents come from when it is not the station itself (&ldquo;Survey notes (1) · from survey T&rdquo;). One exception: if the station has pictures or papers of its own but no survey notes or no sketches, those two groups are taken from its segment or survey, so a photo of T6 does not hide the survey's sketches.</li>
+  <li><b>A survey</b>: documents tagged to it; if none, those tagged to its stations (&ldquo;from its stations&rdquo;); if none, the cave's; if none, the project's untagged ones.</li>
+  <li><b>A cave</b>: its own; if none, what is tagged to anything inside it; if none, the project's untagged ones.</li>
+  <li>Never the documents of <i>another</i> survey, station or cave. Open one and a document opens at the page that was found, and says which (&ldquo;page 3: stations T6–T8&rdquo;).</li>
+</ul>
+<h3>Tagging: the tag box</h3>
+<p>One box is used when you add files and when you look at a document (🏷 <b>Tags</b> in the viewer, <b>Links…</b> on a file). It goes <b>cave → survey → station or range</b>:</p>
+<ul>
+  <li>Pick the cave and, if you like, a survey; type a station (<code>T6</code>) or a <b>range</b> (<code>T6~T8</code>; <code>T6 to T8</code>, <code>T6–T8</code> and <code>T6~8</code> mean the same; a list like <code>T6~T8, T12</code> works too). Suggestions list the stations of the loaded survey and show what a range covers (&ldquo;3 stations: T6, T7, T8&rdquo;); <b>Enter</b> adds the first one. With nothing typed, <b>Add tag</b> adds the survey you chose, or the cave.</li>
+  <li>Several tags at once; the current tags are shown and each has an ✕ to remove it; <b>Recent</b> tags are one click away. <b>Done</b> saves them all together; undo is in History.</li>
+  <li>The same box finds the project, surface points and leads (type part of the name).</li>
+  <li>A cave whose survey file is not loaded cannot suggest stations: what you type is taken as written.</li>
+</ul>
+<h3>Tagging one page</h3>
+<p>A sketchbook is one document with many pages, and one page covers a few stations. In the document viewer, press <b>Tag this page…</b>: the box opens for that page, and a tag such as <code>T6~T8</code> goes on the page only (the viewer then says &ldquo;This page: stations T6–T8&rdquo;). Station T7's card then lists the sketchbook and opens it at that page. In the box, <b>the whole document / page N</b> says where a new tag goes, and ‹ › move to another page. The tag stays with the page itself (by its fingerprint), so reordering pages, adding some, or removing and restoring one never moves it to another page. A document whose pages are tagged is no longer in the inbox.</p>
+<h3>PDFs</h3>
+<p>A PDF added to the project becomes a document of its own: its pages are turned into images (what the viewer, the export and the phone show) and the PDF itself is kept as the original (<b>Original</b> in the viewer saves it).</p>
 
 <h2 id="surface">Surface features</h2>
 <p><svg class="ico" width="14" height="14"><use href="#i-pin"/></svg> Surface lists the project's things on the left (its CalTopo map with the project's folders and items merged into its tree, data files) and 👤 My data on the right. ▸ opens a row in place: a folder shows its folders and features (click one to highlight it, double-click to fly there, ✏️ to edit); the CalTopo map and data files show their own folders, each with its box.</p>

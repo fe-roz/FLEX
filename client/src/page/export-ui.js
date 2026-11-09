@@ -1100,6 +1100,14 @@
       el.addEventListener('change', () => { try { localStorage.setItem('flex.export.' + id, el.value); } catch (_) {} });
     }
     window._exportSyncTerrainSource();
+    // "Include documents": a tick, remembered the same way (on unless it was switched off)
+    const dcb = document.getElementById('export_docs_on');
+    if (dcb) {
+      let v = null;
+      try { v = localStorage.getItem('flex.export.export_docs_on'); } catch (_) {}
+      if (v === '0') dcb.checked = false;
+      dcb.addEventListener('change', () => { try { localStorage.setItem('flex.export.export_docs_on', dcb.checked ? '1' : '0'); } catch (_) {} });
+    }
   })();
 
   window._exportRun = function() {
