@@ -13,7 +13,7 @@
 
   // ── Documents ──────────────────────────────────────────────────────────────
   const docByPage = h => h && Object.values(pj.D.docs).find(d => !d.deleted && d.pages.some(p => p.h === h));
-  function docSub(d) {
+  function docSub(d, skipPages) {
     const tags = d.tagList.filter(t => t !== FL.T.project(pj.pid)).map(targetLabel);
     const m = FL.docMedia(d);
     const what = m === 'video' ? 'Video' : m === 'photo' ? `${d.pages.length > 1 ? d.pages.length + ' photos' : 'Photo'}`
@@ -21,7 +21,7 @@
     const pt = d.pages.filter(p => p.targets && p.targets.length).length;
     return `${what}${d.date ? ' · ' + d.date : ''} · ` +
       (tags.length ? tags.slice(0, 3).join(', ') + (tags.length > 3 ? ` +${tags.length - 3}` : '') : pt ? 'pages tagged' : 'inbox') +
-      (pt ? ` · ${pt} page${pt === 1 ? '' : 's'} tagged` : '') +
+      (pt && !skipPages ? ` · ${pt} page${pt === 1 ? '' : 's'} tagged` : '') +
       (d.has_coordinates ? ' · shows coordinates' : '') + (d.conflicts ? ' · edited on two devices' : '');
   }
   // " · page 3: stations T6–T8": the page a lookup (FL.docsFor) found a document by.
@@ -38,7 +38,8 @@
     if (p && p.ext !== 'pdf') { const im = el('img', 'pj-thumb'); im.loading = 'lazy'; im.src = blobUrl(p); if (p.rot) im.style.transform = `rotate(${p.rot}deg)`; r.appendChild(im); }
     else r.appendChild(el('div', 'pj-thumb pj-thumb-x', vid ? ['video'] : p ? 'PDF' : '—'));
     if (vid) r.classList.add('pj-doc-video');
-    const t = el('div'); t.appendChild(el('div', 'pj-item-t', d.title || 'Untitled')); t.appendChild(el('div', 'pj-sub', docSub(d) + pageNote(d, at, item)));
+    const t = el('div'); t.appendChild(el('div', 'pj-item-t', d.title || 'Untitled')); const note = pageNote(d, at, item);
+    t.appendChild(el('div', 'pj-sub', docSub(d, !!note) + note));
     r.appendChild(t);
     r.dataset.doc = d.id;
     r.addEventListener('click', () => docOpen(d.id, at));
