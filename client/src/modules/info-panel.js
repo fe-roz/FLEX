@@ -492,17 +492,17 @@
     const cave = A.caveName(c.cid);
     const cv = { cid: c.cid, file: c.imp ? c.imp.name : null, survey: c.code || '', station: c.name || null };
     if (c.level === 'cave') {
-      const t = FL.T.cave(c.cid);
+      const t = FL.T.cave(c.cid), dfc = A.docsForCard ? A.docsForCard(c) : null;
       const leads = Object.values(pj.P.leads).filter(L => !L.deleted && FL.parseTarget(L.target).cave === c.cid && FL.leadActive(L));
       return { key: t, kind: 'cave', icon: '🕳', title: cave, line: 'Cave', facts: [['Open leads', String(leads.length)]], desc: (pj.P.caves[c.cid] || {}).desc || '', target: t,
         cave: cv, related: () => caveRelated(c),
-        notes: FL.notesOn(pj.P, t), leads: leads.slice(0, 30).map(L => ({ item: leadItem(L), label: A.targetLabel(L.target) })), docs: docsOn(t), canAdd: true };
+        notes: FL.notesOn(pj.P, t), leads: leads.slice(0, 30).map(L => ({ item: leadItem(L), label: A.targetLabel(L.target) })), docsFor: dfc, docs: dfc ? dfc.docs : docsOn(t), canAdd: true };
     }
     if (c.survey) {
-      const t = FL.T.survey(c.cid, c.code);
+      const t = FL.T.survey(c.cid, c.code), dfs = A.docsForCard ? A.docsForCard(c) : null;
       return { key: t, kind: 'survey', icon: '〰️', title: 'Survey ' + (c.code || '(none)'), line: cave, facts: [['Cave', cave]], desc: '', target: t,
         cave: cv, related: () => surveyRelated(c),
-        notes: FL.notesOn(pj.P, t), leads: [], docs: uniq(docsOn(t).concat(docsOn(FL.T.cave(c.cid)))), canAdd: true };
+        notes: FL.notesOn(pj.P, t), leads: [], docsFor: dfs, docs: dfs ? dfs.docs : docsOn(t), canAdd: true };
     }
     const t = FL.T.station(c.cid, c.name);
     const facts = [['Cave', cave]];
@@ -510,12 +510,13 @@
     const sp = A.stationPos(c.cid, c.name);
     const pos = sp && window.Cesium ? cartoOf(sp) : null;
     if (pos) facts.push(...posFacts(pos, 'point', true, true));
-    const fs = FL.docsForStation(pj.D, pj.P, c.cid, c.name, c.code ? [c.code] : []);
+    const dfst = A.docsForCard ? A.docsForCard(c) : null;
     const leads = A.leadsAt(c.cid, c.name).filter(x => x.active);
+    const leadDocs = uniq([].concat(...leads.filter(x => x.rec).map(x => docsOn(FL.T.lead(x.id))))).filter(d => !dfst || !dfst.docs.includes(d));
     return { key: t, kind: 'station', icon: '📍', title: c.name, line: 'Station · ' + cave, facts, desc: '', target: t,
       cave: cv, pos, self: { station: (c.imp ? c.imp.name : '') + '|' + c.name, target: t }, related: () => stationRelated(c),
       notes: FL.notesOn(pj.P, t), leads: leads.map(x => ({ item: x, label: c.name, cid: c.cid, name: c.name })),
-      docs: uniq([].concat(fs.station, fs.area || [], fs.segment || [], fs.survey, fs.cave, ...leads.filter(x => x.rec).map(x => docsOn(FL.T.lead(x.id))))), canAdd: true };
+      docsFor: dfst, leadDocs, docs: uniq((dfst ? dfst.docs : []).concat(leadDocs)), canAdd: true };
   }
   // Anything else on the map: a CalTopo or data-file feature, a My data point.
   function entitySubject(ent) {
@@ -729,14 +730,19 @@
   }
 
   // ── Media lists ──────────────────────────────────────────────────────────
-  const isSk = d => !!(window._sketches && window._sketches.isSketch(d));
-  const groups = docs => ({ photos: docs.filter(d => FL.docMedia(d) === 'photo'), videos: docs.filter(d => FL.docMedia(d) === 'video'), sketches: docs.filter(isSk), docs: docs.filter(d => !FL.docMedia(d) && !isSk(d)) });
+  // Documents by group (flexlib DOC_GROUPS: Survey notes, Sketches, Media, Other); Media is shown as photos and videos.
+  const groups = docs => {
+    const by = {}; FL.groupDocs(docs).forEach(g => { by[g.id] = g.docs; });
+    const media = by.media || [];
+    return { notes: by.notes || [], sketches: by.sketches || [], media, photos: media.filter(d => FL.docMedia(d) !== 'video'), videos: media.filter(d => FL.docMedia(d) === 'video'), other: by.other || [] };
+  };
   function counts(s) {
     const g = groups(s.docs || []), out = [];
+    if (g.notes.length) out.push(`${g.notes.length} survey note${g.notes.length === 1 ? '' : 's'}`);
+    if (g.sketches.length) out.push(`${g.sketches.length} sketch${g.sketches.length === 1 ? '' : 'es'}`);
     if (g.photos.length) out.push(`🖼 ${g.photos.length} photo${g.photos.length === 1 ? '' : 's'}`);
     if (g.videos.length) out.push(`🎞 ${g.videos.length} video${g.videos.length === 1 ? '' : 's'}`);
-    if (g.sketches.length) out.push(`${g.sketches.length} sketch${g.sketches.length === 1 ? '' : 'es'}`);
-    if (g.docs.length) out.push(`📄 ${g.docs.length} document${g.docs.length === 1 ? '' : 's'}`);
+    if (g.other.length) out.push(`📄 ${g.other.length} other`);
     if (s.notes && s.notes.length) out.push(`📝 ${s.notes.length}`);
     if (s.leads && s.leads.length) out.push(`❓ ${s.leads.length}`);
     return out;
@@ -803,6 +809,51 @@
     });
     return t;
   }
+  // The documents of a subject by group: a heading with the count ("· from survey T" when it fell back to a wider level),
+  // then Media as photo tiles and a video player, the others as rows that open at the page they were found by.
+  function docSections(body, s) {
+    const blocks = [];
+    if (s.docsFor && !s.docsFor.empty) s.docsFor.groups.forEach(g => blocks.push({ id: g.id, label: g.label, from: g.from, entries: g.items.map(it => ({ d: it.doc, item: it })) }));
+    else FL.groupDocs(s.docs || []).forEach(g => blocks.push({ id: g.id, label: g.label, from: '', entries: g.docs.map(d => ({ d, item: null })) }));
+    if (s.leadDocs && s.leadDocs.length) FL.groupDocs(s.leadDocs).forEach(g => blocks.push({ id: g.id, label: 'At the lead · ' + g.label, from: '', entries: g.docs.map(d => ({ d, item: null })) }));
+    blocks.forEach(b => {
+      const h = el('div', 'inf-h inf-gh'); h.dataset.group = b.id;
+      h.appendChild(document.createTextNode(`${b.label} (${b.entries.length})`));
+      if (b.from) h.appendChild(el('span', 'inf-from', ' · from ' + b.from));
+      body.appendChild(h);
+      if (b.id === 'media') {
+        const photos = b.entries.filter(e => FL.docMedia(e.d) !== 'video'), videos = b.entries.filter(e => FL.docMedia(e.d) === 'video');
+        if (photos.length) {
+          sec(body, '🖼 Photos', photos.length);
+          const grid = el('div', 'inf-grid');
+          photos.forEach(({ d, item }) => { const t = tile(d, false); t.addEventListener('click', () => A.docOpen(d.id, item ? item.page : 0)); grid.appendChild(t); });
+          body.appendChild(grid);
+        }
+        if (videos.length) {
+          sec(body, '🎞 Videos', videos.length);
+          const player = el('div', 'inf-player');
+          const grid = el('div', 'inf-grid');
+          videos.forEach(({ d }) => {
+            const t = tile(d, true);
+            t.addEventListener('click', () => {
+              const u = videoUrl(d);
+              if (!u) { A.docOpen(d.id, 0); return; }               // no file to play: its document
+              stopMedia();
+              const head = el('div', 'inf-player-h');
+              head.append(el('span', null, d.title || 'Video'), btn('■ Stop', stopMedia, 'small'), btn('⤢ Viewer', () => A.docOpen(d.id, 0), 'small'));
+              const v = A.videoEl(u, d.pages[0] ? A.blobUrl(d.pages[0]) : null, 'inf-video');
+              player.append(head, v);
+              const vd = v.querySelector('video'); vd.autoplay = true;
+              const pr = vd.play && vd.play(); if (pr && pr.catch) pr.catch(() => {});
+              I.pinned = true; paintPin();                           // watching: it stays until closed
+            });
+            grid.appendChild(t);
+          });
+          body.append(player, grid);
+        }
+      } else b.entries.forEach(({ d, item }) => body.appendChild(A.docEl(d, s.target, item)));
+    });
+  }
   function render() {
     const s = I.subject, x = I.x;
     if (!s || !x) return;
@@ -839,38 +890,8 @@
     if (nb.length) { sec(body, 'Nearby'); body.appendChild(table(nb, 'inf-near')); }
     if (s.notes.length) { sec(body, 'Notes', s.notes.length); s.notes.forEach(n => body.appendChild(A.noteEl(n))); }
     if (s.leads.length) { sec(body, 'Leads', s.leads.length); s.leads.forEach(L => body.appendChild(A.leadEl(L.cid || null, L.label, L.item))); }
-    const g = groups(s.docs);
-    if (g.photos.length) {
-      sec(body, '🖼 Photos', g.photos.length);
-      const grid = el('div', 'inf-grid');
-      g.photos.forEach(d => { const t = tile(d, false); t.addEventListener('click', () => A.docOpen(d.id, 0)); grid.appendChild(t); });
-      body.appendChild(grid);
-    }
-    if (g.videos.length) {
-      sec(body, '🎞 Videos', g.videos.length);
-      const player = el('div', 'inf-player');
-      const grid = el('div', 'inf-grid');
-      g.videos.forEach(d => {
-        const t = tile(d, true);
-        t.addEventListener('click', () => {
-          const u = videoUrl(d);
-          if (!u) { A.docOpen(d.id, 0); return; }               // no file to play: its document
-          stopMedia();
-          const head = el('div', 'inf-player-h');
-          head.append(el('span', null, d.title || 'Video'), btn('■ Stop', stopMedia, 'small'), btn('⤢ Viewer', () => A.docOpen(d.id, 0), 'small'));
-          const v = A.videoEl(u, d.pages[0] ? A.blobUrl(d.pages[0]) : null, 'inf-video');
-          player.append(head, v);
-          const vd = v.querySelector('video'); vd.autoplay = true;
-          const pr = vd.play && vd.play(); if (pr && pr.catch) pr.catch(() => {});
-          I.pinned = true; paintPin();                           // watching: it stays until closed
-        });
-        grid.appendChild(t);
-      });
-      body.append(player, grid);
-    }
-    if (g.sketches.length) { sec(body, 'Sketches', g.sketches.length); g.sketches.forEach(d => body.appendChild(A.docEl(d, s.target))); }
-    if (g.docs.length) { sec(body, '📄 Documents', g.docs.length); g.docs.forEach(d => body.appendChild(A.docEl(d, s.target))); }
-    if (!s.docs.length && s.target && pj.pid) body.appendChild(el('div', 'inf-none', 'No photos, videos, sketches or documents tagged to it yet.'));
+    docSections(body, s);
+    if (!s.docs.length && s.target && pj.pid) body.appendChild(el('div', 'inf-none', 'No survey notes, sketches, media or other documents for it yet.'));
     const r = el('div', 'inf-acts');
     if (s.ref && !s.refIsHost && s.ref.editable && s.ref.kind === 'point' && FE()) r.appendChild(btn('Move on the map', () => { collapse(true); FE().drag(s.ref); }, 'small inf-drag'));
     if (paneOf(s)) r.appendChild(btn('Show in list', () => reveal(s, { open: true }), 'small inf-list'));
@@ -1066,6 +1087,7 @@
   #info-x .inf-facts td { padding: 2px 0; word-break: break-word; white-space: pre-line; }
   #info-x .inf-style { border-top: 1px solid rgba(255,255,255,.06); }
   #info-x .inf-h { font-weight: 700; margin: 12px 0 5px; color: #f2f4f3; }
+  #info-x .inf-from, .pj-from { font-weight: 400; color: rgba(255,255,255,.55); }
   #info-x .inf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }
   #info-x .inf-tile { position: relative; padding: 0; height: 84px; border: 1px solid rgba(255,255,255,.15); border-radius: 6px; overflow: hidden; background: #222; cursor: pointer; color: #fff; }
   #info-x .inf-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
