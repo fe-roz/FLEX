@@ -6223,7 +6223,8 @@ function ffClosePanel() { ffPanelOpen = false; ffDocsOpen = false; const p = doc
 // it is drawn on top of the line that is already there: it looks as if nothing was added.
 const ffNextName = (name, taken) => FL.nextStationName(name, taken);
 // Names the field surveys of a cave use (their tie-ins and both ends of every shot): lower-cased → as written.
-// skipShot: a shot being edited does not count against its own names.
+// skipShot: a shot being edited does not count against its own names; and in its own survey the shots after it,
+// which start where it ends, don't either (only the names other shots end at count there).
 function ffFieldNames(sv, skipShot) {
   const cave = sv.cave || '', out = new Map();
   const add = n => { n = String(n || '').trim(); if (n) out.set(n.toLowerCase(), n); };
@@ -6231,7 +6232,7 @@ function ffFieldNames(sv, skipShot) {
     const o = ffState.surveys[id];
     if (!o || (o.cave || '') !== cave) return;
     add(o.tie);
-    o.shots.forEach(s => { if (s.id !== skipShot) { add(s.from); add(s.to); } });
+    o.shots.forEach(s => { if (s.id !== skipShot) { add(s.to); if (!(skipShot && o.id === sv.id)) add(s.from); } });
   });
   return out;
 }
