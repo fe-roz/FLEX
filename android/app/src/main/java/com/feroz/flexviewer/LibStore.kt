@@ -202,14 +202,36 @@ class LibStore(private val ctx: Context, private val maps: MapStore) {
             var sample = 1
             while (maxOf(o.outWidth, o.outHeight) / (sample * 2) >= PAGE_PX) sample *= 2
             val b = cr.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample }) }
-            if (b != null && maxOf(b.width, b.height) > PAGE_PX) {
+            val s = if (b != null && maxOf(b.width, b.height) > PAGE_PX) {
                 val k = PAGE_PX.toFloat() / maxOf(b.width, b.height)
                 Bitmap.createScaledBitmap(b, maxOf(1, (b.width * k).toInt()), maxOf(1, (b.height * k).toInt()), true).also { if (it !== b) b.recycle() }
             } else b
+            s?.let { exifTurned(uri, it) }
         }
     } catch (_: Exception) { null }
 
+    /** BitmapFactory (Android 8) ignores a photo's EXIF orientation, which
+     *  ImageDecoder applies: a photographed page would come out sideways. */
+    private fun exifTurned(uri: Uri, b: Bitmap): Bitmap {
+        val deg = try {
+            ctx.contentResolver.openInputStream(uri)?.use {
+                when (android.media.ExifInterface(it).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, 1)) {
+                    android.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                    android.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                    android.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                    else -> 0
+                }
+            } ?: 0
+        } catch (_: Exception) { 0 }
+        if (deg == 0) return b
+        val r = Bitmap.createBitmap(b, 0, 0, b.width, b.height, android.graphics.Matrix().apply { postRotate(deg.toFloat()) }, true)
+        if (r !== b) b.recycle()
+        return r
+    }
+
     fun tmpFile(token: String): File? = if (TOKEN_RE.matches(token)) File(tmp, "$token.tif").takeIf { it.isFile } else null
+    /** A parked file of any type, by token (scan import reads JPEG/PNG/WebP ones). */
+    fun tmpAny(token: String): File? = if (TOKEN_RE.matches(token)) tmp.listFiles()?.firstOrNull { it.isFile && it.name.startsWith("$token.") } else null
     fun tmpDone(token: String) { tmpFile(token)?.delete() }
     fun clearTmp() { tmp.listFiles()?.forEach { it.delete() } }
 
