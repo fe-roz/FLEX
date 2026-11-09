@@ -498,7 +498,7 @@
     <div class="help-row"><span class="help-icon">💾</span><span class="help-desc">Display choices (walls, colour, wall opacity, stations, area names, terrain sliders) are remembered for this map. A new map opens with ghost walls coloured by elevation. The view stays over the map.</span></div>
     <div class="help-section">INVENTORIES</div>
     <div class="help-row"><span class="help-icon">📦</span><span class="help-desc">A chest at a station or a surface point keeps a dated log of what is stored there; the export carries them and <b>Display → Inventories</b> shows or hides them (a faded chest has something possibly out of date). Tap a chest, or the <b>📦</b> line on its station's card, for the contents table (item, quantity, last change, last checked) and the log (date, who, action, items, photos: tap one for full screen); a simple list shows as text. 🔍 finds an inventory by its name or by what is in it.</span></div>
-    <div class="help-row"><span class="help-icon">＋</span><span class="help-desc"><b>＋ Add entry</b> is always there, like a note: <i>left</i> adds, <i>took</i> subtracts, <i>checked</i> sets the counts you saw (<b>✓ Check…</b> starts from the contents; leave “that was everything here” on and a line you take out counts as gone), <i>note</i> is text and photos only. The date is today, who is remembered, photos come from the camera or from files. Making an inventory (a station's card → ✎ Edit → 📦 Inventory), renaming it, keeping it as a simple list and changing or removing an entry wait behind the card's small <b>✎ Edit</b>.</span></div>
+    <div class="help-row"><span class="help-icon">＋</span><span class="help-desc"><b>＋ Add entry</b> is always there, like a note: <i>left</i> adds, <i>took</i> subtracts, <i>checked</i> sets the counts you saw (<b>✓ Check…</b> starts from the contents; leave “that was everything here” on and a line you take out counts as gone), <i>note</i> is text and photos only. The date is today, who is remembered, photos come from the camera or from files. Making an inventory (a station's card → ✎ Edit → 📦 Add inventory here), renaming it, keeping it as a simple list and changing or removing an entry wait behind the card's small <b>✎ Edit</b>.</span></div>
     <div class="help-section">SHOTS FROM A SCANNED PAGE</div>
     <div class="help-row"><span class="help-icon">📷</span><span class="help-desc">🔧 → 📐 Field survey → <b>📷 Import shots from scan</b> (or a document page's ⋯): photograph a page of shot tables, or pick a page or a file. FLEX Field reads it on the phone, offline; check the table beside the scan (tap a cell to see it on the page, tap the page to find its cell; orange = check, red = wrong; each column's menu says what it holds), choose ft or m, then <b>Add … shots</b> to a field survey. Each shot remembers its page. In a browser the page is shown beside an empty table to type into.</span></div>
   </div>
@@ -5824,7 +5824,7 @@ function ffStationCard(st) {
     const sb = el('button', 'fp-btn', fsv ? '📐 ' + fsv.name : '📐 Survey from here');
     sb.addEventListener('click', () => fsv ? ffOpenPanel(fsv.id) : ffNewSurvey(st));
     row2.appendChild(sb);
-    if (window.ViewerInv) ViewerInv.stationEdit(row2, st);      // 📦 Inventory: add one here
+    if (window.ViewerInv) ViewerInv.stationEdit(row2, st);      // 📦 Add inventory here
     box.appendChild(row);
     box.appendChild(row2);
   } else box.appendChild(row);

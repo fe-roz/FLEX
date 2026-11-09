@@ -47,6 +47,17 @@ note pages and new survey added on the phone, all in a change log.
   model, inside the APK: offline, no Play Services download), and the table
   opens beside the scan to check (tap a cell to see it on the page) before
   the shots go into a field survey, each linked to its page.
+- **📦 Inventories:** a chest on the map where something is kept (the export
+  carries them; 🎨 Display → Inventories shows or hides them, a faded chest has
+  something possibly out of date), and a 📦 line on its station's card. The
+  card shows the contents (item, quantity, last change, last checked) and the
+  dated log (date, who, action, items, photos: tap one for full screen), or the
+  list of a simple-list inventory. **＋ Add entry** (left, took, checked, note,
+  with the date, who, items and photos from the camera app or from files) is
+  always there; making an inventory, renaming it, list or log, and changing or
+  removing an entry wait behind its ✎ Edit. An exported inventory is taken into
+  the phone's library on the first change (the same ids on every phone, so two
+  phones merge without a conflict). 🔍 Find looks them up by name and by item.
 - **🔧 Tools → 📝 Change log:** who changed what and when, with undo. Everything
   is logged under the name shown on ✍ (switchable, last used by default).
 - **⋯ → Export field data** writes the notes, field surveys (with computed

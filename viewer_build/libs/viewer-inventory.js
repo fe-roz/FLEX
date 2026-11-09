@@ -191,7 +191,7 @@
   const exportedList = () => (typeof CAVES_DATA !== 'undefined' && CAVES_DATA && Array.isArray(CAVES_DATA.inventories) ? CAVES_DATA.inventories : NONE);
   const lsGet = k => { try { return localStorage.getItem(k); } catch (_) { return null; } };
   const lsSet = (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (_) {} };
-  const V3 = a => new THREE.Vector3(a[0], a[1], a[2]);
+  const V3 = a => (Array.isArray(a) && a.length >= 3 && a.slice(0, 3).every(Number.isFinite) ? new THREE.Vector3(a[0], a[1], a[2]) : null);      // the export's xyz, if it is one
 
   // ── The model: what to show, worked out from the library and the export ─────────────────────────────
   // When the export was made, as near as the phone knows: the latest map import / update of the app's own map log.
@@ -323,6 +323,7 @@
 .inv-tbl td.q { font-variant-numeric: tabular-nums; text-align: right; padding-right: 10px; }
 .inv-tbl th.q { text-align: right; padding-right: 10px; }
 .inv-tbl td.d { white-space: nowrap; }
+.inv-tbl td.who { white-space: nowrap; max-width: 72px; overflow: hidden; text-overflow: ellipsis; }
 .inv-tbl td.never { color: rgba(255,255,255,.5); }
 .inv-tbl tr.old td.ck { color: #f2c24e; }
 .inv-tbl td.none { color: rgba(255,255,255,.5); font-style: italic; }
@@ -347,6 +348,8 @@
 .inv-items { display: flex; flex-direction: column; gap: 5px; align-items: stretch; }
 .inv-item { display: flex; gap: 5px; } .inv-item .ff-input { flex: 1; min-width: 0; } .inv-item .inv-qty { flex: none; width: 70px; }
 .inv-item .fp-btn { flex: none; padding: 0 10px; }
+.inv-suggest { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.inv-suggest .inv-chip { padding: 5px 9px; font-size: 12px; }
 .inv-all { display: flex; align-items: center; gap: 8px; font-size: 12.5px; } .inv-all input { width: 20px; height: 20px; }
 .inv-msg { color: #ffb36b; font-size: 12px; } .inv-msg[hidden] { display: none; }
 #inv-photo { position: fixed; inset: 0; z-index: 85; background: rgba(0,0,0,.94); display: flex; align-items: center; justify-content: center; touch-action: none; }
@@ -402,7 +405,7 @@
     const sp = new THREE.Sprite(mat);
     sp.center.set(-0.12, 0.5);                      // to the right of the station, so its dot, name and lead mark stay clear
     sp.renderOrder = 3;
-    sp.userData = { inv: it.id, label, aspect, px: CHEST_MIN_PX };
+    sp.userData = { inv: it.id, label, aspect, px: CHEST_MIN_PX, base: 1, st: null };
     return sp;
   }
   function dropSprite(sp) {
@@ -424,38 +427,44 @@
     }
     return best;
   }
-  /** Where a chest stands (scene frame): its station's own place, else where the export put it, else a library surface point's. */
+  /** Where a chest stands: { pos (scene frame), st (its station, or null) }: the station's own place, else where the export put it, else a library surface point's; null when it has none on this map. */
   function placeOf(it) {
-    const exp = it.exp, near = exp && exp.xyz ? V3(exp.xyz) : null;
+    const exp = it.exp, near = exp ? V3(exp.xyz) : null;
     if (it.kind === 'station') {
       if (it.cave == null) return null;
       const st = stationFor(it.cave, it.station, near);
-      return st ? st.pos.clone() : near;
+      return st ? { pos: st.pos.clone(), st } : near ? { pos: near, st: null } : null;
     }
-    if (near) return near;
+    if (near) return { pos: near, st: null };
     const f = FL.parseTarget(it.rec.target), F = PG.p() && PG.p().features && PG.p().features[f.feature];
     const c = F && !F.removed && F.coords && F.coords[0];
     if (!c || typeof gpsToScene !== 'function') return null;
     const s = gpsToScene(c[1], c[0]);
     let z = c[2];
     try { const g = terrainZAt(s.x, s.y); if (g != null && isFinite(g)) z = g + 1; } catch (_) {}
-    return z != null && isFinite(z) ? new THREE.Vector3(s.x, s.y, z) : null;
+    return z != null && isFinite(z) ? { pos: new THREE.Vector3(s.x, s.y, z), st: null } : null;
   }
   /** Bring the chests up to date: one per inventory that has a place on this map, none for the rest. */
   function redraw() {
     clearTimeout(S.timer); S.timer = null;
     if (typeof THREE === 'undefined' || typeof scene === 'undefined') return;
     ensureGroup();
-    const want = new Set();
+    const want = new Set(), slots = new Map();
     model().v.forEach(it => {
-      it.pos = placeOf(it);
+      const pl = placeOf(it);
+      it.pos = pl && pl.pos;
       if (!it.pos) return;
       want.add(it.id);
+      const spot = pl.st ? pl.st._key : it.pos.toArray().map(v => Math.round(v)).join(','), nth = slots.get(spot) || 0;       // two at one place: the second hangs below the first
+      slots.set(spot, nth + 1);
       let sp = S.sprites.get(it.id);
       if (sp && sp.userData.label !== labelOf(it.rec)) { dropSprite(sp); sp = null; }
       if (!sp) { sp = makeSprite(it); S.group.add(sp); S.sprites.set(it.id, sp); }
       sp.position.copy(it.pos);
-      sp.material.opacity = it.rec.stale ? 0.5 : 1;       // possibly out of date: faded
+      sp.center.y = 0.5 + 1.08 * nth;
+      sp.userData.base = it.rec.stale ? 0.5 : 1;          // possibly out of date: faded
+      sp.userData.st = pl.st;
+      sp.material.opacity = sp.userData.base * (pl.st && pl.st._reachAlpha != null ? pl.st._reachAlpha : 1);
       sp.visible = true;
     });
     S.sprites.forEach((sp, id) => { if (!want.has(id)) { dropSprite(sp); S.sprites.delete(id); } });
@@ -467,16 +476,17 @@
     if (S.timer || !PG.ready()) return;
     S.timer = setTimeout(redraw, 0);
   }
-  /** Every drawn frame: each chest is a real size held between two on-screen sizes (like the lead marks). */
+  /** Every drawn frame: each chest is a real size held between two on-screen sizes (like the lead marks), and as faint as its station is (a route or reach dims the rest of the cave). */
   function size() {
     if (!S.group || !S.group.visible || !S.sprites.size) return;
     const h = renderer.domElement.clientHeight || window.innerHeight || 1, tanH = 2 * Math.tan(camera.fov * Math.PI / 360);
     S.sprites.forEach(sp => {
       const dist = Math.max(0.01, camera.position.distanceTo(sp.position));
       const px = Math.min(CHEST_MAX_PX, Math.max(CHEST_MIN_PX, CHEST_WORLD_M * h / (tanH * dist)));
-      const u = tanH * px / h;
+      const u = tanH * px / h, st = sp.userData.st, a = sp.userData.base * (st && st._reachAlpha != null ? st._reachAlpha : 1);
       sp.scale.set(u * sp.userData.aspect, u, 1);
       sp.userData.px = px;
+      if (sp.material.opacity !== a) sp.material.opacity = a;
     });
   }
   /** Chest's box on the page, in the canvas's pixels: { x0, y0, x1, y1 } or null (behind the camera). */
@@ -510,6 +520,7 @@
       if (text) box.appendChild(mk('div', 'ff-modal-text', text));
       box.appendChild(body);
       const msg = mk('div', 'inv-msg'); msg.hidden = true; box.appendChild(msg);
+      ['input', 'click'].forEach(ev => body.addEventListener(ev, () => { msg.hidden = true; }));       // a complaint goes when the form is touched
       const row = mk('div', 'fp-row ff-modal-btns');
       buttons.forEach(b => {
         const n = mk('button', 'fp-btn ' + (b.cls || '') + (b.primary ? ' active' : '') + (b.danger ? ' ff-danger' : ''), b.label);
@@ -549,6 +560,7 @@
     pv.style.display = nx.style.display = photos.length > 1 ? '' : 'none';
     pv.addEventListener('click', () => show(k - 1)); nx.addEventListener('click', () => show(k + 1));
     x.addEventListener('click', () => w.remove());
+    w.addEventListener('click', e => { if (e.target === w) w.remove(); });                 // (the dark round the picture closes it too)
     const pts = new Map();
     let base = null;
     const snap = () => { const a = [...pts.values()]; return a.length >= 2 ? { d: Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y), cx: (a[0].x + a[1].x) / 2, cy: (a[0].y + a[1].y) / 2 } : { d: 0, cx: a[0].x, cy: a[0].y }; };
@@ -645,7 +657,7 @@
       if (e.text) what.appendChild(mk('div', 'inv-text', e.text));
       if (e.conflicts) what.appendChild(mk('div', 'ic-warn', '⚠ edited on two devices (open it and save to settle)'));
       const ph = mk('td'); if (e.photos.length) ph.appendChild(thumbs(e.photos.map(p => Object.assign({ date: e.date, by: e.by || e.created.who }, p))));
-      tr.append(td(e.date, 'd'), td(e.by || e.created.who || '?'), td(ACT[e.action] || e.action, 'act act-' + e.action), what, ph);
+      tr.append(td(e.date, 'd'), td(e.by || e.created.who || '?', 'who'), td(ACT[e.action] || e.action, 'act act-' + e.action), what, ph);
       if (C.edit) tr.addEventListener('click', () => entryForm(it.id, e));
       b.appendChild(tr);
     });
@@ -681,8 +693,8 @@
       const lines = itemNames(rec), box = mk('div', 'inv-list');
       if (lines.length) lines.forEach(l => box.appendChild(mk('div', 'inv-li', l))); else box.appendChild(mk('div', 'inv-li', 'Nothing listed yet.'));
       el.appendChild(box);
-      const lf = rec.fieldBy && rec.fieldBy.list;
-      if (rec.stale) el.appendChild(mk('div', 'ic-warn', '⚠ Possibly out of date' + (rec.listAge != null ? `: the list was last edited ${rec.listAge} days ago.` : '.')));
+      const lf = rec.fieldBy && rec.fieldBy.list, old = lf && lf.t === OLD_T;           // (OLD_T: an exported list that was out of date already: its date is not known)
+      if (rec.stale) el.appendChild(mk('div', 'ic-warn', '⚠ Possibly out of date' + (old ? ': the list had not been edited for over a year when the map was made.' : rec.listAge != null ? `: the list was last edited ${rec.listAge} days ago.` : '.')));
       else if (lf && lf.who) el.appendChild(mk('div', 'ic-note', 'List last edited ' + String(lf.t).slice(0, 10) + ' by ' + lf.who));
       if (rec.log.length) el.appendChild(mk('div', 'ic-note', `The log (${rec.log.length} entr${rec.log.length === 1 ? 'y' : 'ies'}) is kept; ✎ Edit → keep it as a dated log to see it again.`));
     } else {
@@ -720,7 +732,7 @@
   }
 
   // ── The entry form ──────────────────────────────────────────────────────────────────────────────────
-  let F = null;                                           // the open form: { id, curId, st, paint }
+  let F = null, formBusy = false;                         // the open form: { id, curId, st, paint }; busy: asking who is entering data first
   const DRAFT_KEY = () => 'flex_inv_draft|' + (typeof MAP_KEY !== 'undefined' ? MAP_KEY : '');
   const saveDraft = () => { if (F) lsSet(DRAFT_KEY(), JSON.stringify({ id: F.id, curId: F.curId, st: F.st, t: Date.now() })); };
   const dropDraft = () => lsSet(DRAFT_KEY(), null);
@@ -728,12 +740,13 @@
   const lastBy = () => { const v = lsGet('flex_inv_by'); return v != null && v !== '' ? v : (typeof ffWho === 'function' ? ffWho() : ''); };
   /** Add an entry (cur null) or change one; preset: { action }; draft: a saved form to carry on with. */
   async function entryForm(id, cur, preset, draft) {
-    if (F) return;
+    if (F || formBusy) return;
     const it = get(id);
     if (!it) return;
     const why = cannotWrite(it);
     if (why) { toast(why); return; }
-    await ensureAuthor();
+    formBusy = true;
+    try { await ensureAuthor(); } finally { formBusy = false; }
     const rec = it.rec;
     const st = draft || draftOf(rec, cur, { action: preset && preset.action, by: lastBy() });
     F = { id, curId: cur ? cur.id : null, st };
@@ -767,6 +780,19 @@
         itemsBox.appendChild(row);
       });
       itemsBox.appendChild(btn('＋ Another item', 'inv-more-item', () => { st.items.push({ name: '', qty: '' }); paintItems(); const ins = itemsBox.querySelectorAll('input.inv-name'); if (ins.length) ins[ins.length - 1].focus(); }));
+      // the names this inventory has had, one tap each (a datalist is not always shown on a phone)
+      const have = new Set(st.items.map(x => str(x.name).trim().toLowerCase())), sugg = rec.contents.map(c => c.name).concat(rec.gone.map(g => g.name)).filter(n => !have.has(n.toLowerCase())).slice(0, 14);
+      if (sugg.length) {
+        const sg = mk('div', 'inv-suggest');
+        sg.appendChild(mk('span', 'inv-fl', 'Here before:'));
+        sugg.forEach(n => sg.appendChild(btn(n, 'inv-chip', () => {
+          const k = st.items.findIndex(x => !str(x.name).trim());
+          if (k >= 0) st.items[k].name = n; else st.items.push({ name: n, qty: '' });
+          paintItems();
+          const qs = itemsBox.querySelectorAll('input.inv-qty'); if (qs.length) qs[k >= 0 ? k : qs.length - 1].focus();
+        })));
+        itemsBox.appendChild(sg);
+      }
     };
     const paintPhotos = () => {
       photoBox.textContent = '';
@@ -801,12 +827,12 @@
     const buttons = [{ label: 'Cancel', value: null, cls: 'inv-cancel' }];
     if (cur) buttons.push({ label: 'Remove entry', value: 'rm', danger: true, cls: 'inv-remove' });
     buttons.push({ label: 'Save', value: 'ok', primary: true, cls: 'inv-save', check: () => checkDraft(st) || cannotWrite(get(id)) });
-    const r = await modal({ title: (cur ? 'Entry of ' : 'New entry · ') + (rec.name || 'Inventory'), text: it.where, body, buttons, wide: true });
-    const curId = F.curId;
-    F = null; dropDraft();
+    let r = null, curId = F.curId;
+    try { r = await modal({ title: (cur ? 'Entry of ' : 'New entry · ') + (rec.name || 'Inventory'), text: it.where, body, buttons, wide: true }); }
+    finally { F = null; dropDraft(); }
     if (!r) return;
     if (r === 'rm') { if (await removeEntry(id, curId)) toast('Entry removed'); return; }
-    if (st.by.trim()) rememberBy(st.by.trim());
+    if (!curId && st.by.trim()) rememberBy(st.by.trim());                 // (changing someone else's entry must not make their name the default)
     if (await commitEntry(id, { date: st.date, by: st.by, action: st.action, items: st.items, all: st.all, photos: st.photos, text: st.text }, curId)) toast(curId ? 'Entry saved' : 'Entry added');
   }
   // Photos for the open form. In the app the camera app takes one (libs/scan-import.js's ffPhotoReady hands it back here), or the
@@ -935,7 +961,7 @@
   /** "Add inventory here", in the card's edit actions. */
   function stationEdit(row, st) {
     if (!st || !st.name) return;
-    const b = mk('button', 'fp-btn', '📦 Inventory'); b.id = 'ff-inv-add'; b.title = 'Keep a log of what is stored at this station';
+    const b = mk('button', 'fp-btn', '📦 Add inventory here'); b.id = 'ff-inv-add'; b.title = 'Keep a log of what is stored at this station';
     b.addEventListener('click', () => addHere(st));
     row.appendChild(b);
   }
