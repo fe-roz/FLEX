@@ -125,7 +125,7 @@
       if (L.deleted) return;
       const act = FL.leadActive(L);
       if (!act && !showClosed) return;                  // closed leads only when asked (❓ Leads / 🕳 Caves: closed)
-      if (act && L.source === 'export') return;         // the file's own marker is that lead
+      // an adopted file lead (source 'export') is drawn from its record, with its edits; flex-leads.js hides the file's own marker
       add(L.target, L.fields, false, null, L.id, !act);
     });
     Object.values(pj.P.proposals).forEach(p => {

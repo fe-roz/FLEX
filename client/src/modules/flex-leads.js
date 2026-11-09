@@ -156,7 +156,7 @@
     mineRows().forEach(x => {
       const act = x.active;
       if (!act && !showClosed) return;
-      if (x.rec.source === 'export' && act) return;                    // the file's own marker is that lead
+      // an adopted file lead is drawn from its record (its edits); syncFile() hides the file's own marker
       const t = FL.parseTarget(x.target);
       if (t.kind !== 'station') return;
       const pos = stationPos(t.cave, t.name);
@@ -188,7 +188,7 @@
           const ids = [A.exportLeadId(mineCid(imp), ld)];
           const cid = pj.pid ? A.caveFor(imp, s ? s.survey || '' : '') : null;
           if (cid) ids.push(A.exportLeadId(cid, ld));
-          gone = ids.some(i => { const r = pj.P.leads[i] || mineLeadsMap()[i]; return r && (r.deleted || !FL.leadActive(r)); });
+          gone = ids.some(i => !!(pj.P.leads[i] || mineLeadsMap()[i]));   // adopted: its record is drawn instead (open, with edits) or it was closed or removed
         }
         e._flexHidden = gone;
         e.show = imp.visible !== false && on && !gone;
