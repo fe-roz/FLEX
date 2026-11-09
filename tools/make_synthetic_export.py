@@ -14,6 +14,9 @@ example coordinates.
         [--extent-km 6]      a larger terrain (default 1 x 0.8 km); over 5 km it is
                              tiled the way the exporter does (tex_tiles.py)
         [--flex-leads]       one lead kept in FLEX on the main line (status, source, id, priority)
+        [--cave3d]           a multi-level cave with smooth walls (four galleries stacked over each other and a
+                             shaft, tools/synthetic_cave3d.py) instead of the two flat surveys: for looking at
+                             see-through walls and focus mode
         [--docs]             a project (id pjtest0001, cave id cavetest01) and three documents with
                              page images, written the way the export does (docs.json, docs_<sha>.jpg,
                              inline in viewer.html); docs_input.json beside the export is what the
@@ -149,7 +152,10 @@ LOOP = [
 CODE_C1 = [('C1', 60, 100, 5, 2, 2, 3, 1), ('C2', 70, 110, 5, 2, 2, 3, 1)]
 CODE_C2 = [('A1', 300, 300, 5, 2, 2, 3, 1), ('C3', 310, 310, 5, 2, 2, 3, 1)]
 
-def caves_json(e0, n0, zone, fixture=False, flex_leads=False):
+def caves_json(e0, n0, zone, fixture=False, flex_leads=False, cave3d=False):
+    if cave3d:
+        from synthetic_cave3d import caves_data
+        return caves_data(ground)
     known = {}
     main = place(MAIN, known)
     branch = place(BRANCH, known)
@@ -249,6 +255,7 @@ def main():
     ap.add_argument('--docs', action='store_true', help='a project with documents (see above)')
     ap.add_argument('--docs-input', default=None, help='with --docs: a docs input file (export_docs.js collect()) instead of the made-up documents')
     ap.add_argument('--docs-inline-cap', type=int, default=DOCS_INLINE_CAP)
+    ap.add_argument('--cave3d', action='store_true', help='a multi-level cave with smooth walls (see above)')
     ap.add_argument('--flex-leads', action='store_true', help='a lead kept in FLEX (source flex, status, id, priority) on the main line')
     a = ap.parse_args()
     global W, H
@@ -262,7 +269,7 @@ def main():
     v, f, uv = terrain()
     export_glb(v, f, uv, out / 'terrain.glb', progress=lambda m: None)
     texture(out / 'tex_sat.jpg')
-    caves = caves_json(e0, n0, zone, a.field_fixture, a.flex_leads)
+    caves = caves_json(e0, n0, zone, a.field_fixture, a.flex_leads, a.cave3d)
     data, desc = pack_walls(caves.pop('passages'))
     (out / 'walls.bin').write_bytes(data)
     caves['walls'] = desc

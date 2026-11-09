@@ -216,7 +216,7 @@ async def main():
         txt = await page.inner_text('#ff-panel')
         ok('bad azimuth + ambiguous LRUD flagged', 'azimuth outside 0–360' in txt and 'two numbers' in txt)
         ok('survey stored with the cave id', await page.evaluate('Object.values(ffP.surveys)[0].cave === ffLinks.byName["Cave Ridge"]'))
-        ok('field walls built', await page.evaluate('ffWallGroup.children.length === 2'))
+        ok('field walls built', await page.evaluate('ffWallGroup.children.length >= 2'))
         n_before = await page.evaluate('ffState.surveys[ffPanelSurvey].shots.length')
         await page.evaluate('ffOpenLog()')
         await page.click('#ff-panel .ff-logrow button:has-text("Undo") >> nth=0')

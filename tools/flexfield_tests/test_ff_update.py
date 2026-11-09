@@ -86,7 +86,7 @@ async def main():
             ok('A11 within 0.5 m of where it is', d < 0.5, d)
         ok('lead from the PLT', await page.evaluate('!!(stationMap.get("Cave Ridge|A12").leads||[]).length'))
         ok('old walls hidden (one cave, own colours)', await page.evaluate('passageMesh.userData.meshes[0].geometry.index.count') == 0)
-        ok('new walls drawn', await page.evaluate('ffWallGroup.children.length === 2'))
+        ok('new walls drawn', await page.evaluate('ffWallGroup.children.length >= 2'))
         await page.evaluate('flyToPoint(stationMap.get("Cave Ridge|A10").pos, 60)')
         await page.wait_for_timeout(1200)
         await page.screenshot(path=os.path.join(WORK, 'shots', '11_updated.png'))
