@@ -479,7 +479,7 @@
     <div class="help-row"><span class="help-icon">📍</span><span class="help-desc">GPS: off / pin / follow / heading-up · record a track · drop pins · export GPX/KML · compass calibration</span></div>
     <div class="help-row"><span class="help-icon">🔧</span><span class="help-desc">Tools: find (stations, leads — active / closed), measure, route, reach, fly, crane, import KML · 📐 field survey · 📚 documents · 📝 change log (undo)</span></div>
     <div class="help-row"><span class="help-icon">🚩</span><span class="help-desc">Route: tap the start station, then the end station (only stations answer: not a lead, a name or a pin), or type part of a name in the box under the bar at the top, with the cave in the list. With a route showing only its stations can be tapped; the rest of the cave, its names and leads are dimmed until you clear it (✕ on the bar).</span></div>
-    <div class="help-row"><span class="help-icon">🎨</span><span class="help-desc">Display: colour by survey / elevation / depth / difficulty (narrow blue, low red, steep green); walls (On: one see-through layer, the nearest, at the opacity you set · Ghost: see-through, every layer, with sliders for strength, edges and depth fade · Off); stations (with their names); show or hide leads, area names, tracks, imported layers; imagery and terrain; Focus</span></div>
+    <div class="help-row"><span class="help-icon">🎨</span><span class="help-desc">Display: colour by survey / elevation / depth / difficulty (narrow blue, low red, steep green); walls (On: one see-through layer, the nearest, at the opacity you set · Ghost: see-through, every layer, with sliders for strength, edges and depth fade · Off); stations (with their names); show or hide leads, inventories, area names, tracks, imported layers; imagery and terrain; Focus</span></div>
     <div class="help-row"><span class="help-icon">🎯</span><span class="help-desc">Focus (the small button under ⋯, or Display → Focus): <b>Near centre</b> keeps walls, lines, stations and names within a radius of the orbit point (the middle of the screen) as they are and fades the rest; <b>Cut in front</b> cuts away the passages between you and the orbit point, a hole as wide as the cut radius there. Taps only find what is in focus. Turn the button off to see everything again. The wall sliders and focus settings are remembered for this map too.</span></div>
     <div class="help-row"><span class="help-icon">⋯</span><span class="help-desc">Units (ft / m), what counts as narrow, stooping, crawling or steep (Route difficulty), who is entering data, ⇄ project & sync files (share with other phones and FLEX), export project data, fullscreen, help</span></div>
     <div class="help-section">STATIONS</div>
@@ -496,6 +496,9 @@
     <div class="help-row"><span class="help-icon">🧭</span><span class="help-desc">Declination is worked out offline (World Magnetic Model, for the survey's date) at the tie-in: “Declination 10.3° E (WMM 2026 at T6)”. Type your own (12 W) to override it; Use WMM goes back. <b>Backsights</b> shows the back readings; tap again to hide them.</span></div>
     <div class="help-row"><span class="help-icon">📍</span><span class="help-desc"><b>Use my location</b> takes one GPS fix (no network): the declination is worked out there for a survey tied to no station of the map, and its first station can be placed at the fix (approximate, marked ≈). ＋ New survey with no station selected starts at your location.</span></div>
     <div class="help-row"><span class="help-icon">💾</span><span class="help-desc">Display choices (walls, colour, wall opacity, stations, area names, terrain sliders) are remembered for this map. A new map opens with ghost walls coloured by elevation. The view stays over the map.</span></div>
+    <div class="help-section">INVENTORIES</div>
+    <div class="help-row"><span class="help-icon">📦</span><span class="help-desc">A chest at a station or a surface point keeps a dated log of what is stored there; the export carries them and <b>Display → Inventories</b> shows or hides them (a faded chest has something possibly out of date). Tap a chest, or the <b>📦</b> line on its station's card, for the contents table (item, quantity, last change, last checked) and the log (date, who, action, items, photos: tap one for full screen); a simple list shows as text. 🔍 finds an inventory by its name or by what is in it.</span></div>
+    <div class="help-row"><span class="help-icon">＋</span><span class="help-desc"><b>＋ Add entry</b> is always there, like a note: <i>left</i> adds, <i>took</i> subtracts, <i>checked</i> sets the counts you saw (<b>✓ Check…</b> starts from the contents; leave “that was everything here” on and a line you take out counts as gone), <i>note</i> is text and photos only. The date is today, who is remembered, photos come from the camera or from files. Making an inventory (a station's card → ✎ Edit → 📦 Add inventory here), renaming it, keeping it as a simple list and changing or removing an entry wait behind the card's small <b>✎ Edit</b>.</span></div>
     <div class="help-section">SHOTS FROM A SCANNED PAGE</div>
     <div class="help-row"><span class="help-icon">📷</span><span class="help-desc">🔧 → 📐 Field survey → <b>📷 Import shots from scan</b> (or a document page's ⋯): photograph a page of shot tables, or pick a page or a file. FLEX Field reads it on the phone, offline; check the table beside the scan (tap a cell to see it on the page, tap the page to find its cell; orange = check, red = wrong; each column's menu says what it holds), choose ft or m, then <b>Add … shots</b> to a field survey. Each shot remembers its page. In a browser the page is shown beside an empty table to type into.</span></div>
   </div>
@@ -543,7 +546,7 @@
     <button id="fp-close" title="Close">✕</button>
   </div>
   <div id="fp-search" class="fp-body">
-    <input id="fp-q" type="search" placeholder="Station, area or lead" autocomplete="off" spellcheck="false">
+    <input id="fp-q" type="search" placeholder="Station, area, lead or inventory" autocomplete="off" spellcheck="false">
     <div id="fp-results" class="fp-list"></div>
   </div>
   <div id="fp-leads" class="fp-body" hidden>
@@ -655,6 +658,7 @@ catch(e) { window.DOCS_EXPORT = null; }
 <script src="libs/utif.js"></script>
 <script src="libs/field-where.js"></script>
 <script src="libs/route-search.js"></script>
+<script src="libs/viewer-inventory.js"></script>
 <script src="libs/scan-import.js"></script>
 <script src="libs/viewer-docs.js"></script>
 
@@ -3280,6 +3284,7 @@ function findSearch(q) {
     if (e.kind === 'label') score -= 0.5;          // area names first among equals
     out.push({ e, score });
   }
+  if (window.ViewerInv) out.push(...ViewerInv.findMatches(q));      // inventories: by name and by what is in them
   out.sort((a, b) => a.score - b.score || a.e.text.length - b.e.text.length || a.e.text.localeCompare(b.e.text));
   return out.slice(0, 60).map(o => o.e);
 }
@@ -3288,6 +3293,9 @@ function findGo(e) {
   if (e.kind === 'label') {
     flyToPoint({ x: e.xyz[0], y: e.xyz[1], z: e.xyz[2] }, 80);
     showToast(e.text);
+    findPicked();
+  } else if (e.inv && window.ViewerInv) {
+    ViewerInv.go(e.inv);
     findPicked();
   } else {
     goToStation(e.st);
@@ -3306,7 +3314,7 @@ document.getElementById('fp-q').addEventListener('input', ev => {
       if (q.trim()) { const n = document.createElement('div'); n.className = 'fp-note'; n.textContent = 'Nothing found.'; box.appendChild(n); }
       return;
     }
-    const icons = { station: '◎', lead: '?', label: '🏷' };
+    const icons = { station: '◎', lead: '?', label: '🏷', inventory: '📦', invitem: '📦' };
     hits.forEach(e => box.appendChild(fpRow(icons[e.kind], e.text, e.sub, () => findGo(e))));
   }, 120);
 });
@@ -4541,6 +4549,7 @@ function renderDisplaySheet() {
   sheetHead('Show');
   const chips = [
     ['❓', 'Leads', leadGroup.visible, on => { leadGroup.visible = on; }],
+    ['📦', 'Inventories', window.ViewerInv ? ViewerInv.visible() : true, on => { if (window.ViewerInv) ViewerInv.setVisible(on); }],
     ['🏷', 'Area names', areaLabelGroup.visible, on => { areaLabelGroup.visible = on; }],
     ['📍', 'Tracks & pins', fieldGroup.visible, on => { fieldGroup.visible = on; }],
   ];
@@ -4693,7 +4702,8 @@ async function ffExportDocsLoad() {
   if (!X && /^https?:$/.test(location.protocol)) {
     try { const r = await fetch('docs.json', { cache: 'no-store' }); if (r.ok) X = await r.json(); } catch (_) {}
   }
-  ffExp = X && Array.isArray(X.entries) && X.entries.length ? X : null;
+  ffExp = X && ((Array.isArray(X.entries) && X.entries.length) || (Array.isArray(X.pages) && X.pages.length)) ? X : null;     // (pages alone: the photos of inventories)
+  if (ffExp && !Array.isArray(ffExp.entries)) ffExp.entries = [];
 }
 const ffDocsAll = () => ffExp ? ffEntries.docs.concat(ffExp.entries) : ffEntries.docs;
 function ffExpPage(h) { return ffExp && (ffExp.pages || []).find(p => p.h === h) || null; }
@@ -5072,6 +5082,7 @@ window.ffPagesPicked = async function (ctxJson, resJson) {
   (res.failed || []).forEach(n => showToast('Could not read ' + n));
   if (!pages.length) return;
   await ffEnsureAuthor();
+  if (ctx.inv && window.ViewerInv) { ViewerInv.pagesPicked(ctx, pages); return; }      // photos of an inventory entry (libs/viewer-inventory.js)
   if (ctx.doc && ffD.docs[ctx.doc]) {
     ffRecord('doc.pages', { doc: ctx.doc, add: pages }, null, 'docs');
     showToast(`Added ${pages.length} page${pages.length > 1 ? 's' : ''}`);
@@ -5161,6 +5172,7 @@ function ffReplay() {
 // The entry that undoes `e`, or null when it can't be undone.
 function ffInverse(e) {
   if (e.proposed) return null;                    // a suggestion changed nothing: turn it down instead
+  if (/^inv\./.test(e.op)) return window.ViewerInv ? ViewerInv.inverse(e) : null;
   switch (e.op) {
     case 'note.set':     return { op: 'note.set', note: e.note, text: e.prev || '', prev: e.text || '', base: [e.id] };
     case 'lead.set': {
@@ -5227,6 +5239,7 @@ function ffDescribeOp(e) {
   const docName = id => '“' + ((ffD.docs[id] && ffD.docs[id].title) || 'document') + '”';
   const noteAt = id => { const n = ffP.notes[id]; return n && n.target ? ffTargetLabel(n.target) : 'a station'; };
   const leadAt = id => { const L = ffP.leads[id]; return L && L.target ? ffTargetLabel(L.target) : 'a station'; };
+  if (/^inv\./.test(e.op) && window.ViewerInv) return ViewerInv.describe(e);
   switch (e.op) {
     case 'project.set':  return `Project ${e.name != null ? '“' + e.name + '”' : 'details'}`;
     case 'project.lists': return `Added to lists: ${Object.values(e.add || {}).flat().join(', ')}`;
@@ -5270,6 +5283,7 @@ function ffAfterChange(e) {
   if (ffPanelOpen && !ffDocsOpen) ffRenderPanel();
   if (ffDocsOpen) ffRenderDocs();
   if (/^(note|lead|doc)\./.test(e.op)) ffRefreshCard();
+  if (/^inv\./.test(e.op) && window.ViewerInv) ViewerInv.changed(e);      // the chests, the inventory card, the station card
 }
 function ffRefreshCard() {
   const sel = _selMesh && _selMesh._station;
@@ -5534,6 +5548,7 @@ function ffDecorateLeads() {
     if (st._leadSprite) st._leadSprite.visible = n > 0;
   });
   if (typeof requestRender === 'function') { requestRender(); wakeRender(); }
+  if (window.ViewerInv) ViewerInv.refresh();      // the inventories' chests (libs/viewer-inventory.js)
 }
 
 // ── Documents ─────────────────────────────────────────────────────────────────
@@ -5786,6 +5801,7 @@ function ffStationCard(st) {
   } else if (st.name && ffPid) {
     box.appendChild(el('div', 'fp-note', 'This cave isn’t linked to the project: ⋯ More → Project & sync.'));
   }
+  if (window.ViewerInv) ViewerInv.stationLine(box, st);      // 📦 its inventories (libs/viewer-inventory.js)
   const row = el('div', 'fp-row');
   const nb = el('button', 'fp-btn active', '✏️ Add note');
   nb.id = 'ff-add-note';
@@ -5808,6 +5824,7 @@ function ffStationCard(st) {
     const sb = el('button', 'fp-btn', fsv ? '📐 ' + fsv.name : '📐 Survey from here');
     sb.addEventListener('click', () => fsv ? ffOpenPanel(fsv.id) : ffNewSurvey(st));
     row2.appendChild(sb);
+    if (window.ViewerInv) ViewerInv.stationEdit(row2, st);      // 📦 Add inventory here
     box.appendChild(row);
     box.appendChild(row2);
   } else box.appendChild(row);
@@ -6527,6 +6544,7 @@ function ffExportData() {
     notes: live(ffP.notes).map(n => ({ id: n.id, on: n.target, on_label: ffTargetLabel(n.target), text: n.text, who: n.who, t: n.t })),
     leads: live(ffP.leads).map(L => ({ id: L.id, at: L.target, at_label: ffTargetLabel(L.target), active: FL.leadActive(L), ...L.fields, updated: L.updated })),
     documents: FL.docsOf(ffD, ffP).map(d => ({ id: d.id, title: d.title, kind: d.kind, date: d.date, pages: d.pages.length, tags: d.tagList.map(ffTargetLabel) })),
+    inventories: window.ViewerInv ? ViewerInv.exportData() : [],
     surveys: ffState.order.filter(id => ffState.surveys[id]).map(id => {
       const sv = ffState.surveys[id], b = ffBuilt.find(x => x._ff === id), info = ffBuiltInfo[id] || {};
       return { ...ffClone(sv), declination_used: info.decl ? info.decl.v : null, convergence: info.conv,
@@ -7502,6 +7520,12 @@ function onPointerTap(e) {
     if (hits.length) { const q = hits[0].object._station.pos.clone().project(camera); stD = Math.hypot((q.x - ndc.x) * rect.width / 2, (q.y - ndc.y) * rect.height / 2); }
     if (fpd.d <= stD) { fieldShowPoint(fpd.pt); return; }
   }
+  if (window.ViewerInv) {                    // a chest (libs/viewer-inventory.js): the nearer of it and the station beside it; any other tap closes its card
+    const ivh = onRoute ? null : ViewerInv.pick(clientX - rect.left, clientY - rect.top, rect);
+    const q = ivh && hits.length ? hits[0].object._station.pos.clone().project(camera) : null;
+    if (ivh && (!q || ivh.d <= Math.hypot((q.x - ndc.x) * rect.width / 2, (q.y - ndc.y) * rect.height / 2))) { ViewerInv.open(ivh.id); return; }
+    ViewerInv.closeCard();
+  }
   const lbl = hits.length ? null : labelPick(clientX - rect.left, clientY - rect.top, rect, onRoute);
   if (lbl && lbl.area) { areaLabelInfo(lbl.area); return; }
   if (lbl && lbl.station) hits.push({ object: { _station: lbl.station }, distance: 0 });
@@ -8251,6 +8275,7 @@ function dispRestoreUi() {
   _dispRestored = true;
   if (DISP.annot != null && ANNOT_MODES[DISP.annot]) { annotMode = DISP.annot; if (setupAnnotButton._done) applyAnnotMode(); }
   if (DISP.tracks === false) fieldGroup.visible = false;
+  if (DISP.inv === false && window.ViewerInv) ViewerInv.setVisible(false);
   const cb = document.getElementById('btn-cave');
   if (cb) { cb.classList.toggle('off', stationMode === 0); cb.classList.toggle('active', stationMode === 2); }
   if (colourMode === 2 && !_hgrid) colourMode = 1;
@@ -8263,7 +8288,7 @@ function dispRestoreUi() {
 }
 function dispCapture() {
   const sl = id => { const n = document.getElementById(id); return n ? +n.value : undefined; };
-  dispSave({ wallMode, colourMode, wallAlpha: wallOpacity, stationMode, annot: annotMode, tracks: fieldGroup.visible, fx: FlexFx.serialize(),
+  dispSave({ wallMode, colourMode, wallAlpha: wallOpacity, stationMode, annot: annotMode, tracks: fieldGroup.visible, inv: window.ViewerInv ? ViewerInv.visible() : true, fx: FlexFx.serialize(),
              opacity: sl('terrain-opacity-slider'), bright: sl('terrain-bright-slider'), fog: sl('terrain-fog-slider') });
 }
 let _dispTimer = null;
@@ -8411,6 +8436,7 @@ let _t = 0;
   if (gpsMarker) { easeMarker(_dt); updateCaverScale(); }
   stepStationFocus();
   sizeLeadSprites();
+  if (window.ViewerInv) ViewerInv.size();
 
   if (flyMode) {
     if (craneMode) {
