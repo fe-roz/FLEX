@@ -172,6 +172,44 @@ const pid = 'proj1', cid = 'cave1', cid2 = 'cave2';
   ok('LRUD per station in metres', near(lr.get('A')[0], 4 * 0.3048) && lr.get('A')[2] === '–');
 }
 
+// 7b) Field survey: suggested station names skip the ones in use; declination as written and read
+{
+  const used = new Set(['T7', 'T8', 'T9']);
+  ok('next name: the number counted up', L.nextStationName('T6') === 'T7' && L.nextStationName('A09') === 'A10' && L.nextStationName('A99') === 'A100');
+  ok('next name: names in use are skipped', L.nextStationName('T6', n => used.has(n)) === 'T10' && L.nextStationName('T6', () => false) === 'T7');
+  ok('next name: a name with no number gets 1; blank starts at A1', L.nextStationName('X') === 'X1' && L.nextStationName('') === 'A1' && L.nextStationName('  T6 ') === 'T7');
+  ok('next name: a name that is never free stops', typeof L.nextStationName('T1', () => true) === 'string');
+  ok('decl: said with E / W', L.fmtDecl(10.34) === '10.3° E' && L.fmtDecl(-12) === '12.0° W' && L.fmtDecl(0) === '0.0° E' && L.fmtDecl(-0.04) === '0.0° E' && L.fmtDecl(NaN) === '?');
+  ok('decl: read with or without E / W', L.parseDecl('10.3') === 10.3 && L.parseDecl('-12') === -12 && L.parseDecl('12 W') === -12 && L.parseDecl('e 10.3°') === 10.3 && L.parseDecl('12,5w') === -12.5 && L.parseDecl('+3 e') === 3);
+  ok('decl: nonsense and a blank are null', L.parseDecl('') === null && L.parseDecl('ten') === null && L.parseDecl('10 N') === null && L.parseDecl('400') === null && L.parseDecl(null) === null);
+  ok('decl: said and read agree', [10.3, -12, 0, 17.5, -3.2].every(v => L.parseDecl(L.fmtDecl(v)) === v));
+}
+
+// 7c) Field survey: every change to a survey counts. survey.set / survey.delete once wrote the survey's id over the
+//     entry's own id, so each later change looked like a copy of the first and was dropped (a declination typed after
+//     anything else was lost) and a sync file refused them. New entries say `sid`; old ones are read as if they did.
+{
+  const W = device('phoneW', 'Wu');
+  const sv = { id: 'sv1', name: 'Field 1', cave: cid, tie: 'A1', lenUnit: 'ft', decl: null, shots: [] };
+  const log = [W('survey.add', { survey: sv }), W('survey.set', { sid: 'sv1', patch: { lenUnit: 'm' } }), W('survey.set', { sid: 'sv1', patch: { decl: -12 } }), W('survey.set', { sid: 'sv1', patch: { name: 'Renamed' } })];
+  const S = L.replayProject(log, pid);
+  ok('survey.set: three changes, all applied', S.surveys.sv1.lenUnit === 'm' && S.surveys.sv1.decl === -12 && S.surveys.sv1.name === 'Renamed', S.surveys.sv1);
+  const old = [W('survey.add', { survey: sv }), W('survey.set', { id: 'sv1', patch: { lenUnit: 'm' } }), W('survey.set', { id: 'sv1', patch: { decl: -12 } }), W('survey.set', { id: 'sv1', patch: { name: 'Renamed' } })];
+  ok('legacy survey.set (the survey in `id`): the entries really did collide', new Set(old.slice(1).map(e => e.id)).size === 1);
+  const S2 = L.replayProject(old, pid);
+  ok('legacy survey.set: every change counts all the same', S2.surveys.sv1.lenUnit === 'm' && S2.surveys.sv1.decl === -12 && S2.surveys.sv1.name === 'Renamed', S2.surveys.sv1);
+  const fx = old.slice(1).map(L.fixLegacy);
+  ok('fixLegacy gives each its own id back and names the survey in sid', fx.every((e, i) => e.sid === 'sv1' && e.id === e.dev + '.' + e.seq && e.id !== old[i + 1].id) && new Set(fx.map(e => e.id)).size === 3, fx);
+  ok('fixLegacy leaves the right ones alone', L.fixLegacy(log[1]) === log[1] && L.fixLegacy(log[0]) === log[0] && L.fixLegacy(null) === null);
+  ok('a sync file with legacy survey.set entries: they come in, once each', L.newEntries(new Set(), old.slice(1)).length === 3 && L.newEntries(new Set([fx[0].id]), old.slice(1)).length === 2);
+  const S3 = L.replayProject(log.concat(W('survey.delete', { sid: 'sv1', prev: sv })), pid);
+  ok('survey.delete after changes still deletes', !S3.surveys.sv1 && !S3.order.includes('sv1'));
+  const S4 = L.replayProject(old.concat(W('survey.delete', { id: 'sv1', prev: sv })), pid);
+  ok('legacy survey.delete after legacy changes deletes too', !S4.surveys.sv1 && !S4.order.includes('sv1'));
+  // an entry that is a copy of another stays one entry
+  ok('the same entry merged twice still counts once', L.replayProject(log.concat(log), pid).surveys.sv1.name === 'Renamed' && L.replayProject(log.concat(log), pid).log.length === 4);
+}
+
 // 8) Suggested caves inside one file
 {
   const P = names => names.map(n => (typeof n === 'string' ? { name: n } : n));

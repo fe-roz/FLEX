@@ -635,6 +635,8 @@ catch(e) { window.DOCS_EXPORT = null; }
 <script src="libs/jszip.min.js"></script>
 <script src="libs/flexlib.js"></script>
 <script src="libs/utif.js"></script>
+<script src="libs/field-where.js"></script>
+<script src="libs/route-search.js"></script>
 
 <script>
 'use strict';
@@ -3568,7 +3570,7 @@ const fmtLen = m => U.len(m);
 //   rest of the cave — lines, stations and walls barely there
 // While a route shows, walls (in 'On' mode) are lifted to near-opaque so the
 // difficulty colours read; clearing the route puts the wall mode back.
-const ROUTE_DIM = 0.07, ROUTE_ALT_WALL = 0.28, ROUTE_REST_WALL = 0.04, ROUTE_WALL_OPACITY = 0.9;
+const ROUTE_DIM = 0.07, ROUTE_ALT_WALL = 0.28, ROUTE_REST_WALL = 0.04, ROUTE_WALL_OPACITY = 0.9, ROUTE_LABEL_DIM = 0.12;
 function routeApplyAlpha() {
   if (!routes.length) { applyWallMode(); applyReach(); return; }
   const onRoute = new Set();
@@ -3610,7 +3612,8 @@ function routeApplyAlpha() {
     if (st._sprite && st._sprite !== _selSprite) st._sprite.material.opacity = a;
     if (st._leadSprite) st._leadSprite.material.opacity = a;
   });
-  areaLabelGroup.children.forEach(sp => { sp.material.opacity = 0.35; });
+  areaLabelGroup.children.forEach(sp => { sp.material.opacity = ROUTE_LABEL_DIM; });
+  if (typeof ffApplyWallMode === 'function') ffApplyWallMode();      // the field survey's walls dim with the rest
   requestRender(); wakeRender();
 }
 
@@ -3651,33 +3654,35 @@ function routeClear() {
 }
 function routeSet(which, st) {
   if (which === 'from') routeFrom = st; else routeTo = st;
+  if (routePick) {                      // picking, and an end was set by name (the panel): go on to the one still missing
+    routePick = routeFrom && routeTo ? null : routeFrom ? 'to' : 'from';
+    if (!routePick) document.getElementById('btn-route').classList.remove('active');
+  }
   if (routeFrom && routeTo) routeRun(true);
   else { routeClearDrawing(); routes = []; routeSel = -1; routeApplyAlpha(); routeRenderPanel(); }
 }
 
-// 🚩: tap the start station, then the end.
+// 🚩: tap the start station, then the end (or type a name in the box under the flag: libs/route-search.js).
 document.getElementById('btn-route').addEventListener('click', function () {
   if (routePick) { routePick = null; this.classList.remove('active'); return; }
   measureOn = false; document.getElementById('btn-measure').classList.remove('active');
+  reachPick = false; fieldPickOn = false; document.getElementById('fp-pt-map').classList.remove('active');   // one thing to pick at a time
   routePick = 'from';
   this.classList.add('active');
   openFind('route');
   findPicked();
   showToast('Tap the start station');
 });
-// Called from onPointerTap when picking; returns true if it used the tap.
-function routePickTap() {
-  if (!routePick) return false;
-  const hit = stationRayHits()[0];
-  if (!hit) { showToast(routePick === 'from' ? 'Tap a station to start from' : 'Tap the end station'); return true; }
-  const st = hit.object._station;
+// A station picked to start or end the route, by a tap or by name; the first is the start, the second the end.
+function routePicked(st) {
+  if (!routePick || !st) return false;
   if (routePick === 'from') {
     routePick = 'to';
     routeFrom = st; routeTo = null;
     routeClearDrawing(); routes = []; routeSel = -1; routeApplyAlpha();
     selectStation(st);
     routeRenderPanel();
-    showToast(`Start: ${st.name || 'station'} — now tap the end`);
+    showToast(`Start: ${st.name || 'station'} — now tap the end, or type its name`);
   } else {
     routePick = null;
     document.getElementById('btn-route').classList.remove('active');
@@ -3685,6 +3690,25 @@ function routePickTap() {
     routeSet('to', st);
   }
   return true;
+}
+// Called first from onPointerTap while picking; always uses the tap. Picking takes stations only: a lead mark,
+// a pin, a station's name, an area name or the GPS figure under the finger is not a station and never answers.
+function routePickTap() {
+  if (!routePick) return false;
+  const hit = stationRayHits().find(h => routePickable(h.object._station));
+  if (!hit) { showToast(routePick === 'from' ? 'Tap a station to start from' : 'Tap the end station'); return true; }
+  routePicked(hit.object._station);
+  return true;
+}
+// A station a route can start or end at: one that a shot joins to the survey. The place a lead hangs at when the
+// export cut its station off (no shots, maybe no name) is a lead, not a station of the route.
+function routePickable(st) { routeGraph(); return !!(st && _routeAdj.has(st._key)); }
+// With a route showing, the stations on it (any of the routes shown) are the only ones that can be picked.
+function routeKeySet() {
+  if (!routes.length) return null;
+  const s = new Set();
+  routes.forEach(p => p.keys.forEach(k => s.add(k)));
+  return s;
 }
 // A tap within 14 px of a drawn route line selects that route (panel stays shut).
 let _lastTapPx = null;
@@ -3722,10 +3746,41 @@ function routeEndpointInput(which) {
   const st = which === 'from' ? routeFrom : routeTo;
   if (document.activeElement !== inp) inp.value = st ? (st.name || '') + (st.cave ? ' · ' + st.cave : '') : '';
 }
+// Stations that match what was typed, best first, to pick the start or end by name (here and in the box under
+// the flag, libs/route-search.js). Every word typed has to be in the station's name, its cave or its survey
+// ("t6 ridge" finds T6 in Cave Ridge), and at least one in the name; a name that matches better comes first,
+// and among equals the stations of the cave you are in (the route's start, else the selected station).
+// Entries are { text, sub, st, lc } with a `sub` that tells two stations of one name apart.
+function routeStationHits(q, limit) {
+  const words = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const sel = _selMesh && _selMesh._station;
+  const here = routeFrom ? (routeFrom.cave || '') : sel ? (sel.cave || '') : undefined;
+  const out = [];
+  for (const e of findIndex) {
+    if (e.kind !== 'station' || !routePickable(e.st)) continue;
+    const hay = ((e.st.cave || '') + ' ' + (e.st.surveyName || '')).toLowerCase();
+    let score = 0, inName = 0, ok = true;
+    for (const w of words) {
+      const i = e.lc.indexOf(w);
+      if (i >= 0) { inName++; score += e.lc === w ? 0 : i === 0 ? 1 : /[\s\-_.,(]/.test(e.lc[i - 1]) ? 2 : 3; }
+      else if (hay.indexOf(w) >= 0) score += 4;
+      else { ok = false; break; }
+    }
+    if (!ok || !inName) continue;
+    out.push({ e, score: score + (here !== undefined && (e.st.cave || '') !== here ? 0.5 : 0) });
+  }
+  out.sort((a, b) => a.score - b.score || a.e.text.length - b.e.text.length || a.e.text.localeCompare(b.e.text));
+  const hits = out.slice(0, limit || 12).map(o => o.e);
+  // The same name twice (a name a cave uses for two stations): say how high each one is.
+  const seen = new Map();
+  hits.forEach(e => { const k = e.text + '|' + e.sub; seen.set(k, (seen.get(k) || 0) + 1); });
+  return hits.map(e => (seen.get(e.text + '|' + e.sub) > 1 ? { ...e, sub: [e.sub, U.z(e.st.pos.z)].filter(Boolean).join(' · ') } : e));
+}
 function routeSuggest(which, q) {
   const box = document.getElementById('rt-suggest');
   box.textContent = '';
-  const hits = findSearch(q).filter(e => e.kind === 'station').slice(0, 12);
+  const hits = routeStationHits(q, 12);
   hits.forEach(e => box.appendChild(fpRow('◎', e.text, e.sub, () => {
     box.textContent = '';
     document.getElementById(which === 'from' ? 'rt-from' : 'rt-to').blur();
@@ -4545,7 +4600,7 @@ function updateModeBar(force) {
   const active = !!(text || reach);
   document.getElementById('tb-tools').classList.toggle('tool-on', active);
   const sig = icon + text + (reach ? 'R' : '') + (document.getElementById('rec-badge').classList.contains('show') ? 'C' : '');
-  if (sig === _modeSig && !force) return;
+  if (sig === _modeSig && !force) { RouteSearch.sync(); return; }
   _modeSig = sig;
   bar.classList.toggle('show', !!text);
   const recOn = document.getElementById('rec-badge').classList.contains('show');
@@ -4554,6 +4609,7 @@ function updateModeBar(force) {
   bar.style.top = (top0 + (reach ? 40 : 0)) + 'px';
   document.getElementById('mb-text').textContent = text ? icon + ' ' + text : '';
   bar._off = off; bar._open = open;
+  RouteSearch.sync();                  // the search box under the flag, while the start or end is being picked
 }
 document.getElementById('mb-x').addEventListener('click', e => {
   e.stopPropagation();
@@ -5026,7 +5082,9 @@ function ffRecord(op, data, extra, where) {
   const scope = where === 'docs' ? FL.DOCS : FL.projScope(ffPid);
   const seq = (ffSeq[scope] || 0) + 1;
   ffSeq[scope] = seq;
-  const entry = Object.assign({ id: ffDev + '.' + seq, dev: ffDev, seq, t: ffNowIso(), who: ffWho() || (FF_APP ? 'FLEX Field' : 'viewer'), op }, ffToLog(op, data || {}), extra || {});
+  // (what the entry is called, whose it is and which op it is cannot be overwritten by the data: survey.set once wrote its
+  // survey's id over the entry's own, and every later change to that survey was dropped as a copy of the first)
+  const entry = Object.assign({ id: ffDev + '.' + seq, dev: ffDev, seq, t: ffNowIso(), who: ffWho() || (FF_APP ? 'FLEX Field' : 'viewer'), op }, ffToLog(op, data || {}), extra || {}, { id: ffDev + '.' + seq, dev: ffDev, seq, op });
   (where === 'docs' ? ffEntries.docs : ffEntries.proj).push(entry);
   ffHost.append(scope, entry).then(ok => {
     if (!ok && !_ffSaveWarned) { _ffSaveWarned = true; showToast('Could not save on this device — export your field data'); }
@@ -5043,7 +5101,10 @@ function ffReplay() {
   ffP.order.forEach(id => {
     const sv = ffP.surveys[id];
     if (!sv) return;
-    const name = ffCaveName(sv.cave);
+    // A survey in no cave (started at the phone's GPS position) stays in no cave. One recorded with the cave's
+    // name before that cave was linked to the project turns up as soon as it is.
+    let name = sv.cave === '' || sv.cave == null ? '' : ffCaveName(sv.cave);
+    if (name == null) name = ffCaveName(ffCaveId(sv.cave));
     if (name == null) return;                       // a cave not on this map
     ffState.surveys[id] = Object.assign(ffClone(sv), { cave: name });
     ffState.order.push(id);
@@ -5074,10 +5135,10 @@ function ffInverse(e) {
     case 'doc.rotate':   return e.prev != null ? { op: 'doc.rotate', doc: e.doc, h: e.h, rot: e.prev, prev: e.rot, _where: 'docs' } : null;
     case 'doc.set':      return e.prev ? { op: 'doc.set', doc: e.doc, fields: e.prev, prev: e.fields, _where: 'docs' } : null;
     case 'doc.droppage': return e.page ? { op: 'doc.pages', doc: e.doc, add: [e.page], at: e.at, _where: 'docs' } : null;
-    case 'survey.add':   return { op: 'survey.delete', id: e.survey.id, prev: ffClone(ffP.surveys[e.survey.id] || e.survey) };
-    case 'survey.restore': return { op: 'survey.delete', id: e.survey.id, prev: ffClone(e.survey) };
+    case 'survey.add':   return { op: 'survey.delete', sid: e.survey.id, prev: ffClone(ffP.surveys[e.survey.id] || e.survey) };
+    case 'survey.restore': return { op: 'survey.delete', sid: e.survey.id, prev: ffClone(e.survey) };
     case 'survey.delete': return e.prev ? { op: 'survey.restore', survey: e.prev } : null;
-    case 'survey.set':   return { op: 'survey.set', id: e.id, patch: e.prev, prev: e.patch };
+    case 'survey.set':   return { op: 'survey.set', sid: e.sid != null ? e.sid : e.id, patch: e.prev, prev: e.patch };
     case 'shot.add':     return { op: 'shot.delete', sid: e.sid, shotId: e.shot.id, prev: e.shot };
     case 'shot.set':     return { op: 'shot.set', sid: e.sid, shot: e.prev, prev: e.shot };
     case 'shot.delete':  return e.prev ? { op: 'shot.add', sid: e.sid, shot: e.prev, index: e.index } : null;
@@ -5142,7 +5203,7 @@ function ffDescribeOp(e) {
     case 'doc.restore':  return `Restored ${docName(e.doc)}`;
     case 'survey.add':   return `New field survey “${e.survey.name}”`;
     case 'survey.restore': return `Restored survey “${e.survey.name}”`;
-    case 'survey.set':   return `Changed survey “${svName(e.id)}” (${Object.keys(e.patch || {}).join(', ')})`;
+    case 'survey.set':   return `Changed survey “${svName(e.sid != null ? e.sid : e.id)}” (${Object.keys(e.patch || {}).join(', ')})`;
     case 'survey.delete': return `Deleted survey “${(e.prev && e.prev.name) || 'survey'}”`;
     case 'shot.add':     return `Shot ${shotTxt(e.shot)} in “${svName(e.sid)}”`;
     case 'shot.set':     return `Edited shot ${shotTxt(e.shot)} in “${svName(e.sid)}”`;
@@ -5209,34 +5270,37 @@ async function ffPickProject() {
 let ffPendingProjectName = null;
 async function ffLinkCaves() {
   ffLinks = { byName: {}, byId: {} };
+  for (const name of ffExportCaves()) await ffLinkOne(name);
+}
+// One cave of this map ↔ a cave of the project (asked once; remembered for every map). false = skipped.
+async function ffLinkOne(name) {
   const metaCaves = (META.caves || []).reduce((m, c) => { if (c && c.name != null && c.id) m[c.name] = c; return m; }, {});
-  for (const name of ffExportCaves()) {
-    let cid = null;
-    const mc = metaCaves[name];
-    if (mc) {
-      cid = mc.id;
-      if (!ffP.caves[cid]) ffRecord('cave.set', { cave: cid, name: mc.label || mc.name || name });
-      if (ffP.aliases[name] !== cid) ffRecord('cave.alias', { cave: cid, alias: name });
-    } else cid = FL.caveForName(ffP, name);
-    if (!cid) {
-      const caves = FL.liveCaves(ffP);
-      const label = name || META.name || 'this map';
-      let pick = '__new';
-      if (caves.length) {
-        ffClearHelp();
-        pick = await ffChoose(`Cave “${label}” on this map`, `Is it one of the caves of ${ffP.name || 'this project'}? Your answer is remembered for every map.`,
-          caves.map(c => ({ label: c.name, value: c.id })).concat([{ label: '＋ A new cave', sub: `“${label}”`, value: '__new', primary: true }]), 'Skip for now');
-        if (!pick) continue;
-      }
-      if (pick === '__new') {
-        cid = FL.uid(10);
-        ffRecord('cave.set', { cave: cid, name: String(label).replace(/\.(plt|PLT)$/, '') });
-      } else cid = pick;
-      ffRecord('cave.alias', { cave: cid, alias: name });
+  let cid = null;
+  const mc = metaCaves[name];
+  if (mc) {
+    cid = mc.id;
+    if (!ffP.caves[cid]) ffRecord('cave.set', { cave: cid, name: mc.label || mc.name || name });
+    if (ffP.aliases[name] !== cid) ffRecord('cave.alias', { cave: cid, alias: name });
+  } else cid = FL.caveForName(ffP, name);
+  if (!cid) {
+    const caves = FL.liveCaves(ffP);
+    const label = name || META.name || 'this map';
+    let pick = '__new';
+    if (caves.length) {
+      ffClearHelp();
+      pick = await ffChoose(`Cave “${label}” on this map`, `Is it one of the caves of ${ffP.name || 'this project'}? Your answer is remembered for every map.`,
+        caves.map(c => ({ label: c.name, value: c.id })).concat([{ label: '＋ A new cave', sub: `“${label}”`, value: '__new', primary: true }]), 'Skip for now');
+      if (!pick) return false;
     }
-    ffLinks.byName[name] = cid;
-    ffLinks.byId[cid] = name;
+    if (pick === '__new') {
+      cid = FL.uid(10);
+      ffRecord('cave.set', { cave: cid, name: String(label).replace(/\.(plt|PLT)$/, '') });
+    } else cid = pick;
+    ffRecord('cave.alias', { cave: cid, alias: name });
   }
+  ffLinks.byName[name] = cid;
+  ffLinks.byId[cid] = name;
+  return true;
 }
 // Station ↔ cave id
 const ffStCave = st => (st ? ffLinks.byName[st.cave || ''] || null : null);
@@ -5244,7 +5308,7 @@ const ffStTarget = st => { const c = ffStCave(st); return c && st.name ? FL.T.st
 const ffStCodes = st => [FL.surveyCode(st.surveyName)].filter(Boolean);
 
 async function ffLoadAll() {
-  ffEntries.proj = ffPid ? await ffHost.read(FL.projScope(ffPid)) : [];
+  ffEntries.proj = (ffPid ? await ffHost.read(FL.projScope(ffPid)) : []).map(FL.fixLegacy);   // (survey.set / survey.delete written before `sid`)
   ffEntries.docs = await ffHost.read(FL.DOCS);
   ffEntries.map = await ffHost.mapLog();
   try { await ffExportDocsLoad(); } catch (e) { console.warn('export documents', e); }
@@ -5875,13 +5939,22 @@ function ffYear(dateStr) {
   const y = d.getUTCFullYear(), y0 = Date.UTC(y, 0, 1), y1 = Date.UTC(y + 1, 0, 1);
   return y + (d.getTime() - y0) / (y1 - y0);
 }
-// Declination (WMM at the tie-in, survey date) unless the survey overrides it.
+// Declination, offline: the survey's own if it was entered, else the World Magnetic Model for the survey's
+// date at the tie-in; with no tie-in on the map, at the survey's GPS fix (⌖ Use my location), else at the
+// map's centre. { v: degrees east, src: 'entered' | 'WMM 2026' | …, wmm: what the model gives, where, at }.
 function ffDeclination(sv, at) {
+  const yr = ffYear(sv.date), year = Math.floor(yr);
   const o = sv.decl != null && sv.decl !== '' ? Number(sv.decl) : null;
-  if (o != null && isFinite(o)) return { v: o, src: 'entered' };
-  const ll = at ? sceneToLatLon(at.x ?? at[0], at.y ?? at[1]) : { lat: META.center_lat, lon: META.center_lon };
-  if (!ll || ll.lat == null || !isFinite(ll.lat)) return { v: 0, src: 'unknown — enter it' };
-  return { v: wmmDeclination(ll.lat, ll.lon, 0, ffYear(sv.date)), src: 'WMM ' + Math.floor(ffYear(sv.date)) };
+  let ll, where, name = String(sv.tie || '').trim();
+  if (at) { ll = sceneToLatLon(at.x ?? at[0], at.y ?? at[1]); where = sv.gpsStart && sv.gps ? 'gps-start' : 'tie'; }
+  else if (sv.gps && isFinite(sv.gps.lat) && isFinite(sv.gps.lon)) { ll = { lat: sv.gps.lat, lon: sv.gps.lon }; where = 'gps'; }
+  else { ll = { lat: META.center_lat, lon: META.center_lon }; where = 'centre'; }
+  const wmm = ll && ll.lat != null && isFinite(ll.lat) && isFinite(ll.lon) ? wmmDeclination(ll.lat, ll.lon, 0, yr) : null;
+  const acc = sv.gps && sv.gps.acc != null && isFinite(sv.gps.acc) ? ' (±' + Math.max(1, Math.round(sv.gps.acc)) + ' m)' : '';
+  const at_ = where === 'tie' ? name : where === 'gps-start' ? 'your GPS start ' + name + acc : where === 'gps' ? 'your location' + acc : 'the map centre';
+  if (o != null && isFinite(o)) return { v: o, src: 'entered', wmm, where, at: at_, year };
+  if (wmm == null) return { v: 0, src: 'unknown — enter it', wmm, where, at: at_, year };
+  return { v: wmm, src: 'WMM ' + year, wmm, where, at: at_, year };
 }
 // Grid convergence at a point (grid bearing = true bearing − γ).
 function ffConvergence(at) {
@@ -5892,32 +5965,68 @@ function ffConvergence(at) {
   return Math.atan(Math.tan(dl) * Math.sin(ll.lat * Math.PI / 180)) * 180 / Math.PI;
 }
 
-// Positions of the exported stations, per cave: name → [x, y, z].
-let _ffBase = null;
+// Positions of the exported stations, per cave: "cave|name" → [x, y, z], taken from the map as it was drawn
+// from the export (the one source of what a station is called and where it stands). A name the export uses
+// twice in one cave, far apart (two files that each have a "1"), is two stations: the first keeps the plain
+// key (as buildCaveLines keys it), the others are "name#2"… and are only in _ffBaseAlts (plain key → every
+// station of that name), so a survey tied to the second one starts at the second one. Names are trimmed:
+// a station called "T6 " is found by "T6".
+let _ffBase = null, _ffBaseNames = null, _ffBaseAlts = null, _ffBaseByCave = null;
 function ffBaseStations() {
   if (_ffBase) return _ffBase;
-  _ffBase = new Map();
-  ((CAVES_DATA && CAVES_DATA.surveys) || []).forEach(sv => {
-    const pfx = sv.cave ? sv.cave + '|' : '';
-    (sv.shots || []).forEach(s => {
-      if (s.from_name && s.from_xyz && !_ffBase.has(pfx + s.from_name)) _ffBase.set(pfx + s.from_name, s.from_xyz);
-      if (s.to_name && s.to_xyz && !_ffBase.has(pfx + s.to_name)) _ffBase.set(pfx + s.to_name, s.to_xyz);
-    });
-    (sv.stations || []).forEach(s => { if (s.name && s.xyz) _ffBase.set(pfx + s.name, s.xyz); });
+  _ffBase = new Map(); _ffBaseNames = new Map(); _ffBaseAlts = new Map(); _ffBaseByCave = new Map();
+  stationMap.forEach((st, key) => {
+    if (st._ff) return;                                // a field survey's own, not the export's
+    const name = String(st.name || '').trim();
+    if (!name) return;
+    const cave = st.cave || '', pfx = cave ? cave + '|' : '', plain = pfx + name, m = /#(\d+)$/.exec(key);
+    const k = key !== pfx + st.name && m ? plain + m[0] : plain;
+    const xyz = [st.pos.x, st.pos.y, st.pos.z];
+    if (k === plain) _ffBase.set(plain, xyz);
+    _ffBaseNames.set(k, name);
+    (_ffBaseAlts.get(plain) || _ffBaseAlts.set(plain, []).get(plain)).push({ key: k, xyz });
+    (_ffBaseByCave.get(cave) || _ffBaseByCave.set(cave, new Map()).get(cave)).set(name.toLowerCase(), name);
   });
   return _ffBase;
 }
 const ffKey = (cave, name) => (cave ? cave + '|' : '') + String(name || '').trim();
 
+// A GPS fix → a place on the map: its x / y, the ground there for z (the terrain, as pins do), else the GPS height.
+function ffGpsScene(g) {
+  const s = gpsToScene(g.lat, g.lon), gz = typeof gridZAt === 'function' ? gridZAt(s.x, s.y) : null;
+  return [s.x, s.y, gz !== null && gz !== undefined && !isNaN(gz) ? gz : (g.alt != null && isFinite(g.alt) ? g.alt + (META.z_offset || 0) : 0)];
+}
+// The place a survey is tied in, when it is not simply "the station of that name": the station of that name
+// nearest where it was tapped (tieAt = lat / lon, for a cave that uses the name twice), or the GPS fix a
+// survey that starts away from every station is placed at (approximate). pos is null when "known" decides.
+function ffTiePos(sv) {
+  if (sv.gpsStart && sv.gps && isFinite(sv.gps.lat) && isFinite(sv.gps.lon)) return { pos: ffGpsScene(sv.gps), how: 'gps' };
+  ffBaseStations();
+  const alts = _ffBaseAlts.get(ffKey(sv.cave, sv.tie));
+  if (alts && alts.length > 1 && Array.isArray(sv.tieAt) && isFinite(sv.tieAt[0]) && isFinite(sv.tieAt[1])) {
+    const s = gpsToScene(sv.tieAt[0], sv.tieAt[1]);
+    let best = alts[0], bd = Infinity;
+    alts.forEach(a => { const d = Math.hypot(a.xyz[0] - s.x, a.xyz[1] - s.y); if (d < bd) { bd = d; best = a; } });
+    return { pos: best.xyz, how: 'map' };
+  }
+  return { pos: null, how: 'map' };
+}
+
 // Shots → positions. Starts from every station whose position is known (the
 // export's, and earlier field surveys'), works outward in both directions,
 // and reports closures (both ends already known) and shots not tied in.
+// Also says how the survey is tied in: tied (its tie-in has a place), tiePos, tieHow ('map' | 'gps' | null).
 function ffComputeSurvey(sv, known) {
-  const r = FL.computeSurvey(sv, known, { prefix: sv.cave ? sv.cave + '|' : '', decl: ffDeclination, conv: ffConvergence });
+  const prefix = sv.cave ? sv.cave + '|' : '', tk = ffKey(sv.cave, sv.tie), t = ffTiePos(sv);
+  // The tie-in's own place wins over a same-named station elsewhere (the others are not touched).
+  const K = t.pos ? { has: k => k === tk || known.has(k), get: k => (k === tk ? t.pos : known.get(k)) } : known;
+  const r = FL.computeSurvey(sv, K, { prefix, decl: ffDeclination, conv: ffConvergence });
   const V = a => new THREE.Vector3(a[0], a[1], a[2]);
   const pos = new Map();
   r.pos.forEach((p, k) => pos.set(k, V(p)));
-  return { ...r, pos, legs: r.legs.map(L => ({ ...L, a: V(L.a), b: V(L.b) })) };
+  const tiePos = t.pos || known.get(tk) || null;
+  return { ...r, pos, legs: r.legs.map(L => ({ ...L, a: V(L.a), b: V(L.b) })),
+           tied: !!tiePos, tiePos: tiePos && tiePos.slice(), tieHow: t.pos ? t.how : (tiePos ? 'map' : null) };
 }
 
 // LRUD per station from the shots (at From by default, or at To), in metres.
@@ -5939,8 +6048,8 @@ function ffCompute() {
     const sv = ffState.surveys[id];
     if (!sv) return;
     const res = ffComputeSurvey(sv, known);
-    const lr = ffStationLruds(sv), cave = sv.cave || '';
-    const out = { name: sv.name, cave: sv.cave || undefined, color: FF_COLOR, lines: [], shots: [], stations: [], _ff: id };
+    const lr = ffStationLruds(sv), cave = sv.cave || '', gpsStart = res.tieHow === 'gps';
+    const out = { name: sv.name + (gpsStart ? ' (GPS start, approximate)' : ''), cave: sv.cave || undefined, color: FF_COLOR, lines: [], shots: [], stations: [], _ff: id };
     res.legs.forEach(L => {
       const a = [L.a.x, L.a.y, L.a.z], b = [L.b.x, L.b.y, L.b.z], sh = sv.shots[L.i], r = ffShotReading(sh);
       out.lines.push([a, b]);
@@ -5954,8 +6063,18 @@ function ffCompute() {
       out.stations.push(st);
       known.set(k, st.xyz);
     });
+    // A survey that starts away from every station is placed at its GPS fix: its first station is drawn
+    // there, and says it is approximate (in the card's note and in the survey's name).
+    const tieName = String(sv.tie || '').trim();
+    if (gpsStart) {
+      const st = { name: tieName, xyz: res.tiePos.slice(), approx: true,
+        comment: 'Approximate: placed at your GPS fix' + (sv.gps && sv.gps.acc != null && isFinite(sv.gps.acc) ? ' (±' + Math.max(1, Math.round(sv.gps.acc)) + ' m)' : '') + ', not tied to a surveyed station.' };
+      if (lr.has(tieName)) st.lrud = lr.get(tieName);
+      out.stations.push(st);
+      known.set(ffKey(cave, tieName), st.xyz);
+    }
     // LRUD measured in this survey at an exported station (the tie-in) too.
-    lr.forEach((v, name) => { if (!res.pos.has(ffKey(cave, name)) && known.has(ffKey(cave, name)))
+    lr.forEach((v, name) => { if (!res.pos.has(ffKey(cave, name)) && known.has(ffKey(cave, name)) && !(gpsStart && name === tieName))
       out.stations.push({ name, xyz: known.get(ffKey(cave, name)), lrud: v, _tie: true }); });
     ffBuilt.push(out);
     ffBuiltInfo[id] = { ...res, lruds: lr };
@@ -6016,8 +6135,9 @@ function ffBuildWalls() {
 }
 function ffApplyWallMode() {
   ffWallGroup.visible = wallMode !== 2;
+  let dim = 1; try { if (routes.length) dim = 0.15; } catch (_) {}              // a route is showing: the rest is dimmed
   ffWallGroup.children.forEach(m => {
-    m.material.opacity = wallMode === 1 ? Math.min(wallOpacity, 0.2) : wallOpacity;
+    m.material.opacity = (wallMode === 1 ? Math.min(wallOpacity, 0.2) : wallOpacity) * dim;
     m.material.depthWrite = wallMode !== 1;
     m.material.needsUpdate = true;
   });
@@ -6069,30 +6189,97 @@ function ffOpenPanel(sid) {
   ffRenderPanel();
 }
 function ffClosePanel() { ffPanelOpen = false; ffDocsOpen = false; const p = document.getElementById('ff-panel'); if (p) p.classList.remove('open'); }
-function ffNextName(name) {
-  const m = /^(.*?)(\d+)$/.exec(String(name || '').trim());
-  if (!m) return (name || 'A') + '1';
-  const n = String(Number(m[2]) + 1);
-  return m[1] + (m[2].length > n.length ? n.padStart(m[2].length, '0') : n);
+// The next name for a new station: the number counted up, skipping every name the cave (or a field survey in
+// it) already has. A shot to a name that exists is a loop closure onto that station, not a new station, and
+// it is drawn on top of the line that is already there: it looks as if nothing was added.
+const ffNextName = (name, taken) => FL.nextStationName(name, taken);
+// Names the field surveys of a cave use (their tie-ins and both ends of every shot): lower-cased → as written.
+// skipShot: a shot being edited does not count against its own names.
+function ffFieldNames(sv, skipShot) {
+  const cave = sv.cave || '', out = new Map();
+  const add = n => { n = String(n || '').trim(); if (n) out.set(n.toLowerCase(), n); };
+  ffState.order.forEach(id => {
+    const o = ffState.surveys[id];
+    if (!o || (o.cave || '') !== cave) return;
+    add(o.tie);
+    o.shots.forEach(s => { if (s.id !== skipShot) { add(s.from); add(s.to); } });
+  });
+  return out;
+}
+// What a name is to a survey: 'map' (a station of the export, in its cave), 'field' (one a field survey has),
+// or null (no such station so far). Exact; ffNameNear finds the same name in other capitals.
+function ffNameWhere(sv, name, skipShot) {
+  const nm = String(name || '').trim();
+  if (!nm) return null;
+  ffBaseStations();
+  const m = _ffBaseByCave.get(sv.cave || '');
+  if (m && m.get(nm.toLowerCase()) === nm) return 'map';
+  return ffFieldNames(sv, skipShot).get(nm.toLowerCase()) === nm ? 'field' : null;
+}
+function ffNameNear(sv, name, skipShot) {
+  const nm = String(name || '').trim(), lc = nm.toLowerCase();
+  ffBaseStations();
+  const m = _ffBaseByCave.get(sv.cave || ''), hit = (m && m.get(lc)) || ffFieldNames(sv, skipShot).get(lc);
+  return hit && hit !== nm ? hit : null;
+}
+function ffTakenName(sv) {
+  ffBaseStations();
+  const m = _ffBaseByCave.get(sv.cave || ''), f = ffFieldNames(sv);
+  return n => { const lc = String(n || '').trim().toLowerCase(); return !!((m && m.has(lc)) || f.has(lc)); };
 }
 async function ffNewSurvey(tieSt) {
   const st = tieSt || (_selMesh && _selMesh._station);
-  if (!st) { showToast('Tap the station to tie into, then 📐 Survey from here'); return; }
-  if (!st.name) { showToast('That station has no name to tie to'); return; }
+  if (!st) {
+    // No station to tie into: tap one (then Survey from here), or start at the phone's GPS position.
+    const pick = await ffChoose('New field survey', 'A survey starts at a station of the map: tap the station, then ✎ Edit → 📐 Survey from here. With no station near, it can start at your GPS position instead.',
+      [{ label: '📍 Start at my location', sub: 'the first station is placed at your GPS fix, marked approximate', value: 'gps', primary: true }]);
+    if (pick === 'gps') FieldWhere.startHere();
+    return;
+  }
+  const tie = String(st.name || '').trim();
+  if (!tie) { showToast('That station has no name to tie to'); return; }
+  if (!ffPid) { showToast('Pick this map’s project first (⋯ → Project & sync)'); return; }
+  const cave = st.cave || '', ll = sceneToLatLon(st.pos.x, st.pos.y);
   await ffEnsureAuthor();
+  // A survey belongs to a cave of the project: an unlinked cave would drop it without a word.
+  if (ffLinks.byName[cave] == null && !(await ffLinkOne(cave))) { showToast('Link this cave to the project first (⋯ → Project & sync)'); return; }
   const n = ffState.order.length + 1;
   const r = await ffDialog({
     title: 'New field survey',
-    text: `Tied to ${st.name}${st.cave ? ' (' + st.cave + ')' : ''}. Shots start from there.`,
+    text: `Tied to ${tie}${cave ? ' (' + cave + ')' : ''}. Shots start from there.`,
     input: { value: `Field ${n} ${new Date().toLocaleDateString()}`, placeholder: 'Survey name' },
     buttons: [{ label: 'Cancel', value: null }, { label: 'Start', value: 'ok', primary: true }],
   });
   if (!r || !r.value.trim()) return;
   const id = ffUid(), d = new Date();
-  const survey = { id, name: r.value.trim().slice(0, 60), cave: st.cave || '', tie: st.name, lenUnit: 'ft', lrudAt: 'from',
+  // tieAt: where the station was tapped (lat / lon), so a cave that uses the name twice ties to the right one.
+  const survey = { id, name: r.value.trim().slice(0, 60), cave, tie, tieAt: [+ll.lat.toFixed(6), +ll.lon.toFixed(6)], lenUnit: 'ft', lrudAt: 'from',
     decl: null, date: d.toISOString().slice(0, 10), created: d.toISOString(), shots: [] };
   ffRecord('survey.add', { survey });
   ffOpenPanel(id);
+}
+// After a shot is added: say where it went (the panel covers the map, so nothing shows at once).
+function ffShotToast(sid, shotId) {
+  const sv = ffState.surveys[sid], info = ffBuiltInfo[sid] || {};
+  if (!sv) return;
+  const ix = sv.shots.findIndex(s => s.id === shotId), sh = sv.shots[ix];
+  if (!sh) return;
+  const cl = (info.closures || []).find(c => c.shot === ix), name = `${sh.from} → ${sh.to}`;
+  if (cl) showToast(`${name} added: it closes onto ${cl.at} (off by ${U.dim(cl.err)}), so no new station`);
+  else if ((info.loose || []).includes(ix)) showToast(`${name} added, but not placed yet: no station of this survey or cave at either end`);
+  else showToast(`${name} added and drawn`);
+}
+// Frame the survey on the map: close the panel (it covers a phone) and fly to what is placed.
+function ffShowOnMap(sv) {
+  const b = ffBuilt.find(x => x._ff === sv.id), info = ffBuiltInfo[sv.id] || {}, pts = [];
+  if (b) { b.stations.forEach(s => pts.push(s.xyz)); b.lines.forEach(l => pts.push(l[0], l[1])); }
+  if (info.tiePos) pts.push(info.tiePos);
+  if (!pts.length) { showToast('Nothing of this survey is placed on the map yet'); return; }
+  const box = new THREE.Box3();
+  pts.forEach(p => box.expandByPoint(new THREE.Vector3(p[0], p[1], p[2])));
+  const c = box.getCenter(new THREE.Vector3()), sz = box.getSize(new THREE.Vector3());
+  ffClosePanel();
+  flyToPoint(c, Math.max(40, Math.max(sz.x, sz.y, sz.z) * 1.8));
 }
 
 function ffRenderPanel() {
@@ -6117,12 +6304,13 @@ function ffSurveyLength(sv) {
 }
 function ffRenderSurveyList(body) {
   const ids = ffState.order.filter(id => ffState.surveys[id]);
-  if (!ids.length) body.appendChild(el('div', 'fp-note', 'No field surveys on this map yet. Select a station, then “Survey from here”.'));
+  if (!ids.length) body.appendChild(el('div', 'fp-note', 'No field surveys on this map yet. Select a station, then “Survey from here” (behind ✎ Edit), or ＋ New survey to start at your location.'));
   ids.forEach(id => {
     const sv = ffState.surveys[id], info = ffBuiltInfo[id] || {};
     const flags = sv.shots.reduce((a, s) => a + (ffShotFlags(s, sv).length ? 1 : 0), 0);
-    const sub = `${sv.shots.length} shots · ${U.len(ffSurveyLength(sv))} · from ${sv.tie}${sv.cave ? ' · ' + sv.cave : ''}` +
-      (flags ? ` · ⚠ ${flags}` : '') + (info.loose && info.loose.length ? ` · ${info.loose.length} not tied in` : '');
+    const sub = `${sv.shots.length} shots · ${U.len(ffSurveyLength(sv))} · from ${sv.tie}${sv.gpsStart ? ' (your GPS fix, approximate)' : ''}${sv.cave ? ' · ' + sv.cave : ''}` +
+      (flags ? ` · ⚠ ${flags}` : '') + (info.loose && info.loose.length ? ` · ${info.loose.length} not tied in` : '') +
+      (info.tied === false ? ' · tie-in not on this map' : '');
     body.appendChild(fpRow('📐', sv.name, sub, () => { ffPanelSurvey = id; ffEditShot = null; ffRenderPanel(); }));
   });
   const row = el('div', 'fp-row');
@@ -6145,50 +6333,44 @@ function ffRenderSurvey(body, sv) {
   const ren = el('button', 'fp-btn', 'Rename');
   ren.addEventListener('click', async () => {
     const r = await ffDialog({ title: 'Rename survey', input: { value: sv.name }, buttons: [{ label: 'Cancel', value: null }, { label: 'Save', value: 'ok', primary: true }] });
-    if (r && r.value.trim() && r.value.trim() !== sv.name) ffRecord('survey.set', { id: sv.id, patch: { name: r.value.trim().slice(0, 60) }, prev: { name: sv.name } });
+    if (r && r.value.trim() && r.value.trim() !== sv.name) ffRecord('survey.set', { sid: sv.id, patch: { name: r.value.trim().slice(0, 60) }, prev: { name: sv.name } });
   });
   top.appendChild(ren);
   const del = el('button', 'fp-btn ff-danger', 'Delete');
   del.addEventListener('click', async () => {
     const r = await ffDialog({ title: `Delete “${sv.name}”?`, text: `${sv.shots.length} shots. It stays in the change log and can be undone there.`,
       buttons: [{ label: 'Cancel', value: null }, { label: 'Delete', value: 'rm', danger: true }] });
-    if (r) { ffRecord('survey.delete', { id: sv.id, prev: ffClone(sv) }); ffPanelSurvey = null; ffRenderPanel(); }
+    if (r) { ffRecord('survey.delete', { sid: sv.id, prev: ffClone(sv) }); ffPanelSurvey = null; ffRenderPanel(); }
   });
   top.appendChild(del);
   body.appendChild(top);
 
-  // Settings: units, where LRUDs belong, declination, date.
+  // Where it is: declination (the World Magnetic Model, offline, or what was entered, with its source), the
+  // phone's location, and what to do when no station of the map ties it in (libs/field-where.js).
+  body.appendChild(FieldWhere.block(sv, info));
+
+  // Settings: units, where LRUDs belong, date.
   const set = el('div', 'ff-settings');
   const seg = (label, opts, cur, key) => {
     const r = el('div', 'ff-set'); r.appendChild(el('span', 'ff-set-l', label));
     opts.forEach(([v, t]) => {
       const b = el('button', 'fp-btn' + (cur === v ? ' active' : ''), t);
-      b.addEventListener('click', () => { if (cur !== v) ffRecord('survey.set', { id: sv.id, patch: { [key]: v }, prev: { [key]: cur } }); });
+      b.addEventListener('click', () => { if (cur !== v) ffRecord('survey.set', { sid: sv.id, patch: { [key]: v }, prev: { [key]: cur } }); });
       r.appendChild(b);
     });
     set.appendChild(r);
   };
   seg('Lengths', [['ft', 'feet'], ['m', 'metres']], sv.lenUnit || 'ft', 'lenUnit');
   seg('LRUD at', [['from', 'From stn'], ['to', 'To stn']], sv.lrudAt || 'from', 'lrudAt');
-  const dr = el('div', 'ff-set'); dr.appendChild(el('span', 'ff-set-l', 'Declination'));
   const decl = info.decl || { v: 0, src: '' };
-  const di = el('input', 'ff-input ff-small'); di.type = 'number'; di.step = '0.1';
-  di.placeholder = decl.v.toFixed(1); di.value = sv.decl != null && sv.decl !== '' ? sv.decl : '';
-  di.addEventListener('change', () => {
-    const v = di.value.trim() === '' ? null : Number(di.value);
-    if (v !== null && !isFinite(v)) return;
-    ffRecord('survey.set', { id: sv.id, patch: { decl: v }, prev: { decl: sv.decl ?? null } });
-  });
-  dr.appendChild(di);
-  dr.appendChild(el('span', 'fp-note', sv.decl != null && sv.decl !== '' ? '° entered' : `° (${decl.src}; type to override)`));
-  set.appendChild(dr);
   const dd = el('div', 'ff-set'); dd.appendChild(el('span', 'ff-set-l', 'Date'));
   const din = el('input', 'ff-input ff-small'); din.type = 'date'; din.value = sv.date || '';
-  din.addEventListener('change', () => { if (din.value !== sv.date) ffRecord('survey.set', { id: sv.id, patch: { date: din.value }, prev: { date: sv.date } }); });
+  din.addEventListener('change', () => { if (din.value !== sv.date) ffRecord('survey.set', { sid: sv.id, patch: { date: din.value }, prev: { date: sv.date } }); });
   dd.appendChild(din);
   set.appendChild(dd);
   body.appendChild(set);
-  body.appendChild(el('div', 'fp-note', `Tied to ${sv.tie}${sv.cave ? ' · ' + sv.cave : ''} · ${sv.shots.length} shots · ${U.len(ffSurveyLength(sv))} · grid = az + ${(decl.v).toFixed(2)}° decl − ${(info.conv || 0).toFixed(2)}° conv`));
+  const conv = info.conv || 0;
+  body.appendChild(el('div', 'fp-note', `${sv.gpsStart ? 'Starts at ' + sv.tie + ' (your GPS fix, approximate)' : 'Tied to ' + sv.tie}${sv.cave ? ' · ' + sv.cave : ''} · ${sv.shots.length} shots · ${U.len(ffSurveyLength(sv))} · grid = az + ${(decl.v).toFixed(2)}° decl ${conv >= 0 ? '−' : '+'} ${Math.abs(conv).toFixed(2)}° conv`));
 
   // Shot form
   ffRenderShotForm(body, sv);
@@ -6205,13 +6387,14 @@ function ffRenderSurvey(body, sv) {
   // Shot list
   body.appendChild(el('div', 'fp-h', 'Shots'));
   const list = el('div', 'fp-list');
-  const loose = new Set(info.loose || []);
+  const loose = new Set(info.loose || []), closes = new Map((info.closures || []).map(c => [c.shot, c]));
   sv.shots.slice().reverse().forEach(sh => {
-    const fl = ffShotFlags(sh, sv), r = ffShotReading(sh);
+    const fl = ffShotFlags(sh, sv), r = ffShotReading(sh), ix = sv.shots.indexOf(sh), cl = closes.get(ix);
     const t1 = `${sh.from} → ${sh.to}`;
     const t2 = `${sh.len || '?'} ${sv.lenUnit || 'ft'} · ${r.az == null ? '—' : r.az.toFixed(1) + '°'} · ${r.inc >= 0 ? '+' : ''}${(r.inc || 0).toFixed(1)}°` +
-      ([sh.l, sh.r, sh.u, sh.d].some(v => String(v || '').trim()) ? ` · ${[sh.l, sh.r, sh.u, sh.d].map(v => String(v || '–').trim() || '–').join('/')}` : '');
-    const row = fpRow(fl.length || loose.has(sv.shots.indexOf(sh)) ? '⚠' : '·', t1, fl.length ? t2 + ' · ' + fl.join('; ') : t2, () => { ffEditShot = sh.id; ffRenderPanel(); });
+      ([sh.l, sh.r, sh.u, sh.d].some(v => String(v || '').trim()) ? ` · ${[sh.l, sh.r, sh.u, sh.d].map(v => String(v || '–').trim() || '–').join('/')}` : '') +
+      (cl ? ` · closes onto ${cl.at}` : loose.has(ix) ? ' · not placed' : '');
+    const row = fpRow(fl.length || loose.has(ix) ? '⚠' : cl ? '↺' : '·', t1, fl.length ? t2 + ' · ' + fl.join('; ') : t2, () => { ffEditShot = sh.id; ffRenderPanel(); });
     if (ffEditShot === sh.id) row.classList.add('sel');
     list.appendChild(row);
   });
@@ -6220,8 +6403,10 @@ function ffRenderSurvey(body, sv) {
 function ffRenderShotForm(body, sv) {
   const editing = ffEditShot && sv.shots.find(s => s.id === ffEditShot);
   const last = sv.shots[sv.shots.length - 1];
-  const base = editing || { from: last ? last.to : sv.tie, to: last ? ffNextName(last.to) : ffNextName(sv.tie) };
+  // The next shot starts where the last one ended, and ends at a name nothing in the cave has yet.
+  const base = editing || { from: last ? last.to : sv.tie, to: ffNextName(last ? last.to : sv.tie, ffTakenName(sv)) };
   const f = el('div', 'ff-form');
+  f._editId = editing ? editing.id : null;
   f.appendChild(el('div', 'fp-h', editing ? `Edit shot ${editing.from} → ${editing.to}` : 'New shot'));
   const inputs = {};
   const cell = (key, label, type, w) => {
@@ -6260,12 +6445,17 @@ function ffRenderShotForm(body, sv) {
       const same = Object.keys(inputs).every(k => String(editing[k] || '') === shot[k]);
       if (!same) ffRecord('shot.set', { sid: sv.id, shot, prev: ffClone(editing) });
       ffEditShot = null;
-    } else ffRecord('shot.add', { sid: sv.id, shot });
+    } else if (ffRecord('shot.add', { sid: sv.id, shot })) ffShotToast(sv.id, shot.id);
     ffRenderPanel();
   });
   br.appendChild(save);
-  const bs = el('button', 'fp-btn' + (showBack ? ' active' : ''), 'Backsights');
-  bs.addEventListener('click', () => { ffShowBack = !showBack; r3.style.display = ffShowBack ? '' : 'none'; bs.classList.toggle('active', ffShowBack); });
+  const bs = el('button', 'fp-btn' + (showBack ? ' active' : ''), 'Backsights'); bs.id = 'ff-backsights';
+  // On or off from what is on screen now (not from what it was when the form was drawn), so a second tap turns it off.
+  bs.addEventListener('click', () => {
+    const shown = r3.style.display !== 'none';
+    if (shown && (inputs.baz.value.trim() || inputs.binc.value.trim())) { showToast('Clear the back readings to hide them'); return; }
+    ffShowBack = !shown; r3.style.display = ffShowBack ? '' : 'none'; bs.classList.toggle('active', ffShowBack);
+  });
   br.appendChild(bs);
   if (editing) {
     const cancel = el('button', 'fp-btn', 'Cancel');
@@ -6288,6 +6478,20 @@ function ffFormCheck(f, inputs, sv) {
   const blank = ['len', 'az', 'inc', 'baz', 'binc'].every(k => !String(sh[k] || '').trim());
   const flags = ffShotFlags(sh, sv).filter(t => !(blank && /missing/.test(t)));
   const notes = ['l', 'r', 'u', 'd'].map(k => { const p = ffParseNum(sh[k], 'lrud'); return p.note ? `${k.toUpperCase()} ${p.raw} → ${p.v} (${p.note})` : null; }).filter(Boolean);
+  // The names: a shot to a name that exists closes a loop onto that station (and is drawn over the line there);
+  // a shot from a name nothing has can't be placed yet.
+  const from = String(sh.from || '').trim(), to = String(sh.to || '').trim(), cave = sv.cave || 'this map';
+  if (from && to && from.toLowerCase() === to.toLowerCase()) flags.push('from and to are the same station');
+  else if (to) {
+    const w = ffNameWhere(sv, to, f._editId), near = w ? null : ffNameNear(sv, to, f._editId);
+    if (w) flags.push(`“${to}” is already a station ${w === 'map' ? 'of ' + cave : 'of a field survey here'}: this shot closes a loop onto it, and is drawn over the line already there. A new station needs a new name.`);
+    else if (near) flags.push(`“${to}” is not a station, but “${near}” is: the same name in other capitals?`);
+  }
+  if (from) {
+    const w = ffNameWhere(sv, from, f._editId), near = w ? null : ffNameNear(sv, from, f._editId);
+    if (!w && near) flags.push(`“${from}” is not a station, but “${near}” is: the same name in other capitals?`);
+    else if (!w) notes.push(`“${from}” is not a station of ${cave} or of this survey yet: this shot is drawn once another shot reaches it`);
+  }
   const box = f.querySelector('.ff-flags');
   box.textContent = '';
   flags.forEach(t => box.appendChild(el('div', 'ff-flag', '⚠ ' + t)));
@@ -7026,7 +7230,8 @@ function stationRayHits() {
 
 // Names and marks a finger can land on without touching the dot: a station's
 // name, its lead "?", an area name. { station } or { area } (nearest first).
-function labelPick(px, py, rect) {
+// only: a Set of station keys (the stations of the route showing): the others' names and leads, and every area name, are left out.
+function labelPick(px, py, rect, only) {
   const W = rect.width, H = rect.height, tanH = 2 * Math.tan(camera.fov * Math.PI / 360);
   const pad = Math.max(6, STATION_HIT_PX * 0.4);
   const v = new THREE.Vector3();
@@ -7034,6 +7239,7 @@ function labelPick(px, py, rect) {
   const proj = pos => { v.copy(pos).project(camera); return v.z > 1 ? null : [(v.x + 1) / 2 * W, (1 - v.y) / 2 * H]; };
   const consider = (kind, obj, d) => { if (d < bestD) { bestD = d; best = { [kind]: obj }; } };
   stationMap.forEach(st => {
+    if (only && !only.has(st._key)) return;
     const sp = st._sprite;
     if (sp && sp.visible && stationNamed(st)) {                       // the name's box
       const c = proj(sp.position);
@@ -7049,7 +7255,7 @@ function labelPick(px, py, rect) {
       if (c) { const d = Math.hypot(px - c[0], py - c[1]); if (d <= STATION_HIT_PX) consider('station', st, d); }
     }
   });
-  if (areaLabelGroup.visible) areaLabelGroup.children.forEach(sp => {
+  if (areaLabelGroup.visible && !only) areaLabelGroup.children.forEach(sp => {
     if (!sp.visible) return;
     const c = proj(sp.position); if (!c) return;
     const hw = (AREA_LABEL_PX * (sp.userData.aspect || 3)) / 2, hh = AREA_LABEL_PX / 2;
@@ -7271,6 +7477,9 @@ function onPointerTap(e) {
   _tapRay.setFromCamera(ndc, camera);
   _lastTapPx = [clientX, clientY];
 
+  // Picking a route's start or end: stations only, and before anything else (the GPS figure, a pin) can answer.
+  if (routePickTap()) return;
+
   // GPS marker check (screen-space)
   if (gpsMarker && gpsScenePos) {
     _tmp3.copy(gpsMarker.position).project(camera);
@@ -7294,19 +7503,20 @@ function onPointerTap(e) {
     reachFrom(h.object._station);
     return;
   }
-  if (routePickTap()) return;
   if (measureOn) { measureTap(); return; }
   // What is under the finger: the nearest of a station dot, a pin, and (when
   // none of those) a station's name, a lead mark or an area name, all judged in
-  // screen pixels round the tap.
-  const hits = stationRayHits();
-  const fpd = fieldHitTest(ndc, true);
+  // screen pixels round the tap. With a route showing, only its stations answer:
+  // the rest of the cave, its names and the pins are dimmed and left alone until the route is cleared.
+  const onRoute = routeKeySet();
+  const hits = stationRayHits().filter(h => !onRoute || onRoute.has(h.object._station._key));
+  const fpd = onRoute ? null : fieldHitTest(ndc, true);
   if (fpd) {
     let stD = Infinity;
     if (hits.length) { const q = hits[0].object._station.pos.clone().project(camera); stD = Math.hypot((q.x - ndc.x) * rect.width / 2, (q.y - ndc.y) * rect.height / 2); }
     if (fpd.d <= stD) { fieldShowPoint(fpd.pt); return; }
   }
-  const lbl = hits.length ? null : labelPick(clientX - rect.left, clientY - rect.top, rect);
+  const lbl = hits.length ? null : labelPick(clientX - rect.left, clientY - rect.top, rect, onRoute);
   if (lbl && lbl.area) { areaLabelInfo(lbl.area); return; }
   if (lbl && lbl.station) hits.push({ object: { _station: lbl.station }, distance: 0 });
   if (hits.length) {
