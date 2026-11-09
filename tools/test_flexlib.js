@@ -659,6 +659,5 @@ const pid = 'proj1', cid = 'cave1', cid2 = 'cave2';
   ok('area labels: an op a reader does not know changes nothing else', JSON.stringify(Object.keys(L.replayProject([a1, D1('arealabel.frobnicate', { label: 'l1' })], pid).arealabels)) === '["l1"]');
 }
 
-
 console.log((fail ? 'FAILED ' : 'ok ') + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
