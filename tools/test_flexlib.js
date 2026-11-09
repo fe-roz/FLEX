@@ -299,6 +299,99 @@ const pid = 'proj1', cid = 'cave1', cid2 = 'cave2';
   }
 }
 
+// Inventories move with their place: a cave to another project (caveBundle, caveMoveEntries, caveMoveClear), a surface
+// point between a project and My data (featureInvMove). Same inventory id and log entry ids on the other side; the source
+// removes its copy.
+{
+  const D1 = device('mvA', 'Ana'), D2 = device('mvB', 'Bo'), X = device('mvX', 'Cy'), H = n => String(n).repeat(64).slice(0, 64);
+  const st1 = L.T.station('c1', 'T6');
+  const caveSet = (c, n) => D1('cave.set', { cave: c, name: n });
+  const set1 = D1('inv.set', { inv: 'iv1', target: st1, fields: { name: 'Rope cache', desc: 'Blue barrel', mode: 'log', list: '' }, prev: null });
+  const left = D1('inv.log', { inv: 'iv1', log: 'e1', date: '2026-01-10', by: 'Ana', action: 'left', items: [{ name: 'Rope 50 m', qty: 2 }, { name: 'Stove', qty: 1 }], photos: [{ h: H(1), ext: 'jpg', w: 800, ht: 600 }], text: 'In the barrel', prev: null });
+  const took = D2('inv.log', { inv: 'iv1', log: 'e2', date: '2026-02-01', action: 'took', items: [{ name: 'rope 50 m', qty: 1 }], prev: null });         // no `by`: Bo wrote it
+  const mist = D1('inv.log', { inv: 'iv1', log: 'e3', date: '2026-02-02', action: 'left', items: [{ name: 'Tarp', qty: 1 }], prev: null });
+  const mistRm = D1('inv.log', { inv: 'iv1', log: 'e3', removed: true, prev: { date: '2026-02-02', action: 'left', items: [{ name: 'Tarp', qty: 1 }] }, base: [mist.id] });
+  const set2 = D1('inv.set', { inv: 'iv2', target: L.T.station('c2', 'B1'), fields: { name: 'Other cache', mode: 'log' }, prev: null });
+  const listAt = Date.parse('2025-01-05T10:00:00Z');
+  const set3 = D1('inv.set', { inv: 'iv3', target: L.T.feature('f1'), fields: { name: 'Dig kit', desc: '', mode: 'list', list: '2 spades\nrope' }, prev: null }, listAt);
+  const ph3 = D1('inv.log', { inv: 'iv3', log: 'p1', date: '2025-01-05', action: 'note', text: 'Lid', photos: [{ h: H(2), ext: 'jpg' }], prev: null });
+  const srcLog = [caveSet('c1', 'Cave Ridge'), caveSet('c2', 'Little Pit'), set1, left, took, mist, mistRm, set2, set3, ph3];
+  const S = L.replayProject(srcLog, 'src');
+  const onlyInv = list => list.filter(e => /^inv\./.test(e.op));
+  const stamp = (list, dev) => list.map(e => { const { op, ...d } = e; return (dev || X)(op, d); });
+
+  const B = L.caveBundle(S, null, 'c1');
+  ok('move: the bundle holds the chests at the cave\'s stations (not another cave\'s, not a surface point\'s), counted', B.inventories.map(i => i.id).join() === 'iv1' && B.counts.inventories === 1 && L.caveBundle(S, null, 'c2').inventories.map(i => i.id).join() === 'iv2', B.counts);
+  ok('move: the photos of the chest\'s entries are among the files to copy', B.blobs.some(b => b.h === H(1) && b.ext === 'jpg') && !B.blobs.some(b => b.h === H(2)), B.blobs);
+  const T0 = L.replayProject([], 'dst');
+  const ins = onlyInv(L.caveMoveEntries(B, T0, {}));
+  ok('move: the destination gets the inv.set (same id, place, fields; new, so prev null and no base) and one inv.log per live entry (same ids)', ins[0].op === 'inv.set' && ins[0].inv === 'iv1' && ins[0].target === st1 && ins[0].prev === null && !('base' in ins[0]) && ins[0].fields.name === 'Rope cache'
+    && ins[0].fields.desc === 'Blue barrel' && ins.slice(1).map(e => e.op + ':' + e.log).join() === 'inv.log:e1,inv.log:e2' && ins.slice(1).every(e => e.prev === null), ins);
+  ok('move: who wrote each entry is kept (by, else the author); an entry that was removed is not carried', ins[1].by === 'Ana' && ins[2].by === 'Bo' && !ins.some(e => e.log === 'e3'), ins.map(e => e.by));
+  const all1 = L.caveMoveEntries(B, T0, {});
+  const T1 = L.replayProject(stamp(all1), 'dst'), I0 = S.inventories.iv1, I1 = T1.inventories.iv1;
+  ok('destination: the same chest (id, place, name, description), the same log, counts and photo', I1 && !I1.deleted && I1.target === st1 && I1.name === 'Rope cache' && I1.desc === 'Blue barrel' && I1.log.map(e => e.id + ':' + e.by).join() === I0.log.map(e => e.id + ':' + (e.by || e.created.who)).join()
+    && JSON.stringify(I1.contents.map(c => [c.name, c.qty, c.changed])) === JSON.stringify(I0.contents.map(c => [c.name, c.qty, c.changed])) && I1.photos.length === 1 && I1.photos[0].h === H(1) && !T1.inventories.iv2, I1);
+  ok('destination: listed live, found at its station; the other cave\'s chest did not come', L.liveInventories(T1).map(i => i.id).join() === 'iv1' && L.invsOn(T1, st1).length === 1);
+  ok('moving again adds nothing (also from a destination that has it all)', onlyInv(L.caveMoveEntries(B, T1, {})).length === 0, onlyInv(L.caveMoveEntries(B, T1, {})).map(e => e.op));
+  // a move that stopped halfway: only what is missing is added
+  const half = L.replayProject(stamp(all1.filter(e => e.op !== 'inv.log' || e.log !== 'e2')), 'dst');
+  ok('a move that stopped halfway: finishing adds only the missing entry', onlyInv(L.caveMoveEntries(B, half, {})).map(e => e.op + ':' + (e.log || '')).join() === 'inv.log:e2');
+  // the source lets go
+  const clr = onlyInv(L.caveMoveClear(B, S));
+  ok('source: one inv.del for the chest, built on what it saw', clr.length === 1 && clr[0].op === 'inv.del' && clr[0].inv === 'iv1' && clr[0].base.join() === I0.heads.join(), clr);
+  const S2 = L.replayProject(srcLog.concat(stamp(clr)), 'src');
+  ok('source: the chest is removed (its log stays, History can undo), the other cave\'s and the point\'s stay', S2.inventories.iv1.deleted && S2.inventories.iv1.log.length === 2 && L.liveInventories(S2).map(i => i.id).sort().join() === 'iv2,iv3');
+  ok('source: removing again adds nothing', onlyInv(L.caveMoveClear(B, S2)).length === 0);
+  // back again: restored, plus what was written meanwhile, nothing twice
+  const newer = X('inv.log', { inv: 'iv1', log: 'e9', date: '2026-03-01', by: 'Cy', action: 'checked', items: [{ name: 'Rope 50 m', qty: 1 }], prev: null });
+  const T1b = L.replayProject(stamp(all1).concat(newer), 'dst'), B2 = L.caveBundle(T1b, null, 'c1');
+  const back = onlyInv(L.caveMoveEntries(B2, S2, {}));
+  ok('moving back: the removed copy is restored and only the new entry is added', back.map(e => e.op + ':' + (e.log || '')).join() === 'inv.restore:,inv.log:e9' && back[0].base.join() === S2.inventories.iv1.heads.join(), back.map(e => e.op));
+  const S3 = L.replayProject(srcLog.concat(stamp(clr), stamp(back)), 'src');
+  ok('moving back: live again, with the log of both sides', !S3.inventories.iv1.deleted && S3.inventories.iv1.log.map(e => e.id).join() === 'e1,e2,e9' && S3.inventories.iv1.checked === '2026-03-01' && L.liveInventories(S3).length === 3);
+  ok('a bundle from an older host (no inventories) still moves', onlyInv(L.caveMoveEntries(Object.assign({}, B, { inventories: undefined }), T0, {})).length === 0 && onlyInv(L.caveMoveClear(Object.assign({}, B, { inventories: undefined }), S)).length === 0);
+
+  // a surface point between a project and My data: the point has a new id there, so the place follows it
+  const M0 = L.replayProject([], 'mine');
+  const FM = L.featureInvMove(S, 'f1', M0, 'pf-f1');
+  ok('point: the chest is put at the point\'s new id (same inventory id; the list and its mode kept) and the old one let go', FM.put[0].op === 'inv.set' && FM.put[0].inv === 'iv3' && FM.put[0].target === 'feature:pf-f1' && FM.put[0].fields.mode === 'list' && FM.put[0].fields.list === '2 spades\nrope'
+    && FM.put.slice(1).map(e => e.log).join() === 'p1' && FM.clear.length === 1 && FM.clear[0].op === 'inv.del' && FM.clear[0].inv === 'iv3', FM);
+  ok('point: the photo files to copy are listed', FM.photos.length === 1 && FM.photos[0].h === H(2) && FM.photos[0].ext === 'jpg', FM.photos);
+  const M1 = L.replayProject(stamp(FM.put), 'mine'), J = M1.inventories.iv3;
+  ok('point: in the other store it is at the new place, as a list, with its entry and photo', J.target === 'feature:pf-f1' && J.mode === 'list' && J.log.length === 1 && J.photos.length === 1 && L.invsOn(M1, 'feature:pf-f1').length === 1 && L.invsOn(M1, 'feature:f1').length === 0);
+  ok('point: the list keeps when it was last edited, so it is still possibly out of date (and a list edited today is not)', J.fieldBy.list.t === new Date(listAt).toISOString() && J.fieldBy.list.who === 'Ana' && L.invMark(J, { now: Date.parse('2026-06-01T00:00:00Z') }).stale === true
+    && L.invMark(J, { now: listAt + 30 * 864e5 }).stale === false, J.fieldBy);
+  ok('point: moving it again adds nothing; a point with no chest, or a chest on another point, gives nothing', L.featureInvMove(S, 'f1', M1, 'pf-f1').put.length === 0 && L.featureInvMove(S, 'nothing-here', M0, 'x').put.length === 0 && L.featureInvMove(S, 'nothing-here', M0, 'x').clear.length === 0);
+  const SB = L.replayProject(srcLog.concat(stamp(FM.clear)), 'src');
+  ok('point: the source copy is removed; the cave\'s chests are untouched', SB.inventories.iv3.deleted && !SB.inventories.iv1.deleted && L.featureInvMove(SB, 'f1', M1, 'pf-f1').clear.length === 0);
+  // the way back: the project already has the removed chest (same id): restored, its place follows the point's new id there
+  const MB = L.featureInvMove(M1, 'pf-f1', SB, 'g7');
+  ok('point: back into the project: restored there (it was removed), placed at the new point, entries not doubled', MB.put.map(e => e.op).join() === 'inv.restore,inv.set' && MB.put[1].target === 'feature:g7' && MB.put[1].prev.target === 'feature:f1' && MB.clear.length === 1, MB.put.map(e => e.op));
+  const SC = L.replayProject(srcLog.concat(stamp(FM.clear), stamp(MB.put)), 'src');
+  ok('point: …live at the new point with one copy of each entry', !SC.inventories.iv3.deleted && SC.inventories.iv3.target === 'feature:g7' && SC.inventories.iv3.log.length === 1 && L.invsOn(SC, 'feature:g7').length === 1 && SC.inventories.iv3.fieldBy.list.t === new Date(listAt).toISOString());
+}
+
+// causalOrder and the replay never stop on an entry whose `base` is not a list (a damaged or foreign entry)
+{
+  const E = (id, dev, seq, t, extra) => Object.assign({ id, dev, seq, t, who: 'x', op: 'note.set', note: 'n1', target: 'cave:c9', text: id }, extra);
+  const odd = [E('o.1', 'o', 1, '2026-06-01T00:00:00Z', { base: 'o.0' }), E('p.1', 'p', 1, '2026-06-01T00:00:01Z', { base: 5 }), E('q.1', 'q', 1, '2026-06-01T00:00:02Z', { base: null }),
+    E('r.1', 'r', 1, '2026-06-01T00:00:03Z', { base: {} }), E('s.1', 's', 1, '2026-06-01T00:00:04Z', { base: true }), E('t.1', 't', 1, '2026-06-01T00:00:05Z', { base: [] })];
+  let out = null, err = null;
+  try { out = L.causalOrder(odd); } catch (e) { err = e; }
+  ok('causalOrder: a base that is not a list does not throw, and every entry is kept', !err && out && out.length === odd.length && new Set(out.map(e => e.id)).size === odd.length, err && err.message);
+  // one id written as a string is read as a one-entry list: the entry still comes after the one it names, whatever the clocks say
+  const first = E('a.1', 'a', 1, '2026-06-02T00:00:00Z'), after = E('b.1', 'b', 1, '2026-06-01T00:00:00Z', { base: 'a.1', text: 'after' });
+  ok('causalOrder: a base written as one id is still honoured (it comes after the entry it names)', L.causalOrder([after, first]).map(e => e.id).join() === 'a.1,b.1' && L.causalOrder([first, after]).map(e => e.id).join() === 'a.1,b.1');
+  let S4 = null, err2 = null;
+  try { S4 = L.replayProject(odd.concat(first, after), 'p'); L.replayDocs(odd.map(e => Object.assign({}, e, { op: 'doc.add', doc: 'd' + e.id, pages: [] }))); } catch (e) { err2 = e; }
+  ok('replay: such entries do not stop the project or the documents replaying (heads and proposals read them the same way)', !err2 && S4 && S4.notes.n1 && S4.notes.n1.text, err2 && err2.message);
+  const prop = E('u.1', 'u', 1, '2026-06-03T00:00:00Z', { op: 'lead.set', lead: 'L1', fields: { status: 'open' }, base: 'x.1', proposed: { by: 'archive', confidence: 0.5 } });
+  let S5 = null, err3 = null;
+  try { S5 = L.replayProject([prop, E('v.1', 'v', 1, '2026-06-03T00:00:01Z', { op: 'accept', ref: 'u.1', base: 7 })], 'p'); } catch (e) { err3 = e; }
+  ok('proposals: an accepted suggestion whose base is not a list is accepted all the same', !err3 && S5 && S5.leads.L1 && S5.leads.L1.fields.status === 'open', err3 && err3.message);
+}
+
 // 4) Documents: pages, tags, rotation, membership, inbox
 {
   const S = L.replayProject([PC('cave.set', { cave: cid, name: 'Cave Ridge' }), PC('lead.set', { lead: 'L9', target: L.T.station(cid, 'A1'), fields: { status: 'open' } })], pid);

@@ -272,7 +272,7 @@
 
   // ── A cave to another project (doc 14, rule 9) ───────────────────────────
   // Queued here like any move; 💾 Save asks the server (library.js moveCave) to copy the cave with its files, notes,
-  // leads, segments, area labels and documents into the other project, then lets it go from this one, each keeping a
+  // leads, segments, area labels, inventories and documents into the other project, then lets it go from this one, each keeping a
   // record ("moved to … / moved in from …", in History). Files are copied, never deleted. Repeating it adds nothing.
   const cavesOfFile = name => FL.liveCaves(pj.P).filter(c => (c.sources || []).some(s => s.file === name) || pj.P.aliases[name] === c.id);
   const queuedCaveMove = cid => W.moves.find(m => m.kind === 'cavemove' && m.id === cid) || null;
@@ -348,11 +348,11 @@
     let pv = null;
     try { pv = await (await fetch(`/api/lib/move-preview?from=${encodeURIComponent(pj.pid)}&cave=${encodeURIComponent(c.id)}`)).json(); } catch (_) {}
     if (pv && pv.shared && pv.shared.length) { toast(`“${pv.shared[0]}” is a survey file shared with another cave, so “${c.name}” can’t move on its own. Moving a cave out into its own file comes later.`); return; }
-    const to = await choose(`Move “${c.name}” to…`, 'The cave goes with its survey files, notes, leads, segments, area labels, sketches and documents.',
+    const to = await choose(`Move “${c.name}” to…`, 'The cave goes with its survey files, notes, leads, segments, area labels, sketches, inventories and documents.',
       dests.map(p => ({ label: ['folder', p.name || p.id], value: p.id })));
     if (!to) return;
     const dest = dests.find(p => p.id === to), n = pv && pv.counts ? pv.counts : null;
-    const what = n ? [n.files + ' survey file' + (n.files === 1 ? '' : 's'), n.notes + ' note' + (n.notes === 1 ? '' : 's'), n.leads + ' lead' + (n.leads === 1 ? '' : 's'), n.segments + ' segment' + (n.segments === 1 ? '' : 's'), n.docs + ' document' + (n.docs === 1 ? '' : 's')].join(', ') : 'its data';
+    const what = n ? [n.files + ' survey file' + (n.files === 1 ? '' : 's'), n.notes + ' note' + (n.notes === 1 ? '' : 's'), n.leads + ' lead' + (n.leads === 1 ? '' : 's'), n.segments + ' segment' + (n.segments === 1 ? '' : 's'), (n.inventories || 0) + ' inventor' + (n.inventories === 1 ? 'y' : 'ies'), n.docs + ' document' + (n.docs === 1 ? '' : 's')].join(', ') : 'its data';
     const ok = await choose(`Move “${c.name}” to “${dest.name || dest.id}”?`, `Goes along: ${what}. “${projName()}” keeps a record (“moved to ${dest.name || dest.id}”) and so does the other project. Nothing is deleted: the files are copied. It moves when you press 💾 Save.`,
       [{ label: 'Move it (on Save)', value: 'yes', primary: true }]);
     if (ok !== 'yes') return;
@@ -402,7 +402,12 @@
     const groupName = f => { const path = FL.groupPath(pj.P, f.group); return path.length ? path.map(g => g.name || 'Folder').join(' / ') : 'From ' + pname; };
     const color = f => (f.style && f.style.color) || ((FL.groupPath(pj.P, f.group).reverse().find(g => g.color) || {}).color) || null;
     const items = feats.map(f => ({ id: f.id, kind: f.kind, coords: f.coords, hsrc: f.hsrc || null, name: f.name || '', desc: f.desc || '', group: groupName(f), color: color(f), style: f.style || null }));
-    await MD.adopt(items);                                      // made in My data first: never in neither
+    const made = await MD.adopt(items);                         // made in My data first: never in neither
+    // the chests at those points go with them (the point has a new id in My data): made there, then removed here
+    if (window._inventory && window._inventory.carryPoints) {
+      const ids = new Set(made);
+      await window._inventory.carryPoints(feats.filter(f => f.kind === 'point' && ids.has('pf-' + f.id)).map(f => [f.id, 'pf-' + f.id]), 'out');
+    }
     for (const f of feats) await record('feature.set', { feature: f.id, removed: true, movedTo: 'mydata' }, null, { quiet: true });
     if (m.id.startsWith('g:')) {
       const gone = new Set([m.id.slice(2)]);
@@ -450,7 +455,9 @@
       if (m.kind === 'point' && m.target && m.target.length && window._surfMerge) group = await window._surfMerge.ensureGroupPath(m.target);   // dropped on a folder of the merged tree (surface-columns.js)
       if (m.kind === 'pgroup') { group = FL.uid(10); await record('group.set', { group, name: (S.groups[m.id] || {}).name || m.name || 'Points', parent: '' }, null, { quiet: true }); }
       for (const f of pts) {
-        await record('feature.set', Object.assign({ feature: FL.uid(12), kind: 'point', coords: f.coords, name: f.name || 'Point', group }, f.hsrc ? { hsrc: f.hsrc } : {}), null, { quiet: true });
+        const nid = FL.uid(12);
+        await record('feature.set', Object.assign({ feature: nid, kind: 'point', coords: f.coords, name: f.name || 'Point', group }, f.hsrc ? { hsrc: f.hsrc } : {}), null, { quiet: true });
+        if (window._inventory && window._inventory.carryPoints) await window._inventory.carryPoints([[f.id, nid]], 'in');       // its chests go with it (it has a new id here)
         await MD.forgetPoint({ properties: { myFeature: { getValue: () => f.id } } }, 'moved');
         const V = window.cesiumViewer, e = V && V.entities.values.find(x => x.properties && x.properties.myFeature && x.properties.myFeature.getValue() === f.id);
         if (e) V.entities.remove(e);
@@ -811,7 +818,7 @@
       .forEach(c => A.editCave && out.push([`Cave “${c.name}”…`, () => A.editCave(c.id), 'Rename it, see what it is made of, put it in a system']));
     if (saved && FL.liveCaves(pj.P).some(c => (c.sources || []).some(s => s.file === name) || pj.P.aliases[name] === c.id)) {
       const q = cavesOfFile(name).map(c => queuedCaveMove(c.id)).find(Boolean);
-      out.push([q ? `Cancel the move to ${q.toName}` : 'Move to another project…', () => askCaveMove(name), 'The cave with its files, notes, leads, segments, labels, sketches and documents; it moves on Save, each project keeping a record']);
+      out.push([q ? `Cancel the move to ${q.toName}` : 'Move to another project…', () => askCaveMove(name), 'The cave with its files, notes, leads, segments, labels, sketches, inventories and documents; it moves on Save, each project keeping a record']);
     }
     if (saved) out.push(['Remove from project', () => removeCaveFile(name), 'Out of the project (→ moves it to My data instead)']);
     return out;

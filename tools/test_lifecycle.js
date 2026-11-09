@@ -64,6 +64,7 @@ function device(dev, who) {
 // ── Moving a cave: the rules ────────────────────────────────────────────────
 const H1 = crypto.createHash('sha256').update('survey one').digest('hex');
 const HP = crypto.createHash('sha256').update('page one').digest('hex');
+const HX = crypto.createHash('sha256').update('photo one').digest('hex');      // a photo in an inventory's log
 const t0 = '2026-03-01T10:00:00.000Z';
 function sourceLog() {
   const D = device('pc', 'Cy');
@@ -81,6 +82,9 @@ function sourceLog() {
     D('lead.set', { lead: 'ld1', target: 'station:c1:A2', fields: { status: 'open', desc: 'a crawl' } }, t0),
     D('lead.set', { lead: 'ld2', target: 'station:c2:B1', fields: { status: 'open' } }, t0),
     D('feature.set', { feature: 'f1', kind: 'point', coords: [[-100.5, 45.1, 0]], name: 'Sink' }, t0),
+    D('inv.set', { inv: 'iv1', target: 'station:c1:A2', fields: { name: 'Rope cache', desc: 'Blue barrel', mode: 'log', list: '' }, prev: null }, t0),
+    D('inv.log', { inv: 'iv1', log: 'e1', date: '2026-01-10', by: 'Ana', action: 'left', items: [{ name: 'Rope 50 m', qty: 2 }], photos: [{ h: HX, ext: 'jpg' }], text: 'In the barrel', prev: null }, t0),
+    D('inv.set', { inv: 'iv2', target: 'station:c2:B1', fields: { name: 'Other cache', mode: 'log' }, prev: null }, t0),
   ];
 }
 const docLog = [{ id: 'pc.1', dev: 'pc', seq: 1, t: t0, who: 'Cy', op: 'doc.add', doc: 'd1', title: 'Plan sketch', kind: 'sketch-plan', pages: [{ h: HP, ext: 'jpg' }], tags: ['cave:c1', 'station:c1:A2'] },
@@ -88,18 +92,20 @@ const docLog = [{ id: 'pc.1', dev: 'pc', seq: 1, t: t0, who: 'Cy', op: 'doc.add'
 {
   const S = L.replayProject(sourceLog(), 'src'), D = L.replayDocs(docLog);
   const B = L.caveBundle(S, D, 'c1');
-  ok('bundle: counts', JSON.stringify(B.counts) === JSON.stringify({ files: 1, segments: 1, leads: 1, notes: 1, labels: 1, docs: 1 }), B.counts);
+  ok('bundle: counts', JSON.stringify(B.counts) === JSON.stringify({ files: 1, segments: 1, leads: 1, notes: 1, labels: 1, docs: 1, inventories: 1 }), B.counts);
   ok('bundle: nothing shared', B.shared.length === 0);
-  ok('bundle: blobs are the survey file and the page', B.blobs.map(b => b.h).sort().join() === [H1, HP].sort().join());
+  ok('bundle: blobs are the survey file, the page and the inventory\'s photo', B.blobs.map(b => b.h).sort().join() === [H1, HP, HX].sort().join());
   ok('bundle: another cave is none', L.caveBundle(S, D, 'nope') === null);
   const T = L.replayProject([], 'dst');
   const ins = L.caveMoveEntries(B, T, {});
-  ok('entries for the destination', ['cave.set', 'cave.alias', 'cavefile.set', 'segment.set', 'arealabel.set', 'lead.set', 'note.set'].every(op => ins.some(e => e.op === op)), ins.map(e => e.op));
+  ok('entries for the destination', ['cave.set', 'cave.alias', 'cavefile.set', 'segment.set', 'arealabel.set', 'lead.set', 'note.set', 'inv.set', 'inv.log'].every(op => ins.some(e => e.op === op)), ins.map(e => e.op));
   const dev = device('pc2', 'Cy'), stamp = (list, t) => list.map(e => dev(e.op, Object.assign({}, e), t));
   let T2 = L.replayProject(stamp(ins, '2026-03-02T10:00:00.000Z').concat(dev('cave.moved', L.moveRecord('m1', 'in', B, { id: 'src', name: 'Ridge test' }), '2026-03-02T10:00:01.000Z')), 'dst');
   ok('destination: the cave, its file and placement', L.liveCaves(T2).length === 1 && T2.cavefiles['CR.plt'].h === H1 && T2.cavefiles['CR.plt'].place.station === 'A1' && T2.aliases['CR.plt'] === 'c1');
   ok('destination: segment, label, note, lead', T2.segments.s1 && !T2.segments.s1.removed && L.areaLabelsOf(T2, 'CR.plt').length === 1 && T2.notes.n1.text === 'draughting' && T2.leads.ld1.fields.desc === 'a crawl');
-  ok('destination: the other cave did not come', !T2.caves.c2 && !T2.notes.n2 && !T2.leads.ld2);
+  ok('destination: the other cave did not come', !T2.caves.c2 && !T2.notes.n2 && !T2.leads.ld2 && !T2.inventories.iv2);
+  ok('destination: the inventory, with its place, its log and its photo', L.liveInventories(T2).map(i => i.id).join() === 'iv1' && T2.inventories.iv1.target === 'station:c1:A2' && T2.inventories.iv1.name === 'Rope cache' && T2.inventories.iv1.log.length === 1
+    && T2.inventories.iv1.log[0].id === 'e1' && T2.inventories.iv1.log[0].by === 'Ana' && T2.inventories.iv1.photos[0].h === HX && T2.inventories.iv1.contents[0].qty === 2, T2.inventories.iv1);
   ok('destination: its documents are its own now (same cave id)', L.docsOf(L.replayDocs(docLog), T2).map(d => d.id).join() === 'd1');
   ok('destination: a record of the move', L.movesOf(T2).length === 1 && L.movesOf(T2)[0].dir === 'in' && L.movesOf(T2)[0].peer.name === 'Ridge test');
   ok('moving again adds nothing', L.caveMoveEntries(B, T2, {}).length === 0, L.caveMoveEntries(B, T2, {}).map(e => e.op));
@@ -108,6 +114,7 @@ const docLog = [{ id: 'pc.1', dev: 'pc', seq: 1, t: t0, who: 'Cy', op: 'doc.add'
   let S2 = L.replayProject(sourceLog().concat(stamp(clr, '2026-03-02T10:00:02.000Z'), dev('cave.moved', L.moveRecord('m1', 'out', B, { id: 'dst', name: 'Other area' }), '2026-03-02T10:00:03.000Z')), 'src');
   ok('source: the cave is gone, the other stays', L.liveCaves(S2).map(c => c.id).join() === 'c2');
   ok('source: files, segment, label, note, lead gone', L.liveCavefiles(S2).map(f => f.file).join() === 'LP.plt' && S2.segments.s1.removed && L.areaLabelsOf(S2, 'CR.plt').length === 0 && S2.notes.n1.deleted && S2.leads.ld1.deleted && !S2.notes.n2.deleted && !S2.leads.ld2.deleted);
+  ok('source: its inventory is gone (the log stays), the other cave\'s stays', S2.inventories.iv1.deleted && S2.inventories.iv1.log.length === 1 && L.liveInventories(S2).map(i => i.id).join() === 'iv2');
   ok('source: its documents left, the other cave\'s stay', L.docsOf(L.replayDocs(docLog), S2).map(d => d.id).join() === 'd2');
   ok('source: a record "moved to"', L.movesOf(S2)[0].dir === 'out' && L.movesOf(S2)[0].peer.name === 'Other area' && S2.caves.c1.movedTo.id === 'dst');
   ok('source: points stay', !!S2.features.f1);
@@ -116,6 +123,7 @@ const docLog = [{ id: 'pc.1', dev: 'pc', seq: 1, t: t0, who: 'Cy', op: 'doc.add'
   let S3 = L.replayProject(sourceLog().concat(stamp(clr, '2026-03-02T10:00:02.000Z'), dev('cave.moved', L.moveRecord('m1', 'out', B, { id: 'dst', name: 'Other area' }), '2026-03-02T10:00:03.000Z'),
     stamp(L.caveMoveEntries(back, S2, {}), '2026-03-03T10:00:00.000Z'), dev('cave.moved', L.moveRecord('m2', 'in', back, { id: 'dst', name: 'Other area' }), '2026-03-03T10:00:01.000Z')), 'src');
   ok('back again: the cave, its notes and documents are back in the first project', L.liveCaves(S3).length === 2 && S3.notes.n1.text === 'draughting' && !S3.leads.ld1.deleted && !S3.caves.c1.movedTo && L.docsOf(L.replayDocs(docLog), S3).length === 2 && L.movesOf(S3).length === 2);
+  ok('back again: its inventory is back with its log (nothing doubled)', L.liveInventories(S3).map(i => i.id).sort().join() === 'iv1,iv2' && S3.inventories.iv1.log.length === 1 && S3.inventories.iv1.photos.length === 1, S3.inventories.iv1);
   // A different file with the same name in the destination: renamed, not overwritten.
   const T3 = L.replayProject([device('x', 'X')('cavefile.set', { file: 'CR.plt', h: 'c'.repeat(64), ext: 'plt' }, t0)], 'dst');
   const rn = L.moveRenames(B, T3);
@@ -131,8 +139,8 @@ const docLog = [{ id: 'pc.1', dev: 'pc', seq: 1, t: t0, who: 'Cy', op: 'doc.add'
 {
   lib.setProject('src', 'Ridge test'); lib.setProject('dst', 'Other area');
   const put = (pid, h, ext, text) => lib.putBlob(Buffer.from(text), ext, null, pid);
-  const b1 = put('src', null, 'plt', 'survey one'), page = put('src', null, 'jpg', 'page one');
-  ok('test blobs hash as expected', b1.h === H1 && page.h === HP);
+  const b1 = put('src', null, 'plt', 'survey one'), page = put('src', null, 'jpg', 'page one'), photo = put('src', null, 'jpg', 'photo one');
+  ok('test blobs hash as expected', b1.h === H1 && page.h === HP && photo.h === HX);
   sourceLog().forEach(e => lib.append('p-src', Object.assign({}, e, { id: undefined, seq: undefined, dev: undefined })));
   docLog.forEach(e => lib.append('docs', { op: e.op, t: e.t, who: e.who, doc: e.doc, title: e.title, kind: e.kind, pages: e.pages, tags: e.tags }, 'src'));
   fs.mkdirSync(path.join(lib.projDir('src'), 'Caves', 'Cave Ridge'), { recursive: true });
@@ -145,6 +153,8 @@ const docLog = [{ id: 'pc.1', dev: 'pc', seq: 1, t: t0, who: 'Cy', op: 'doc.add'
   ok('server: source lost it and keeps the record', L.liveCaves(S).map(c => c.id).join() === 'c2' && L.movesOf(S)[0].dir === 'out' && L.movesOf(S)[0].peer.id === 'dst');
   ok('server: survey file and page copied into the destination folder', fs.existsSync(path.join(lib.projDir('dst'), '.flex', 'blobs', H1 + '.plt')) && fs.existsSync(path.join(lib.projDir('dst'), '.flex', 'renders', HP + '.jpg')));
   ok('server: originals stay in the source', fs.existsSync(path.join(lib.projDir('src'), '.flex', 'blobs', H1 + '.plt')));
+  ok('server: the inventory moved (log and photo file); the source keeps its removed copy', L.liveInventories(T).map(i => i.id).join() === 'iv1' && T.inventories.iv1.log.length === 1 && r1.counts.inventories === 1
+    && fs.existsSync(path.join(lib.projDir('dst'), '.flex', 'renders', HX + '.jpg')) && S.inventories.iv1.deleted && L.liveInventories(S).map(i => i.id).join() === 'iv2', [r1.counts, T.inventories.iv1, S.inventories.iv1]);
   ok('server: the cave folder was copied, not moved', fs.existsSync(path.join(lib.projDir('dst'), 'Caves', 'Cave Ridge', 'notes.txt')) && fs.existsSync(path.join(lib.projDir('src'), 'Caves', 'Cave Ridge', 'notes.txt')));
   const n = lib.read('p-dst').split('\n').filter(Boolean).length, ns = lib.read('p-src').split('\n').filter(Boolean).length;
   const r2 = lib.moveCave('src', 'dst', 'c1', 'mv1', 'Cy');

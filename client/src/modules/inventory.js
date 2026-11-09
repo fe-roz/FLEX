@@ -16,11 +16,15 @@
 //     photos), Add entry, a switch to keep a simple list instead (info-panel.js shows it for a clicked marker);
 //   - right-click a station: Add inventory here…; right-click a surface point too; station cards have a button;
 //   - ❓ Leads lists them in a section of their own;
-//   - the export: window._inventory.exportAt / exportSurface → caves.json `inventories` (export-ui.js).
+//   - the export: window._inventory.exportAt / exportSurface → caves.json `inventories` (export-ui.js);
+//   - moves: a cave that moves to another project takes the chests at its stations (flexlib caveBundle, done by the server);
+//     a surface point that moves between the project and My data takes its chests (carryPoints, called by project-workspace.js);
+//   - one id, one chest: when the project and My data both have a record of an inventory id (the phone adopts a chest of
+//     My data into the project's log before its first change), the project's record is the one listed, drawn and exported.
 //
 // window._inventory = { all, lookup, load, redraw, visible, setVisible, addAtStation, addAtFeature, addEntry, editEntry,
 //   editInventory, setMode, subject, card, cardSection, cardButton, cardNoProject, paneSection, exportAt, exportSurface,
-//   stationPos, labelOf, open, lightbox, photoPages }
+//   stationPos, labelOf, open, lightbox, photoPages, atStation, carryPoints }
 (function () {
   'use strict';
   const A = window._pjApi, FL = window.FlexLib;
@@ -59,11 +63,15 @@
       return e;
     },
   };
-  /** Every live inventory: [{ inv, store }] (the open project's, then My data's). */
+  /**
+   * Every live inventory: [{ inv, store }] (the open project's, then My data's). An id is listed once, the project's: when
+   * the phone changes a chest that came from My data it takes the chest into the project's log first (same id), so after
+   * the phone's sync file is imported both logs have it, and the project's record is the one listed, drawn and exported.
+   */
   function all() {
-    const out = [];
-    if (pj.pid && pj.P) FL.liveInventories(pj.P).forEach(inv => out.push({ inv, store: projectStore }));
-    FL.liveInventories(mineS || {}).forEach(inv => out.push({ inv, store: mineStore }));
+    const out = [], seen = new Set();
+    if (pj.pid && pj.P) FL.liveInventories(pj.P).forEach(inv => { seen.add(inv.id); out.push({ inv, store: projectStore }); });
+    FL.liveInventories(mineS || {}).forEach(inv => { if (!seen.has(inv.id)) out.push({ inv, store: mineStore }); });
     return out;
   }
   /** { inv, store } for an inventory id (null when it is gone). */
@@ -326,6 +334,36 @@
     const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: buf });
     if (!r.ok) throw new Error('could not store the photo');
     return r.json();
+  }
+  /** A photo file into another store's folder (stored by content hash, so the same bytes keep the same name). */
+  async function copyPhoto(p, store) {
+    const r = await fetch(blobUrl(p));
+    if (!r.ok) throw new Error('could not read a photo to move it');
+    return storeBlob(await r.arrayBuffer(), p.ext || 'jpg', store);
+  }
+
+  // ── Moving with a surface point (project ⇄ My data) ────────────────────────
+  /**
+   * The chests at surface points that move between the project and My data (the point gets a new id there). They follow
+   * with the same inventory ids and log entries, their photo files are copied into the other folder, and the old copy is
+   * removed (History can undo it). Made at the other side first, so a chest is never in neither; repeating it adds nothing.
+   * pairs: [[id here, id there]]; dir 'out': project → My data, 'in': My data → project. → how many chests moved.
+   */
+  async function carryPoints(pairs, dir) {
+    if (!pairs || !pairs.length) return 0;
+    await mineLoad(true);
+    const from = dir === 'out' ? projectStore : mineStore, to = dir === 'out' ? mineStore : projectStore;
+    let n = 0;
+    for (const [a, b] of pairs) {
+      const mv = FL.featureInvMove(from.P, a, to.P, b);
+      if (!mv.put.length && !mv.clear.length) continue;
+      for (const p of mv.photos) await copyPhoto(p, to);
+      for (const e of mv.put) { const { op, ...d } = e; if (!(await to.record(op, d))) throw new Error('could not move the inventory at a surface point'); }
+      for (const e of mv.clear) { const { op, ...d } = e; await from.record(op, d); }
+      n += mv.clear.length;
+    }
+    if (n) { await mineLoad(true); redraw(); }
+    return n;
   }
   /** Image files → pages (JPEG up to 2400 px, stored once by content hash, like a document's pages): { pages, failed }. */
   async function photoPages(files, store) {
@@ -714,5 +752,5 @@
   wrapMenu();
 
   window._inventory = { all, lookup, load: mineLoad, redraw, visible, setVisible, addAtStation, addAtFeature, addEntry, editEntry, editInventory, setMode, subject, card, cardSection, cardButton, cardNoProject,
-    paneSection, exportAt, exportSurface, stationPos, labelOf, open, lightbox, photoPages, atStation };
+    paneSection, exportAt, exportSurface, stationPos, labelOf, open, lightbox, photoPages, atStation, carryPoints };
 })();
