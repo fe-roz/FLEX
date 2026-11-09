@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Only the cache subfolder the viewer's exports are written to is shareable. -->
+<!-- Only the cache subfolder the viewer's exports are written to is shareable,
+     plus the one the camera app writes a photographed page into. -->
 <paths>
     <cache-path name="shared" path="shared/" />
+    <cache-path name="camera" path="camera/" />
 </paths>

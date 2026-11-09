@@ -15,6 +15,10 @@ android {
         targetSdk     = 34
         versionCode   = 2
         versionName   = "2.0"
+
+        // ML Kit's on-device text reader (scan import) is native code, ~11 MB
+        // per ABI. Phones are ARM; drop this line to build for an x86 emulator.
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
     // The viewer is not copied into the app: viewer_build/ itself is an asset
@@ -62,4 +66,9 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.activity:activity-ktx:1.9.2")
     implementation("androidx.webkit:webkit:1.11.0")
+    // "Import shots from scan": ML Kit Text Recognition v2, Latin script, the
+    // BUNDLED artifact. Its model ships inside the APK, so pages are read offline
+    // with no Play Services download (the unbundled play-services-mlkit-text-
+    // recognition would fetch the model over the network instead).
+    implementation("com.google.mlkit:text-recognition:16.0.1")
 }

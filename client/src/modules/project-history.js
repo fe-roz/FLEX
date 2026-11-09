@@ -20,6 +20,7 @@
     const at = (rec, id) => { const r = rec[id]; return r && r.target ? targetLabel(r.target) : e.target ? targetLabel(e.target) : '?'; };
     const n = [].concat(e.ref != null ? [e.ref] : [], e.refs || []).length;
     const sv = id => (pj.P.surveys[id] && pj.P.surveys[id].name) || 'survey';
+    const pageNo = e => { const d = pj.D.docs[e.doc], i = d ? d.pages.findIndex(p => p.h === e.h) : -1; return i < 0 ? '' : i + 1; };
     const m = {
       'project.set': () => `Project “${e.name || ''}”`,
       'project.archive': () => e.archived === false ? 'Project unarchived' : 'Project archived (read-only)' + (e.note ? ': ' + e.note : ''),
@@ -43,6 +44,8 @@
       'doc.rotate': () => `Turned a page of ${doc(e.doc)}`,
       'doc.tag': () => `Tagged ${doc(e.doc)}: ${targetLabel(e.target)}`,
       'doc.untag': () => `Untagged ${doc(e.doc)}: ${targetLabel(e.target)}`,
+      'doc.pagetag': () => `Tagged page ${pageNo(e)} of ${doc(e.doc)}: ${targetLabel(e.target)}`,
+      'doc.pageuntag': () => `Untagged page ${pageNo(e)} of ${doc(e.doc)}: ${targetLabel(e.target)}`,
       'doc.set': () => `Edited ${doc(e.doc)} (${Object.keys(e.fields || {}).join(', ')})`,
       'doc.page': () => `Page details in ${doc(e.doc)}`,
       'doc.del': () => `Deleted ${doc(e.doc)}`,
@@ -83,6 +86,8 @@
       case 'doc.restore': return { op: 'doc.del', doc: e.doc, _w: 'docs' };
       case 'doc.tag': return { op: 'doc.untag', doc: e.doc, target: e.target, _w: 'docs' };
       case 'doc.untag': return { op: 'doc.tag', doc: e.doc, target: e.target, _w: 'docs' };
+      case 'doc.pagetag': return { op: 'doc.pageuntag', doc: e.doc, h: e.h, target: e.target, _w: 'docs' };
+      case 'doc.pageuntag': return { op: 'doc.pagetag', doc: e.doc, h: e.h, target: e.target, _w: 'docs' };
       case 'doc.rotate': return e.prev != null ? { op: 'doc.rotate', doc: e.doc, h: e.h, rot: e.prev, prev: e.rot, _w: 'docs' } : null;
       case 'doc.set': return e.prev ? { op: 'doc.set', doc: e.doc, fields: e.prev, prev: e.fields, _w: 'docs' } : null;
       case 'doc.droppage': return e.page ? { op: 'doc.pages', doc: e.doc, add: [e.page], at: e.at, _w: 'docs' } : null;

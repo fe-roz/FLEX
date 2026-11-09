@@ -28,6 +28,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.webkit.WebViewAssetLoader
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.io.File
@@ -57,6 +58,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private lateinit var store: MapStore
     private lateinit var lib: LibStore
+    private lateinit var ocr: ScanOcr
     private val io = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
 
@@ -123,6 +125,39 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** "Photograph a page" (scan import): the phone's camera app writes the
+     *  photo into cache/camera/ (no CAMERA permission needed, none declared);
+     *  it becomes a page in the library, and the page collects it with
+     *  photoResult() when told (ffPhotoReady) or when it loads again -- the
+     *  activity may have been recreated while the camera was in front. */
+    private var photoPath: String? = null
+    private var photoCtx: String? = null
+    private val photoLock = Any()
+    private var photoDone: String? = null
+    private val photoTaker = registerForActivityResult(ActivityResultContracts.TakePicture()) { _ ->
+        // The photo counts if the camera app wrote it (a few report "cancelled" even so).
+        val f = photoPath?.let { File(it) }
+        val ctx = photoCtx ?: "{}"
+        photoPath = null
+        photoCtx = null
+        if (f == null || !f.isFile || f.length() == 0L) {
+            f?.delete()
+            photoReady(ctx, JSONObject().put("pages", JSONArray()).put("cancelled", true))
+            return@registerForActivityResult
+        }
+        toast("Saving the page…")
+        io.execute {
+            val res = try { lib.addPages(listOf(FileProvider.getUriForFile(this, "$packageName.fileprovider", f))) { } }
+                      catch (e: Exception) { JSONObject().put("pages", JSONArray()).put("error", e.message ?: e.toString()) }
+            f.delete()
+            photoReady(ctx, res)
+        }
+    }
+    private fun photoReady(ctx: String, res: JSONObject) {
+        synchronized(photoLock) { photoDone = JSONObject().put("ctx", ctx).put("res", res).toString() }
+        js("window.ffPhotoReady && ffPhotoReady()")
+    }
+
     /** Sync files: a zip someone made in FLEX Field or FLEX. */
     private val syncPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@registerForActivityResult
@@ -139,6 +174,9 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         store = MapStore(this)
         lib = LibStore(this, store)
+        ocr = ScanOcr(lib, store)
+        photoPath = savedInstanceState?.getString("photoPath")
+        photoCtx = savedInstanceState?.getString("photoCtx")
 
         // Draw behind the cutout and system bars; the viewer is a full-bleed canvas.
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -415,6 +453,32 @@ class MainActivity : AppCompatActivity() {
             share(f, "application/zip")
             true
         } catch (e: Exception) { runOnUiThread { toast("Could not write the sync file: ${e.message}") }; false }
+
+        // scan import ("Import shots from scan", libs/scan-import.js)
+        /** Read a page's text on the phone (ML Kit, offline) → ffOcrDone(ctx, result). See ScanOcr. */
+        @JavascriptInterface fun ocrImage(ref: String, ctxJson: String) {
+            ocr.read(ref, ctxJson) { res -> js("window.ffOcrDone && ffOcrDone(${q(ctxJson)}, ${q(res.toString())})") }
+        }
+        /** Photograph a page with the camera app → a page in the library → ffPhotoReady(); then photoResult(). */
+        @JavascriptInterface fun takePhoto(ctxJson: String) {
+            runOnUiThread {
+                try {
+                    val dir = File(cacheDir, "camera").apply { mkdirs() }
+                    dir.listFiles()?.forEach { it.delete() }
+                    val stamp = java.text.SimpleDateFormat("yyyy-MM-dd HHmm", java.util.Locale.US).format(java.util.Date())
+                    val f = File(dir, "Scan $stamp.jpg")
+                    photoPath = f.absolutePath
+                    photoCtx = ctxJson
+                    photoTaker.launch(FileProvider.getUriForFile(this@MainActivity, "$packageName.fileprovider", f))
+                } catch (e: Exception) {
+                    photoPath = null
+                    photoCtx = null
+                    photoReady(ctxJson, JSONObject().put("pages", JSONArray()).put("error", "No camera app on this phone"))
+                }
+            }
+        }
+        /** The last photographed page, once: { ctx, res: { pages, … } } as JSON, or "". */
+        @JavascriptInterface fun photoResult(): String = synchronized(photoLock) { val s = photoDone ?: ""; photoDone = null; s }
     }
 
     // ── /lib/… ──────────────────────────────────────────────────────────────
@@ -520,6 +584,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         io.shutdown()
+        ocr.close()
         webView.destroy()
         super.onDestroy()
     }
@@ -527,6 +592,8 @@ class MainActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         webView.saveState(outState)
+        photoPath?.let { outState.putString("photoPath", it) }
+        photoCtx?.let { outState.putString("photoCtx", it) }
     }
 
     override fun onRestoreInstanceState(savedInstanceState: Bundle) {
