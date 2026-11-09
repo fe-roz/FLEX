@@ -1865,6 +1865,9 @@
               </div>
             </div>
 
+            <!-- Surface route: filled by surface-route.js -->
+            <div id="surfroute-host"></div>
+
           </div>
         </div>
 
@@ -2130,6 +2133,7 @@
 <!-- 📍 Surface: project | My data -->
 <div id="jobs-panel" class="jobs-panel" hidden></div>  <!-- filled by jobs-panel.js -->
 <script src="client/src/modules/jobs-panel.js"></script>  <!-- the Jobs panel along the bottom of the map: running, waiting and failed jobs (window._jobs) -->
+<script src="client/src/modules/surface-route.js"></script>  <!-- 🔬 Analyze → Surface route: picks, weights, Find routes (route_cost.py on the server), cards, graph, save as line, overlays (window._surfRoute) -->
 <script src="client/src/modules/offline-cache.js"></script>  <!-- saves tiles and point-cloud data as they load; registers client/src/sw.js (window._offline) -->
 <script src="client/src/modules/folder-style.js"></script>  <!-- a folder's display settings for everything in it (window._folderStyle) -->
 <script src="client/src/modules/surface-merge.js"></script>  <!-- 📍 Surface: CalTopo as the master — the project folders and items merged into its tree; drag and drop (window._surfMerge) -->

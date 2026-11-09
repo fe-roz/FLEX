@@ -730,8 +730,8 @@ const EXPORT_SCRIPT = path.join(__dirname, 'export_terrain.py');
 const EXPORT_OUT_DIR = path.join(__dirname, 'user_files', 'exports');
 // The same pipeline run for a project: its DEM as a terrain patch, its hillshade as map tiles.
 const terrainGen = require('./terrain_generate')({ python: CONDA_PYTHON, script: EXPORT_SCRIPT, library });
-// Surface routes (route_api.js → route_cost.py); FLEX_ROUTE_SCRIPT points at another script (the tests' stub)
-const routeGen = require('./route_api')({ python: CONDA_PYTHON, script: process.env.FLEX_ROUTE_SCRIPT || path.join(__dirname, 'route_cost.py'),
+// Surface routes (route_api.js → route_cost.py); FLEX_ROUTE_SCRIPT / FLEX_ROUTE_PYTHON point at another script / interpreter (the tests' stub)
+const routeGen = require('./route_api')({ python: process.env.FLEX_ROUTE_PYTHON || CONDA_PYTHON, script: process.env.FLEX_ROUTE_SCRIPT || path.join(__dirname, 'route_cost.py'),
     outRoot: path.join(__dirname, 'user_files', 'jobs', 'route') });
 
 function handleExportTerrain(req, res) {
