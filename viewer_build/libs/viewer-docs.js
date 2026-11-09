@@ -451,11 +451,20 @@
       notesInto(box, target);
       cardButtons(box, target, []);
       const sec = mk('div', 'ffd-box'); sec.id = 'ffd-cave';
-      if (inf.surveys.length) {
-        sec.appendChild(mk('div', 'ffd-gh', 'Surveys'));
-        inf.surveys.forEach(s => { const row = fpRow('〰️', s.name, `${s.stations.length} station${s.stations.length === 1 ? '' : 's'}`, () => openSurvey(CARD.cave, s.code)); row.classList.add('ffd-svrow'); row.dataset.code = s.code; sec.appendChild(row); });
-      }
       if (!groupsInto(sec, caveDocs(CARD.cave), { limit: 4 })) sec.appendChild(mk('div', 'ffd-empty', 'No documents for this cave or the project yet.'));
+      if (inf.surveys.length) {                                   // after the documents: a big cave has many surveys
+        const sw = mk('div', 'ffd-group'); sw.dataset.list = 'surveys';
+        const sh = mk('div', 'ffd-gh'); sh.appendChild(mk('b', null, `Surveys (${inf.surveys.length})`)); sw.appendChild(sh);
+        const rows = inf.surveys.map(s => { const row = fpRow('〰️', s.name, `${s.stations.length} station${s.stations.length === 1 ? '' : 's'}`, () => openSurvey(CARD.cave, s.code)); row.classList.add('ffd-svrow'); row.dataset.code = s.code; return row; });
+        const keep = rows.length > 9 ? 8 : rows.length;
+        rows.slice(0, keep).forEach(r => sw.appendChild(r));
+        if (keep < rows.length) {
+          const more = mk('button', 'ffd-more', `${rows.length - keep} more…`);
+          more.addEventListener('click', () => { rows.slice(keep).forEach(r => sw.insertBefore(r, more)); more.remove(); });
+          sw.appendChild(more);
+        }
+        sec.appendChild(sw);
+      }
       box.appendChild(sec);
     }
     rows.appendChild(box);
