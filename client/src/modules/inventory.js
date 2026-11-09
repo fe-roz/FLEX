@@ -18,7 +18,7 @@
 //   - ❓ Leads lists them in a section of their own;
 //   - the export: window._inventory.exportAt / exportSurface → caves.json `inventories` (export-ui.js);
 //   - moves: a cave that moves to another project takes the chests at its stations (flexlib caveBundle, done by the server);
-//     a surface point that moves between the project and My data takes its chests (carryPoints, called by project-workspace.js).
+//     a surface point that moves between the project and My data takes its chests (carryPoints, called by project-workspace.js);
 //   - one id, one chest: when the project and My data both have a record of an inventory id (the phone adopts a chest of
 //     My data into the project's log before its first change), the project's record is the one listed, drawn and exported.
 //
