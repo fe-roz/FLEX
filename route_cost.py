@@ -16,6 +16,16 @@ FLEX (inputs, outputs) is in the FLEX routing brief; outputs:
     OUTDIR/routes.geojson
     OUTDIR/summary.json
 
+Beyond the contract (all optional): `start_lines` (GeoJSON lines; every cell
+under them is a start and the cheapest wins -- "from any nearby road";
+other lines are kept when within 1.5 x the best), `start_line_buffer_m` (2),
+`dem_method` ("csf", or "export" = export_terrain.build_dem for comparison),
+`cache_dir` (or --cache-dir / env FLEX_ROUTE_CACHE: grid sets shared between
+output folders, newest `cache_keep` = 8 kept), `area_margin_m`,
+`connectivity` (8, 16 or "auto"). Route properties add start_kind,
+start_lonlat (where the walk leaves the road), and for lines start_line,
+start_name and best.
+
 Structure: everything after the point reader works on plain numpy arrays, so
 it is tested without PDAL (tools/test_route_cost.py, --points-npz). PDAL is
 needed only to read EPT or LAS/LAZ (the same conda env as Generate).
