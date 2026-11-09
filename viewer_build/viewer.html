@@ -478,13 +478,13 @@
     <div class="help-row"><span class="help-icon">📍</span><span class="help-desc">GPS: off / pin / follow / heading-up · record a track · drop pins · export GPX/KML · compass calibration</span></div>
     <div class="help-row"><span class="help-icon">🔧</span><span class="help-desc">Tools: find (stations, leads — active / closed), measure, route, reach, fly, crane, import KML · 📐 field survey · 📚 documents · 📝 change log (undo)</span></div>
     <div class="help-row"><span class="help-icon">🎨</span><span class="help-desc">Display: colour by survey / elevation / depth / difficulty (narrow blue, low red, steep green); walls (On: one see-through layer, the nearest, at the opacity you set · Ghost: see-through, every layer, with sliders for strength, edges and depth fade · Off); stations (with their names); show or hide leads, area names, tracks, imported layers; imagery and terrain; Focus</span></div>
-    <div class="help-row"><span class="help-icon">🎯</span><span class="help-desc">Focus (the small button under ⋯, or Display → Focus): <b>Near centre</b> keeps walls, lines, stations and names within a radius of the orbit point (the middle of the screen) as they are and fades the rest; <b>Cut in front</b> cuts away the passages between you and the orbit point, a hole as wide as the cut radius there. Taps only find what is in focus. Turn the button off to see everything again.</span></div>
+    <div class="help-row"><span class="help-icon">🎯</span><span class="help-desc">Focus (the small button under ⋯, or Display → Focus): <b>Near centre</b> keeps walls, lines, stations and names within a radius of the orbit point (the middle of the screen) as they are and fades the rest; <b>Cut in front</b> cuts away the passages between you and the orbit point, a hole as wide as the cut radius there. Taps only find what is in focus. Turn the button off to see everything again. The wall sliders and focus settings are remembered for this map too.</span></div>
     <div class="help-row"><span class="help-icon">⋯</span><span class="help-desc">Units (ft / m), what counts as narrow, stooping, crawling or steep (Route difficulty), who is entering data, ⇄ project & sync files (share with other phones and FLEX), export project data, fullscreen, help</span></div>
     <div class="help-section">STATIONS</div>
     <div class="help-row"><span class="help-icon">👆</span><span class="help-desc">Tap: info · again: caver for scale · again: reach (what's within range along the survey) · again: off</span></div>
     <div class="help-row"><span class="help-icon">✏️</span><span class="help-desc">On a station's card: ✏️ Add note is always there · 📄 documents tagged to the station, its survey or cave (the ones in the export too: scanned notes and photos; PDFs stay in FLEX). Everything else — changing a note, ❓ leads (status, size…), 📐 survey new passage from here, and in a document turning pages, tags, removing — waits behind the small <b>✎ Edit</b> button, which is off again when you close the card.</span></div>
     <div class="help-row"><span class="help-icon">👆</span><span class="help-desc">Taps find the nearest station, lead mark, name or pin within a finger's width of the touch; a drag or a two-finger move is never a tap</span></div>
-    <div class="help-row"><span class="help-icon">💾</span><span class="help-desc">Display choices (walls and their sliders, colour, stations, area names, focus, terrain sliders) are remembered for this map. A new map opens with ghost walls coloured by elevation. The view stays over the map.</span></div>
+    <div class="help-row"><span class="help-icon">💾</span><span class="help-desc">Display choices (walls, colour, wall opacity, stations, area names, terrain sliders) are remembered for this map. A new map opens with ghost walls coloured by elevation. The view stays over the map.</span></div>
   </div>
   <div id="help-dismiss">Tap anywhere to dismiss</div>
 </div>
@@ -638,8 +638,8 @@ catch(e) { window.DOCS_EXPORT = null; }
 <script src="libs/GLTFLoader.js"></script>
 <script src="libs/jszip.min.js"></script>
 <script src="libs/flexlib.js"></script>
-<script src="libs/utif.js"></script>
 <script src="libs/wall-fx.js"></script>
+<script src="libs/utif.js"></script>
 
 <script>
 'use strict';
