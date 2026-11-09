@@ -58,9 +58,13 @@
       Object.assign({ enableHighAccuracy: true, timeout: 25000, maximumAge: 30000 }, opts || {}));
     });
   }
-  async function fixOrToast() {
+  // A fix, or null with the reason in a toast. The button that asked says it is waiting (a cold GPS takes a while).
+  async function fixOrToast(btn) {
+    const was = btn && btn.textContent;
+    if (btn) { btn.disabled = true; btn.textContent = 'Getting your location…'; }
     showToast('Getting your location…');
     try { return await fix(); } catch (e) { showToast(e.message); return null; }
+    finally { if (btn) { btn.disabled = false; btn.textContent = was; } }
   }
 
   // "WMM 2026 at T6" / "entered; WMM would give 10.3° E at T6" — where the number on the line comes from.
@@ -107,7 +111,7 @@
     const gr = el('div', 'ff-set');
     const gb = el('button', 'fp-btn', placed ? '📍 Use my location again' : '📍 Use my location'); gb.id = 'ff-use-loc';
     gb.title = 'One GPS fix from this phone; no network needed';
-    gb.addEventListener('click', () => (placed ? placeHere(sv, true) : useLocation(sv, info)));
+    gb.addEventListener('click', () => (placed ? placeHere(sv, true, gb) : useLocation(sv, info, gb)));
     gr.appendChild(gb);
     const sm = el('button', 'fp-btn', '🗺 Show on map'); sm.id = 'ff-show-map'; sm.title = 'Close this panel and go to the survey';
     sm.addEventListener('click', () => ffShowOnMap(sv));
@@ -124,7 +128,7 @@
       const w = el('div', 'ff-where-warn'); w.id = 'ff-where-note';
       w.appendChild(el('div', null, '“' + tie + '” is not a station on this map, so these shots can’t be drawn yet.'));
       const pb = el('button', 'fp-btn', '📍 Place ' + tie + ' at my location (approximate)'); pb.id = 'ff-place-here';
-      pb.addEventListener('click', () => placeHere(sv, false));
+      pb.addEventListener('click', () => placeHere(sv, false, pb));
       w.appendChild(pb);
       box.appendChild(w);
     }
@@ -133,9 +137,9 @@
 
   // 📍 Use my location: keep the fix on the survey. It is where the model is worked out when the survey has
   // no tie-in on the map; for a tied survey the declination stays where its tie-in is.
-  async function useLocation(sv, info) {
+  async function useLocation(sv, info, btn) {
     await ffEnsureAuthor();
-    const g = await fixOrToast();
+    const g = await fixOrToast(btn);
     if (!g) return;
     ffRecord('survey.set', { sid: sv.id, patch: { gps: g }, prev: { gps: sv.gps || null } });
     const now = ffState.surveys[sv.id], d = (ffBuiltInfo[sv.id] || {}).decl;
@@ -144,14 +148,14 @@
   }
 
   // Put the survey's first station (survey.tie) at a GPS fix: approximate, and flagged as such.
-  async function placeHere(sv, again) {
+  async function placeHere(sv, again, btn) {
     await ffEnsureAuthor();
-    const g = await fixOrToast();
+    const g = await fixOrToast(btn);
     if (!g) return;
     const tie = String(sv.tie || '').trim();
     const r = await ffDialog({
       title: again ? 'Move ' + tie + ' to where you are?' : 'Place ' + tie + ' here?',
-      html: 'Your GPS position is <b>' + fmtLL(g) + '</b>' + fmtAcc(g) + '.<br>The survey’s first station <b>' + tie + '</b> will stand there and its shots are drawn from it. ' +
+      html: 'Your GPS position is <b>' + fmtLL(g) + '</b>' + fmtAcc(g) + '.<br>The survey’s first station <b>' + escHtml(tie) + '</b> will stand there and its shots are drawn from it. ' +
         'That is <b>approximate</b> and marked so; it is not tied to a surveyed station.',
       buttons: [{ label: 'Cancel', value: null }, { label: again ? 'Move ' + tie : 'Place ' + tie + ' here', value: 'ok', primary: true }] });
     if (!r) return;

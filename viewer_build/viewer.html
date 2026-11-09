@@ -6061,7 +6061,7 @@ function ffCompute() {
     if (!sv) return;
     const res = ffComputeSurvey(sv, known);
     const lr = ffStationLruds(sv), cave = sv.cave || '', gpsStart = res.tieHow === 'gps';
-    const out = { name: sv.name + (gpsStart ? ' (GPS start, approximate)' : ''), cave: sv.cave || undefined, color: FF_COLOR, lines: [], shots: [], stations: [], _ff: id };
+    const out = { name: sv.name + (gpsStart ? ' (GPS start, approximate)' : ''), cave: sv.cave || undefined, color: gpsStart ? '#ffb74d' : FF_COLOR, lines: [], shots: [], stations: [], _ff: id };   // (amber: not tied to a surveyed station)
     res.legs.forEach(L => {
       const a = [L.a.x, L.a.y, L.a.z], b = [L.b.x, L.b.y, L.b.z], sh = sv.shots[L.i], r = ffShotReading(sh);
       out.lines.push([a, b]);
@@ -6217,26 +6217,32 @@ function ffFieldNames(sv, skipShot) {
   });
   return out;
 }
-// What a name is to a survey: 'map' (a station of the export, in its cave), 'field' (one a field survey has),
-// or null (no such station so far). Exact; ffNameNear finds the same name in other capitals.
+// The stations of a cave that was redrawn from a PLT on the phone (its names are the cave's now, as the export's were).
+function ffPltNames(cave) {
+  const out = new Map();
+  ffBuilt.forEach(b => { if (b._pltOf !== undefined && (b.cave || '') === (cave || '')) b.stations.forEach(s => { const n = String(s.name || '').trim(); if (n) out.set(n.toLowerCase(), n); }); });
+  return out;
+}
+// What a name is to a survey: 'map' (a station of the cave: the export's, or a PLT's that replaced it), 'field'
+// (one a field survey has), or null (no such station so far). Exact; ffNameNear finds the same name in other capitals.
 function ffNameWhere(sv, name, skipShot) {
   const nm = String(name || '').trim();
   if (!nm) return null;
   ffBaseStations();
-  const m = _ffBaseByCave.get(sv.cave || '');
-  if (m && m.get(nm.toLowerCase()) === nm) return 'map';
-  return ffFieldNames(sv, skipShot).get(nm.toLowerCase()) === nm ? 'field' : null;
+  const m = _ffBaseByCave.get(sv.cave || ''), lc = nm.toLowerCase();
+  if ((m && m.get(lc) === nm) || ffPltNames(sv.cave).get(lc) === nm) return 'map';
+  return ffFieldNames(sv, skipShot).get(lc) === nm ? 'field' : null;
 }
 function ffNameNear(sv, name, skipShot) {
   const nm = String(name || '').trim(), lc = nm.toLowerCase();
   ffBaseStations();
-  const m = _ffBaseByCave.get(sv.cave || ''), hit = (m && m.get(lc)) || ffFieldNames(sv, skipShot).get(lc);
+  const m = _ffBaseByCave.get(sv.cave || ''), hit = (m && m.get(lc)) || ffPltNames(sv.cave).get(lc) || ffFieldNames(sv, skipShot).get(lc);
   return hit && hit !== nm ? hit : null;
 }
 function ffTakenName(sv) {
   ffBaseStations();
-  const m = _ffBaseByCave.get(sv.cave || ''), f = ffFieldNames(sv);
-  return n => { const lc = String(n || '').trim().toLowerCase(); return !!((m && m.has(lc)) || f.has(lc)); };
+  const m = _ffBaseByCave.get(sv.cave || ''), f = ffFieldNames(sv), pl = ffPltNames(sv.cave);
+  return n => { const lc = String(n || '').trim().toLowerCase(); return !!((m && m.has(lc)) || pl.has(lc) || f.has(lc)); };
 }
 async function ffNewSurvey(tieSt) {
   const st = tieSt || (_selMesh && _selMesh._station);
@@ -6321,6 +6327,7 @@ function ffRenderSurveyList(body) {
     const flags = sv.shots.reduce((a, s) => a + (ffShotFlags(s, sv).length ? 1 : 0), 0);
     const sub = `${sv.shots.length} shots · ${U.len(ffSurveyLength(sv))} · from ${sv.tie}${sv.gpsStart ? ' (your GPS fix, approximate)' : ''}${sv.cave ? ' · ' + sv.cave : ''}` +
       (flags ? ` · ⚠ ${flags}` : '') + (info.loose && info.loose.length ? ` · ${info.loose.length} not tied in` : '') +
+      (info.closures && info.closures.length ? ` · ↺ ${info.closures.length} close${info.closures.length > 1 ? '' : 's'} onto a station` : '') +
       (info.tied === false ? ' · tie-in not on this map' : '');
     body.appendChild(fpRow('📐', sv.name, sub, () => { ffPanelSurvey = id; ffEditShot = null; ffRenderPanel(); }));
   });
