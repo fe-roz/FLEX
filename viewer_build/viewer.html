@@ -508,7 +508,7 @@
         <div class="help-row"><span class="help-icon">🎨</span><span class="help-desc">Colour by survey / elevation / depth / difficulty (narrow blue, low red, steep green).</span></div>
         <div class="help-row"><span class="help-icon">🧱</span><span class="help-desc">Walls: On = one see-through layer, the nearest, at the opacity you set · Ghost = see-through, every layer, with sliders for strength, edges and depth fade · Off.</span></div>
         <div class="help-row"><span class="help-icon">👁</span><span class="help-desc">Show or hide stations (with their names), leads, inventories, area names, tracks and imported layers. Choose imagery and terrain.</span></div>
-        <div class="help-row"><span class="help-icon">🎯</span><span class="help-desc">Focus (the small button under ⋯, or Display → Focus) is for looking at one place when other passages are in the way. <b>Near centre</b> keeps walls, lines, stations and names within a radius of the orbit point (the middle of the screen) as they are and fades the rest. <b>Cut in front</b> cuts away the passages between you and the orbit point (a hole as wide as the cut radius there). Taps only find what is in focus. Turn the button off to see everything again.</span></div>
+        <div class="help-row"><span class="help-icon">🎯</span><span class="help-desc">Focus (the small button under ⋯, or Display → Focus) is for looking at one place when other passages are in the way. <b>Near centre</b> keeps walls, lines, stations and names within a radius of the orbit point (the middle of the screen) as they are and fades the rest. <b>Cut in front</b> cuts away the passages between you and the orbit point (a hole as wide as the cut radius there) and, with <b>Cut the ground</b> on (the default), the ground too, with a thin light rim at its edge, so you can look down into the cave; the ground far away stays. Taps only find what is in focus, and a tap through the hole lands on what you see, not on the ground that is cut away. Turn the button off to see everything again.</span></div>
         <div class="help-row"><span class="help-icon">💾</span><span class="help-desc">Display choices, wall sliders and focus settings are remembered for this map. A new map opens with ghost walls coloured by elevation.</span></div>
       </details>
       <details class="help-sec">
@@ -1997,6 +1997,7 @@ setTimeout(() => {
         m.transparent = true;
         m.depthWrite  = true;
         m.opacity     = 0.7;
+        FlexFx.patchTerrain(m);       // focus mode's cut also cuts the ground (libs/wall-fx.js)
         terrainMaterials.push(m);
       });
     });
@@ -2464,10 +2465,26 @@ function clearMeasure() {
 function measurePick() {
   const st = stationRayHits()[0];
   if (st) return { p: st.object._station.pos.clone(), name: st.object._station.name || 'station' };
-  if (terrainGroup) {
-    const t = _tapRay.intersectObject(terrainGroup, true)[0];
-    if (t) return { p: t.point.clone(), name: null };
-  }
+  const t = terrainTapHit();
+  if (t) return { p: t.point.clone(), name: null };
+  const w = wallTapHit();                    // the ground there is cut away: the wall seen through the hole
+  if (w) return { p: w.point.clone(), name: null };
+  return null;
+}
+// The ground under the tap, skipping what focus mode's cut has removed (what you see is what you can tap).
+// A tap is one ray against the mesh, as before; never per frame.
+function terrainTapHit() {
+  if (!terrainGroup) return null;
+  const hits = _tapRay.intersectObject(terrainGroup, true);
+  if (!FlexFx.terrainCutActive()) return hits[0] || null;
+  for (const h of hits) if (FlexFx.terrainAt(h.point.x, h.point.y, h.point.z) >= 0.5) return h;
+  return null;
+}
+// The nearest passage wall under the tap that is in focus (used when the ground there is cut away).
+function wallTapHit() {
+  if (!FlexFx.terrainCutActive() || wallMode === 2 || !passageMesh || !passageMesh.userData.meshes) return null;
+  const hits = _tapRay.intersectObject(passageMesh.userData.meshes[0], false);
+  for (const h of hits) if (FlexFx.focusAt(h.point.x, h.point.y, h.point.z) >= 0.5) return h;
   return null;
 }
 
@@ -4178,8 +4195,8 @@ document.getElementById('fp-pt-map').addEventListener('click', () => {
   if (fieldPickOn) { showToast('Tap the ground to place a pin'); closeSheet(); }
 });
 function fieldPickTap() {
-  const hit = terrainGroup && _tapRay.intersectObject(terrainGroup, true)[0];
-  if (!hit) { showToast('Tap on the ground'); return; }
+  const hit = terrainTapHit();
+  if (!hit) { showToast(FlexFx.terrainCutActive() ? 'Tap on the ground, outside the cut' : 'Tap on the ground'); return; }
   fieldPickOn = false;
   document.getElementById('fp-pt-map').classList.remove('active');
   const ll = sceneToLatLon(hit.point.x, hit.point.y);
