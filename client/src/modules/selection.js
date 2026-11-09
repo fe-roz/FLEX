@@ -167,6 +167,8 @@
     st.forEach(n => items.push({ label: 'Station ' + n, run: () => show(Object.assign(at('station', Object.assign({}, h, { near: n })), { station: n })) }));
     // Add a lead at a station (flex-leads.js: the project's, or My data's without a project / for a cave outside it).
     if (window._flexLeads) st.forEach(n => items.push({ lead: true, label: 'Add lead at ' + n + '…', run: () => window._flexLeads.add(h.imp, h.code, n) }));
+    // … and an inventory (inventory.js): a chest with a dated log of what is kept there, in its own menu section.
+    if (window._inventory) st.forEach(n => items.push({ inv: true, label: 'Add inventory here (' + n + ')…', run: () => window._inventory.addAtStation(h.imp, h.code, n) }));
     return items;
   };
 

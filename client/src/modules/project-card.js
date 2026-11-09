@@ -40,12 +40,14 @@
     if (!pj.pid) {
       box.appendChild(el('div', 'pj-note', 'Notes and documents belong to a project: open Project to choose or create one. A lead can be kept in My data without one.'));
       if (window._flexLeads) window._flexLeads.card(box, c);
+      if (window._inventory) window._inventory.cardNoProject(box, c);
       return;
     }
     if (!c.cid) {
       box.appendChild(el('div', 'pj-note', `“${c.imp ? c.imp.name : 'This file'}” isn’t a cave of “${pj.P.name || 'this project'}” yet.`));
       if (c.imp) box.appendChild(btn('Link it to a cave…', async () => { await linkFile(c.imp); c.cid = caveFor(c.imp, c.code); renderCard(); }, 'primary'));
       if (window._flexLeads) window._flexLeads.card(box, c);          // a lead there goes to My data
+      if (window._inventory) window._inventory.cardNoProject(box, c);
       return;
     }
     // Picked with selection.js: Details / Files / History.
@@ -73,9 +75,11 @@
       docGroupsInto(box, docsForCard(c));
       if (c.ends.length) { const r = el('div', 'pj-row'); c.ends.forEach(n => r.appendChild(btn(['pin', n], () => openCard({ imp: c.imp, code: c.code, cid: c.cid, name: n }), 'small'))); box.appendChild(r); }
     }
+    if (!c.survey && window._inventory) window._inventory.cardSection(box, c);          // the inventories at this station (inventory.js), above the buttons
     const row = el('div', 'pj-row pj-card-btns');
     row.appendChild(btn(['pencil', 'Note'], () => editNote(target)));
     if (!c.survey) row.appendChild(btn(['help', 'Lead'], () => editLead(c.cid, c.name, null)));
+    if (!c.survey && c.imp && window._inventory) row.appendChild(window._inventory.cardButton(c));
     row.appendChild(btn(['doc', 'Add pages'], () => addPages({ tags: [target] })));
     row.appendChild(btn(['tag', 'From inbox'], () => tagFromInbox(target)));
     box.appendChild(row);
@@ -139,7 +143,7 @@
     const tgt = cardTarget(c), below = belowOf(c);
     const files = c.level === 'cave' ? new Set(((pj.P.caves[c.cid] || {}).sources || []).map(s => s.file)) : null;
     const about = e => {
-      const ts = [e.target, e.cave ? FL.T.cave(e.cave) : null].concat(Array.isArray(e.tags) ? e.tags : []).filter(Boolean);   // doc.add carries its tags
+      const ts = [e.target, e.cave ? FL.T.cave(e.cave) : null, e.inv && pj.P.inventories && pj.P.inventories[e.inv] ? pj.P.inventories[e.inv].target : null].concat(Array.isArray(e.tags) ? e.tags : []).filter(Boolean);   // doc.add carries its tags; an inventory's entries are about where it is
       if (ts.some(t => t === tgt || below(t))) return true;
       if (files && (e.op === 'cavefile.set' || e.op === 'arealabel.set') && files.has(e.file || (pj.P.arealabels[e.label] || {}).file)) return true;
       if (c.level === 'cave' && e.op === 'segment.set' && e.cave === c.cid) return true;

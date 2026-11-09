@@ -88,7 +88,7 @@
     refreshCard();
     if (pj.gallery) galleryShow(pj.gallery.i);
     if (/^(survey|shot|cave)\.|^accept$/.test(e.op)) drawField();
-    if (/^lead\.|^accept$|^reject$|^feature\./.test(e.op) || /^cave\./.test(e.op)) drawLeads();
+    if (/^lead\.|^inv\.|^accept$|^reject$|^feature\./.test(e.op) || /^cave\./.test(e.op)) drawLeads();
     if (window._pjSeg) window._pjSeg.changed(e);
     if (window._pjf) window._pjf.changed(e);
     if (window._info) window._info.changed(e);

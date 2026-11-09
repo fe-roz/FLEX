@@ -24,6 +24,10 @@ example coordinates.
         [--docs-input FILE]  with --docs: use this docs input (what export_docs.js collect() writes) instead of
                              the three made-up documents; its pages' files must exist
         [--docs-inline-cap N] bytes of page images inlined in viewer.html (default: the exporter's)
+        [--inventories]      three inventories (a chest at station A5 with a dated log and photos, a simple list at
+                             B2, one at a surface point), written the way the export does (caves.json `inventories`;
+                             the photos as docs_<sha>.jpg listed in docs.json `pages`, which has no entries unless
+                             --docs is given too); the same project id as --docs
         [--field-fixture]    extra data for tools/test_viewer_field.js: leads whose
                              survey order differs from the straight-line one, shots
                              with no from/to names, a bare survey code beside the
@@ -246,6 +250,44 @@ def make_docs(out):
             'pages': [dict(p, path=f) for p, f in ((p1, f1), (p2, f2), (p3, f3), (p4, f4))]}
 
 
+def make_inventories(out, known):
+    """Inventories as the exporter writes them (caves.json `inventories`) and their photo pages for the docs input.
+    known: station name -> scene xyz. Returns (inventories, pages: [{h, ext, w, ht, path}])."""
+    import hashlib
+    pages_dir = out / '_pages'
+    pages_dir.mkdir(exist_ok=True)
+    def photo(label, color, w=480, h=360):
+        im = Image.new('RGB', (w, h), color)
+        d = ImageDraw.Draw(im)
+        d.rectangle([16, 16, w - 16, h - 16], outline=(255, 255, 255), width=4)
+        d.text((30, 30), label, fill=(255, 255, 255))
+        buf = io.BytesIO(); im.save(buf, 'JPEG', quality=80)
+        data = buf.getvalue()
+        sha = hashlib.sha256(data).hexdigest()
+        f = pages_dir / f'{sha}.jpg'
+        f.write_bytes(data)
+        return {'h': sha, 'ext': 'jpg', 'w': w, 'ht': h, 'name': label + '.jpg'}, str(f)
+    p1, f1 = photo('barrel inside', (150, 90, 40)); p2, f2 = photo('barrel lid', (90, 90, 140))
+    ref = lambda p: {'h': p['h'], 'ext': p['ext']}
+    cave_ref = {'station': 'A5', 'cave': 'Cave Ridge', 'target': f'station:{CAVE_ID}:A5'}
+    rope = dict(id='flexinv-rope', xyz=known['A5'], name='Rope cache', desc='Blue barrel behind the boulder', mode='log', kept='project', **cave_ref,
+                contents=[{'name': 'Rope 50 m', 'qty': 3, 'changed': '2026-03-02', 'checked': '2026-03-02', 'since': '2026-03-02', 'stale': False},
+                          {'name': 'Stove', 'qty': 1, 'changed': '2026-01-10', 'checked': '2026-03-02', 'since': '2026-03-02', 'stale': False},
+                          {'name': 'Tarp', 'qty': 1, 'changed': '2026-03-02', 'checked': '2026-03-02', 'since': '2026-03-02', 'stale': False}],
+                checked='2026-03-02', stale=False,
+                log=[{'id': 'e1', 'date': '2026-01-10', 'by': 'Ana', 'action': 'left', 'items': [{'name': 'Rope 50 m', 'qty': 2}, {'name': 'Stove', 'qty': 1}], 'text': 'In the barrel'},
+                     {'id': 'e2', 'date': '2026-02-01', 'by': 'Bo', 'action': 'took', 'items': [{'name': 'Rope 50 m', 'qty': 1}], 'text': ''},
+                     {'id': 'e3', 'date': '2026-03-02', 'by': 'Ana', 'action': 'checked', 'items': [{'name': 'Rope 50 m', 'qty': 3}, {'name': 'Stove', 'qty': 1}, {'name': 'Tarp', 'qty': 1}], 'text': '', 'photos': [ref(p1)]},
+                     {'id': 'e4', 'date': '2026-04-05', 'by': 'Ana', 'action': 'note', 'items': [], 'text': 'Barrel lid cracked', 'photos': [ref(p2)]}])
+    stash = dict(id='flexinv-list', xyz=known['B2'], name='Old stash', desc='', mode='list', kept='mine', station='B2', cave='Cave Ridge', target='station:f.Cave%20Ridge:B2',
+                 list='2 x carbide\nspare lamp', contents=[{'name': 'Carbide', 'qty': 2, 'changed': '2024-05-01', 'checked': '', 'since': '2024-05-01', 'stale': True}], checked='', stale=True,
+                 log=[{'id': 'e1', 'date': '2024-05-01', 'by': 'Cy', 'action': 'left', 'items': [{'name': 'Carbide', 'qty': 2}], 'text': ''}])
+    dig = dict(id='flexinv-dig', xyz=[60.0, -45.0, ground(60.0, -45.0)], name='Dig tools', desc='Under the fallen tree', mode='log', kept='project', target='feature:fsurf1',
+               contents=[{'name': 'Shovel', 'qty': 2, 'changed': '2026-05-01', 'checked': '', 'since': '2026-05-01', 'stale': False}], checked='', stale=False,
+               log=[{'id': 'e1', 'date': '2026-05-01', 'by': 'Bo', 'action': 'left', 'items': [{'name': 'Shovel', 'qty': 2}], 'text': ''}])
+    return [rope, stash, dig], [dict(p1, path=f1), dict(p2, path=f2)]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('out_dir')
@@ -257,6 +299,7 @@ def main():
     ap.add_argument('--docs-inline-cap', type=int, default=DOCS_INLINE_CAP)
     ap.add_argument('--cave3d', action='store_true', help='a multi-level cave with smooth walls (see above)')
     ap.add_argument('--flex-leads', action='store_true', help='a lead kept in FLEX (source flex, status, id, priority) on the main line')
+    ap.add_argument('--inventories', action='store_true', help='inventories (chests with a dated log) and their photos (see above)')
     a = ap.parse_args()
     global W, H
     if a.extent_km:
@@ -280,7 +323,11 @@ def main():
         'extent_utm': [e0 - W / 2, n0 - H / 2, e0 + W / 2, n0 + H / 2],
         'hillshade': None, 'hillshade_cell_m': None, 'terrain': 'lidar', 'terrain_cell_m': 12.5,
     }
-    if a.docs:
+    inv_pages = []
+    if a.inventories:
+        known = {st['name']: st['xyz'] for sv in caves['surveys'] for st in sv['stations']}
+        caves['inventories'], inv_pages = make_inventories(out, known)
+    if a.docs or a.inventories:
         caves['meta']['project'] = {'id': PJ_ID, 'name': 'Test Project'}
         caves['meta']['caves'] = [{'id': CAVE_ID, 'name': 'Cave Ridge'}]
     tiles = []
@@ -314,6 +361,17 @@ def main():
         for zname, fp in docs_files:
             shutil.copyfile(fp, out / zname)
         docs_json = docs_inline_json(side, lambda n: dict(docs_files)[n].read_bytes(), a.docs_inline_cap)
+    if inv_pages:                                  # the photos of inventories: pages in the docs input (with or without documents)
+        dp = out / 'docs_input.json'
+        din = json.loads(dp.read_text(encoding='utf-8')) if dp.exists() else {'project': None, 'caves': [], 'entries': [], 'pages': []}
+        have = {q['h'] for q in din['pages']}
+        din['pages'] = din['pages'] + [q for q in inv_pages if q['h'] not in have]
+        dp.write_text(json.dumps(din), encoding='utf-8')
+        side, docs_files = load_docs(dp, progress=lambda m: None)
+        (out / 'docs.json').write_text(json.dumps(side, separators=(',', ':')), encoding='utf-8')
+        for zname, fp in docs_files:
+            shutil.copyfile(fp, out / zname)
+        docs_json = docs_inline_json(side, lambda n: dict(docs_files)[n].read_bytes(), a.docs_inline_cap)
     html = build_inline_viewer(out / 'terrain.glb', tex_b64, caves, libs, progress=lambda m: None,
                                walls_bytes=data, hs_b64=hs_b64, docs_json=docs_json)
     (out / 'viewer.html').write_text(html, encoding='utf-8')
@@ -321,7 +379,7 @@ def main():
     with zipfile.ZipFile(out.parent / f'FLEX-{slug}.zip', 'w', zipfile.ZIP_DEFLATED) as zf:
         for name in ('terrain.glb', 'tex_sat.jpg', 'walls.bin', 'caves.json', 'viewer.html', *(['tex_hs.jpg'] if tiles else []), *tiles):
             zf.write(out / name, name)
-        if a.docs:
+        if a.docs or inv_pages:
             zf.write(out / 'docs.json', 'docs.json')
             for zname, _ in docs_files:
                 zf.write(out / zname, zname)

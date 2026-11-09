@@ -439,6 +439,7 @@
     ordered.forEach(e => { S.byId.set(e.id, e); S.log.push(e); });
     const R = resolveProposals(ordered);
     S.proposals = R.proposals;
+    const invEntries = [];                        // inventories (inv.* records): replayed by replayInventories, see the section at the end
     R.effective.forEach(e => {
       if (applyFieldSurvey(e, S)) return;
       switch (e.op) {
@@ -614,6 +615,7 @@
         case 'note.set': (recs.note[e.note] || (recs.note[e.note] = { id: e.note, entries: [] })).entries.push(e); break;
         case 'lead.set': case 'lead.del': case 'lead.restore':
           (recs.lead[e.lead] || (recs.lead[e.lead] = { id: e.lead, entries: [] })).entries.push(e); break;
+        case 'inv.set': case 'inv.log': case 'inv.del': case 'inv.restore': invEntries.push(e); break;
         default: break;                       // map.* and anything newer: history only
       }
     });
@@ -657,6 +659,7 @@
       L.updated = { who: r.entries[r.entries.length - 1].who, t: r.entries[r.entries.length - 1].t };
       S.leads[r.id] = L;
     });
+    S.inventories = replayInventories(invEntries);
     return S;
   }
   // The cave an export's cave name stands for (an alias, else a cave of that name).
@@ -1397,6 +1400,7 @@
     out[DOCS].forEach(e => (e.pages || e.add || []).forEach(p => p && p.h && blobs.add(p.h + '.' + (p.ext || 'jpg'))));
     out[pScope].forEach(e => { if (e.op === 'cavefile.set' && e.h) blobs.add(e.h + '.' + (e.ext || 'plt')); });   // survey files travel too
     out[pScope].forEach(e => { if (e.op === 'layer.set' && e.blob) blobs.add(e.blob); });
+    out[pScope].forEach(e => { if (e.op === 'inv.log') invPhotos(e.photos).forEach(p => blobs.add(p.h + '.' + p.ext)); });   // an inventory entry's photos
     const next = clone(sent || {});
     Object.keys(out).forEach(sc => out[sc].forEach(e => {
       const m = next[sc] || (next[sc] = {});
@@ -1750,7 +1754,323 @@
     return { main, pins };
   }
 
+  // ── Inventories: what is kept where, worked out from a dated log ──────────
+  // A cache of gear or supplies at a station (target station:<cid>:<name>) or a surface point (feature:<fid>).
+  // Four records, in the project's log, or My data's when there is no project (same rules as leads: append only,
+  // merged by entry id, `base` links show edits that never saw each other):
+  //   inv.set      { inv, target, fields: { name, desc, mode ('log' | 'list'), list }, prev, base }   create / edit
+  //   inv.log      { inv, log, date, by, action, items: [{ name, qty }], all, photos: [{ h, ext, w?, ht?, name? }], text,
+  //                  removed, prev, base }                                                              one dated entry
+  //   inv.del / inv.restore { inv, base }
+  // Actions: left (adds), took (subtracts), checked (sets the counts seen; `all`: that was everything, so what is not
+  // listed is gone), note (text and photos only). An `inv.log` with the same `log` id is an edit of that entry (whole
+  // or partial, like a note); `removed: true` takes it out of the log (the history keeps it).
+  // Contents come from the log in date order, never stored. Photos are pages by content hash, like documents' pages.
+  const INV = {
+    actions: ['left', 'took', 'checked', 'note'],
+    labels: { left: 'Left', took: 'Took', checked: 'Checked', note: 'Note' },
+    modes: ['log', 'list'],
+    staleDays: 365,                    // an item nobody has counted for this long is "possibly out of date"
+  };
+  const INV_LOG_KEYS = ['date', 'by', 'action', 'items', 'all', 'photos', 'text'];
+  const invKey = n => String(n == null ? '' : n).replace(/\s+/g, ' ').trim().toLowerCase();
+  const invName = n => String(n == null ? '' : n).replace(/\s+/g, ' ').trim().slice(0, 80);
+  const round3 = x => Math.round(x * 1000) / 1000;
+  // A quantity as typed ("3", "2,5", 4): none or text counts as 1; never below 0.
+  function invQty(v) {
+    if (v === 0 || v === '0') return 0;
+    if (v == null || v === '') return 1;
+    const n = typeof v === 'number' ? v : Number(String(v).trim().replace(',', '.'));
+    return Number.isFinite(n) && n >= 0 ? round3(n) : 1;
+  }
+  // The items of one entry: names tidied, empty ones dropped, the same item twice added together.
+  function invItems(list) {
+    const out = [], at = new Map();
+    (Array.isArray(list) ? list : []).forEach(it => {
+      const name = invName(it && it.name);
+      if (!name) return;
+      const q = invQty(it.qty), k = invKey(name);
+      if (at.has(k)) { out[at.get(k)].qty = round3(out[at.get(k)].qty + q); return; }
+      at.set(k, out.length);
+      out.push({ name, qty: q });
+    });
+    return out;
+  }
+  // Photos of an entry: page references (content hash + type), the rest of a page's details kept when sane.
+  function invPhotos(list) {
+    return (Array.isArray(list) ? list : []).filter(p => p && /^[0-9a-f]{64}$/.test(String(p.h || ''))).map(p => {
+      const o = { h: String(p.h), ext: String(p.ext || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 4) || 'jpg' };
+      ['w', 'ht'].forEach(k => { if (Number.isFinite(+p[k]) && +p[k] > 0) o[k] = Math.round(+p[k]); });
+      if (p.name) o.name = String(p.name).slice(0, 120);
+      return o;
+    });
+  }
+  // A date as typed → "2026-03-02" / "2026-03" (2026-3-2, 2026/03/02, 2026.3 are tidied); anything else ("2019", "c. 1975") stays as written.
+  function invDate(v) {
+    const t = String(v == null ? '' : v).trim(), m = /^(\d{4})[-\/.](\d{1,2})(?:[-\/.](\d{1,2}))?$/.exec(t);
+    return m ? m[1] + '-' + m[2].padStart(2, '0') + (m[3] ? '-' + m[3].padStart(2, '0') : '') : t;
+  }
+  // Days from the start of a (possibly partial) date, "2026-03-02" / "2026-03" / "2026", to `now` (ms).
+  function invAge(dk, now) {
+    const m = /^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?/.exec(String(dk || ''));
+    if (!m) return null;
+    return Math.floor((now - Date.UTC(+m[1], (m[2] ? +m[2] : 1) - 1, m[3] ? +m[3] : 1)) / 864e5);
+  }
+  const invNow = o => (o && o.now != null ? (typeof o.now === 'number' ? o.now : Date.parse(o.now)) : Date.now());
+
+  // The counts after a log (entries in date order, removed ones already out).
+  //   left adds · took subtracts (never below 0; what could not be taken off is kept as `short`, a sign the record is
+  //   incomplete) · checked sets what was seen (all: true also empties whatever it did not list).
+  // → { items: [{ key, name, qty, first, changed, checked, short }] (those still there, by name),
+  //     gone: [{ name, changed, checked }], checked: date of the latest check, '' if never }
+  function invContents(log) {
+    const m = new Map();
+    let checked = '';
+    const get = it => {
+      const k = invKey(it.name);
+      let r = m.get(k);
+      if (!r) m.set(k, r = { key: k, name: it.name, qty: 0, first: '', changed: '', checked: '', short: 0 });
+      return r;                                      // (named as first written; edit that entry to correct a spelling)
+    };
+    log.forEach(e => {
+      if (e.action === 'left') e.items.forEach(it => { const r = get(it); if (!r.first) r.first = e.date; if (it.qty) { r.qty = round3(r.qty + it.qty); r.changed = e.date; } });
+      else if (e.action === 'took') e.items.forEach(it => {
+        const r = get(it);
+        if (!r.first) r.first = e.date;
+        if (!it.qty) return;
+        r.qty = round3(r.qty - it.qty);
+        if (r.qty < 0) { r.short = round3(r.short - r.qty); r.qty = 0; }
+        r.changed = e.date;
+      });
+      else if (e.action === 'checked') {
+        const listed = new Set();
+        e.items.forEach(it => { const r = get(it); listed.add(r.key); if (!r.first) r.first = e.date; if (r.qty !== it.qty) r.changed = e.date; r.qty = it.qty; r.checked = e.date; });
+        if (e.all) m.forEach(r => { if (!listed.has(r.key)) { if (r.qty) r.changed = e.date; r.qty = 0; r.checked = e.date; } });
+        checked = e.date;                            // (date order: the last one is the latest)
+      }
+    });
+    const all = [...m.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    return { items: all.filter(r => r.qty > 0), gone: all.filter(r => r.qty <= 0).map(r => ({ name: r.name, changed: r.changed, checked: r.checked })), checked };
+  }
+  // "Possibly out of date": an item counts as known since its last check, else since it was first seen; a list since
+  // it was last edited. Flags depend on the clock, so replay marks them for now and a host may mark again.
+  function invMarkStale(I, now, days) {
+    I.contents.forEach(c => {
+      c.since = c.checked || c.first;
+      c.age = invAge(dateKey(c.since), now);
+      c.stale = c.age != null && c.age > days;
+    });
+    I.checkedAge = I.checked ? invAge(dateKey(I.checked), now) : null;
+    if (I.mode === 'list') {
+      const t = I.fieldBy.list ? Date.parse(I.fieldBy.list.t) : NaN;
+      I.listAge = Number.isFinite(t) ? Math.floor((now - t) / 864e5) : null;
+      I.stale = !!I.list.trim() && I.listAge != null && I.listAge > days;
+    } else I.stale = I.contents.some(c => c.stale);
+    I.staleDays = days;
+    return I;
+  }
+  // A copy of an inventory with the stale flags worked out for another moment or limit: { now (ms or ISO), staleDays }.
+  function invMark(I, o) {
+    const c = Object.assign({}, I, { contents: I.contents.map(x => Object.assign({}, x)) });
+    return invMarkStale(c, invNow(o), o && o.staleDays != null ? o.staleDays : INV.staleDays);
+  }
+  const invSortLog = (a, b) => (a.dk < b.dk ? -1 : a.dk > b.dk ? 1 : a.created.t < b.created.t ? -1 : a.created.t > b.created.t ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+  function invRecord(r) {
+    const first = r.entries[0] || null;
+    const I = { id: r.id, target: '', name: '', desc: '', mode: 'log', list: '', fields: {}, fieldBy: {}, deleted: false, orphan: !first,
+                created: first ? { who: first.who, t: first.t } : null, updated: null, history: r.entries.map(e => e.id), heads: [] };
+    r.entries.forEach(e => {
+      if (e.target) I.target = String(e.target);
+      if (e.op === 'inv.del') { I.deleted = true; return; }
+      if (e.op === 'inv.restore') { I.deleted = false; return; }
+      Object.keys(e.fields || {}).forEach(k => { I.fields[k] = clone(e.fields[k]); I.fieldBy[k] = { who: e.who, t: e.t }; });
+      if (e.source) I.source = e.source;
+    });
+    const f = I.fields, str = v => (v == null ? '' : String(v));
+    I.name = str(f.name); I.desc = str(f.desc); I.list = str(f.list);
+    I.mode = f.mode === 'list' ? 'list' : 'log';
+    const last = r.entries[r.entries.length - 1];
+    if (last) I.updated = { who: last.who, t: last.t };
+    // Two edits that never saw each other (neither is in the other's `base`): per field, both kept.
+    if (r.entries.length) {
+      const hs = heads({ entries: r.entries });
+      I.heads = hs.map(e => e.id);
+      if (hs.length > 1) {
+        const by = {};
+        hs.forEach(e => Object.keys(e.fields || {}).forEach(k => (by[k] || (by[k] = [])).push({ id: e.id, v: e.fields[k], who: e.who, t: e.t })));
+        Object.keys(by).forEach(k => { if (by[k].length > 1 && new Set(by[k].map(x => JSON.stringify(x.v))).size > 1) (I.conflicts || (I.conflicts = {}))[k] = by[k]; });
+      }
+    }
+    // The log: every `log` id is one entry, edits applied in order (a field an edit leaves out stays).
+    const log = [];
+    r.logs.forEach(lr => {
+      const e0 = lr.entries[0], lastE = lr.entries[lr.entries.length - 1], hs = heads(lr);
+      const E = { id: lr.id, inv: r.id, date: '', by: '', action: 'note', items: [], all: false, photos: [], text: '', removed: false,
+                  created: { who: e0.who, t: e0.t }, updated: { who: lastE.who, t: lastE.t }, history: lr.entries.map(e => e.id), heads: hs.map(e => e.id) };
+      lr.entries.forEach(e => {
+        INV_LOG_KEYS.forEach(k => { if (e[k] !== undefined) E[k] = clone(e[k]); });
+        if (e.removed != null) E.removed = !!e.removed;
+      });
+      E.action = INV.actions.includes(E.action) ? E.action : 'note';
+      E.items = invItems(E.items);
+      E.photos = invPhotos(E.photos);
+      E.all = E.action === 'checked' && !!E.all;
+      E.by = str(E.by); E.text = str(E.text); E.date = invDate(E.date);
+      // The day it happened; an entry with none (or nothing readable) counts from the day it was recorded.
+      E.dk = dateKey(E.date) || str(e0.t).slice(0, 10);
+      if (!dateKey(E.date)) E.date = E.dk;
+      if (hs.length > 1) {
+        const by = {};
+        hs.forEach(e => INV_LOG_KEYS.concat(['removed']).forEach(k => { if (e[k] !== undefined) (by[k] || (by[k] = [])).push({ id: e.id, v: e[k], who: e.who, t: e.t }); }));
+        Object.keys(by).forEach(k => { if (by[k].length > 1 && new Set(by[k].map(x => JSON.stringify(x.v))).size > 1) (E.conflicts || (E.conflicts = {}))[k] = by[k]; });
+      }
+      log.push(E);
+    });
+    I.log = log.filter(e => !e.removed).sort(invSortLog);
+    const C = invContents(I.log);
+    I.contents = C.items; I.gone = C.gone; I.checked = C.checked;
+    I.lastDate = I.log.length ? I.log[I.log.length - 1].date : '';
+    I.photos = [];                                         // every photo, newest first, with its date
+    I.log.slice().reverse().forEach(e => e.photos.forEach(p => I.photos.push(Object.assign({}, p, { date: e.date, by: e.by || e.created.who, log: e.id }))));
+    return invMarkStale(I, Date.now(), INV.staleDays);
+  }
+  /**
+   * The inventories of a log: entries are the effective inv.* entries in replay order (replayProject passes them).
+   * → { <inv id>: { id, target, name, desc, mode, list, deleted, orphan (log entries but no inv.set yet), created, updated,
+   *      heads, conflicts?, log: [entry] by date (oldest first; entry: { id, date, by, action, items, all, photos, text,
+   *      created, conflicts? }), contents: [{ name, qty, first, changed, checked, since, age, stale, short }], gone, checked,
+   *      lastDate, photos, stale } }
+   */
+  function replayInventories(entries) {
+    const recs = {};
+    (entries || []).forEach(e => {
+      if (!e || e.inv == null || e.inv === '') return;
+      const id = String(e.inv), rec = recs[id] || (recs[id] = { id, entries: [], logs: new Map() });
+      if (e.op === 'inv.log') {
+        const lid = String(e.log != null && e.log !== '' ? e.log : e.id);
+        (rec.logs.get(lid) || rec.logs.set(lid, { id: lid, entries: [] }).get(lid)).entries.push(e);
+      } else rec.entries.push(e);
+    });
+    const out = {};
+    Object.values(recs).forEach(r => { out[r.id] = invRecord(r); });
+    return out;
+  }
+  // Live inventories (placed, not removed), by name; those at a target; at a station / a surface point.
+  const liveInventories = S => Object.values((S && S.inventories) || {}).filter(i => !i.deleted && i.target).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || (a.id < b.id ? -1 : 1));
+  const invsOn = (S, target) => liveInventories(S).filter(i => i.target === target);
+
+  // The body of the inv.set that turns inventory `cur` (null: a new one) into `next` ({ target, name, desc, mode, list },
+  // any subset); null when nothing changes. The host adds `inv` (a new id for a new one) and records it.
+  function invSetBody(cur, next) {
+    const fields = {}, prev = {};
+    ['name', 'desc', 'mode', 'list'].forEach(k => {
+      if (next[k] == null) return;
+      let v = String(next[k]);
+      if (k === 'name') v = invName(v);
+      else if (k === 'mode') v = v === 'list' ? 'list' : 'log';
+      const was = cur ? String(cur[k] == null ? '' : cur[k]) : '';
+      if (!cur || v !== was) { fields[k] = v; prev[k] = cur ? was : null; }
+    });
+    const body = { op: 'inv.set', fields };
+    if (next.target && (!cur || cur.target !== String(next.target))) body.target = String(next.target);
+    if (!cur) { body.prev = null; return body; }
+    if (body.target) prev.target = cur.target;
+    if (!Object.keys(fields).length && !body.target) return null;
+    body.prev = prev;
+    body.base = cur.heads.slice();
+    return body;
+  }
+  // The body of an inv.log: a new entry of inventory `inv` (id), or with `cur` (an entry of the replayed log) its edit.
+  // draft: { date, by, action, items, all, photos, text }; the date is today when none. null when an edit changes nothing.
+  function invLogBody(inv, draft, cur) {
+    const day = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    const action = INV.actions.includes(draft.action) ? draft.action : 'note';
+    const c = {
+      date: dateKey(draft.date) ? invDate(draft.date) : day(new Date()), by: String(draft.by == null ? '' : draft.by).trim().slice(0, 80), action,
+      items: invItems(draft.items), all: action === 'checked' && !!draft.all, photos: invPhotos(draft.photos), text: String(draft.text == null ? '' : draft.text).trim(),
+    };
+    if (action === 'note') c.items = [];
+    if (!cur) return Object.assign({ op: 'inv.log', inv, log: uid(12), prev: null }, c);
+    const was = {};
+    INV_LOG_KEYS.forEach(k => { was[k] = clone(cur[k]); });
+    was.by = cur.by; was.all = !!cur.all;
+    if (same(was, c) && !cur.removed) return null;
+    return Object.assign({ op: 'inv.log', inv, log: cur.id, prev: was, base: cur.heads.slice() }, c, cur.removed ? { removed: false } : {});
+  }
+  // The body that takes an entry out of the log (History can undo it); `cur`: the entry as replayed.
+  function invLogRemoveBody(inv, cur) {
+    const was = {};
+    INV_LOG_KEYS.forEach(k => { was[k] = clone(cur[k]); });
+    return { op: 'inv.log', inv, log: cur.id, removed: true, prev: was, base: cur.heads.slice() };
+  }
+  // The entry that undoes one of the inv.* entries (a body without id / dev / seq / t / who, like tripUndo), or null:
+  // a new inventory is removed, an edit goes back, a removal is restored; a new log entry is taken out, an edit goes
+  // back, a removed one comes back.
+  function invUndo(e) {
+    if (!e || e.proposed || !e.inv) return null;
+    const out = { inv: e.inv, base: [e.id] };
+    switch (e.op) {
+      case 'inv.set': {
+        if (e.prev === null) return Object.assign(out, { op: 'inv.del' });
+        if (!e.prev || typeof e.prev !== 'object') return null;
+        const back = {}, now = {};
+        Object.keys(e.fields || {}).forEach(k => { back[k] = e.prev[k] == null ? '' : e.prev[k]; now[k] = e.fields[k]; });
+        const o = Object.assign(out, { op: 'inv.set', fields: back, prev: now });
+        if (e.target && e.prev.target) { o.target = e.prev.target; now.target = e.target; }
+        return Object.keys(back).length || o.target ? o : null;
+      }
+      case 'inv.del': return Object.assign(out, { op: 'inv.restore' });
+      case 'inv.restore': return Object.assign(out, { op: 'inv.del' });
+      case 'inv.log': {
+        const here = {};
+        INV_LOG_KEYS.forEach(k => { if (e[k] !== undefined) here[k] = clone(e[k]); });
+        if (e.prev === null) return Object.assign(out, { op: 'inv.log', log: e.log, removed: true, prev: here });
+        if (!e.prev || typeof e.prev !== 'object') return null;
+        return Object.assign(out, { op: 'inv.log', log: e.log }, clone(e.prev), { removed: false, prev: Object.assign(here, e.removed ? { removed: true } : {}) });
+      }
+      default: return null;
+    }
+  }
+  // Take an inventory that came in an export (caves.json `inventories`: id, name, desc, mode, list, log) into a library that
+  // does not have it yet: the inv.set (same id, so every device that adopts it makes the same record) and one inv.log per
+  // exported entry (same log ids), as bodies for the host to record, oldest first. Records two devices both made from the
+  // same export have equal values, so they merge into one inventory without a conflict. `target`: the place in this library
+  // (the export's `target` names the writer's own cave key, so the host maps it to the project's cave).
+  function invAdoptBodies(exp, target) {
+    const out = [Object.assign({ op: 'inv.set', inv: String(exp.id), target: String(target), fields: { name: invName(exp.name), desc: String(exp.desc || ''), mode: exp.mode === 'list' ? 'list' : 'log', list: String(exp.list || '') }, prev: null, source: 'export' })];
+    (Array.isArray(exp.log) ? exp.log : []).forEach(e => {
+      if (!e || !e.id) return;
+      const action = INV.actions.includes(e.action) ? e.action : 'note';
+      out.push({ op: 'inv.log', inv: String(exp.id), log: String(e.id), date: String(e.date || ''), by: String(e.by || ''), action, items: invItems(e.items), all: action === 'checked' && !!e.all,
+        photos: invPhotos(e.photos), text: String(e.text || ''), prev: null });
+    });
+    return out;
+  }
+  // A one-line account of what is there ("Rope 50 m ×2, Stove"), for lists and markers.
+  function invLine(I, max) {
+    if (I.mode === 'list') return String(I.list || '').split('\n').map(s => s.trim()).filter(Boolean).join(', ');
+    const q = c => (c.qty === 1 ? '' : ' ×' + c.qty);
+    const all = I.contents.map(c => c.name + q(c));
+    return max && all.length > max ? all.slice(0, max).join(', ') + ` +${all.length - max}` : all.join(', ');
+  }
+  // The inventory as the export carries it (caves.json `inventories`): the host adds where it is.
+  function invPayload(I) {
+    return {
+      id: I.id, target: I.target, name: I.name, desc: I.desc, mode: I.mode, list: I.list,
+      contents: I.contents.map(c => ({ name: c.name, qty: c.qty, changed: c.changed, checked: c.checked, since: c.since, stale: !!c.stale })),      // since: counted, else first seen (a viewer works out `stale` on its own clock from it)
+      checked: I.checked, stale: !!I.stale,
+      log: I.log.map(e => {
+        const o = { id: e.id, date: e.date, by: e.by || e.created.who || '', action: e.action, items: e.items.map(x => ({ name: x.name, qty: x.qty })), text: e.text };
+        if (e.all) o.all = true;
+        if (e.photos.length) o.photos = e.photos.map(p => ({ h: p.h, ext: p.ext }));
+        return o;
+      }),
+    };
+  }
+
   return {
+    INV, invKey, invQty, invItems, invPhotos, invDate, invAge, invMark, replayInventories, liveInventories, invsOn, invSetBody, invLogBody, invLogRemoveBody, invUndo, invAdoptBodies, invLine, invPayload,   // inventories (the section above)
     FORMAT, FT, DOCS, projScope, scopeProject, sha256, uid, clone, nowIso, same, cmp, sortEntries, surveyCode,
     T, parseTarget, areaHas, DOC_KINDS, DOC_KIND_LABELS, docMedia, dateKey, resolveProposals, reviewQueue, causalOrder, LEAD, LEAD_FIELDS, leadLists, statusLabel, leadActive, heads,
     replayProject, replayDocs, caveForName, liveCaves, notesOn, leadsOn,

@@ -91,6 +91,7 @@
     if (!leadSrc) { leadSrc = new Cesium.CustomDataSource('pj-leads'); V.dataSources.add(leadSrc); }
     leadSrc.entities.removeAll();
     if (window._flexLeads) window._flexLeads.syncFile();
+    if (window._inventory) window._inventory.redraw();          // the chests (inventory.js) follow the same events: project opened / changed, caves loaded
     if (!pj.pid) return;
     const FX = window._flexLeads;
     const showClosed = !!(FX && FX.closed());
