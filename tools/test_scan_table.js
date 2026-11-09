@@ -146,6 +146,15 @@ t = S.buildTable(ocr5b);
 sh = shotsOf(t);
 ok('merged cells without letter boxes: cut by letter position', sh[2].shot.len === '15.0' && sh[2].shot.az === '271', sh[2].shot);
 
+// grid lines read as text: a "|" between columns on every row, a rule of underscores
+let ocr5c = makeOcr(rows5, { colX: X1, seed: 24 });
+const lineY = ocr5c.words.filter(w => w.line >= 1).map(w => w.box[1]);
+ocr5c.words.push({ text: '|', box: [300, Math.min(...lineY) - 10, 306, Math.max(...lineY) + 40], conf: 0.5 });
+ocr5c.words.push({ text: '|', box: [568, Math.min(...lineY) - 10, 573, Math.max(...lineY) + 40], conf: 0.5 });
+ocr5c.words.push({ text: '______________', box: [50, 165, 1100, 175], conf: 0.4 });
+t = S.buildTable(ocr5c);
+ok('ruled lines read as "|" and "____" are left out', JSON.stringify(fieldsOf(t)) === JSON.stringify(['from', 'to', 'len', 'az', 'inc', 'l', 'r', 'u', 'd', 'note']) && shotsOf(t).length === 4 && shotsOf(t)[1].shot.len === '8.3', [fieldsOf(t), shotsOf(t).map(x => x.shot)]);
+
 // ── 6. Missing LRUD ────────────────────────────────────────────────────────
 const rows6 = [H1,
   ['A4', 'X1', '12.5', '245', '-5', '', '', '', '', ''],

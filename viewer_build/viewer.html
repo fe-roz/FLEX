@@ -5023,6 +5023,7 @@ function ffToLog(op, data) {
   return d;
 }
 let _ffSaveWarned = false;
+let _ffQuiet = 0;                // > 0 while ffRecordMany logs a batch
 // Record a change: log it, replay, redraw what it touches.
 function ffRecord(op, data, extra, where) {
   if (!ffPid && where !== 'docs') { showToast('No project for this map yet'); return null; }
@@ -5040,7 +5041,6 @@ function ffRecord(op, data, extra, where) {
   return entry;
 }
 // Many entries at once (a page of shots from a scan): logged one by one, replayed and redrawn once.
-let _ffQuiet = 0;
 function ffRecordMany(list, where) {
   const out = [];
   _ffQuiet++;
@@ -5637,7 +5637,7 @@ async function ffDocMenu(docId) {
   const r = await ffChoose(d.title || 'Document', `${d.pages.length} page(s) · added by ${(d.created && d.created.who) || '?'}, ${ffWhen(d.created && d.created.t)}`, [
     { label: '✏️ Title, kind, date', value: 'edit' }, { label: '＋ Add pages', value: 'add' },
     ...(d.pages.length ? [{ label: '🗑 Remove this page', value: 'drop' }] : []),
-    ...(window.FlexScan && d.pages[ffGallery.i] && d.pages[ffGallery.i].ext !== 'pdf' ? [{ label: '📷 Import shots from this page', value: 'scan' }] : []),
+    ...(window.FlexScan && ffGallery && d.pages[ffGallery.i] && d.pages[ffGallery.i].ext !== 'pdf' ? [{ label: '📷 Import shots from this page', value: 'scan' }] : []),
     { label: '📝 Notes on this document', value: 'note' }, { label: '🗑 Delete the document', value: 'del' }]);
   if (!r) return;
   if (r === 'scan') { FlexScan.openFromDoc(docId, ffGallery.i); return; }

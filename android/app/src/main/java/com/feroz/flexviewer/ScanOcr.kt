@@ -7,6 +7,7 @@ import android.graphics.Rect
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.TextRecognizer
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import org.json.JSONArray
 import org.json.JSONObject
@@ -34,7 +35,9 @@ import java.util.concurrent.Executors
 class ScanOcr(private val lib: LibStore, private val maps: MapStore) {
 
     private val worker = Executors.newSingleThreadExecutor()
-    private val reader by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
+    /** Made on first use (on the worker thread), so opening the app costs nothing. */
+    @Volatile private var reader: TextRecognizer? = null
+    private fun reader(): TextRecognizer = reader ?: TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS).also { reader = it }
 
     companion object {
         /** Long side a page is read at, at most: plenty for pencil digits, light on memory. */
@@ -53,7 +56,7 @@ class ScanOcr(private val lib: LibStore, private val maps: MapStore) {
 
     fun close() {
         worker.shutdown()
-        try { reader.close() } catch (_: Exception) {}
+        try { reader?.close() } catch (_: Exception) {}
     }
 
     private fun run(ref: String, ctxJson: String): JSONObject {
@@ -68,7 +71,7 @@ class ScanOcr(private val lib: LibStore, private val maps: MapStore) {
         }
         val w = bmp.width
         val h = bmp.height
-        val text = try { Tasks.await(reader.process(InputImage.fromBitmap(bmp, 0))) } finally { bmp.recycle() }
+        val text = try { Tasks.await(reader().process(InputImage.fromBitmap(bmp, 0))) } finally { bmp.recycle() }
 
         val blocks = JSONArray()
         for (b in text.textBlocks) {

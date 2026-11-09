@@ -474,7 +474,18 @@
     const table = { width: num(ocr && ocr.width) || 0, height: num(ocr && ocr.height) || 0, skew: 0, H: 0, unit: null,
       columns: [], rows: [], words: ws.map(w => ({ text: w.text, box: [w.x0, w.y0, w.x1, w.y1], conf: w.conf })) };
     if (!ws.length) return table;
-    const H = Math.max(4, median(ws.map(w => w.y1 - w.y0)));
+    let H = Math.max(4, median(ws.map(w => w.y1 - w.y0)));
+    // ruled lines read as text: tall thin strokes ("|", "l" between columns), long runs of dashes or underscores
+    const kept = ws.filter(w => {
+      const h = w.y1 - w.y0, wd = w.x1 - w.x0;
+      if (/^[|lI1!\[\]()]+$/.test(w.text) && h > 1.8 * H && wd < 0.5 * H) return false;
+      if (/^[-_=~.—–]{3,}$/.test(w.text) && wd > 3 * H) return false;
+      return h < 3.5 * H;
+    });
+    if (kept.length !== ws.length) {
+      ws.length = 0; kept.forEach(w => ws.push(w));
+      H = Math.max(4, median(ws.map(w => w.y1 - w.y0)));
+    }
     const slope = estimateSkew(ws, H);
     deskew(ws, slope);
     table.H = H; table.skew = slope;
@@ -1207,7 +1218,7 @@ body.scan-open #mode-toast { z-index: 95; bottom: 96px; font-size: 14px; }
     const keep = !!(S && S.pushed);
     if (S) close(true);
     frame();
-    const sid = opts.sid && survey(opts.sid) ? opts.sid : (typeof ffPanelSurvey !== 'undefined' && ffPanelOpen && survey(ffPanelSurvey) ? ffPanelSurvey : null);
+    const sid = opts.sid && survey(opts.sid) ? opts.sid : (typeof ffPanelSurvey !== 'undefined' && ffPanelOpen && !ffDocsOpen && survey(ffPanelSurvey) ? ffPanelSurvey : null);
     S = { page: opts.page || null, sid, unit: (survey(sid) && survey(sid).lenUnit) || 'ft', table: null, sel: null, rowSel: new Set(),
       z: 1, x: 0, y: 0, img: null, reading: false, dirty: false, pushed: false };
     S.known = knownStations(sid);
@@ -1219,12 +1230,14 @@ body.scan-open #mode-toast { z-index: 95; bottom: 96px; font-size: 14px; }
     R.title.append(document.createTextNode('Import shots from scan'));
     R.title.appendChild(mk('small', null, S.page ? [S.page.title, S.page.name || (S.page.doc ? 'page ' + (S.page.index + 1) : '')].filter(Boolean).join(' · ') : 'no page: type the shots'));
     R.boxes.textContent = ''; R.hl.style.display = 'none'; R.msg.textContent = '';
-    if (S.img) S.img.remove();
+    R.sheet.querySelectorAll('img').forEach(i => i.remove());
     R.turn.style.display = S.page ? '' : 'none';
     banner(null);
     renderTargets();
+    const me = S;
     if (S.page) await loadImage();
     else R.msg.textContent = 'No page. Type the shots into the table.';
+    if (S !== me) return;                                  // closed while the page loaded
     const d = loadDraft();
     if (d) {
       S.table = d.table; S.unit = d.unit || S.unit; S.dirty = true;
@@ -1562,6 +1575,7 @@ body.scan-open #mode-toast { z-index: 95; bottom: 96px; font-size: 14px; }
       td.classList.toggle('f1', rc.level === 1); td.classList.toggle('f2', rc.level === 2);
     });
     drawBoxes();
+    markRows();
     if (S.sel) select(S.sel.r, S.sel.c, null);
     counts();
     saveDraft();
@@ -1720,6 +1734,7 @@ body.scan-open #mode-toast { z-index: 95; bottom: 96px; font-size: 14px; }
     dropDraft();
     S.dirty = false;
     close();
+    try { ffGalleryClose(); } catch (_) {}
     try { ffOpenPanel(sid); } catch (_) {}
     toast(`Added ${list.length} shot${list.length === 1 ? '' : 's'} to “${sv.name}”${conv}${tagged ? ' · page tagged ' + tagged : ''}`);
   }
