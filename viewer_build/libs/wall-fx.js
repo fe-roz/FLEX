@@ -47,7 +47,7 @@
   // Ghost draws the nearest wall layer at the ghost strength and every layer behind it at restShare of
   // that, in three passes (depth pre-pass, the layers behind, the nearest). Past layeredMaxTris
   // triangles (a phone's budget) it falls back to one pass over every layer.
-  const LIMITS = { layeredMaxTris: 700000, restShare: 0.6, layered: true };
+  const LIMITS = { layeredMaxTris: 450000, restShare: 0.6, layered: true };
   const RANGE = { ghost: [0.03, 0.5], edge: [0, 1], fade: [0, 1], r: [3, 5000], cutR: [1, 500] };
 
   // ── Shader pieces ───────────────────────────────────────────────────────────
@@ -86,6 +86,8 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
     float fxPart = fxV * fxF * fxD;
     if (uFxPass > 0.5) {
       if (fxPart < 0.5) discard;
+      gl_FragColor = vec4(0.0);       // the depth pre-pass: depth only, so skip the lighting
+      return;
     } else {
       float fxL = length(vFxN);
       float fxNV = fxL > 0.00001 ? abs(dot(vFxN / fxL, normalize(-vFxP))) : 1.0;
@@ -172,7 +174,7 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
   function caveSize() {
     if (_size) return _size;
     const b = ctx && ctx.caveBox && ctx.caveBox();
-    if (b && !b.isEmpty()) { const d = b.max.distanceTo(b.min); if (d > 1) _size = d; }
+    if (b && !b.isEmpty()) _size = Math.max(1, b.max.distanceTo(b.min));      // once there is a cave, not again
     return _size || 200;
   }
   const defaultR = () => clamp(0.18 * caveSize(), 12, 150);
@@ -353,12 +355,18 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
     const len = H.units && H.units.len ? m => H.units.len(m) : m => Math.round(m) + ' m';
     H.head('Focus');
     const row = H.row('🎯', 'Focus mode', 'near the orbit point only', toggleFocus, S.focus);
-    // The two parts; with both off, focus mode has nothing to do, so it turns itself off.
-    H.chips([
-      ['⭕', 'Near centre', S.around, on => { S.around = on; if (!S.around && !S.cut) S.focus = false; changed(); }],
-      ['✂️', 'Cut in front', S.cut, on => { S.cut = on; if (!S.around && !S.cut) S.focus = false; changed(); }],
-    ]);
-    const grid = H.sheet.lastElementChild, chips = grid.querySelectorAll('.sh-chip');
+    // The two parts, read live (the quick button or the other chip can change them while the sheet is
+    // open); with both off, focus mode has nothing to do, so it turns itself off.
+    const grid = H.el('div', 'sh-chips'), chips = [];
+    const chip = (icon, label, get, set) => {
+      const c = H.el('button', 'sh-chip');
+      c.append(H.el('span', '', icon), H.el('span', '', label)); c.title = label;
+      c.addEventListener('click', () => { set(!get()); if (!S.around && !S.cut) S.focus = false; changed(); });
+      grid.appendChild(c); chips.push(c);
+    };
+    chip('⭕', 'Near centre', () => S.around, v => { S.around = v; });
+    chip('✂️', 'Cut in front', () => S.cut, v => { S.cut = v; });
+    H.sheet.appendChild(grid);
     const rs = slider(H, 'focus-radius-slider', 'Radius', 0, 100, toT(getR(), rRange()), t => len(fromT(t, rRange())), t => { S.r = fromT(t, rRange()); changed(); });
     const cs = slider(H, 'focus-cut-slider', 'Cut radius', 0, 100, toT(getCutR(), cRange()), t => len(fromT(t, cRange())), t => { S.cutR = fromT(t, cRange()); changed(); });
     // Repainted in place (the sheet keeps its scroll position): the switch row, the chips and the

@@ -155,9 +155,11 @@ FX.applyWalls(0, 0.6);
 ok('On: pre-pass visible, no layers-behind pass, opacity as given, depth test on, edges only lift the rims', w.pre.visible && !w.rest.visible && w.col.material.opacity === 0.6 && w.col.material.depthTest && w.col.material.userData.fxFace.value === 0);
 FX.applyWalls(1, 0.6);
 ok('Ghost: pre-pass, layers behind at a share of the ghost strength, nearest at the full strength', w.pre.visible && w.rest.visible && w.col.material.opacity === S.ghost && near(w.rest.material.opacity, S.ghost * FX.limits.restShare) && w.col.material.depthTest && w.col.material.userData.fxFace.value === 1);
+const budget = FX.limits.layeredMaxTris;
+ok('the triangle budget for the layered ghost is set (a phone must draw it three times)', budget > 100000 && budget < 2000000, budget);
 FX.limits.layeredMaxTris = 50; FX.applyWalls(1, 0.6);
 ok('Ghost over the triangle budget: one pass over every layer (no pre-pass, no depth test)', !w.pre.visible && !w.rest.visible && !w.col.material.depthTest);
-FX.limits.layeredMaxTris = 700000;
+FX.limits.layeredMaxTris = budget;
 FX.applyWalls(2, 0.6);
 ok('Off: nothing of the set is visible by itself (the group is hidden by the viewer)', !w.pre.visible && !w.rest.visible);
 S.ghost = 0.33; FX.applyWalls(1, 0.6);
@@ -170,6 +172,16 @@ FX.applyWalls(0, 0.5);
 ok('a set that was removed from the scene drops out of the registry', FX.wallSets.length === 1);
 let disposed = 0; w.rest.material.dispose = () => { disposed++; }; w.grp.remove(w.col);
 ok('removing a set releases its child pass material', disposed === 1, disposed);
+
+// ── The viewer still calls it where it must (a merge that drops one of these hooks fails here) ──
+{
+  const html = fs.readFileSync(path.join(root, 'viewer_build', 'viewer.html'), 'utf8');
+  const hooks = [['<script src="libs/wall-fx.js"></script>', 1, 1], ['FlexFx.init(', 1, 1], ['FlexFx.makeWalls(', 2, 2], ['FlexFx.applyWalls(', 2, 2], ['FlexFx.patch(', 5, 9],
+    ['FlexFx.tapFactor(', 3, 6], ['FlexFx.sheetWalls(', 1, 1], ['FlexFx.sheetFocus(', 1, 1], ['FlexFx.bindButton(', 1, 1], ['FlexFx.serialize()', 1, 1], ['FlexFx.syncUi()', 1, 1], ['id="tb-focus"', 1, 1]];
+  for (const [t, lo, hi] of hooks) { const n = count(html, t); ok(`viewer.html has ${t} ${lo === hi ? lo : lo + '-' + hi} time(s)`, n >= lo && n <= hi, n); }
+  ok('the module is loaded before the viewer script that calls it', html.indexOf('<script src="libs/wall-fx.js"></script>') < html.indexOf("<script>\n'use strict';"));
+  ok('the viewer no longer builds its own wall pair (BackSide / FrontSide wall materials)', !/new THREE\.Mesh\(geo, mk\(THREE\.(Back|Front)Side\)\)/.test(html));
+}
 
 // ── Cost ─────────────────────────────────────────────────────────────────────
 {
