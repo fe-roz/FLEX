@@ -42,4 +42,10 @@ ok('stat lines: grade, brush, sun, trail', L.mid === 'steepest 28% · brush 20% 
 ok('stat lines: the breakdown names each part', /walking 14 min · climbing 6 min/.test(L.breakdown) && /trail −/.test(L.breakdown) && L.cliffs === 2, L.breakdown);
 ok('presets: the five, sliders for all seven weights', Object.keys(M.PRESETS).length === 5 && M.SLIDERS.length === 7 && Object.keys(M.WDEF).every(k => M.SLIDERS.some(s => s.k === k)));
 ok('presets: Shadiest prefers shade, Shortest weighs distance most', M.PRESETS.shadiest.w.sun === -1 && M.PRESETS.shortest.w.distance > M.PRESETS.easiest.w.distance);
+const pa = M.buildParams(Object.assign({}, st, { starts: [], anyRoad: true }));
+ok('params: "any ticked road or trail" sends the ticked lines as start_lines and still as trails', pa.starts.length === 0 && pa.start_lines.features.length === 1 && pa.trails.features.length === 1 && pa.start_lines.features[0].properties.name === 'Cave Ridge Rd', pa.start_lines);
+ok('params: no start_lines key without the chip, or with no ticked line', !('start_lines' in p) && !('start_lines' in M.buildParams(Object.assign({}, st, { anyRoad: true, trails: [] }))));
+const bins = M.profileBins([[0, 10, 0, 0], [100, 12, 1, 40], [200, 14, 0, 20]], 4);
+ok('profile bins: n columns along the distance, brush 0..1 and slope interpolated', bins.length === 4 && Math.abs(bins[0].brush - 0.25) < 0.01 && Math.abs(bins[1].brush - 0.75) < 0.01 && Math.abs(bins[2].slope - 35) < 0.01 && bins.every(b => b.brush >= 0 && b.brush <= 1), bins);
+ok('profile bins: nothing for no profile, junk brush counts as 0', M.profileBins(null, 10).length === 0 && M.profileBins([[0, 1], [10, 2]], 2)[0].brush === 0);
 console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

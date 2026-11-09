@@ -4,6 +4,8 @@
 //
 //   Picks      End (one) and Starts (one or more): click on the ground, or choose a point from the project, My data, CalTopo or
 //              a file (a cave entrance is a point with the flex: tag). A chip per pick with ×. Drawn on the map as S1, S2 … and E.
+//              Or the chip "Any ticked road or trail": every cell under the ticked trails is a start (params.start_lines; the
+//              ticked trails are still sent as params.trails), the route is the cheapest to any of them ("from road: <name>").
 //   Source     the LiDAR: point clouds loaded now (their ORIGINAL url, captured when they were added) and the open project's
 //              own point cloud layers; tick one or several. Cell, DEM (below / above / both), brush band.
 //   Weights    sliders (Distance, Steepness, Brush, Cliffs, Sun, Trails, Roads), presets (Easiest, Shortest, Least brush,
@@ -17,7 +19,7 @@
 //              (route-stats.js routeNode); "Save as project line…" (project or My data); overlays (brush, slope, shade,
 //              hillshade) over the grid's bounds with opacity.
 //
-// window._surfRoute = { state, run, results, select, selected, addPick, removePick, setPick, clearPicks, candidates, datasets,
+// window._surfRoute = { setAnyRoad, state, run, results, select, selected, addPick, removePick, setPick, clearPicks, candidates, datasets,
 //   setWeights, weights, preset, presets, savePreset, trails, setTrail, params, saveLine, overlay, overlays, setOpacity,
 //   pickOnMap, stopPick, zoomTo, clear, refresh, cancelRerun, pure }
 // Node (tools/test_surface_route.js): module.exports = pure helpers.
@@ -86,6 +88,7 @@
       presets: ['shortest', 'least_brush', 'shadiest', 'least_climb'],
       units: st.units === 'imperial' ? 'ft' : 'm',
     };
+    if (st.anyRoad && feats.length) p.start_lines = { type: 'FeatureCollection', features: feats };      // every cell under these lines is a start
     return p;
   }
   const OPT_LABEL = { recommended: 'Recommended', shortest: 'Shortest', least_brush: 'Least brush', shadiest: 'Shadiest', least_climb: 'Least climb' };
@@ -105,7 +108,20 @@
     const breakdown = parts.map(p => p[0] + ' ' + (p[1] < 0 ? '−' : '') + mins(Math.abs(p[1]))).join(' · ');
     return { top: top.join(' · '), mid: mid.join(' · '), breakdown, cliffs: s.cliff_cells || 0 };
   }
-  const pure = { WDEF, PRESETS, SLIDERS, detectKind, eptUrl, buildParams, orderRoutes, statLines, OPT_LABEL, COLOURS };
+  /** The server's profile [[dist, elev, brush 0..1, slope deg]…] → n columns [{ brush, slope }] along the distance axis (cheap: one pass). */
+  function profileBins(profile, n) {
+    const pr = (profile || []).filter(r => r && Number.isFinite(r[0])), out = [];
+    if (pr.length < 2) return out;
+    const last = pr[pr.length - 1][0] || 1; let j = 0;
+    for (let k = 0; k < n; k++) {
+      const d = (k + 0.5) / n * last;
+      while (j < pr.length - 2 && pr[j + 1][0] < d) j++;
+      const a = pr[j], b = pr[j + 1], t = b[0] > a[0] ? Math.min(1, Math.max(0, (d - a[0]) / (b[0] - a[0]))) : 0, mix = i => (Number.isFinite(a[i]) ? a[i] : 0) * (1 - t) + (Number.isFinite(b[i]) ? b[i] : 0) * t;
+      out.push({ brush: Math.min(1, Math.max(0, mix(2))), slope: Math.max(0, mix(3)) });
+    }
+    return out;
+  }
+  const pure = { profileBins, WDEF, PRESETS, SLIDERS, detectKind, eptUrl, buildParams, orderRoutes, statLines, OPT_LABEL, COLOURS };
   if (typeof module !== 'undefined' && module.exports) module.exports = pure;
   if (!root || !root.document) return;
 
@@ -118,7 +134,7 @@
   const lset = (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} };
   const SKEY = 'flex.surfroute', PKEY = 'flex.surfroute.presets';
 
-  const S = { end: null, starts: [], epts: [], cell: 'auto', dem: 'below', band: [0.5, 2], weights: Object.assign({}, WDEF),
+  const S = { end: null, starts: [], anyRoad: false, epts: [], cell: 'auto', dem: 'below', band: [0.5, 2], weights: Object.assign({}, WDEF),
     trailOff: new Set(), trailOn: new Set(), trailKind: {},
     running: false, dirty: false, jobId: null, lastId: null, result: null, routes: [], sel: 0, msg: '', msgBad: false,
     overlays: {}, opacity: 0.6, ovLayers: {}, units: null, rerunTimer: null };
@@ -170,11 +186,11 @@
     const t = trails().find(x => x.key === key); if (!t) return false;
     if (kind) S.trailKind[key] = kind === 'road' ? 'road' : 'trail';
     if (on != null) { if (t.detected) (on ? S.trailOff.delete(key) : S.trailOff.add(key)); else (on ? S.trailOn.add(key) : S.trailOn.delete(key)); }
-    paintTrails(); return true;
+    paintTrails(); if (S.anyRoad) paintPicks(); return true;
   }
   const trailsOn = () => trails().filter(t => t.on);
   function params() {
-    return buildParams({ epts: S.epts, end: S.end, starts: S.starts, cell: S.cell, dem: S.dem, band: S.band, weights: S.weights, units: U().system(),
+    return buildParams({ epts: S.epts, end: S.end, starts: S.starts, anyRoad: S.anyRoad, cell: S.cell, dem: S.dem, band: S.band, weights: S.weights, units: U().system(),
       trails: trailsOn().map(t => ({ coords: t.coords, kind: t.kind, name: t.name })) });
   }
 
@@ -248,7 +264,8 @@
     paintPicks(); drawPicks(); return pick;
   }
   function removePick(kind, i) { if (kind === 'end') S.end = null; else S.starts.splice(i, 1); paintPicks(); drawPicks(); }
-  function clearPicks() { S.end = null; S.starts = []; paintPicks(); drawPicks(); }
+  function setAnyRoad(on) { S.anyRoad = !!on; paintPicks(); }
+  function clearPicks() { S.end = null; S.starts = []; S.anyRoad = false; paintPicks(); drawPicks(); }
 
   // ── Overlays from grids/ ──────────────────────────────────────────────────
   const OV = [['brush', 'Brush', 'brush.png'], ['slope', 'Slope', 'slope.png'], ['shade', 'Shade', 'shade.png'], ['ground_hs', 'Ground hillshade', 'ground_hs.png']];
@@ -284,7 +301,8 @@
     if (S.running) { S.dirty = true; return { ok: false, error: 'busy' }; }
     if (!S.epts.length) { say('Tick the LiDAR to use (a point cloud loaded or in the project).', true); return { ok: false, error: 'no lidar' }; }
     if (!S.end) { say('Choose the end of the route.', true); return { ok: false, error: 'no end' }; }
-    if (!S.starts.length) { say('Choose at least one start.', true); return { ok: false, error: 'no start' }; }
+    if (!S.starts.length && !S.anyRoad) { say('Choose at least one start, or “Any ticked road or trail”.', true); return { ok: false, error: 'no start' }; }
+    if (S.anyRoad && !S.starts.length && !trailsOn().length) { say('Tick at least one road or trail to start from (under Trails and roads).', true); return { ok: false, error: 'no start lines' }; }
     const pj = (A() && A().pj) || {};
     S.running = true; S.dirty = false; paintRun();
     say(o.rerun ? 'Searching again with the new weights…' : 'Starting…');
@@ -358,7 +376,7 @@
   async function saveDialog() {
     const f = S.routes[S.sel]; if (!f || !A()) return;
     const pj = A().pj, body = el('div', 'pj-form'), lab = (t, x) => { const r = el('div', 'pj-f'); r.appendChild(el('div', 'pj-f-l', t)); r.appendChild(x); return r; };
-    const name = el('input', 'pj-input'); name.id = 'sr-save-name'; name.value = 'Route: ' + (f.properties.label || f.properties.option) + ' (' + (S.starts[f.properties.start_index || 0] || { name: 'start' }).name + ' to ' + (S.end ? S.end.name : 'end') + ')';
+    const name = el('input', 'pj-input'); name.id = 'sr-save-name'; name.value = 'Route: ' + (f.properties.label || f.properties.option) + ' (' + ((S.starts[f.properties.start_index] || {}).name || String(f.properties.label || 'a road')) + ' to ' + (S.end ? S.end.name : 'end') + ')';
     const desc = el('textarea', 'pj-input'); desc.id = 'sr-save-desc'; desc.rows = 6; desc.value = describe(f);
     const dest = el('select', 'pj-input'); dest.id = 'sr-save-dest';
     if (pj.pid) dest.appendChild(new Option('The open project', 'project'));
@@ -405,7 +423,9 @@
     if (S.end) e.appendChild(chip(S.end.name, S.end.at[1].toFixed(5) + ', ' + S.end.at[0].toFixed(5), () => removePick('end')));
     else e.appendChild(el('span', 'sr-none', 'not chosen'));
     S.starts.forEach((p, i) => s.appendChild(chip('S' + (i + 1) + ' ' + p.name, p.at[1].toFixed(5) + ', ' + p.at[0].toFixed(5), () => removePick('start', i))));
-    if (!S.starts.length) s.appendChild(el('span', 'sr-none', 'none chosen'));
+    if (S.anyRoad) s.appendChild(chip('Any ticked road or trail (' + trailsOn().length + ')', 'Every cell under the ticked trails is a start: the cheapest way from any of them', () => setAnyRoad(false)));
+    if (!S.starts.length && !S.anyRoad) s.appendChild(el('span', 'sr-none', 'none chosen'));
+    const rb = $('sr-start-roads'); if (rb) rb.classList.toggle('on', S.anyRoad);
     [['sr-end-map', 'end'], ['sr-start-map', 'start']].forEach(([id, k]) => { const b = $(id); if (b) b.classList.toggle('on', !!(picking && picking.kind === k)); });
   }
   function fillCandidates() {
@@ -479,7 +499,7 @@
       const c = el('div', 'sr-card' + (i === S.sel ? ' on' : '')); c.dataset.i = i; c.dataset.option = p.option; c.tabIndex = 0; c.style.setProperty('--c', col);
       const h = el('div', 'sr-ch'); h.appendChild(el('span', 'sr-sw')); h.appendChild(el('b', null, p.label || OPT_LABEL[p.option] || p.option));
       if (p.option === 'recommended') h.appendChild(el('span', 'sr-rec', 'recommended'));
-      if (S.starts.length > 1) h.appendChild(el('span', 'sr-from', 'from S' + ((p.start_index || 0) + 1)));
+      if (S.starts.length > 1 && Number.isInteger(p.start_index) && p.start_index >= 0 && p.start_index < S.starts.length) h.appendChild(el('span', 'sr-from', 'from S' + (p.start_index + 1)));
       c.appendChild(h);
       const t = el('div', 'sr-cs', L.top); t.title = L.breakdown ? 'Time: ' + L.breakdown : ''; c.appendChild(t);
       c.appendChild(el('div', 'sr-cs2', L.mid));
@@ -497,6 +517,24 @@
     try { wrap.appendChild(RS.routeNode({ coords: f.geometry.coordinates, times: null, points: pts, lines: [], open: it => I && I.openItem && I.openItem(it),
       entrance: pt => { const FLx = FL(); const t = FLx && FLx.flexTag && FLx.flexTag(pt.desc ? pt.desc() : ''); return t ? 'entrance of ' + t.cave : null; } })); } catch (e) { wrap.textContent = 'The height graph could not be drawn.'; }
     box.appendChild(wrap);
+    const strips = profileStrips(f.properties.profile), at = wrap.querySelector('.rs-tip');
+    if (strips && at) at.parentNode.insertBefore(strips, at);
+  }
+  /** Brush (green) and slope (grey) along the route from the server's profile, on the graph's distance axis (viewBox 420, x 40..412 as route-stats draws it). */
+  function profileStrips(profile) {
+    const bins = profileBins(profile, 160); if (!bins.length) return null;
+    const NS = 'http://www.w3.org/2000/svg', X0 = 40, X1 = 412, W = 420, H = 24, bw = (X1 - X0) / bins.length;
+    const box = el('div', 'sr-strips'), svg = doc.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H); svg.setAttribute('class', 'sr-strip-svg'); svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', 'Brush and slope along the route');
+    const mk = (tag, at) => { const e = doc.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, at[k]); svg.appendChild(e); return e; };
+    [['Brush', 1, 'sr-sb'], ['Slope', 14, 'sr-ss']].forEach(([label, y, cls], r) => {
+      const t = mk('text', { x: X0 - 4, y: y + 7, 'text-anchor': 'end', class: 'sr-strip-l' }); t.textContent = label;
+      mk('rect', { x: X0, y, width: X1 - X0, height: 8, class: 'sr-strip-bg' });
+      bins.forEach((b, i) => { const v = r === 0 ? b.brush : Math.min(1, b.slope / 40); if (v < 0.02) return; mk('rect', { x: (X0 + i * bw).toFixed(2), y, width: (bw + 0.4).toFixed(2), height: 8, class: cls, 'fill-opacity': v.toFixed(2) }); });
+    });
+    box.appendChild(svg);
+    const lg = el('div', 'sr-strip-lg', 'Brush 0 to 1 (green) · slope 0 to 40° or more (grey), along the route'); box.appendChild(lg);
+    return box;
   }
   function paintOverlays() {
     const box = $('sr-ov'); if (!box) return; box.textContent = '';
@@ -544,6 +582,8 @@
     const sr = el('div', 'sr-row'); const sb = el('button', 'sr-btn', 'Click on the ground'); sb.type = 'button'; sb.id = 'sr-start-map'; sb.addEventListener('click', () => pickOnMap('start'));
     const sl = sel('sr-start-list', [['', '＋ a point…']], ''); sl.addEventListener('change', () => { const c = (sl._cs || []).find(x => x.key === sl.value); if (c) addPick('start', c); sl.value = ''; });
     sr.append(sb, sl); b.appendChild(sr);
+    const rr = el('div', 'sr-row'); const roads = el('button', 'sr-btn', 'Any ticked road or trail'); roads.type = 'button'; roads.id = 'sr-start-roads';
+    roads.title = 'Start from the nearest road or trail: the cheapest way from any of the ticked ones (under Trails and roads)'; roads.addEventListener('click', () => setAnyRoad(!S.anyRoad)); rr.appendChild(roads); b.appendChild(rr);
     const sc = el('div', 'sr-chips'); sc.id = 'sr-start-chips'; b.appendChild(sc);
 
     // Source
@@ -629,6 +669,9 @@
   #surfroute-host .sr-cs { margin-top: 2px; color: #eee; } #surfroute-host .sr-cs2 { color: rgba(255,255,255,.6); font-size: 10.5px; }
   #surfroute-host .sr-warn { color: #f2c24e; font-size: 10.5px; margin-top: 2px; } #surfroute-host .sr-det { color: rgba(255,255,255,.55); font-size: 10.5px; margin-top: 3px; border-top: 1px dashed rgba(255,255,255,.15); padding-top: 3px; }
   #surfroute-host .sr-ov { display: flex; flex-direction: column; gap: 3px; } #surfroute-host .sw-row.off { opacity: .4; } #surfroute-host .sr-op { font-size: 11px; display: flex; gap: 6px; align-items: center; }
+  #surfroute-host .sr-strips { margin-top: -2px; } #surfroute-host .sr-strip-svg { width: 100%; height: auto; display: block; }
+  #surfroute-host .sr-strip-l { fill: rgba(255,255,255,.55); font-size: 8px; } #surfroute-host .sr-strip-bg { fill: rgba(255,255,255,.07); }
+  #surfroute-host .sr-sb { fill: #46c86e; } #surfroute-host .sr-ss { fill: #c4c9cf; } #surfroute-host .sr-strip-lg { font-size: 10px; color: rgba(255,255,255,.45); }
   #surfroute-host .rs-host { margin-top: 8px; color: #e8e8ee; font-size: 11.5px; }
   .rs-host .inf-h { font-weight: 700; margin: 4px 0 5px; color: #f2f4f3; } .rs-host .inf-facts { border-collapse: collapse; margin: 6px 0 2px; width: 100%; }
   .rs-host .inf-facts th { text-align: left; font-weight: 500; color: rgba(255,255,255,.5); padding: 2px 10px 2px 0; white-space: nowrap; vertical-align: top; width: 1%; }
@@ -637,7 +680,7 @@
 
   w._surfRoute = { state: () => S, run, results: () => S.routes, select, selected: () => S.routes[S.sel] || null, addPick, removePick, setPick: addPick, clearPicks, candidates, datasets, setWeights,
     weights: () => Object.assign({}, S.weights), preset, presets: () => Object.keys(PRESETS).concat(myPresets().map(p => p.name)), savePreset, trails, setTrail, params, saveLine, overlay,
-    overlays: () => Object.assign({}, S.overlays), setOpacity, pickOnMap, stopPick, zoomTo, clear, refresh, cancelRerun, pure };
+    overlays: () => Object.assign({}, S.overlays), setOpacity, pickOnMap, stopPick, zoomTo, clear, refresh, cancelRerun, setAnyRoad, pure };
   w.addEventListener('flex-units-changed', () => { paintCards(); paintGraph(); });
   const start = () => {
     build();

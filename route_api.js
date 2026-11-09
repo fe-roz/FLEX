@@ -3,7 +3,7 @@
 // (ground, slope, cliffs, brush, shade, trails) and searches the cheapest ways from each start to the end.
 //
 //   POST /api/route/plan     { project?, params, reuse? } → { ok, jobId }
-//                            params: see route_cost.py / the contract below. reuse: the id of an earlier job of the same
+//                            params: see route_cost.py (starts: points; start_lines: road/trail lines, every cell under them is a start). reuse: the id of an earlier job of the same
 //                            area; its grids/ are linked into the new job, so a changed weight only re-runs the search.
 //   GET  /api/route/status/<jobId>    { status, progress, message, error }
 //   GET  /api/route/result?id=<jobId>  { ok, id, routes (GeoJSON), summary, grid, images: [names], base, params }
@@ -42,36 +42,41 @@ module.exports = function routeApi({ python, script, outRoot }) {
     const also = (Array.isArray(src.ept_also) ? src.ept_also : []).map(url).filter(Boolean).slice(0, 5);
     if (!lonlat(p.end)) return { error: 'choose the end of the route (a spot on the map)' };
     const starts = (Array.isArray(p.starts) ? p.starts : []).filter(lonlat).slice(0, 12).map(s => [+s[0], +s[1]]);
-    if (!starts.length) return { error: 'choose at least one start' };
     const w = p.weights || {};
     const weights = { distance: clampN(w.distance, 0, 10, 1), steep: clampN(w.steep, 0, 10, 1), brush: clampN(w.brush, 0, 10, 1), cliff: clampN(w.cliff, 0, 1, 0.5),
       sun: clampN(w.sun, -1, 1, 0), trail: clampN(w.trail, 0, 1, 1), road: clampN(w.road, 0, 1, 1) };
     let band = Array.isArray(p.brush_band) && p.brush_band.length === 2 && p.brush_band.every(num) ? p.brush_band.slice() : [0.5, 2.0];
     band = [clampN(band[0], 0, 20, 0.5), clampN(band[1], 0, 50, 2)]; if (!(band[1] > band[0])) band = [0.5, 2.0];
-    const features = [];
     let verts = 0;
-    for (const f of (p.trails && Array.isArray(p.trails.features) ? p.trails.features : []).slice(0, 4000)) {
-      const g = f && f.geometry; if (!g) continue;
-      const lines = g.type === 'LineString' ? [g.coordinates] : g.type === 'MultiLineString' ? g.coordinates : [];
-      for (const ln of lines) {
-        if (!Array.isArray(ln) || ln.length < 2 || !ln.every(lonlat)) continue;
-        verts += ln.length; if (verts > 400000) break;
-        const pr = f.properties || {};
-        features.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: ln.map(c => [+c[0], +c[1]]) },
-          properties: { kind: pr.kind === 'road' ? 'road' : 'trail', name: String(pr.name || '').slice(0, 120) } });
+    const lineFC = fc => {
+      const features = [];
+      for (const f of (fc && Array.isArray(fc.features) ? fc.features : []).slice(0, 4000)) {
+        const g = f && f.geometry; if (!g) continue;
+        const lines = g.type === 'LineString' ? [g.coordinates] : g.type === 'MultiLineString' ? g.coordinates : [];
+        for (const ln of lines) {
+          if (!Array.isArray(ln) || ln.length < 2 || !ln.every(lonlat)) continue;
+          verts += ln.length; if (verts > 400000) break;
+          const pr = f.properties || {};
+          features.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: ln.map(c => [+c[0], +c[1]]) },
+            properties: { kind: pr.kind === 'road' ? 'road' : 'trail', name: String(pr.name || '').slice(0, 120) } });
+        }
       }
-    }
+      return { type: 'FeatureCollection', features };
+    };
+    const trails = lineFC(p.trails), startLines = lineFC(p.start_lines);
+    if (!starts.length && !startLines.features.length) return { error: 'choose at least one start' };
     const params = {
       source: Object.assign({ ept }, also.length ? { ept_also: also } : {}),
       end: [+p.end[0], +p.end[1]], starts,
       cell: p.cell === 'auto' || p.cell == null ? 'auto' : clampN(+p.cell, 0.1, 20, 'auto'),
       dem: ['below', 'above', 'both'].includes(p.dem) ? p.dem : 'below',
       brush_band: band, weights,
-      trails: { type: 'FeatureCollection', features },
+      trails,
       corridor_m: clampN(p.corridor_m, 50, 5000, 300),
       presets: (Array.isArray(p.presets) ? p.presets : PRESETS).filter(x => PRESETS.includes(x)),
       units: p.units === 'ft' ? 'ft' : 'm',
     };
+    if (startLines.features.length) params.start_lines = startLines;       // every cell under these lines is a start
     return { params };
   }
 
