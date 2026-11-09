@@ -253,7 +253,7 @@
     .ffd-scan .t1 { font-size: 13px; }
     .ffd-scan .t2 { font-size: 10px; opacity: .55; margin-top: 2px; }
     .ffd-lead { font-size: 10px; text-transform: uppercase; letter-spacing: .6px; opacity: .45; margin: 8px 0 0; }
-    .ffd-sl { text-decoration: underline dotted; text-underline-offset: 2px; cursor: pointer; }
+    .ffd-sl { text-decoration: underline dotted; text-underline-offset: 2px; cursor: pointer; padding: 6px 2px; }
     .ffd-empty { font-size: 11px; opacity: .55; margin: 4px 0; }
     #ff-gallery .ffg-tags { white-space: normal; line-height: 1.35; max-height: 4.4em; overflow-y: auto; }
     #ff-gallery .ffg-pt { display: none; padding: 4px 10px 6px; background: rgba(20,20,30,.95); z-index: 2; }
