@@ -904,5 +904,881 @@
   if (typeof document === 'undefined') return T;     // under Node: the rules only
 
   /* ════════════════════════════ the review screen ════════════════════════ */
-  return T;
+  // Everything below runs in the viewer page and reads its state (ffPid,
+  // ffState, ffD, stationMap...) only when the user acts, after the page's
+  // own script has run.
+  const W = window;
+  const hasOcr = () => !!(W.AndroidHost && typeof W.AndroidHost.ocrImage === 'function');
+  const hasCamera = () => !!(W.AndroidHost && typeof W.AndroidHost.takePhoto === 'function');
+  const mk = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+  const toast = m => { try { showToast(m); } catch (_) { console.log(m); } };
+  const pid = () => (typeof ffPid !== 'undefined' ? ffPid : null);
+  const docsState = () => (typeof ffD !== 'undefined' && ffD ? ffD.docs : {});
+  const surveys = () => (typeof ffState !== 'undefined' ? ffState.order.filter(id => ffState.surveys[id]).map(id => ffState.surveys[id]) : []);
+  const survey = id => (id && typeof ffState !== 'undefined' ? ffState.surveys[id] || null : null);
+  const today = () => new Date().toISOString().slice(0, 10);
+  const FCLASS = f => (f === 'from' || f === 'to' ? 'st' : NUMERIC[f] ? 'nu' : f === 'note' ? 'nt' : f === 'lrud' ? 'lr' : 'sk');
+
+  // ── Styles (one block, everything under #scan-review) ─────────────────────
+  function css() {
+    if (document.getElementById('scan-review-css')) return;
+    const st = mk('style'); st.id = 'scan-review-css';
+    st.textContent = `
+#scan-review { display: none; position: fixed; inset: 0; z-index: 75; background: #0b0b12; color: #eee; flex-direction: column;
+  font: 15px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; pointer-events: all; }
+#scan-review.open { display: flex; }
+body.scan-open #mode-toast { z-index: 95; bottom: 96px; font-size: 14px; }
+#scan-review button { font: inherit; color: inherit; cursor: pointer; }
+.sr-btn { min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 9px; border: 1px solid rgba(255,255,255,.2);
+  background: rgba(255,255,255,.07); font-size: 15px; white-space: nowrap; }
+.sr-btn.on { background: rgba(33,150,243,.38); border-color: #2196F3; }
+.sr-btn.primary { background: #1e88e5; border-color: #64b5f6; font-weight: 700; }
+.sr-btn:disabled { opacity: .4; }
+.sr-top { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: #151522; border-bottom: 1px solid rgba(255,255,255,.1); }
+.sr-title { flex: 1; min-width: 0; font-weight: 700; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sr-title small { display: block; font-weight: 400; font-size: 13px; opacity: .65; overflow: hidden; text-overflow: ellipsis; }
+.sr-seg { display: flex; }
+.sr-seg .sr-btn { border-radius: 0; min-width: 48px; }
+.sr-seg .sr-btn:first-child { border-radius: 9px 0 0 9px; } .sr-seg .sr-btn:last-child { border-radius: 0 9px 9px 0; border-left: none; }
+.sr-x { font-size: 20px; }
+.sr-banner { display: none; align-items: center; gap: 8px; padding: 6px 10px; background: rgba(255,179,0,.14); border-bottom: 1px solid rgba(255,179,0,.4); font-size: 14px; flex-wrap: wrap; }
+.sr-banner.show { display: flex; }
+.sr-banner span { flex: 1; min-width: 160px; }
+.sr-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.sr-scan { flex: 0 0 40%; position: relative; overflow: hidden; background: #000; touch-action: none; }
+.sr-side { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+@media (orientation: landscape) {
+  .sr-main { flex-direction: row; }
+  .sr-scan { flex: 0 0 50%; border-right: 1px solid rgba(255,255,255,.12); }
+}
+.sr-sheet { position: absolute; left: 0; top: 0; transform-origin: 0 0; --bw: 1.5; }
+.sr-sheet img { position: absolute; left: 0; top: 0; transform-origin: 0 0; user-select: none; -webkit-user-drag: none; pointer-events: none; max-width: none; }
+.sr-box { position: absolute; border: calc(var(--bw) * 1px) solid rgba(0,229,255,.55); border-radius: calc(var(--bw) * 2px); pointer-events: none; box-sizing: border-box; }
+.sr-box.f1 { border-color: rgba(255,179,0,.95); background: rgba(255,179,0,.10); }
+.sr-box.f2 { border-color: rgba(255,82,82,.95); background: rgba(255,82,82,.14); }
+.sr-box.row { background: rgba(0,229,255,.10); }
+.sr-hl { position: absolute; display: none; pointer-events: none; box-sizing: border-box; border: calc(var(--bw) * 3px) solid #ff4081;
+  background: rgba(255,64,129,.18); border-radius: calc(var(--bw) * 3px); }
+.sr-scanmsg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 20px; color: #bbb; font-size: 15px; }
+.sr-zoom { position: absolute; right: 8px; bottom: 8px; display: flex; gap: 6px; }
+.sr-zoom .sr-btn { background: rgba(20,20,30,.85); }
+.sr-info { padding: 7px 10px; min-height: 22px; font-size: 14px; background: #12121c; border-bottom: 1px solid rgba(255,255,255,.08); }
+.sr-info.f1 { color: #ffd27a; } .sr-info.f2 { color: #ff9b9b; }
+.sr-tools { display: flex; gap: 6px; padding: 6px 8px; overflow-x: auto; border-bottom: 1px solid rgba(255,255,255,.08); scrollbar-width: none; }
+.sr-tools .sr-btn { flex: 0 0 auto; }
+.sr-wrap { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; scroll-padding: 60px 0 0 52px; }
+.sr-wait { padding: 24px 14px; font-size: 16px; opacity: .8; }
+.sr-table { border-collapse: separate; border-spacing: 0; }
+.sr-table thead th { position: sticky; top: 0; z-index: 3; background: #1a1a28; padding: 4px 2px; vertical-align: top; }
+.sr-table select { font-size: 15px; min-height: 44px; width: 100%; min-width: 78px; background: #222234; color: #eee;
+  border: 1px solid rgba(255,255,255,.25); border-radius: 8px; padding: 0 4px; }
+.sr-hdr { font-size: 13px; opacity: .6; font-weight: 400; padding: 2px 2px 0; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sr-table td { padding: 2px; border-bottom: 1px solid rgba(255,255,255,.05); }
+.sr-table td input { width: 100%; box-sizing: border-box; height: 44px; font-size: 16px; padding: 4px 6px; border-radius: 7px;
+  background: rgba(0,0,0,.4); color: #eee; border: 1px solid rgba(255,255,255,.16); font-variant-numeric: tabular-nums; }
+.sr-table td.st input { min-width: 70px; } .sr-table td.nu input { min-width: 70px; } .sr-table td.nt input { min-width: 150px; }
+.sr-table td.lr input { min-width: 120px; } .sr-table td.sk input { min-width: 60px; opacity: .45; }
+.sr-table td.f1 input { border-color: #ffb300; background: rgba(255,179,0,.14); }
+.sr-table td.f2 input { border-color: #ff5252; background: rgba(255,82,82,.17); }
+.sr-table td.sel input { outline: 3px solid #ff4081; outline-offset: -1px; }
+.sr-table tr.off td input { opacity: .35; text-decoration: line-through; }
+.sr-rh { position: sticky; left: 0; z-index: 2; background: #151522; padding: 2px; }
+.sr-table thead .sr-rh { z-index: 4; }
+.sr-rb { min-width: 44px; min-height: 44px; border-radius: 8px; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.05); font-size: 14px; }
+.sr-rb.on { background: rgba(33,150,243,.45); border-color: #2196F3; }
+.sr-bottom { display: flex; align-items: center; gap: 8px; padding: 8px; background: #151522; border-top: 1px solid rgba(255,255,255,.1); flex-wrap: wrap; }
+.sr-bottom label { font-size: 14px; opacity: .75; }
+.sr-target { flex: 1; min-width: 120px; min-height: 44px; font-size: 15px; background: #222234; color: #eee; border: 1px solid rgba(255,255,255,.25); border-radius: 8px; }
+.sr-add { flex: 2; min-width: 200px; }
+@media (orientation: landscape) and (max-height: 500px) {
+  .sr-top, .sr-bottom { padding: 4px 6px; } .sr-tools { padding: 4px 6px; } .sr-info { padding: 4px 8px; }
+  .sr-btn, .sr-rb, .sr-target, .sr-table select, .sr-table td input { min-height: 40px; height: auto; }
+  .sr-table td input { height: 40px; }
+}`;
+    document.head.appendChild(st);
+  }
+
+  // ── The page's text, read on the phone ────────────────────────────────────
+  const pending = {};
+  let reqSeq = 0;
+  function readPage(page) {
+    return new Promise((resolve, reject) => {
+      const req = 'scan' + (++reqSeq) + '.' + Date.now().toString(36);
+      const timer = setTimeout(() => { delete pending[req]; reject(new Error('the reader did not answer')); }, 90000);
+      pending[req] = { resolve, timer };
+      try { W.AndroidHost.ocrImage(page.h + (page.ext ? '.' + page.ext : ''), JSON.stringify({ req, map: W.FF_MAP_ID || '', rot: page.rot || 0 })); }
+      catch (e) { clearTimeout(timer); delete pending[req]; reject(e); }
+    });
+  }
+  // The app calls this with the result (AndroidHost.ocrImage -> ScanOcr.kt).
+  W.ffOcrDone = function (ctxJson, resJson) {
+    let ctx = {}, res = null;
+    try { ctx = JSON.parse(ctxJson || '{}'); } catch (_) {}
+    try { res = JSON.parse(resJson || 'null'); } catch (_) {}
+    const p = pending[ctx.req];
+    if (!p) return;
+    clearTimeout(p.timer); delete pending[ctx.req];
+    p.resolve(res);
+  };
+
+  // ── Opening: from the field-survey panel, a document page, a photo ───────
+  let S = null;                 // the open review
+  async function start(opts) {
+    opts = opts || {};
+    if (!pid()) { toast('No project for this map yet: ⋯ More → Project & sync'); return; }
+    try { await ffEnsureAuthor(); } catch (_) {}
+    const pages = pageDocs();
+    const choices = [];
+    if (hasCamera()) choices.push({ label: '📷 Photograph a page', value: 'photo', sub: 'The camera app takes it; the page is kept as a Shot table document', primary: true });
+    if (pages.length) choices.push({ label: '📄 A page from Documents', value: 'doc', sub: pages.length + ' document' + (pages.length === 1 ? '' : 's') + ' with pages' });
+    choices.push({ label: '🖼 A photo or scan from a file', value: 'file' });
+    choices.push({ label: '⌨ No page: type the shots in', value: 'none' });
+    const how = hasOcr() ? 'The phone reads the page (offline), then you check the table beside it.'
+      : 'This device cannot read handwriting (FLEX Field on the phone does): the page is shown beside an empty table to type into.';
+    const r = await ffChoose('Import shots from scan', how, choices);
+    if (!r) return;
+    if (r === 'none') return open({ page: null, sid: opts.sid });
+    if (r === 'photo') return photo(opts);
+    if (r === 'file') return pickFile(opts);
+    const d = await pickDoc(pages);
+    if (!d) return;
+    const i = d.pages.length > 1 ? await pickPage(d) : 0;
+    if (i == null) return;
+    openFromDoc(d.id, i, opts);
+  }
+  // Documents with image pages, shot tables first.
+  function pageDocs() {
+    let list = [];
+    try { list = FL.docsOf(ffD, ffP); } catch (_) { list = Object.values(docsState()); }
+    return list.filter(d => d && (d.pages || []).some(p => p.ext !== 'pdf'))
+      .sort((a, b) => (b.kind === 'shot-table') - (a.kind === 'shot-table') || String(b.date || '').localeCompare(String(a.date || '')));
+  }
+  async function pickDoc(list) {
+    const v = await ffChoose('Which document?', null, list.slice(0, 40).map(d => ({ label: '📄 ' + (d.title || 'Untitled'), value: d.id,
+      sub: `${d.pages.length} page${d.pages.length === 1 ? '' : 's'}${d.kind ? ' · ' + (FL.DOC_KIND_LABELS[d.kind] || d.kind) : ''}${d.date ? ' · ' + d.date : ''}` })));
+    return v ? docsState()[v] : null;
+  }
+  async function pickPage(d) {
+    const v = await ffChoose(d.title || 'Which page?', 'Which page holds the shots?', d.pages.map((p, i) => ({ label: `Page ${i + 1}${p.name ? ' · ' + p.name : ''}`, value: String(i) })).filter((o, i) => d.pages[i].ext !== 'pdf'));
+    return v == null ? null : +v;
+  }
+  function openFromDoc(docId, index, opts) {
+    const d = docsState()[docId];
+    const pg = d && d.pages[index || 0];
+    if (!pg) { toast('That page is not here'); return; }
+    if (pg.ext === 'pdf') { toast('A PDF page can\'t be shown here: add it as images (FLEX Field turns PDFs into pages)'); return; }
+    open(Object.assign({}, opts || {}, { page: { doc: docId, index: index || 0, h: pg.h, ext: pg.ext || 'jpg', rot: pg.rot || 0, name: pg.name || '', title: d.title || '' } }));
+  }
+  // A file: through the viewer's own page picker (the phone stores it as a
+  // page, a browser too), which makes a Shot table document of it.
+  let picking = null;
+  async function pickFile(opts) {
+    const req = 'scan' + Date.now().toString(36);
+    const sv = survey(opts.sid);
+    const tags = [FL.T.project(pid())];
+    const cid = sv && typeof ffCaveId === 'function' ? ffCaveId(sv.cave || '') : null;
+    if (cid && cid !== sv.cave) tags.push(FL.T.cave(cid));
+    picking = { req, opts };
+    if (!W.ffPagesPicked || !W.ffPagesPicked._scan) {
+      const orig = W.ffPagesPicked;
+      const wrapped = async function (ctxJson, resJson) {
+        let ctx = {};
+        try { ctx = JSON.parse(ctxJson || '{}'); } catch (_) {}
+        const before = new Set((typeof ffEntries !== 'undefined' ? ffEntries.docs : []).map(e => e.id));
+        await orig(ctxJson, resJson);
+        if (!ctx.scan || !picking || ctx.scan !== picking.req) return;
+        const o = picking.opts; picking = null;
+        const added = (typeof ffEntries !== 'undefined' ? ffEntries.docs : []).filter(e => !before.has(e.id) && e.op === 'doc.add');
+        const e = added[added.length - 1];
+        if (e) openFromDoc(e.doc, 0, o);
+      };
+      wrapped._scan = true;
+      W.ffPagesPicked = wrapped;
+    }
+    try { await ffHost.pickPages({ scan: req, kind: 'shot-table', open: false, tags, title: 'Shot table ' + today() }); }
+    catch (e) { picking = null; toast('Could not open the file picker'); }
+  }
+  // A photo: the app hands the shot to the camera app and keeps it as a page.
+  function photo(opts) {
+    try { W.AndroidHost.takePhoto(JSON.stringify({ scan: 1, sid: opts.sid || null })); }
+    catch (e) { toast('Could not start the camera'); }
+  }
+  // The app says a photo is stored (or the camera came back empty). Also asked
+  // once after the page loads: the app may have been closed while the camera
+  // was in front.
+  W.ffPhotoReady = function () {
+    let o = null;
+    try { o = JSON.parse((W.AndroidHost && W.AndroidHost.photoResult && W.AndroidHost.photoResult()) || 'null'); } catch (_) {}
+    if (!o) return;
+    let ctx = {}, res = o.res || {};
+    try { ctx = JSON.parse(o.ctx || '{}'); } catch (_) {}
+    if (res.error) { toast(res.error); return; }
+    const pg = (res.pages || [])[0];
+    if (!pg) { if (!res.cancelled) toast('No photo'); return; }
+    const sv = survey(ctx.sid);
+    const tags = [FL.T.project(pid())];
+    const cid = sv && typeof ffCaveId === 'function' ? ffCaveId(sv.cave || '') : null;
+    if (cid && cid !== sv.cave) tags.push(FL.T.cave(cid));
+    const id = ffUid();
+    ffRecord('doc.add', { doc: id, title: 'Shot table ' + today(), kind: 'shot-table', date: today(), pages: [pg], tags }, null, 'docs');
+    openFromDoc(id, 0, { sid: ctx.sid || null });
+  };
+  if (hasCamera()) {
+    let tries = 0;
+    const look = () => { if (typeof ffReady !== 'undefined' && ffReady) W.ffPhotoReady(); else if (++tries < 40) setTimeout(look, 1500); };
+    W.addEventListener('load', () => setTimeout(look, 1500));
+  }
+
+  // ── The screen ────────────────────────────────────────────────────────────
+  let R = null;                 // the screen's elements
+  function frame() {
+    css();
+    let root = document.getElementById('scan-review');
+    if (root) return R;
+    root = mk('div'); root.id = 'scan-review';
+    root.setAttribute('role', 'dialog'); root.setAttribute('aria-label', 'Import shots from scan');
+    R = { root };
+    const top = mk('div', 'sr-top');
+    R.title = mk('div', 'sr-title');
+    R.turn = mk('button', 'sr-btn', '⟳'); R.turn.title = 'Turn the page a quarter (and read it again)';
+    const seg = mk('div', 'sr-seg');
+    R.ft = mk('button', 'sr-btn', 'ft'); R.m = mk('button', 'sr-btn', 'm');
+    R.ft.title = 'Lengths and LRUD in feet'; R.m.title = 'Lengths and LRUD in metres';
+    seg.append(R.ft, R.m);
+    R.x = mk('button', 'sr-btn sr-x', '✕'); R.x.title = 'Close (the table is kept for this page)';
+    top.append(R.title, R.turn, seg, R.x);
+    R.banner = mk('div', 'sr-banner');
+    const main = mk('div', 'sr-main');
+    R.scan = mk('div', 'sr-scan');
+    R.sheet = mk('div', 'sr-sheet');
+    R.boxes = mk('div'); R.hl = mk('div', 'sr-hl');
+    R.sheet.append(R.boxes, R.hl);
+    R.msg = mk('div', 'sr-scanmsg');
+    const zoom = mk('div', 'sr-zoom');
+    R.fit = mk('button', 'sr-btn', '⤢'); R.fit.title = 'Whole page';
+    zoom.append(R.fit);
+    R.scan.append(R.sheet, R.msg, zoom);
+    const side = mk('div', 'sr-side');
+    R.info = mk('div', 'sr-info');
+    const tools = mk('div', 'sr-tools');
+    R.addRow = mk('button', 'sr-btn', '＋ Row'); R.addCol = mk('button', 'sr-btn', '＋ Column');
+    R.skip = mk('button', 'sr-btn', '⊘ Skip'); R.merge = mk('button', 'sr-btn', '⇅ Merge'); R.del = mk('button', 'sr-btn', '🗑 Delete');
+    R.skip.title = 'Leave the picked rows out (or use them again)'; R.merge.title = 'Join the picked rows into one'; R.del.title = 'Delete the picked rows';
+    R.addRow.title = 'A new row under the picked cell'; R.addCol.title = 'Another column (Back az, Back incl., Notes…)';
+    R.again = mk('button', 'sr-btn', '↻ Read again');
+    tools.append(R.addRow, R.skip, R.merge, R.del, R.addCol, R.again);
+    R.wrap = mk('div', 'sr-wrap');
+    side.append(R.info, tools, R.wrap);
+    main.append(R.scan, side);
+    const bottom = mk('div', 'sr-bottom');
+    const lab = mk('label', null, 'Add to'); R.target = mk('select', 'sr-target'); lab.htmlFor = R.target.id = 'sr-target';
+    R.add = mk('button', 'sr-btn primary sr-add', 'Add shots');
+    bottom.append(lab, R.target, R.add);
+    root.append(top, R.banner, main, bottom);
+    document.body.appendChild(root);
+    R.x.addEventListener('click', () => close());
+    R.ft.addEventListener('click', () => setUnit('ft'));
+    R.m.addEventListener('click', () => setUnit('m'));
+    R.turn.addEventListener('click', turn);
+    R.fit.addEventListener('click', () => { fit(); xf(); });
+    R.addRow.addEventListener('click', addRow);
+    R.addCol.addEventListener('click', addCol);
+    R.skip.addEventListener('click', skipRows);
+    R.merge.addEventListener('click', mergeRows);
+    R.del.addEventListener('click', deleteRows);
+    R.again.addEventListener('click', () => readAgain());
+    R.target.addEventListener('change', () => { S.sid = R.target.value === 'new' ? null : R.target.value; S.known = knownStations(S.sid); refresh(); });
+    R.add.addEventListener('click', addShots);
+    gestures(R.scan);
+    W.addEventListener('resize', () => {           // the keyboard opening keeps the zoom; a page at full view refits
+      if (!S || !S.img) return;
+      const atFit = Math.abs(S.z - S.fz) < 1e-6, z = S.z, x = S.x, y = S.y;
+      fit();
+      if (!atFit) { S.z = z; S.x = x; S.y = y; }
+      xf();
+    });
+    W.addEventListener('popstate', () => { if (S && S.pushed) { S.pushed = false; close(); } });
+    return R;
+  }
+
+  async function open(opts) {
+    const keep = !!(S && S.pushed);
+    if (S) close(true);
+    frame();
+    const sid = opts.sid && survey(opts.sid) ? opts.sid : (typeof ffPanelSurvey !== 'undefined' && ffPanelOpen && survey(ffPanelSurvey) ? ffPanelSurvey : null);
+    S = { page: opts.page || null, sid, unit: (survey(sid) && survey(sid).lenUnit) || 'ft', table: null, sel: null, rowSel: new Set(),
+      z: 1, x: 0, y: 0, img: null, reading: false, dirty: false, pushed: false };
+    S.known = knownStations(sid);
+    R.root.classList.add('open');
+    document.body.classList.add('scan-open');
+    if (keep) S.pushed = true;
+    else { try { history.pushState({ flexScan: 1 }, ''); S.pushed = true; } catch (_) {} }
+    R.title.textContent = '';
+    R.title.append(document.createTextNode('Import shots from scan'));
+    R.title.appendChild(mk('small', null, S.page ? [S.page.title, S.page.name || (S.page.doc ? 'page ' + (S.page.index + 1) : '')].filter(Boolean).join(' · ') : 'no page: type the shots'));
+    R.boxes.textContent = ''; R.hl.style.display = 'none'; R.msg.textContent = '';
+    if (S.img) S.img.remove();
+    R.turn.style.display = S.page ? '' : 'none';
+    banner(null);
+    renderTargets();
+    if (S.page) await loadImage();
+    else R.msg.textContent = 'No page. Type the shots into the table.';
+    const d = loadDraft();
+    if (d) {
+      S.table = d.table; S.unit = d.unit || S.unit; S.dirty = true;
+      banner(`Your unsaved table from ${new Date(d.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} is back.`, [
+        hasOcr() && S.page ? ['↻ Read the page again', () => readAgain(true)] : null, ['Start over', () => { dropDraft(); S.table = blankTable(); S.dirty = false; banner(null); render(); }]].filter(Boolean));
+      render();
+    } else if (S.page && hasOcr()) await read();
+    else {
+      S.table = blankTable();
+      render();
+      info(S.page ? 'This device can\'t read the page: type the shots beside it. (FLEX Field reads pages on the phone.)' : 'Type the shots; ＋ Row adds more.');
+    }
+  }
+  function close(quiet) {
+    if (!S) return;
+    if (S.dirty) saveDraft(true);
+    const pushed = S.pushed;
+    S = null;
+    if (R) R.root.classList.remove('open');
+    document.body.classList.remove('scan-open');
+    if (pushed && !quiet) { try { if (history.state && history.state.flexScan) history.back(); } catch (_) {} }
+    if (!quiet && R) R.wrap.textContent = '';
+  }
+  function banner(text, actions) {
+    R.banner.textContent = '';
+    R.banner.classList.toggle('show', !!text);
+    if (!text) return;
+    R.banner.appendChild(mk('span', null, text));
+    (actions || []).forEach(([label, fn]) => { const b = mk('button', 'sr-btn', label); b.addEventListener('click', fn); R.banner.appendChild(b); });
+  }
+  function info(text, lvl) { R.info.textContent = text || ''; R.info.className = 'sr-info' + (lvl ? ' f' + lvl : ''); }
+
+  // An empty table with the target survey's columns (backsights if it has them),
+  // the first From filled in where the survey ends.
+  function blankTable() {
+    const sv = survey(S.sid);
+    const back = sv && sv.shots.some(s => String(s.baz || '').trim() || String(s.binc || '').trim());
+    const t = T.emptyTable({ unit: S.unit, rows: 6, fields: back ? ['from', 'to', 'len', 'az', 'baz', 'inc', 'binc', 'l', 'r', 'u', 'd', 'note'] : null });
+    if (sv) { const last = sv.shots[sv.shots.length - 1]; const c = t.rows[0].cells[0]; c.edited = true; c.text = String(last ? last.to : sv.tie || ''); }
+    return t;
+  }
+  function knownStations(sid) {
+    const sv = survey(sid), cave = sv ? (sv.cave || '') : null, out = new Set();
+    try { stationMap.forEach(st => { if (st && st.name && (cave == null || (st.cave || '') === cave)) out.add(String(st.name)); }); } catch (_) {}
+    surveys().forEach(s => { if (cave == null || (s.cave || '') === cave) s.shots.forEach(sh => { out.add(String(sh.from || '').trim()); out.add(String(sh.to || '').trim()); }); });
+    out.delete('');
+    return [...out];
+  }
+
+  // ── Reading ───────────────────────────────────────────────────────────────
+  async function read() {
+    const me = S;
+    S.reading = true; S.table = null;
+    info('Reading the page… (a few seconds)');
+    render();
+    let res = null, err = null;
+    try { res = await readPage(S.page); } catch (e) { err = e; }
+    if (S !== me) return;                                  // closed meanwhile
+    S.reading = false;
+    if (!err && (!res || res.ok === false)) err = new Error((res && res.error) || 'nothing came back');
+    if (err) {
+      S.table = blankTable();
+      render();
+      info('Could not read the page (' + err.message + '): type the shots beside it.', 2);
+      return;
+    }
+    S.table = T.buildTable(res, { unit: S.unit });
+    if (S.table.unit) S.unit = S.table.unit;
+    const rows = S.table.rows.filter(r => !r.off).length;
+    if (!rows) {
+      S.table = blankTable();
+      render();
+      info('No table found on this page: type the shots beside it, or ⟳ turn the page if it is sideways.', 1);
+      return;
+    }
+    render();
+    const R2 = T.resolve(S.table, { unit: S.unit, known: S.known });
+    const n1 = R2.cells.reduce((a, r) => a + r.filter(c => c.level >= 1).length, 0);
+    info(`Read ${R2.shots.length} row${R2.shots.length === 1 ? '' : 's'}. ${n1 ? n1 + ' cell' + (n1 === 1 ? '' : 's') + ' to check (marked). ' : ''}Tap a cell to see it on the page; tap the page to find its cell.`, n1 ? 1 : 0);
+  }
+  async function readAgain(force) {
+    if (!S || !S.page || !hasOcr()) { toast('This device can\'t read pages'); return; }
+    if (S.dirty && !force) {
+      const r = await ffDialog({ title: 'Read the page again?', text: 'Your changes to the table are lost.', buttons: [{ label: 'Cancel', value: null }, { label: 'Read again', value: 'ok', primary: true }] });
+      if (!r) return;
+    }
+    dropDraft(); S.dirty = false; banner(null);
+    await read();
+  }
+  async function turn() {
+    if (!S || !S.page) return;
+    if (S.dirty && hasOcr()) {
+      const r = await ffDialog({ title: 'Turn the page?', text: 'It is read again, and your changes to the table are lost.', buttons: [{ label: 'Cancel', value: null }, { label: 'Turn', value: 'ok', primary: true }] });
+      if (!r) return;
+    }
+    const prev = S.page.rot || 0, rot = (prev + 90) % 360;
+    S.page.rot = rot;
+    const d = S.page.doc && docsState()[S.page.doc];
+    if (d && d.pages[S.page.index] && d.pages[S.page.index].h === S.page.h) { try { ffRecord('doc.rotate', { doc: d.id, h: S.page.h, rot, prev }, null, 'docs'); } catch (_) {} }
+    if (S.img) { layoutSheet(); fit(); xf(); }
+    if (hasOcr()) { dropDraft(); S.dirty = false; banner(null); await read(); }
+    else drawBoxes();
+  }
+
+  // ── The scan: image, boxes, pinch / pan / tap ─────────────────────────────
+  async function loadImage() {
+    const me = S, pg = S.page;
+    let url = null;
+    try { url = await ffBlobUrl(pg.h, pg.ext); } catch (_) {}
+    if (S !== me) return;
+    if (!url) { R.msg.textContent = 'The page image is not on this device.'; return; }
+    const img = new Image();
+    img.alt = 'Scanned page';
+    R.sheet.insertBefore(img, R.boxes);
+    await new Promise(res => { img.onload = res; img.onerror = res; img.src = url; });
+    if (S !== me) { img.remove(); return; }
+    if (!img.naturalWidth) { img.remove(); R.msg.textContent = 'Could not show the page.'; return; }
+    S.img = img;
+    layoutSheet(); fit(); xf();
+  }
+  function layoutSheet() {
+    const iw = S.img.naturalWidth, ih = S.img.naturalHeight, r = ((S.page.rot || 0) % 360 + 360) % 360;
+    S.sw = r % 180 ? ih : iw; S.sh = r % 180 ? iw : ih;
+    R.sheet.style.width = S.sw + 'px'; R.sheet.style.height = S.sh + 'px';
+    S.img.style.width = iw + 'px'; S.img.style.height = ih + 'px';
+    S.img.style.transform = r === 90 ? `translate(${ih}px,0) rotate(90deg)` : r === 180 ? `translate(${iw}px,${ih}px) rotate(180deg)` : r === 270 ? `translate(0,${iw}px) rotate(270deg)` : '';
+  }
+  function fit() {
+    if (!S || !S.sw) return;
+    const w = R.scan.clientWidth || 1, h = R.scan.clientHeight || 1;
+    S.z = S.fz = Math.min(w / S.sw, h / S.sh);
+    S.x = (w - S.sw * S.z) / 2; S.y = (h - S.sh * S.z) / 2;
+  }
+  function xf() {
+    if (!S) return;
+    R.sheet.style.transform = `translate(${S.x}px, ${S.y}px) scale(${S.z})`;
+    R.sheet.style.setProperty('--bw', (1.5 / S.z).toFixed(3));
+  }
+  // OCR pixels -> sheet pixels
+  const kx = () => (S.table && S.table.width && S.sw ? S.sw / S.table.width : 1);
+  const ky = () => (S.table && S.table.height && S.sh ? S.sh / S.table.height : 1);
+  const place = (n, b) => { const x = kx(), y = ky(); n.style.left = b[0] * x + 'px'; n.style.top = b[1] * y + 'px'; n.style.width = Math.max(2, (b[2] - b[0]) * x) + 'px'; n.style.height = Math.max(2, (b[3] - b[1]) * y) + 'px'; };
+  function drawBoxes() {
+    R.boxes.textContent = '';
+    R.hl.style.display = 'none';
+    S.wordCell = new Map();
+    if (!S.table || !S.sw) return;
+    S.table.rows.forEach((r, ri) => r.cells.forEach((c, k) => (c.words || []).forEach(wi => S.wordCell.set(wi, [ri, k]))));
+    const lv = S.res ? S.res.cells : [];
+    (S.table.words || []).forEach((w, i) => {
+      const b = mk('div', 'sr-box');
+      const rc = S.wordCell.get(i);
+      const l = rc && lv[rc[0]] && lv[rc[0]][rc[1]] ? lv[rc[0]][rc[1]].level : 0;
+      if (l) b.classList.add('f' + l);
+      place(b, w.box);
+      R.boxes.appendChild(b);
+    });
+  }
+  // A cell's place on the page: its words, else where its row and column cross.
+  function cellBox(ri, k) {
+    const t = S.table, c = t.rows[ri] && t.rows[ri].cells[k];
+    if (c && c.box) return c.box;
+    let y0 = Infinity, y1 = -Infinity, x0 = Infinity, x1 = -Infinity;
+    (t.rows[ri] ? t.rows[ri].cells : []).forEach(cc => { if (cc.box) { y0 = Math.min(y0, cc.box[1]); y1 = Math.max(y1, cc.box[3]); } });
+    t.rows.forEach(r => { const cc = r.cells[k]; if (cc && cc.box) { x0 = Math.min(x0, cc.box[0]); x1 = Math.max(x1, cc.box[2]); } });
+    return isFinite(y0) && isFinite(x0) ? [x0, y0, x1, y1] : null;
+  }
+  function focusBox(b) {
+    const w = R.scan.clientWidth, h = R.scan.clientHeight;
+    const bx0 = b[0] * kx(), by0 = b[1] * ky(), bx1 = b[2] * kx(), by1 = b[3] * ky();
+    const bh = Math.max(1, by1 - by0);
+    let z = S.z;
+    if (bh * z < 26) z = Math.min(S.fz * 12, 34 / bh);
+    const sx0 = S.x + bx0 * z, sx1 = S.x + bx1 * z, sy0 = S.y + by0 * z, sy1 = S.y + by1 * z;
+    const pad = 24;
+    if (z !== S.z || sx0 < pad || sx1 > w - pad || sy0 < pad || sy1 > h - pad) {
+      S.z = z;
+      S.x = w / 2 - (bx0 + bx1) / 2 * z;
+      S.y = h / 2 - (by0 + by1) / 2 * z;
+      xf();
+    }
+  }
+  function gestures(stage) {
+    const pts = new Map();
+    let base = null, moved = false, t0 = 0, lastTap = 0;
+    const snap = () => { const a = [...pts.values()]; return a.length >= 2
+      ? { d: Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y), cx: (a[0].x + a[1].x) / 2, cy: (a[0].y + a[1].y) / 2 } : { d: 0, cx: a[0].x, cy: a[0].y }; };
+    const rebase = () => { const s = snap(); base = { ...s, z: S.z, x: S.x, y: S.y }; };
+    const local = e => { const r = stage.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+    stage.addEventListener('pointerdown', e => {
+      if (!S || !S.sw || e.target.closest('.sr-zoom')) return;
+      stage.setPointerCapture(e.pointerId);
+      pts.set(e.pointerId, local(e));
+      if (pts.size === 1) { moved = false; t0 = Date.now(); }
+      rebase();
+    });
+    stage.addEventListener('pointermove', e => {
+      if (!pts.has(e.pointerId) || !S) return;
+      const p = local(e), q = pts.get(e.pointerId);
+      if (Math.hypot(p.x - q.x, p.y - q.y) > 0 && pts.size === 1 && Math.hypot(p.x - base.cx, p.y - base.cy) > 8) moved = true;
+      pts.set(e.pointerId, p);
+      const s = snap();
+      if (pts.size >= 2 && base.d > 0) {
+        moved = true;
+        const z = Math.max(S.fz * 0.5, Math.min(S.fz * 14, base.z * s.d / base.d)), k = z / base.z;
+        S.z = z; S.x = s.cx - (base.cx - base.x) * k; S.y = s.cy - (base.cy - base.y) * k;
+      } else if (moved) { S.x = base.x + (s.cx - base.cx); S.y = base.y + (s.cy - base.cy); }
+      xf();
+    });
+    const end = e => {
+      if (!pts.has(e.pointerId)) return;
+      const p = local(e);
+      pts.delete(e.pointerId);
+      if (!pts.size && !moved && Date.now() - t0 < 500 && S) {
+        const now = Date.now();
+        if (now - lastTap < 300) { zoomAt(p.x, p.y, S.z > S.fz * 1.5 ? S.fz / S.z : 2.5); lastTap = 0; return; }
+        lastTap = now;
+        tapAt(p.x, p.y);
+      }
+      if (pts.size) rebase();
+    };
+    stage.addEventListener('pointerup', end);
+    stage.addEventListener('pointercancel', end);
+    stage.addEventListener('wheel', e => {
+      if (!S || !S.sw) return;
+      e.preventDefault();
+      const p = local(e);
+      zoomAt(p.x, p.y, e.deltaY < 0 ? 1.18 : 1 / 1.18);
+    }, { passive: false });
+  }
+  function zoomAt(px, py, f) {
+    const z = Math.max(S.fz * 0.5, Math.min(S.fz * 14, S.z * f)), k = z / S.z;
+    S.x = px - (px - S.x) * k; S.y = py - (py - S.y) * k; S.z = z;
+    xf();
+  }
+  // A tap on the page: the word under the finger (or the nearest within a
+  // finger's width) -> its cell.
+  function tapAt(px, py) {
+    if (!S.table || !S.table.words) return;
+    const sx = (px - S.x) / S.z / kx(), sy = (py - S.y) / S.z / ky();
+    const reach = 22 / S.z / Math.min(kx(), ky());
+    let best = -1, bd = Infinity;
+    S.table.words.forEach((w, i) => {
+      const b = w.box;
+      const dx = sx < b[0] ? b[0] - sx : sx > b[2] ? sx - b[2] : 0, dy = sy < b[1] ? b[1] - sy : sy > b[3] ? sy - b[3] : 0;
+      const d = Math.hypot(dx, dy);
+      if (d < bd) { bd = d; best = i; }
+    });
+    if (best < 0 || bd > reach) return;
+    const rc = S.wordCell && S.wordCell.get(best);
+    if (rc) { select(rc[0], rc[1], true); return; }
+    place(R.hl, S.table.words[best].box); R.hl.style.display = 'block';
+    info(`“${S.table.words[best].text}”: not in the table (a title or a row left out).`);
+  }
+
+  // ── The table ─────────────────────────────────────────────────────────────
+  function render() {
+    if (!S) return;
+    R.ft.classList.toggle('on', S.unit === 'ft'); R.m.classList.toggle('on', S.unit === 'm');
+    const ocr = hasOcr() && !!S.page;
+    R.again.style.display = ocr ? '' : 'none';
+    R.wrap.textContent = '';
+    [R.addRow, R.addCol, R.skip, R.merge, R.del].forEach(b => { b.disabled = S.reading; });
+    if (S.reading || !S.table) {
+      R.wrap.appendChild(mk('div', 'sr-wait', S.reading ? 'Reading the page… (a few seconds)' : ''));
+      R.add.disabled = true;
+      return;
+    }
+    S.res = T.resolve(S.table, { unit: S.unit, known: S.known });
+    const tbl = mk('table', 'sr-table');
+    const head = mk('thead'), hr = mk('tr');
+    hr.appendChild(mk('th', 'sr-rh'));
+    S.table.columns.forEach((col, k) => {
+      const th = mk('th');
+      const sel = mk('select');
+      sel.setAttribute('aria-label', 'Column ' + (k + 1) + ' is');
+      FIELDS.forEach(f => { const o = mk('option', null, LABEL[f]); o.value = f; sel.appendChild(o); });
+      sel.value = col.field || 'skip';
+      sel.addEventListener('change', () => { col.field = sel.value; col.auto = false; changed(true); });
+      th.appendChild(sel);
+      if (col.header) th.appendChild(mk('div', 'sr-hdr', col.header));
+      hr.appendChild(th);
+    });
+    head.appendChild(hr); tbl.appendChild(head);
+    const body = mk('tbody');
+    let n = 0;
+    S.table.rows.forEach((row, ri) => {
+      const tr = mk('tr'); tr.dataset.r = ri;
+      if (row.off) tr.classList.add('off');
+      const th = mk('th', 'sr-rh');
+      const rb = mk('button', 'sr-rb' + (S.rowSel.has(ri) ? ' on' : ''), row.off ? (row.kind === 'header' ? 'H' : '⊘') : String(++n));
+      rb.title = row.off ? (row.kind === 'header' ? 'Header row (left out)' : 'Left out') : 'Select this row';
+      rb.setAttribute('aria-pressed', S.rowSel.has(ri) ? 'true' : 'false');
+      rb.addEventListener('click', () => { if (S.rowSel.has(ri)) S.rowSel.delete(ri); else S.rowSel.add(ri); rb.classList.toggle('on', S.rowSel.has(ri)); rb.setAttribute('aria-pressed', S.rowSel.has(ri) ? 'true' : 'false'); markRows(); });
+      th.appendChild(rb); tr.appendChild(th);
+      S.table.columns.forEach((col, k) => {
+        const f = col.field || 'skip', rc = S.res.cells[ri][k];
+        const td = mk('td', FCLASS(f) + (rc.level ? ' f' + rc.level : ''));
+        const inp = mk('input');
+        inp.value = rc.text; inp.inputMode = NUMERIC[f] ? 'decimal' : 'text';
+        inp.autocomplete = 'off'; inp.spellcheck = false; inp.setAttribute('autocapitalize', f === 'from' || f === 'to' ? 'characters' : 'off');
+        inp.enterKeyHint = 'next';
+        inp.dataset.r = ri; inp.dataset.c = k;
+        inp.setAttribute('aria-label', `Row ${ri + 1}, ${LABEL[f]}`);
+        inp.addEventListener('focus', () => select(ri, k, false));
+        inp.addEventListener('input', () => { const c = row.cells[k]; c.edited = true; c.text = inp.value; S.dirty = true; soon(); });
+        inp.addEventListener('keydown', e => {
+          if (e.key !== 'Enter') return;
+          e.preventDefault();
+          const all = [...R.wrap.querySelectorAll('td input')], i = all.indexOf(inp);
+          if (all[i + 1]) all[i + 1].focus(); else addRow();
+        });
+        td.appendChild(inp); tr.appendChild(td);
+      });
+      body.appendChild(tr);
+    });
+    tbl.appendChild(body);
+    R.wrap.appendChild(tbl);
+    drawBoxes();
+    markRows();
+    if (S.sel) select(S.sel.r, S.sel.c, null);
+    counts();
+  }
+  // After typing: flags and the other cells follow (a ditto, a From filled in)
+  let soonT = 0;
+  function soon() { clearTimeout(soonT); soonT = setTimeout(() => refresh(), 180); }
+  function refresh() {
+    if (!S || !S.table) return;
+    S.res = T.resolve(S.table, { unit: S.unit, known: S.known });
+    R.wrap.querySelectorAll('td input').forEach(inp => {
+      const ri = +inp.dataset.r, k = +inp.dataset.c, rc = S.res.cells[ri] && S.res.cells[ri][k];
+      if (!rc) return;
+      if (document.activeElement !== inp && inp.value !== rc.text) inp.value = rc.text;
+      const td = inp.parentNode;
+      td.classList.toggle('f1', rc.level === 1); td.classList.toggle('f2', rc.level === 2);
+    });
+    drawBoxes();
+    if (S.sel) select(S.sel.r, S.sel.c, null);
+    counts();
+    saveDraft();
+  }
+  function changed(full) { S.dirty = true; if (full) render(); else refresh(); saveDraft(); }
+  // Rows picked by their number: their words light up on the page.
+  function markRows() {
+    R.boxes.querySelectorAll('.row').forEach(b => b.classList.remove('row'));
+    S.rowSel.forEach(ri => (S.table.rows[ri] ? S.table.rows[ri].cells : []).forEach(c => (c.words || []).forEach(wi => { const b = R.boxes.children[wi]; if (b) b.classList.add('row'); })));
+  }
+  // A cell picked (from the table: show its place on the page; from the page:
+  // bring the cell into view, without opening the keyboard).
+  function select(ri, k, fromScan) {
+    if (!S || !S.table || !S.table.rows[ri]) return;
+    S.sel = { r: ri, c: k };
+    R.wrap.querySelectorAll('td.sel').forEach(td => td.classList.remove('sel'));
+    const inp = R.wrap.querySelector(`td input[data-r="${ri}"][data-c="${k}"]`);
+    if (inp) inp.parentNode.classList.add('sel');
+    const b = S.sw ? cellBox(ri, k) : null;
+    if (b) { place(R.hl, b); R.hl.style.display = 'block'; if (fromScan === false) focusBox(b); }
+    else R.hl.style.display = 'none';
+    if (fromScan && inp) inp.parentNode.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    const col = S.table.columns[k], rc = S.res && S.res.cells[ri] && S.res.cells[ri][k], cell = S.table.rows[ri].cells[k];
+    const row = S.table.rows[ri];
+    const label = `Row ${S.table.rows.slice(0, ri + 1).filter(r => !r.off).length || '—'} · ${LABEL[col.field || 'skip']}`;
+    if (row.off) info(`${label}: this row is left out (${row.kind === 'header' ? 'a header' : 'not a shot'}). ⊘ to use it.`);
+    else if (rc && rc.flags.length) info(`${label}: ${rc.flags.join(' · ')}`, rc.level);
+    else if (cell && cell.raw && !cell.edited && rc && cell.raw.trim() !== rc.text) info(`${label}: read “${cell.raw}”`);
+    else info(label + (cell && cell.conf != null ? ` · read with ${Math.round(cell.conf * 100)}% confidence` : ''));
+  }
+  function counts() {
+    const shots = S.res ? S.res.shots.filter(x => x.ok) : [];
+    const sv = survey(S.sid);
+    const n = shots.length;
+    R.add.disabled = !n;
+    R.add.textContent = n ? `Add ${n} shot${n === 1 ? '' : 's'} to ${sv ? '“' + sv.name + '”' : 'a new survey'}` : 'Add shots (each needs From, To, Length)';
+  }
+  function renderTargets() {
+    R.target.textContent = '';
+    surveys().forEach(sv => { const o = mk('option', null, `📐 ${sv.name} (${sv.shots.length})`); o.value = sv.id; R.target.appendChild(o); });
+    const o = mk('option', null, '＋ New survey…'); o.value = 'new'; R.target.appendChild(o);
+    R.target.value = S.sid || 'new';
+  }
+  function setUnit(u) { if (!S || S.unit === u) return; S.unit = u; if (S.table) S.table.unit = u; changed(true); }
+
+  // ── Rows and columns ──────────────────────────────────────────────────────
+  const blankCell = () => ({ raw: '', box: null, conf: null, words: [] });
+  const picked = () => { const a = [...S.rowSel].sort((x, y) => x - y); if (!a.length && S.sel) a.push(S.sel.r); return a; };
+  function addRow() {
+    if (!S.table) return;
+    const at = S.sel ? S.sel.r + 1 : S.table.rows.length;
+    S.table.rows.splice(at, 0, { kind: 'data', off: false, cells: S.table.columns.map(blankCell) });
+    S.rowSel = new Set([...S.rowSel].map(r => (r >= at ? r + 1 : r)));
+    S.sel = { r: at, c: 0 };
+    changed(true);
+    const inp = R.wrap.querySelector(`td input[data-r="${at}"][data-c="0"]`);
+    if (inp) { inp.parentNode.scrollIntoView({ block: 'nearest' }); inp.focus(); }
+  }
+  function addCol() {
+    if (!S.table) return;
+    const used = new Set(S.table.columns.map(c => c.field));
+    const f = ['baz', 'binc', 'note', 'l', 'r', 'u', 'd'].find(x => !used.has(x)) || 'skip';
+    S.table.columns.push({ field: f, header: '', auto: false });
+    S.table.rows.forEach(r => r.cells.push(blankCell()));
+    changed(true);
+    R.wrap.scrollLeft = R.wrap.scrollWidth;
+  }
+  function skipRows() {
+    const a = picked();
+    if (!a.length) { toast('Tap a row number first'); return; }
+    const off = !a.every(i => S.table.rows[i].off);
+    a.forEach(i => { S.table.rows[i].off = off; if (!off) S.table.rows[i].kind = 'data'; });
+    S.rowSel.clear();
+    changed(true);
+  }
+  function mergeRows() {
+    const a = [...S.rowSel].sort((x, y) => x - y);
+    if (a.length < 2) { toast('Tap two or more row numbers, then Merge'); return; }
+    const res = S.res || T.resolve(S.table, { unit: S.unit, known: S.known });
+    const keep = S.table.rows[a[0]];
+    keep.cells = S.table.columns.map((c, k) => {
+      const texts = a.map(i => res.cells[i][k].text).filter(Boolean);
+      const cells = a.map(i => S.table.rows[i].cells[k]);
+      const box = cells.reduce((b, c2) => union(b, c2.box), null);
+      return { raw: texts.join(' '), text: texts.join(' '), edited: true, box, conf: cells.reduce((m, c2) => minConf(m, c2.conf), null), words: [].concat(...cells.map(c2 => c2.words || [])) };
+    });
+    keep.off = false; keep.kind = 'data';
+    for (let j = a.length - 1; j > 0; j--) S.table.rows.splice(a[j], 1);
+    S.rowSel.clear(); S.sel = { r: a[0], c: 0 };
+    changed(true);
+  }
+  async function deleteRows() {
+    const a = picked();
+    if (!a.length) { toast('Tap a row number first'); return; }
+    if (a.length > 2) {
+      const r = await ffDialog({ title: `Delete ${a.length} rows?`, buttons: [{ label: 'Cancel', value: null }, { label: 'Delete', value: 'rm', danger: true }] });
+      if (!r) return;
+    }
+    for (let j = a.length - 1; j >= 0; j--) S.table.rows.splice(a[j], 1);
+    S.rowSel.clear(); S.sel = null;
+    changed(true);
+  }
+
+  // ── Adding the shots ──────────────────────────────────────────────────────
+  async function addShots() {
+    if (!S || !S.table) return;
+    const res = T.resolve(S.table, { unit: S.unit, known: S.known });
+    const good = res.shots.filter(x => x.ok);
+    if (!good.length) { toast('No complete rows: each shot needs From, To and Length'); return; }
+    const marked = res.cells.reduce((a, r, ri) => a + (S.table.rows[ri].off ? 0 : r.filter(c => c.level >= 1).length), 0);
+    const skipped = res.shots.length - good.length;
+    if (marked || skipped) {
+      const r = await ffDialog({ title: `Add ${good.length} shot${good.length === 1 ? '' : 's'}?`,
+        text: [marked ? `${marked} cell${marked === 1 ? ' is' : 's are'} still marked to check.` : '', skipped ? `${skipped} row${skipped === 1 ? '' : 's'} without From, To or Length ${skipped === 1 ? 'is' : 'are'} left out.` : '', 'Shots can be corrected later in the survey too.'].filter(Boolean).join(' '),
+        buttons: [{ label: 'Check them', value: null }, { label: 'Add', value: 'ok', primary: true }] });
+      if (!r) { const first = res.cells.findIndex((r2, ri) => !S.table.rows[ri].off && r2.some(c => c.level >= 1)); if (first >= 0) select(first, res.cells[first].findIndex(c => c.level >= 1), true); return; }
+    }
+    try { await ffEnsureAuthor(); } catch (_) {}
+    let sid = S.sid;
+    if (!sid || !survey(sid)) { sid = await newSurvey(good[0].shot.from); if (!sid) return; }
+    const sv = survey(sid);
+    let unit = sv.lenUnit || 'ft';
+    if (unit !== S.unit && !sv.shots.length) { ffRecord('survey.set', { id: sid, patch: { lenUnit: S.unit }, prev: { lenUnit: unit } }); unit = S.unit; }
+    const pg = S.page, W0 = S.table.width, H0 = S.table.height;
+    const rowBox = ri => {
+      if (!W0 || !H0) return null;
+      const b = S.table.rows[ri].cells.reduce((a, c) => union(a, c.box), null);
+      return b ? b.map((v, i) => Math.round(v / (i % 2 ? H0 : W0) * 10000) / 10000) : null;
+    };
+    const list = good.map(x => {
+      const shot = convertShot(x.shot, S.unit, unit);
+      SHOT_KEYS.forEach(k => { shot[k] = String(shot[k] == null ? '' : shot[k]).trim(); });
+      if (!shot.note) delete shot.note;
+      const out = Object.assign({ id: ffUid() }, shot);
+      if (pg) {
+        out.src = { h: pg.h };
+        if (pg.doc) { out.src.doc = pg.doc; out.src.page = pg.index; }
+        const b = rowBox(x.row);
+        if (b) { out.src.box = b; out.src.rot = pg.rot || 0; }
+      }
+      return ['shot.add', { sid, shot: out }];
+    });
+    if (typeof ffRecordMany === 'function') ffRecordMany(list);
+    else list.forEach(([op, d]) => ffRecord(op, d));
+    // the page is about these stations: tag it, so a station's card lists it
+    let tagged = '';
+    if (pg && pg.doc && docsState()[pg.doc]) {
+      const cid = typeof ffCaveId === 'function' ? ffCaveId(sv.cave || '') : null;
+      const spec = areaSpec([].concat(...good.map(x => [x.shot.from, x.shot.to])));
+      if (cid && spec && typeof ffP !== 'undefined' && ffP.caves && ffP.caves[cid]) {
+        const target = FL.T.area(cid, spec);
+        if (!docsState()[pg.doc].tags[target]) { try { ffRecord('doc.tag', { doc: pg.doc, target }, null, 'docs'); tagged = spec; } catch (_) {} }
+      }
+    }
+    const conv = S.unit !== unit ? ` (lengths turned from ${S.unit} to ${unit})` : '';
+    dropDraft();
+    S.dirty = false;
+    close();
+    try { ffOpenPanel(sid); } catch (_) {}
+    toast(`Added ${list.length} shot${list.length === 1 ? '' : 's'} to “${sv.name}”${conv}${tagged ? ' · page tagged ' + tagged : ''}`);
+  }
+  // A new field survey for these shots: tied to the first From if the map
+  // knows it (else to the selected station), in that station's cave.
+  async function newSurvey(first) {
+    const caves = typeof ffExportCaves === 'function' ? ffExportCaves() : [''];
+    let cave = null;
+    try { stationMap.forEach(st => { if (cave == null && st && st.name === first) cave = st.cave || ''; }); } catch (_) {}
+    const selSt = typeof _selMesh !== 'undefined' && _selMesh && _selMesh._station;
+    if (cave == null) cave = selSt ? selSt.cave || '' : caves[0] || '';
+    const form = mk('div', 'ff-leadform');
+    const row = (label, node) => { const r = mk('div', 'ff-lf'); r.appendChild(mk('div', 'ff-lf-l', label)); r.appendChild(node); form.appendChild(r); return node; };
+    const name = row('Name', mk('input', 'ff-input')); name.value = (S.page && S.page.title ? S.page.title : 'Scan ' + today()).slice(0, 60);
+    let caveSel = null;
+    if (caves.length > 1) {
+      caveSel = row('Cave', mk('select', 'ff-input'));
+      caves.forEach(c => { const o = mk('option', null, c || '(no name)'); o.value = c; caveSel.appendChild(o); });
+      caveSel.value = cave;
+    }
+    const tie = row('Tied to station', mk('input', 'ff-input')); tie.value = first || (selSt && selSt.name) || '';
+    const r = await ffDialog({ title: 'New field survey', text: 'The shots go into a new field survey.', body: form,
+      buttons: [{ label: 'Cancel', value: null }, { label: 'Create', value: 'ok', primary: true }] });
+    if (!r || !name.value.trim()) return null;
+    const d = new Date();
+    const sv = { id: ffUid(), name: name.value.trim().slice(0, 60), cave: caveSel ? caveSel.value : cave, tie: tie.value.trim(), lenUnit: S.unit,
+      lrudAt: 'from', decl: null, date: d.toISOString().slice(0, 10), created: d.toISOString(), shots: [] };
+    ffRecord('survey.add', { survey: sv });
+    return sv.id;
+  }
+
+  // ── Drafts: a half-checked table survives closing (or the back button) ───
+  const dkey = () => 'flexscan.draft.' + (S && S.page ? S.page.h : 'none');
+  let draftT = 0;
+  function saveDraft(now) {
+    if (!S || !S.table || !S.dirty) return;
+    const write = () => { try { const txt = JSON.stringify({ v: 1, t: Date.now(), unit: S.unit, rot: S.page ? S.page.rot || 0 : 0, table: S.table }); if (txt.length < 600000) localStorage.setItem(dkey(), txt); } catch (_) {} };
+    clearTimeout(draftT);
+    if (now) write(); else { const me = S; draftT = setTimeout(() => { if (S === me) write(); }, 700); }
+  }
+  function loadDraft() {
+    try {
+      const d = JSON.parse(localStorage.getItem(dkey()) || 'null');
+      return d && d.v === 1 && d.table && Array.isArray(d.table.rows) && (d.rot || 0) === (S.page ? S.page.rot || 0 : 0) ? d : null;
+    } catch (_) { return null; }
+  }
+  function dropDraft() { clearTimeout(draftT); try { localStorage.removeItem(dkey()); } catch (_) {} }
+
+  // ── Hooks the viewer calls ────────────────────────────────────────────────
+  // The field-survey panel (ffRenderPanel): a button in the survey view and in the list.
+  function panelHook(body, sv) {
+    if (!body || body.querySelector('.sr-panel-btn')) return;
+    const b = mk('button', 'fp-btn sr-panel-btn', '📷 Import shots from scan');
+    b.title = 'Read a page of shot tables (photo, document page or file) and add its shots';
+    b.addEventListener('click', () => start({ sid: sv ? sv.id : null }));
+    const rows = body.querySelectorAll(':scope > .fp-row');
+    if (sv && rows[0]) { const r = mk('div', 'fp-row'); r.appendChild(b); rows[0].after(r); }
+    else if (!sv && rows.length) rows[rows.length - 1].appendChild(b);
+    else { const r = mk('div', 'fp-row'); r.appendChild(b); body.appendChild(r); }
+  }
+
+  return Object.assign(T, { start, open, openFromDoc, panelHook, close,
+    state: () => S, select: (r, c) => select(r, c, false), tap: tapAt, refresh });
 });
