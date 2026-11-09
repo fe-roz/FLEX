@@ -1,7 +1,7 @@
 // jobs_api.js — the server side of the Jobs panel (client/src/modules/jobs-panel.js).
 //
 // One list over the server's long jobs (offline-map exports, terrain + hillshade generation,
-// analyze runs), whatever file keeps them. Each source is { jobs, pct(job), download?(id, job) }; a job
+// analyze runs, surface routes), whatever file keeps them. Each source is { jobs, pct(job), download?(id, job) }; a job
 // record carries { status: 'running'|'done'|'error', progress: [lines], error, name|label, started, ended,
 // cancelled, proc }. The records live in memory, so a job is listed as long as the server runs.
 //
@@ -9,10 +9,10 @@
 //   GET  /api/jobs/<id>/log        the job's whole output (text)
 //   POST /api/jobs/<id>/cancel     stop a running job (kills its process)
 //
-// <id> is "<kind>.<jobId>" (export.k3x9a1, terrain.…, analyze.…): the kind and a short [A-Za-z0-9_-] id,
+// <id> is "<kind>.<jobId>" (export.k3x9a1, terrain.…, analyze.…, route.…): the kind and a short [A-Za-z0-9_-] id,
 // nothing else is looked up.
 'use strict';
-const ID_RE = /^(export|terrain|analyze)\.([A-Za-z0-9_-]{1,40})$/;
+const ID_RE = /^(export|terrain|analyze|route)\.([A-Za-z0-9_-]{1,40})$/;
 const KEEP_MS = 3600 * 1000;
 
 module.exports = function jobsApi({ sources }) {

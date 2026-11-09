@@ -114,6 +114,9 @@ const server = http.createServer((req, res) => {
     // ── The Jobs panel: running and recent server jobs, their log, Cancel (jobs_api.js) ──
     } else if (sanitizedPath === '/api/jobs' || sanitizedPath.startsWith('/api/jobs/')) {
         if (!jobsApi.handle(req, res, sanitizedPath.slice('/api/jobs'.length).replace(/^\//, ''))) jsonResponse(res, { ok: false, error: 'not found' }, 404);
+    // ── Surface routes (route_api.js) ────────────────────────────────────────
+    } else if (sanitizedPath.startsWith('/api/route/')) {
+        routeGen.handle(req, res, sanitizedPath.slice('/api/route/'.length), parsedUrl.query);
     // ── LiDAR derivations (vegetation density, voids) ────────────────────────
     } else if (sanitizedPath === '/api/lidar/derive' && req.method === 'POST') {
         handleLidarDerive(req, res);
@@ -727,6 +730,9 @@ const EXPORT_SCRIPT = path.join(__dirname, 'export_terrain.py');
 const EXPORT_OUT_DIR = path.join(__dirname, 'user_files', 'exports');
 // The same pipeline run for a project: its DEM as a terrain patch, its hillshade as map tiles.
 const terrainGen = require('./terrain_generate')({ python: CONDA_PYTHON, script: EXPORT_SCRIPT, library });
+// Surface routes (route_api.js → route_cost.py); FLEX_ROUTE_SCRIPT points at another script (the tests' stub)
+const routeGen = require('./route_api')({ python: CONDA_PYTHON, script: process.env.FLEX_ROUTE_SCRIPT || path.join(__dirname, 'route_cost.py'),
+    outRoot: path.join(__dirname, 'user_files', 'jobs', 'route') });
 
 function handleExportTerrain(req, res) {
     let body = '';
@@ -950,6 +956,7 @@ const jobsApi = require('./jobs_api')({ sources: {
     export:  { jobs: _exportJobs, pct: exportPct, download: id => '/api/export/download/' + id },
     terrain: { jobs: terrainGen.jobs, pct: terrainGen.pctOf },
     analyze: { jobs: _lidarJobs, pct: lidarPct },
+    route:   { jobs: routeGen.jobs, pct: routeGen.pctOf },
 } });
 
 function handleLidarDerive(req, res) {
