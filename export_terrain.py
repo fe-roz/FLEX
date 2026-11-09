@@ -1533,7 +1533,7 @@ def convert_inventories(raw, utm_center_e, utm_center_n, zone):
     contents worked out from the log, the log itself) -> the viewer's form: xyz in the scene frame, the rest kept.
 
         in:  {"id", "station"?, "cave"?, "target", "lon", "lat", "elev", "name", "desc", "mode": "log"|"list", "list",
-              "contents": [{"name","qty","changed","checked","stale"}], "checked", "stale", "kept": "project"|"mine",
+              "contents": [{"name","qty","changed","checked","since","stale"}], "checked", "stale", "kept": "project"|"mine",
               "log": [{"id","date","by","action": left|took|checked|note,"items": [{"name","qty"}],"all","photos": [{"h","ext"}],"text"}]}
         out: the same without lon/lat/elev, with "xyz": [x, y, z]
 
@@ -1571,8 +1571,8 @@ def convert_inventories(raw, utm_center_e, utm_center_n, zone):
         contents = []
         for c in iv.get("contents") or []:
             if isinstance(c, dict) and c.get("name"):
-                contents.append({"name": s(c["name"], 80), "qty": num(c.get("qty"), 1),
-                                 "changed": s(c.get("changed"), 30), "checked": s(c.get("checked"), 30), "stale": bool(c.get("stale"))})
+                contents.append({"name": s(c["name"], 80), "qty": num(c.get("qty"), 1), "changed": s(c.get("changed"), 30),
+                                 "checked": s(c.get("checked"), 30), "since": s(c.get("since"), 30), "stale": bool(c.get("stale"))})
         entry["contents"] = contents
         log = []
         for e in (iv.get("log") or [])[:5000]:

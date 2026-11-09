@@ -43,8 +43,8 @@ def run(payload):
 
 inv = {'id': 'iv1', 'station': 'A2', 'cave': 'Cave Ridge', 'target': 'station:cave1:A2', 'kept': 'project', 'lon': LON + 0.0001, 'lat': LAT, 'elev': 1498.0,
        'name': 'Rope cache', 'desc': 'Blue barrel behind the boulder', 'mode': 'log', 'checked': '2026-03-02', 'stale': False,
-       'contents': [{'name': 'Rope 50 m', 'qty': 3, 'changed': '2026-03-02', 'checked': '2026-03-02', 'stale': False},
-                    {'name': 'Stove', 'qty': 1.5, 'changed': '2026-01-10', 'checked': '', 'stale': True}],
+       'contents': [{'name': 'Rope 50 m', 'qty': 3, 'changed': '2026-03-02', 'checked': '2026-03-02', 'since': '2026-03-02', 'stale': False},
+                    {'name': 'Stove', 'qty': 1.5, 'changed': '2026-01-10', 'checked': '', 'since': '2026-01-10', 'stale': True}],
        'log': [{'id': 'e1', 'date': '2026-01-10', 'by': 'Ana', 'action': 'left', 'items': [{'name': 'Rope 50 m', 'qty': 2}, {'name': 'Stove', 'qty': 1.5}], 'text': 'In the barrel'},
                {'id': 'e2', 'date': '2026-03-02', 'by': 'T', 'action': 'checked', 'all': True, 'items': [{'name': 'Rope 50 m', 'qty': 3}], 'text': '',
                 'photos': [{'h': H1, 'ext': 'jpg'}, {'h': 'nothex', 'ext': 'jpg'}, {'h': H2, 'ext': 'tif'}, {'h': H2, 'ext': 'png'}]},
@@ -64,7 +64,7 @@ st = {s['name']: s for s in r['surveys'][0]['stations']}
 check('a station\'s inventory sits at the station (scene frame, height kept)', all(abs(a['xyz'][k] - st['A2']['xyz'][k]) < 1e-6 for k in range(3)) and a['xyz'][2] == 1498.0, [a['xyz'], st['A2']['xyz']])
 check('name, description, mode, station, cave, target, kept, checked', (a['name'], a['desc'], a['mode'], a['station'], a['cave'], a['target'], a['kept'], a['checked']) ==
       ('Rope cache', 'Blue barrel behind the boulder', 'log', 'A2', 'Cave Ridge', 'station:cave1:A2', 'project', '2026-03-02'), a)
-check('contents with their dates and the possibly-out-of-date flag; whole numbers stay whole', a['contents'][0] == {'name': 'Rope 50 m', 'qty': 3, 'changed': '2026-03-02', 'checked': '2026-03-02', 'stale': False}
+check('contents with their dates and the possibly-out-of-date flag; whole numbers stay whole', a['contents'][0] == {'name': 'Rope 50 m', 'qty': 3, 'changed': '2026-03-02', 'checked': '2026-03-02', 'since': '2026-03-02', 'stale': False} and a['contents'][1]['since'] == '2026-01-10'
       and a['contents'][1]['qty'] == 1.5 and a['contents'][1]['stale'] is True and isinstance(a['contents'][0]['qty'], int), a['contents'])
 check('the log is kept in order with date, who, action, items, text; bad entries are left out', [e['id'] for e in a['log']] == ['e1', 'e2', 'e3'] and a['log'][0]['by'] == 'Ana'
       and a['log'][0]['items'] == [{'name': 'Rope 50 m', 'qty': 2}, {'name': 'Stove', 'qty': 1.5}] and a['log'][0]['text'] == 'In the barrel' and a['log'][1]['all'] is True, a['log'])

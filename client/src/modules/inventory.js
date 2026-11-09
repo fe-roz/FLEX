@@ -201,7 +201,8 @@
   }
 
   // ── Small dialogs (a form that stays open until it is right) ───────────────
-  function modal({ title, text, body, buttons, wide }) {
+  // enter: Enter in a one-line box presses the primary button (for a short form; the entry form has several lines to fill).
+  function modal({ title, text, body, buttons, wide, enter }) {
     return new Promise(resolve => {
       const wrap = el('div', 'pj-modal inv-modal'), box = el('div', 'pj-modal-box' + (wide ? ' wide' : ''));
       box.appendChild(el('div', 'pj-modal-title', title));
@@ -210,7 +211,10 @@
       const msg = el('div', 'pj-conflict inv-msg'); msg.style.display = 'none'; box.appendChild(msg);
       const row = el('div', 'pj-modal-btns');
       const done = v => { wrap.remove(); document.removeEventListener('keydown', key, true); resolve(v); };
-      const key = e => { if (e.key === 'Escape') { e.stopPropagation(); done(null); } };
+      const key = e => {
+        if (e.key === 'Escape') { e.stopPropagation(); done(null); }
+        else if (enter && e.key === 'Enter' && e.target && e.target.tagName === 'INPUT' && e.target.type === 'text') { e.preventDefault(); const pb = [...row.querySelectorAll('.primary')][0]; if (pb) pb.click(); }
+      };
       buttons.forEach(b => row.appendChild(btn(b.label, () => {
         if (b.value === null) return done(null);
         const bad = b.check && b.check();
@@ -243,7 +247,7 @@
     const buttons = [{ label: 'Cancel', value: null }];
     if (canRemove) buttons.push({ label: 'Remove inventory', value: 'rm', danger: true });
     buttons.push({ label: 'Save', value: 'ok', primary: true });
-    const r = await modal({ title, body, buttons, wide: true });
+    const r = await modal({ title, body, buttons, wide: true, enter: true });
     if (!r) return null;
     return { remove: r === 'rm', name: name.value.trim(), desc: desc.value.trim(), mode: st.mode, list: list.value };
   }
@@ -363,6 +367,19 @@
     });
     return box;
   };
+
+  /** Every photo of an inventory, newest first, each with the date of its entry (click: full size). */
+  function photoGrid(photos) {
+    const box = el('div', 'inv-grid');
+    photos.forEach((p, i) => {
+      const f = el('figure', 'inv-fig'), im = el('img');
+      im.loading = 'lazy'; im.src = blobUrl(p); im.alt = 'photo'; im.title = (p.date || '') + (p.by ? ' · ' + p.by : '');
+      im.addEventListener('click', () => lightbox(photos, i));
+      f.append(im, el('figcaption', null, p.date || ''));
+      box.appendChild(f);
+    });
+    return box;
+  }
 
   // ── An entry of the log ────────────────────────────────────────────────────
   const ACT_LABEL = { left: 'Left', took: 'Took', checked: 'Checked', note: 'Note' };
@@ -527,6 +544,10 @@
       box.appendChild(acts);
       box.appendChild(el('div', 'inv-h', `Log (${inv.log.length})`));
       box.appendChild(logTable(hit, full));
+      if (inv.photos.length) {
+        box.appendChild(el('div', 'inv-h', `Photos (${inv.photos.length})`));
+        box.appendChild(photoGrid(full ? inv.photos : inv.photos.slice(0, 6)));
+      }
       if (!full && inv.log.length > 4) {
         const more = btn(openLogs.has(inv.id) ? 'Show only the latest' : `Show all ${inv.log.length} entries`, () => { openLogs.has(inv.id) ? openLogs.delete(inv.id) : openLogs.add(inv.id); box.replaceWith(card(hit, false)); }, 'link');
         box.appendChild(more);
@@ -672,6 +693,9 @@
   .inv-thumbs.inv-edit { margin-bottom: 4px; } .inv-th { position: relative; display: inline-block; } .inv-th img { width: 56px; height: 56px; }
   .inv-th .pj-btn { position: absolute; top: -4px; right: -4px; margin: 0; padding: 0 4px; line-height: 14px; }
   .inv-row.inv-old .pj-sub:last-child { color: #f2c24e; }
+  .inv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)); gap: 6px; margin: 2px 0 4px; }
+  .inv-fig { margin: 0; } .inv-fig img { width: 100%; height: 62px; object-fit: cover; border-radius: 4px; cursor: zoom-in; background: #222; display: block; }
+  .inv-fig figcaption { font-size: 10px; color: rgba(255,255,255,.6); text-align: center; margin-top: 1px; }
   .inv-items { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
   .inv-item { display: flex; gap: 4px; width: 100%; } .inv-item .pj-input { flex: 1; min-width: 0; } .inv-item .inv-qty { flex: none; width: 74px; }
   .inv-form .pj-f { margin-bottom: 2px; }

@@ -263,19 +263,19 @@ def make_inventories(out, known):
     ref = lambda p: {'h': p['h'], 'ext': p['ext']}
     cave_ref = {'station': 'A5', 'cave': 'Cave Ridge', 'target': f'station:{CAVE_ID}:A5'}
     rope = dict(id='flexinv-rope', xyz=known['A5'], name='Rope cache', desc='Blue barrel behind the boulder', mode='log', kept='project', **cave_ref,
-                contents=[{'name': 'Rope 50 m', 'qty': 3, 'changed': '2026-03-02', 'checked': '2026-03-02', 'stale': False},
-                          {'name': 'Stove', 'qty': 1, 'changed': '2026-01-10', 'checked': '2026-03-02', 'stale': False},
-                          {'name': 'Tarp', 'qty': 1, 'changed': '2026-03-02', 'checked': '2026-03-02', 'stale': False}],
+                contents=[{'name': 'Rope 50 m', 'qty': 3, 'changed': '2026-03-02', 'checked': '2026-03-02', 'since': '2026-03-02', 'stale': False},
+                          {'name': 'Stove', 'qty': 1, 'changed': '2026-01-10', 'checked': '2026-03-02', 'since': '2026-03-02', 'stale': False},
+                          {'name': 'Tarp', 'qty': 1, 'changed': '2026-03-02', 'checked': '2026-03-02', 'since': '2026-03-02', 'stale': False}],
                 checked='2026-03-02', stale=False,
                 log=[{'id': 'e1', 'date': '2026-01-10', 'by': 'Ana', 'action': 'left', 'items': [{'name': 'Rope 50 m', 'qty': 2}, {'name': 'Stove', 'qty': 1}], 'text': 'In the barrel'},
                      {'id': 'e2', 'date': '2026-02-01', 'by': 'Bo', 'action': 'took', 'items': [{'name': 'Rope 50 m', 'qty': 1}], 'text': ''},
                      {'id': 'e3', 'date': '2026-03-02', 'by': 'Ana', 'action': 'checked', 'items': [{'name': 'Rope 50 m', 'qty': 3}, {'name': 'Stove', 'qty': 1}, {'name': 'Tarp', 'qty': 1}], 'text': '', 'photos': [ref(p1)]},
                      {'id': 'e4', 'date': '2026-04-05', 'by': 'Ana', 'action': 'note', 'items': [], 'text': 'Barrel lid cracked', 'photos': [ref(p2)]}])
     stash = dict(id='flexinv-list', xyz=known['B2'], name='Old stash', desc='', mode='list', kept='mine', station='B2', cave='Cave Ridge', target='station:f.Cave%20Ridge:B2',
-                 list='2 x carbide\nspare lamp', contents=[{'name': 'Carbide', 'qty': 2, 'changed': '2024-05-01', 'checked': '', 'stale': True}], checked='', stale=True,
+                 list='2 x carbide\nspare lamp', contents=[{'name': 'Carbide', 'qty': 2, 'changed': '2024-05-01', 'checked': '', 'since': '2024-05-01', 'stale': True}], checked='', stale=True,
                  log=[{'id': 'e1', 'date': '2024-05-01', 'by': 'Cy', 'action': 'left', 'items': [{'name': 'Carbide', 'qty': 2}], 'text': ''}])
     dig = dict(id='flexinv-dig', xyz=[60.0, -40.0, ground(60.0, -40.0)], name='Dig tools', desc='Under the fallen tree', mode='log', kept='project', target='feature:fsurf1',
-               contents=[{'name': 'Shovel', 'qty': 2, 'changed': '2026-05-01', 'checked': '', 'stale': False}], checked='', stale=False,
+               contents=[{'name': 'Shovel', 'qty': 2, 'changed': '2026-05-01', 'checked': '', 'since': '2026-05-01', 'stale': False}], checked='', stale=False,
                log=[{'id': 'e1', 'date': '2026-05-01', 'by': 'Bo', 'action': 'left', 'items': [{'name': 'Shovel', 'qty': 2}], 'text': ''}])
     return [rope, stash, dig], [dict(p1, path=f1), dict(p2, path=f2)]
 

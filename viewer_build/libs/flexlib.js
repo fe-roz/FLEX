@@ -1666,6 +1666,21 @@
       default: return null;
     }
   }
+  // Take an inventory that came in an export (caves.json `inventories`: id, name, desc, mode, list, log) into a library that
+  // does not have it yet: the inv.set (same id, so every device that adopts it makes the same record) and one inv.log per
+  // exported entry (same log ids), as bodies for the host to record, oldest first. Records two devices both made from the
+  // same export have equal values, so they merge into one inventory without a conflict. `target`: the place in this library
+  // (the export's `target` names the writer's own cave key, so the host maps it to the project's cave).
+  function invAdoptBodies(exp, target) {
+    const out = [Object.assign({ op: 'inv.set', inv: String(exp.id), target: String(target), fields: { name: invName(exp.name), desc: String(exp.desc || ''), mode: exp.mode === 'list' ? 'list' : 'log', list: String(exp.list || '') }, prev: null, source: 'export' })];
+    (Array.isArray(exp.log) ? exp.log : []).forEach(e => {
+      if (!e || !e.id) return;
+      const action = INV.actions.includes(e.action) ? e.action : 'note';
+      out.push({ op: 'inv.log', inv: String(exp.id), log: String(e.id), date: String(e.date || ''), by: String(e.by || ''), action, items: invItems(e.items), all: action === 'checked' && !!e.all,
+        photos: invPhotos(e.photos), text: String(e.text || ''), prev: null });
+    });
+    return out;
+  }
   // A one-line account of what is there ("Rope 50 m ×2, Stove"), for lists and markers.
   function invLine(I, max) {
     if (I.mode === 'list') return String(I.list || '').split('\n').map(s => s.trim()).filter(Boolean).join(', ');
@@ -1677,7 +1692,7 @@
   function invPayload(I) {
     return {
       id: I.id, target: I.target, name: I.name, desc: I.desc, mode: I.mode, list: I.list,
-      contents: I.contents.map(c => ({ name: c.name, qty: c.qty, changed: c.changed, checked: c.checked, stale: !!c.stale })),
+      contents: I.contents.map(c => ({ name: c.name, qty: c.qty, changed: c.changed, checked: c.checked, since: c.since, stale: !!c.stale })),      // since: counted, else first seen (a viewer works out `stale` on its own clock from it)
       checked: I.checked, stale: !!I.stale,
       log: I.log.map(e => {
         const o = { id: e.id, date: e.date, by: e.by || e.created.who || '', action: e.action, items: e.items.map(x => ({ name: x.name, qty: x.qty })), text: e.text };
@@ -1689,6 +1704,7 @@
   }
 
   return {
+    INV, invKey, invQty, invItems, invPhotos, invAge, invMark, replayInventories, liveInventories, invsOn, invSetBody, invLogBody, invLogRemoveBody, invUndo, invAdoptBodies, invLine, invPayload,   // inventories (the section above)
     FORMAT, FT, DOCS, projScope, scopeProject, sha256, uid, clone, nowIso, same, cmp, sortEntries, surveyCode,
     T, parseTarget, areaHas, DOC_KINDS, DOC_KIND_LABELS, docMedia, dateKey, resolveProposals, reviewQueue, causalOrder, LEAD, LEAD_FIELDS, leadLists, statusLabel, leadActive, heads,
     replayProject, replayDocs, caveForName, liveCaves, notesOn, leadsOn,
@@ -1700,6 +1716,5 @@
     selectForSync, syncManifest, newEntries,
     parseNum, shotFlags, shotReading, computeSurvey, stationLruds, suggestCaves,
     liveSystems, systemsOf, systemTotals, fileGroups, planMulti, systemUndo, multiUndo, entrancesOf, entranceFit,
-    INV, invKey, invQty, invItems, invPhotos, invAge, invMark, replayInventories, liveInventories, invsOn, invSetBody, invLogBody, invLogRemoveBody, invUndo, invLine, invPayload,
   };
 });
