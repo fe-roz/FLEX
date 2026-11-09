@@ -484,8 +484,13 @@
     <div class="help-row"><span class="help-icon">⋯</span><span class="help-desc">Units (ft / m), what counts as narrow, stooping, crawling or steep (Route difficulty), who is entering data, ⇄ project & sync files (share with other phones and FLEX), export project data, fullscreen, help</span></div>
     <div class="help-section">STATIONS</div>
     <div class="help-row"><span class="help-icon">👆</span><span class="help-desc">Tap: info · again: caver for scale · again: reach (what's within range along the survey) · again: off</span></div>
-    <div class="help-row"><span class="help-icon">✏️</span><span class="help-desc">On a station's card: ✏️ Add note is always there · 📄 documents tagged to the station, its survey or cave (the ones in the export too: scanned notes and photos; PDFs stay in FLEX). Everything else — changing a note, ❓ leads (status, size…), 📐 survey new passage from here, and in a document turning pages, tags, removing — waits behind the small <b>✎ Edit</b> button, which is off again when you close the card.</span></div>
+    <div class="help-row"><span class="help-icon">✏️</span><span class="help-desc">On a station's card: ✏️ Add note is always there · 📄 its documents (see Documents below; the ones in the export too: scanned notes and photos; PDFs stay in FLEX). Everything else — changing a note, ❓ leads (status, size…), 📐 survey new passage from here, and in a document turning pages, tags, removing — waits behind the small <b>✎ Edit</b> button, which is off again when you close the card.</span></div>
     <div class="help-row"><span class="help-icon">👆</span><span class="help-desc">Taps find the nearest station, lead mark, name or pin within a finger's width of the touch; a drag or a two-finger move is never a tap</span></div>
+    <div class="help-section">DOCUMENTS</div>
+    <div class="help-row"><span class="help-icon">📄</span><span class="help-desc">A station's card lists its documents in four groups, each with a count: <b>Survey notes</b>, <b>Sketches</b>, <b>Media</b>, <b>Other</b>. Most specific first: the sketch page that covers the station (a page tagged <b>A6~A8</b>) or the book that holds it; if there are none, its survey's; then the cave's; never another survey's or cave's. A group that comes from a wider level says so (“Survey notes (1) · from survey T”). A document opens at the page that was found (“page 2: stations A2–A4”). The project's untagged documents wait behind “Show N not yet sorted…”.</span></div>
+    <div class="help-row"><span class="help-icon">〰️</span><span class="help-desc">Tap the survey or the cave on a station's card (or 📚 → <b>Surveys</b>) for its own card: the survey's documents, or the cave's when it has none. 📚 lists every document by group, with counts.</span></div>
+    <div class="help-row"><span class="help-icon">🏷</span><span class="help-desc">Tagging waits behind <b>✎ Edit</b> in a document: <b>🏷 Tags</b> for the whole document, <b>🏷 Tag this page…</b> for one page (a station, or a range such as <b>A6~A8</b>: <b>A6 to A8</b> and <b>A6–A8</b> mean the same). Pick the cave and the survey, type the station or the range (the map's stations are suggested, Enter takes the first); recent tags are one tap away; <b>Done</b> saves them together, undo is in 📝 Change log. The caption says what the page is tagged to (“This page: stations A6–A8”).</span></div>
+    <div class="help-row"><span class="help-icon">📷</span><span class="help-desc">A station whose shots were read from a scanned page says <b>From page 2 of “…”</b>: tap it to see that page. Pages and photos you add get a kind from their name (a camera photo is Media, a scan Survey notes, a PDF Other); change it in <b>✎ Edit → ⋯ → Title, kind, date</b>.</span></div>
     <div class="help-section">FIELD SURVEY</div>
     <div class="help-row"><span class="help-icon">📐</span><span class="help-desc">Shots start at the station you tied the survey to (✎ Edit on its card → Survey from here). The form suggests station names the cave does not have yet; a shot to a name that exists closes a loop onto that station and is drawn over the line already there. <b>🗺 Show on map</b> takes the view to your shots.</span></div>
     <div class="help-row"><span class="help-icon">🧭</span><span class="help-desc">Declination is worked out offline (World Magnetic Model, for the survey's date) at the tie-in: “Declination 10.3° E (WMM 2026 at T6)”. Type your own (12 W) to override it; Use WMM goes back. <b>Backsights</b> shows the back readings; tap again to hide them.</span></div>
@@ -655,6 +660,7 @@ catch(e) { window.DOCS_EXPORT = null; }
 <script src="libs/route-search.js"></script>
 <script src="libs/viewer-inventory.js"></script>
 <script src="libs/scan-import.js"></script>
+<script src="libs/viewer-docs.js"></script>
 
 <script>
 'use strict';
@@ -5052,6 +5058,7 @@ async function ffBrowserPick(ctx) {
           }
         } catch (e) { showToast('Could not read ' + f.name); }
       }
+      if (c && !c.doc && c.kind == null && window.FlexDocs) { try { c.kind = await FlexDocs.kindForFiles(files); } catch (_) {} }    // a camera photo is Media, a scan Survey notes…
       window.ffPagesPicked(JSON.stringify(c), JSON.stringify({ pages }));
     });
   }
@@ -5084,7 +5091,7 @@ window.ffPagesPicked = async function (ctxJson, resJson) {
     const d = new Date();
     const title = ctx.title || (pages.length === 1 ? pages[0].name.replace(/\.[^.]*$/, '') : `${pages[0].name.replace(/\.[^.]*$/, '')} +${pages.length - 1}`);
     const id = ffUid();
-    ffRecord('doc.add', { doc: id, title: title.slice(0, 80), kind: ctx.kind || '', date: d.toISOString().slice(0, 10), pages,
+    ffRecord('doc.add', { doc: id, title: title.slice(0, 80), kind: window.FlexDocs ? FlexDocs.kindFor(pages, ctx) : ctx.kind || '', date: d.toISOString().slice(0, 10), pages,
       tags: (ctx.tags && ctx.tags.length ? ctx.tags : [FL.T.project(ffPid)]) }, null, 'docs');
     showToast(`New document, ${pages.length} page${pages.length > 1 ? 's' : ''}`);
     if (ctx.open !== false) ffDocOpen(id, 0);
@@ -5179,6 +5186,8 @@ function ffInverse(e) {
     case 'doc.restore':  return { op: 'doc.del', doc: e.doc, _where: 'docs' };
     case 'doc.tag':      return { op: 'doc.untag', doc: e.doc, target: e.target, _where: 'docs' };
     case 'doc.untag':    return { op: 'doc.tag', doc: e.doc, target: e.target, _where: 'docs' };
+    case 'doc.pagetag':   return { op: 'doc.pageuntag', doc: e.doc, h: e.h, target: e.target, _where: 'docs' };
+    case 'doc.pageuntag': return { op: 'doc.pagetag', doc: e.doc, h: e.h, target: e.target, _where: 'docs' };
     case 'doc.rotate':   return e.prev != null ? { op: 'doc.rotate', doc: e.doc, h: e.h, rot: e.prev, prev: e.rot, _where: 'docs' } : null;
     case 'doc.set':      return e.prev ? { op: 'doc.set', doc: e.doc, fields: e.prev, prev: e.fields, _where: 'docs' } : null;
     case 'doc.droppage': return e.page ? { op: 'doc.pages', doc: e.doc, add: [e.page], at: e.at, _where: 'docs' } : null;
@@ -5246,6 +5255,8 @@ function ffDescribeOp(e) {
     case 'doc.rotate':   return `Turned a page of ${docName(e.doc)}`;
     case 'doc.tag':      return `Tagged ${docName(e.doc)}: ${ffTargetLabel(e.target)}`;
     case 'doc.untag':    return `Untagged ${docName(e.doc)}: ${ffTargetLabel(e.target)}`;
+    case 'doc.pagetag':   return `Tagged a page of ${docName(e.doc)}: ${ffTargetLabel(e.target)}`;
+    case 'doc.pageuntag': return `Untagged a page of ${docName(e.doc)}: ${ffTargetLabel(e.target)}`;
     case 'doc.set':      return `Edited ${docName(e.doc)} (${Object.keys(e.fields || {}).join(', ')})`;
     case 'doc.del':      return `Deleted ${docName(e.doc)}`;
     case 'doc.restore':  return `Restored ${docName(e.doc)}`;
@@ -5277,6 +5288,7 @@ function ffAfterChange(e) {
 function ffRefreshCard() {
   const sel = _selMesh && _selMesh._station;
   if (sel && infoPanel.classList.contains('open')) selectStation(sel);
+  else if (window.FlexDocs) FlexDocs.refresh();      // a survey or cave card (libs/viewer-docs.js) is open
 }
 
 // ── Project and caves for this map ────────────────────────────────────────────
@@ -5553,8 +5565,10 @@ function ffOpenDocs(st, tab) {
 }
 function ffDocSub(d) {
   const tags = d.tagList.filter(t => t !== FL.T.project(ffPid)).map(ffTargetLabel);
+  const pt = d.pages.filter(p => p.targets && p.targets.length).length;      // pages with a tag of their own
   return `${d.pages.length} page${d.pages.length === 1 ? '' : 's'}${d.kind ? ' · ' + (FL.DOC_KIND_LABELS[d.kind] || d.kind) : ''}${d.date ? ' · ' + d.date : ''} · ` +
-    (tags.length ? tags.slice(0, 3).join(', ') + (tags.length > 3 ? ` +${tags.length - 3}` : '') : 'inbox') +
+    (tags.length ? tags.slice(0, 3).join(', ') + (tags.length > 3 ? ` +${tags.length - 3}` : '') : pt ? '' : 'inbox') +
+    (pt ? `${tags.length ? ' · ' : ''}${pt} page${pt === 1 ? '' : 's'} tagged` : '') +
     (d.conflicts ? ' · ⚠ edited on two devices' : '');
 }
 function ffRenderDocs() {
@@ -5573,6 +5587,7 @@ function ffRenderDocs() {
   const all = FL.docsOf(ffD, ffP);
   const tabs = el('div', 'fp-sort');
   const tabList = [['inbox', `Inbox (${all.filter(d => FL.docInbox(d, ffP)).length})`], ['all', `All (${all.length})`]];
+  if (window.FlexDocs) tabList.unshift(['surveys', 'Surveys']);      // a survey's or a cave's documents (libs/viewer-docs.js)
   if (ffDocsFor) tabList.unshift(['station', ffDocsFor.name || 'Station']);
   tabList.forEach(([k, label]) => {
     const b = el('button', ffDocsTab === k ? 'active' : '', label);
@@ -5584,35 +5599,17 @@ function ffRenderDocs() {
   add.addEventListener('click', () => ffAddPages(ffDocsTab === 'station' ? ffDocsFor : null));
   const row = el('div', 'fp-row'); row.appendChild(add); body.appendChild(row);
   const list = el('div', 'fp-list');
-  const put = (title, docs) => {
-    if (!docs.length) return;
-    if (title) list.appendChild(el('div', 'fp-h', title));
-    docs.forEach(d => list.appendChild(fpRow('📄', d.title || 'Untitled', ffDocSub(d), () => ffDocOpen(d.id, 0))));
-  };
-  if (ffDocsTab === 'station' && ffDocsFor) {
-    const cid = ffStCave(ffDocsFor);
-    const fs = cid ? FL.docsForStation(ffD, ffP, cid, ffDocsFor.name, ffStCodes(ffDocsFor)) : { station: [], survey: [], cave: [] };
-    put('This station', fs.station);
-    put('Pages covering this area', fs.area || []);
-    put('Survey ' + (ffStCodes(ffDocsFor)[0] || ''), fs.survey);
-    put('The cave', fs.cave);
-    if (!fs.station.length && !(fs.area || []).length && !fs.survey.length && !fs.cave.length) list.appendChild(el('div', 'fp-note', 'Nothing tagged here yet. ＋ Add pages, or tag a document from the Inbox.'));
-  } else if (ffDocsTab === 'inbox') {
-    const inbox = all.filter(d => FL.docInbox(d, ffP));
-    put(null, inbox);
-    if (!inbox.length) list.appendChild(el('div', 'fp-note', 'Inbox empty: every document is tagged to a cave, survey, station or lead.'));
-  } else {
-    put(null, all);
-    if (!all.length) list.appendChild(el('div', 'fp-note', 'No documents yet. ＋ Add pages: photos, scans (TIFF too) or PDFs of survey notes, trip reports, maps…'));
-  }
+  // by group, with counts; a station's by the strict order (libs/viewer-docs.js)
+  if (!(window.FlexDocs && FlexDocs.fillList(list, ffDocsTab, ffDocsFor, all))) all.forEach(d => list.appendChild(fpRow('📄', d.title || 'Untitled', ffDocSub(d), () => ffDocOpen(d.id, 0))));
   body.appendChild(list);
 }
-async function ffAddPages(st, docId) {
+async function ffAddPages(st, docId, moreTags) {
   await ffEnsureAuthor();
   if (!ffPid) { showToast('No project for this map yet'); return; }
   const tags = [FL.T.project(ffPid)];
   const t = st && ffStTarget(st);
   if (t) tags.push(t);
+  (moreTags || []).forEach(x => { if (x && !tags.includes(x)) tags.push(x); });      // a survey's or a cave's card
   try { await ffHost.pickPages(docId ? { doc: docId } : { tags }); }
   catch (e) { showToast('Could not open the file picker'); }
 }
@@ -5642,6 +5639,7 @@ async function ffDocOpen(docId, index) {
     g.querySelector('.ffg-tag').addEventListener('click', () => ffEditTags(ffGallery.doc));
     g.querySelector('.ffg-more').addEventListener('click', () => ffDocMenu(ffGallery.doc));
     ffGalleryGestures(g.querySelector('.ffg-stage'));
+    if (window.FlexDocs) FlexDocs.galleryInit(g);      // 🏷 Tag this page… behind Edit (libs/viewer-docs.js)
   }
   ffGallery = { doc: docId, i: Math.max(0, Math.min(index || 0, d.pages.length - 1)), z: 1, x: 0, y: 0 };
   g.classList.add('open');
@@ -5667,6 +5665,7 @@ async function ffGalleryShow(i) {
   if (!n) { img.style.display = 'none'; empty.style.display = ''; empty.textContent = 'No pages. ⋯ → Add pages.'; g.querySelector('.ffg-count').textContent = ''; return; }
   G.i = ((i % n) + n) % n; G.z = 1; G.x = 0; G.y = 0;
   const pg = d.pages[G.i];
+  if (window.FlexDocs) FlexDocs.galleryCaption(g, d, G.i);      // the document's tags and this page's own
   const url = await ffBlobUrl(pg.h, pg.ext);
   g.querySelector('.ffg-count').textContent = `${G.i + 1} / ${n}${pg.name ? ' · ' + pg.name : ''}`;
   empty.style.display = 'none';
@@ -5762,6 +5761,7 @@ async function ffDocMenu(docId) {
       form.appendChild(row); };
     mk('Title', 'title'); mk('Kind', 'kind', 'sketch-plan, shot-table, trip-report, photo…', FL.DOC_KINDS);
     mk('Date (can be approximate)', 'date', '1994-07-16, 1994, 1970s…'); mk('Description', 'desc');
+    if (window.FlexDocs) FlexDocs.kindChips(form);      // Survey notes / Sketches / Media / Other under Kind
     const r2 = await ffDialog({ title: 'Document', body: form, wide: true, buttons: [{ label: 'Cancel', value: null }, { label: 'Save', value: 'ok', primary: true }] });
     if (!r2) return;
     const fields = {}, prev = {};
@@ -5770,62 +5770,10 @@ async function ffDocMenu(docId) {
     ffGalleryShow(ffGallery ? ffGallery.i : 0);
   }
 }
-// Tags: the project's caves, the map's surveys and stations, leads.
-function ffTagChoices() {
-  const out = [];
-  Object.entries(ffLinks.byName).forEach(([name, cid]) => {
-    const cn = (ffP.caves[cid] && ffP.caves[cid].name) || name;
-    out.push({ label: `Cave · ${cn}`, target: FL.T.cave(cid) });
-    const svs = new Map();
-    ((CAVES_DATA && CAVES_DATA.surveys) || []).filter(s => (s.cave || '') === name).forEach(s => { const c = FL.surveyCode(s.name); if (c && !svs.has(c)) svs.set(c, s.name); });
-    svs.forEach((full, code) => out.push({ label: `Survey ${full} · ${cn}`, target: FL.T.survey(cid, code) }));
-  });
-  stationMap.forEach(st => { const t = ffStTarget(st); if (t) out.push({ label: `Station ${st.name} · ${(ffP.caves[ffStCave(st)] || {}).name || st.cave}`, target: t, st: true }); });
-  return out;
-}
-async function ffEditTags(docId) {
-  await ffEnsureAuthor();
-  const d = ffD.docs[docId];
-  if (!d) return;
-  const body = el('div', 'ff-tagbox');
-  const cur = el('div', 'ff-chips');
-  const draw = () => {
-    const dd = ffD.docs[docId];
-    cur.textContent = '';
-    dd.tagList.forEach(t => {
-      const b = el('button', 'fp-btn ff-chip active', (t === FL.T.project(ffPid) ? 'Project · ' : '') + ffTargetLabel(t) + ' ✕');
-      b.addEventListener('click', () => { ffRecord('doc.untag', { doc: docId, target: t }, null, 'docs'); draw(); });
-      cur.appendChild(b);
-    });
-    if (!dd.tagList.length) cur.appendChild(el('div', 'fp-note', 'No tags: the document is in no project.'));
-  };
-  draw();
-  body.appendChild(cur);
-  const sel = _selMesh && _selMesh._station, selT = sel && ffStTarget(sel);
-  const quick = el('div', 'fp-row');
-  if (selT) { const b = el('button', 'fp-btn', '＋ ' + sel.name + ' (selected)'); b.addEventListener('click', () => { if (!ffD.docs[docId].tags[selT]) ffRecord('doc.tag', { doc: docId, target: selT }, null, 'docs'); draw(); }); quick.appendChild(b); }
-  if (selT) { const code = ffStCodes(sel)[0]; if (code) { const st2 = FL.T.survey(ffStCave(sel), code);
-    const b = el('button', 'fp-btn', '＋ survey ' + code); b.addEventListener('click', () => { if (!ffD.docs[docId].tags[st2]) ffRecord('doc.tag', { doc: docId, target: st2 }, null, 'docs'); draw(); }); quick.appendChild(b); } }
-  if (!d.tags[FL.T.project(ffPid)]) { const b = el('button', 'fp-btn', '＋ this project'); b.addEventListener('click', () => { ffRecord('doc.tag', { doc: docId, target: FL.T.project(ffPid) }, null, 'docs'); draw(); }); quick.appendChild(b); }
-  body.appendChild(quick);
-  const choices = ffTagChoices();
-  const inp = el('input', 'ff-input'); inp.placeholder = 'Tag a cave, survey or station…';
-  const dl = el('datalist'); dl.id = 'ff-tag-list';
-  choices.slice(0, 6000).forEach(c => { const o = el('option'); o.value = c.label; dl.appendChild(o); });
-  inp.setAttribute('list', 'ff-tag-list');
-  const addB = el('button', 'fp-btn active', 'Add tag');
-  addB.addEventListener('click', () => {
-    const v = inp.value.trim().toLowerCase();
-    const c = choices.find(x => x.label.toLowerCase() === v) || choices.find(x => x.label.toLowerCase().includes(v));
-    if (!v || !c) { showToast('Pick one from the list'); return; }
-    if (!ffD.docs[docId].tags[c.target]) ffRecord('doc.tag', { doc: docId, target: c.target }, null, 'docs');
-    inp.value = ''; draw();
-  });
-  const r = el('div', 'fp-row ff-tagadd'); r.appendChild(inp); r.appendChild(addB);
-  body.appendChild(dl); body.appendChild(r);
-  await ffDialog({ title: 'Tags · ' + (d.title || 'document'), text: 'A document shows on the stations, surveys and caves it is tagged to. Tagged to the project only, it waits in the Inbox.', body, wide: true,
-    buttons: [{ label: 'Done', value: 'ok', primary: true }] });
-  if (ffGallery && ffGallery.doc === docId) ffGalleryShow(ffGallery.i);
+// Tags of a document, or of one page of it (opts.page): the picker (cave → survey → station or range, recent tags,
+// the whole document or this page) is in libs/viewer-docs.js; it records doc.tag / doc.untag / doc.pagetag / doc.pageuntag.
+async function ffEditTags(docId, opts) {
+  if (window.FlexDocs) await FlexDocs.editTags(docId, opts || {});
 }
 
 // ── Station card additions ────────────────────────────────────────────────────
@@ -5862,11 +5810,6 @@ function ffStationCard(st) {
   const fb = el('button', 'fp-btn', '📄 Documents');
   fb.addEventListener('click', () => ffOpenDocs(st, 'station'));
   row.appendChild(fb);
-  if (target) {
-    const fs = FL.docsForStation(ffD, ffP, ffStCave(st), st.name, ffStCodes(st));
-    const n = fs.station.length + fs.survey.length + fs.cave.length;
-    if (n) fb.textContent = `📄 Documents · ${n}`;
-  }
   const fsv = st._ff && ffState.surveys[st._ff];
   const eb = el('button', 'fp-btn ff-edit-btn' + (edit ? ' active' : ''), edit ? '✓ Done' : '✎ Edit');
   eb.id = 'ff-edit-btn'; eb.title = 'Show the edit actions for this station';
@@ -5885,6 +5828,7 @@ function ffStationCard(st) {
     box.appendChild(row);
     box.appendChild(row2);
   } else box.appendChild(row);
+  if (window.FlexDocs && target) FlexDocs.stationCard(box, st, fb);      // its documents by group, scanned shots; the Survey row opens its card
   rows.insertBefore(box, rows.children[2] || null);
 }
 
