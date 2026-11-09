@@ -15,9 +15,18 @@ note pages and new survey added on the phone, all in a change log.
   or import it separately. Updating replaces the terrain, imagery and caves and
   keeps everything added on the phone. ⋯ → *Update from a newer export…* does
   the same for a map whose name changed.
-- **On a station's card:** ✏️ a note · 📄 that survey's note pages (photos or a
-  PDF of the notes, opened full screen, pinch to zoom) · 📐 survey new passage
-  from here.
+- **On a station's card:** ✏️ a note · 📄 its documents (the export's scanned
+  notes, sketches and photos, and what was added on the phone; opened full
+  screen, pinch to zoom), in Survey notes / Sketches / Media / Other with counts,
+  the most specific first: the sketchbook page that covers the station (a page
+  tagged A6~A8), then its survey's, then the cave's, never another survey's or
+  cave's (`libs/viewer-docs.js`, with FlexLib's `docsFor`: the same order as on
+  the desktop). A group that comes from a wider level says so ("from survey T");
+  the survey and the cave on the card open their own cards (the survey's
+  documents, else the cave's); a station whose shots were read from a scan says
+  "From page 2 of …" · 📐 survey new passage from here. In a document, ✎ Edit
+  shows 🏷 Tags (the whole document) and 🏷 Tag this page… (cave → survey →
+  station or range, recent tags); new pages get a kind from their name.
 - **🔧 Tools → 📐 Field survey:** typed shots (from, to, length, azimuth,
   inclination, optional backsights, LRUD in decimal feet; `3/5` = ledge, the
   larger value is used), tied to existing stations, drawn as lines, stations

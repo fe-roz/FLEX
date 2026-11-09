@@ -1748,14 +1748,17 @@ body.scan-open #mode-toast { z-index: 95; bottom: 96px; font-size: 14px; }
     });
     if (typeof ffRecordMany === 'function') ffRecordMany(list);
     else list.forEach(([op, d]) => ffRecord(op, d));
-    // the page is about these stations: tag it, so a station's card lists it
+    // the page is about these stations: tag that page (not the whole document: a scanned book has many pages), so a
+    // station's card lists the document and opens it at this page
     let tagged = '';
-    if (pg && pg.doc && docsState()[pg.doc]) {
+    const d0 = pg && pg.doc ? docsState()[pg.doc] : null;
+    if (d0) {
       const cid = typeof ffCaveId === 'function' ? ffCaveId(sv.cave || '') : null;
       const spec = areaSpec([].concat(...good.map(x => [x.shot.from, x.shot.to])));
-      if (cid && spec && typeof ffP !== 'undefined' && ffP.caves && ffP.caves[cid]) {
+      const page = (d0.pages || []).find(q => q.h === pg.h) || (d0.pages || [])[pg.index];
+      if (cid && spec && page && typeof ffP !== 'undefined' && ffP.caves && ffP.caves[cid]) {
         const target = FL.T.area(cid, spec);
-        if (!docsState()[pg.doc].tags[target]) { try { ffRecord('doc.tag', { doc: pg.doc, target }, null, 'docs'); tagged = spec; } catch (_) {} }
+        if (!(page.targets || []).includes(target)) { try { ffRecord('doc.pagetag', { doc: pg.doc, h: page.h, target }, null, 'docs'); tagged = spec; } catch (_) {} }
       }
     }
     const conv = S.unit !== unit ? ` (lengths turned from ${S.unit} to ${unit})` : '';
