@@ -251,6 +251,8 @@
   .tb-btn.legacy { display: none !important; }
   .tb-btn.tb-new { width: 46px; height: 46px; border-radius: 11px; font-size: 21px; position: relative; }
   .tb-btn.sheet-on { background: rgba(33,150,243,.35); border-color: #2196F3; }
+  .tb-btn.tb-focus { width: 38px; height: 38px; border-radius: 10px; font-size: 17px; align-self: center; }
+  .tb-btn.focus-on { background: rgba(0,229,255,.22); border-color: #00e5ff; box-shadow: 0 0 0 1px rgba(0,229,255,.35); }
   .tb-btn.tool-on::after { content: ''; position: absolute; top: 5px; right: 5px; width: 8px; height: 8px;
     border-radius: 50%; background: #ff4f7a; box-shadow: 0 0 0 2px #0a0a0f; }
   #ui-sheet { display: none; position: fixed; right: 66px; top: 50%; transform: translateY(-50%); z-index: 36;
@@ -424,6 +426,7 @@
   <button class="tb-btn tb-new" id="tb-tools" title="Tools: find, measure, route, reach, fly">🔧</button>
   <button class="tb-btn tb-new" id="tb-display" title="Display: colours, walls, stations, leads, layers, terrain">🎨</button>
   <button class="tb-btn tb-new" id="tb-more"  title="More: units, fullscreen, help">⋯</button>
+  <button class="tb-btn tb-new tb-focus" id="tb-focus" title="Focus: solid near the orbit point, the rest faded, passages in front cut away (settings: Display)" aria-pressed="false" style="display:none">🎯</button>
   <button class="tb-btn" id="btn-fullscreen" title="Fullscreen">⛶</button>
   <button class="tb-btn" id="btn-find"  title="Search · leads · tracks &amp; points">🔍</button>
   <button class="tb-btn" id="btn-fly"   title="Fly / Crane mode" style="font-size:14px">🕹️</button>
@@ -474,13 +477,14 @@
     <div class="help-section">TOOLBAR</div>
     <div class="help-row"><span class="help-icon">📍</span><span class="help-desc">GPS: off / pin / follow / heading-up · record a track · drop pins · export GPX/KML · compass calibration</span></div>
     <div class="help-row"><span class="help-icon">🔧</span><span class="help-desc">Tools: find (stations, leads — active / closed), measure, route, reach, fly, crane, import KML · 📐 field survey · 📚 documents · 📝 change log (undo)</span></div>
-    <div class="help-row"><span class="help-icon">🎨</span><span class="help-desc">Display: colour by survey / elevation / depth / difficulty (narrow blue, low red, steep green), walls, stations (with their names); show or hide leads, area names, tracks, imported layers; imagery and terrain</span></div>
+    <div class="help-row"><span class="help-icon">🎨</span><span class="help-desc">Display: colour by survey / elevation / depth / difficulty (narrow blue, low red, steep green); walls (On: one see-through layer, the nearest, at the opacity you set · Ghost: see-through, every layer, with sliders for strength, edges and depth fade · Off); stations (with their names); show or hide leads, area names, tracks, imported layers; imagery and terrain; Focus</span></div>
+    <div class="help-row"><span class="help-icon">🎯</span><span class="help-desc">Focus (the small button under ⋯, or Display → Focus): <b>Around centre</b> keeps walls, lines, stations and names within a radius of the orbit point (the middle of the screen) as they are and fades the rest; <b>Cut in front</b> cuts away the passages between you and the orbit point, a hole as wide as the cut radius there. Taps only find what is in focus. Turn the button off to see everything again.</span></div>
     <div class="help-row"><span class="help-icon">⋯</span><span class="help-desc">Units (ft / m), what counts as narrow, stooping, crawling or steep (Route difficulty), who is entering data, ⇄ project & sync files (share with other phones and FLEX), export project data, fullscreen, help</span></div>
     <div class="help-section">STATIONS</div>
     <div class="help-row"><span class="help-icon">👆</span><span class="help-desc">Tap: info · again: caver for scale · again: reach (what's within range along the survey) · again: off</span></div>
     <div class="help-row"><span class="help-icon">✏️</span><span class="help-desc">On a station's card: ✏️ Add note is always there · 📄 documents tagged to the station, its survey or cave (the ones in the export too: scanned notes and photos; PDFs stay in FLEX). Everything else — changing a note, ❓ leads (status, size…), 📐 survey new passage from here, and in a document turning pages, tags, removing — waits behind the small <b>✎ Edit</b> button, which is off again when you close the card.</span></div>
     <div class="help-row"><span class="help-icon">👆</span><span class="help-desc">Taps find the nearest station, lead mark, name or pin within a finger's width of the touch; a drag or a two-finger move is never a tap</span></div>
-    <div class="help-row"><span class="help-icon">💾</span><span class="help-desc">Display choices (walls, colour, wall opacity, stations, area names, terrain sliders) are remembered for this map. A new map opens with ghost walls coloured by elevation. The view stays over the map.</span></div>
+    <div class="help-row"><span class="help-icon">💾</span><span class="help-desc">Display choices (walls and their sliders, colour, stations, area names, focus, terrain sliders) are remembered for this map. A new map opens with ghost walls coloured by elevation. The view stays over the map.</span></div>
   </div>
   <div id="help-dismiss">Tap anywhere to dismiss</div>
 </div>
@@ -635,6 +639,7 @@ catch(e) { window.DOCS_EXPORT = null; }
 <script src="libs/jszip.min.js"></script>
 <script src="libs/flexlib.js"></script>
 <script src="libs/utif.js"></script>
+<script src="libs/wall-fx.js"></script>
 
 <script>
 'use strict';
@@ -750,6 +755,19 @@ function setUnits(u) {
   try { localStorage.setItem('flex_units_v1', UNITS); } catch (_) {}
   if (typeof onUnitsChanged === 'function') onUnitsChanged();
 }
+
+// ── See-through walls and focus mode (libs/wall-fx.js) ───────────────────────
+// Its settings travel in DISP.fx (saved with the rest). The walls, survey lines,
+// station dots / names, leads and area names register with it where they are made.
+FlexFx.init({
+  THREE, scene, camera, controls, renderer, saved: DISP.fx, units: U,
+  isFly: () => { try { return !!flyMode; } catch (_) { return false; } },
+  caveBox: () => { const b = new THREE.Box3(); stationMap.forEach(st => b.expandByPoint(st.pos)); return b; },
+  nearestStation: p => { let d = Infinity; stationMap.forEach(st => { d = Math.min(d, st.pos.distanceToSquared(p)); }); return isFinite(d) ? Math.sqrt(d) : null; },
+  redraw: () => { requestRender(); wakeRender(); },
+  applyWallMode: () => { applyWallMode(); if (routes.length) routeApplyAlpha(); },
+  toast: m => showToast(m),
+});
 
 // The name typed in FLEX's export panel titles the viewer (and the app).
 function applyMapName() {
@@ -2054,7 +2072,7 @@ let _leadTex = null;
 const leadSprites = [];
 function makeLeadSprite() {
   if (!_leadTex) _leadTex = new THREE.CanvasTexture(drawLeadIcon(LEAD_PX));
-  const mat = new THREE.SpriteMaterial({ map: _leadTex, depthTest: false, transparent: true, sizeAttenuation: false });
+  const mat = FlexFx.patch(new THREE.SpriteMaterial({ map: _leadTex, depthTest: false, transparent: true, sizeAttenuation: false }));
   const sp = new THREE.Sprite(mat);
   sp.center.set(0.5, -0.05);              // just above the station
   sp.renderOrder = 3;
@@ -2160,26 +2178,15 @@ function buildPassageMesh(groups) {
   geo.setIndex(new THREE.BufferAttribute(idx, 1));
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
-  // Two passes over the same geometry — far sides first, then near sides — so a
-  // translucent tube never draws its back wall over its front wall (one
-  // double-sided pass shows that as dark stripes along every tube).
-  const mk = side => new THREE.MeshLambertMaterial({
-    vertexColors: true, transparent: true, opacity: wallOpacity, side, depthWrite: true,
-  });
-  const back  = new THREE.Mesh(geo, mk(THREE.BackSide));
-  const front = new THREE.Mesh(geo, mk(THREE.FrontSide));
-  back.renderOrder  = 0.5;
-  front.renderOrder = 0.6;
-  // Once per frame, before both passes. gl.clear() honours the depth *write
-  // mask*, and three's clear() doesn't touch it: whatever drew just before
-  // the walls decides. The caver's headlamp beam writes no depth, so when
-  // the transparent sort put it last (camera-dependent) the clear silently
-  // did nothing and the walls were hidden behind the terrain's depth — walls
-  // vanishing at some view angles. Force the mask on first.
-  back.onBeforeRender = (r) => { r.state.buffers.depth.setMask(true); r.clearDepth(); };
+  // Two meshes over the same geometry: [colour pass, depth pre-pass] (libs/wall-fx.js).
+  // "On" blends only the nearest wall layer (pre-pass, then colour with the depth test), so
+  // overlapping tubes read cleanly whatever the triangle order; ghost blends every layer with
+  // an edge rim and a depth fade. The once-per-frame depth clear (walls show through the
+  // ground) lives there too.
+  const layers = FlexFx.makeWalls(geo, 0.5);
   passageMesh = new THREE.Group();
-  passageMesh.add(back, front);
-  passageMesh.userData.meshes = [back, front];
+  passageMesh.add(...layers);
+  passageMesh.userData.meshes = layers;
   passageMesh.userData.groupRanges = ranges;          // per survey colour (FLEX Field hides a replaced cave's)
   passageMesh.userData.fullIndex = idx;
   scene.add(passageMesh);
@@ -2195,12 +2202,7 @@ function buildPassageMesh(groups) {
 function applyWallMode() {
   if (!passageMesh) { if (typeof ffApplyWallMode === 'function') ffApplyWallMode(); return; }
   passageMesh.visible = wallMode !== 2;
-  passageMesh.userData.meshes.forEach(mesh => {
-    const m = mesh.material;
-    m.opacity    = wallMode === 1 ? Math.min(wallOpacity, 0.2) : wallOpacity;
-    m.depthWrite = wallMode !== 1;        // ghost: see every wall at once
-    m.needsUpdate = true;
-  });
+  FlexFx.applyWalls(wallMode, wallOpacity);   // opacity, ghost strength, depth pre-pass on / off
   if (typeof ffApplyWallMode === 'function') ffApplyWallMode();   // field-survey walls follow
   const btn = document.getElementById('btn-walls');
   if (btn) {
@@ -2360,6 +2362,7 @@ function buildAreaLabels() {
   labels.forEach(lb => {
     if (!lb || !lb.text || !lb.xyz) return;
     const { sprite, aspect } = makeTextSprite(String(lb.text), '#7fe7ff');
+    FlexFx.patch(sprite.material);
     sprite.material.sizeAttenuation = false;
     sprite.renderOrder = 4;
     sprite.userData.aspect = aspect;
@@ -4298,6 +4301,7 @@ function openSheet(name) {
 }
 function rerenderSheet() { if (sheetOpen) { const n = sheetOpen; sheetOpen = null; openSheet(n); } }
 ['gps', 'tools', 'display', 'more'].forEach(n => document.getElementById('tb-' + n).addEventListener('click', () => openSheet(n)));
+FlexFx.bindButton(document.getElementById('tb-focus'));        // 🎯 focus mode on / off (settings: Display → Focus)
 // Tap outside closes (the toolbar buttons toggle on their own).
 document.addEventListener('pointerdown', e => {
   if (!sheetOpen) return;
@@ -4441,14 +4445,18 @@ function renderDisplaySheet() {
   if (passageMesh || ffWallGroup.children.length) {
     sheetHead('Walls');
     sheetSeg(['On', 'Ghost', 'Off'], wallMode, i => { wallMode = i; applyWallMode(); if (routes.length) routeApplyAlpha(); rerenderSheet(); });
-    const wr = el('div', 'sh-sl');
-    const wl = el('label', '', 'Opacity'), wv = el('div', '', Math.round(wallOpacity * 100) + '%');
-    const wi = el('input'); wi.type = 'range'; wi.min = '10'; wi.max = '100'; wi.value = String(Math.round(wallOpacity * 100)); wi.id = 'wall-opacity-slider';
-    wi.style.accentColor = '#00e5ff';
-    wi.addEventListener('input', () => { wallOpacity = +wi.value / 100; wv.textContent = wi.value + '%'; applyWallMode(); if (routes.length) routeApplyAlpha(); });
-    wr.append(wl, wi, wv);
-    sheetEl.appendChild(wr);
+    if (wallMode === 0) {              // the On slider; ghost has its own strength (below)
+      const wr = el('div', 'sh-sl');
+      const wl = el('label', '', 'Opacity'), wv = el('div', '', Math.round(wallOpacity * 100) + '%');
+      const wi = el('input'); wi.type = 'range'; wi.min = '10'; wi.max = '100'; wi.value = String(Math.round(wallOpacity * 100)); wi.id = 'wall-opacity-slider';
+      wi.style.accentColor = '#00e5ff';
+      wi.addEventListener('input', () => { wallOpacity = +wi.value / 100; wv.textContent = wi.value + '%'; applyWallMode(); if (routes.length) routeApplyAlpha(); });
+      wr.append(wl, wi, wv);
+      sheetEl.appendChild(wr);
+    }
+    if (wallMode !== 2) FlexFx.sheetWalls({ el, sheet: sheetEl, head: sheetHead, row: sheetRow, chips: sheetChips, rerender: rerenderSheet, units: U }, wallMode);   // ghost strength, edges, depth fade
   }
+  if (stationMap.size || passageMesh) FlexFx.sheetFocus({ el, sheet: sheetEl, head: sheetHead, row: sheetRow, chips: sheetChips, rerender: rerenderSheet, units: U });
   sheetHead('Stations');
   const smap = [1, 2, 0];
   sheetSeg(['Ends', 'All', 'None'], smap.indexOf(stationMode), i => {
@@ -6005,22 +6013,13 @@ function ffBuildWalls() {
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
   geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(col), 3));
   geo.computeVertexNormals();
-  const mk = side => new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, opacity: 0.55, side, depthWrite: true });
-  const back = new THREE.Mesh(geo, mk(THREE.BackSide)), front = new THREE.Mesh(geo, mk(THREE.FrontSide));
-  back.renderOrder = 0.55; front.renderOrder = 0.65;
-  // Like the exported walls: drawn into a cleared depth buffer so they show
-  // through the ground; mask on first (see buildPassageMesh).
-  back.onBeforeRender = r => { r.state.buffers.depth.setMask(true); r.clearDepth(); };
-  ffWallGroup.add(back, front);
+  // Like the exported walls (libs/wall-fx.js): same look and the same depth buffer.
+  ffWallGroup.add(...FlexFx.makeWalls(geo, 0.51));
   ffApplyWallMode();
 }
 function ffApplyWallMode() {
   ffWallGroup.visible = wallMode !== 2;
-  ffWallGroup.children.forEach(m => {
-    m.material.opacity = wallMode === 1 ? Math.min(wallOpacity, 0.2) : wallOpacity;
-    m.material.depthWrite = wallMode !== 1;
-    m.material.needsUpdate = true;
-  });
+  FlexFx.applyWalls(wallMode, wallOpacity);
   if (typeof requestRender === 'function') { requestRender(); wakeRender(); }
 }
 
@@ -6777,7 +6776,7 @@ function buildCaveLines() {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(_segPos), 3));
     geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(_segCol), 4));
-    caveLines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false, transparent: true }));
+    caveLines = new THREE.LineSegments(geo, FlexFx.patch(new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false, transparent: true })));
     caveLines.renderOrder = -1;      // first in the transparent pass, as when it was opaque
     caveGroup.add(caveLines);
   }
@@ -6927,7 +6926,7 @@ const STATION_LABEL_CAP = 1500;   // names shown at once (each is its own textur
 let _stationCapped = false, _stationCapTimer = null;
 function ensureStationMesh(st) {
   if (st._mesh || !_stGeo) return st._mesh;
-  const mat = new THREE.MeshBasicMaterial({ color: st._dispColor || st.hexColor, depthTest: false });
+  const mat = FlexFx.patch(new THREE.MeshBasicMaterial({ color: st._dispColor || st.hexColor, depthTest: false }), { alwaysTransparent: true });
   const a = st._reachAlpha ?? 1;
   mat.opacity = a; mat.transparent = a < 1;
   const mesh = new THREE.Mesh(_stGeo, mat);
@@ -6940,6 +6939,7 @@ function ensureStationMesh(st) {
 function ensureStationLabel(st) {
   if (st._sprite || !st.name) return st._sprite;
   const { sprite, aspect } = makeTextSprite(st.name, st.hexColor);
+  FlexFx.patch(sprite.material);
   sprite.position.copy(st.pos);
   sprite.position.z += _stR + _lblH * 0.6;   // tight — just above the dot
   sprite.scale.set(_lblH * aspect, _lblH, 1);
@@ -7017,8 +7017,10 @@ function stationRayHits() {
     const R = stationTapRadius(t);
     const m2 = vx * vx + vy * vy + vz * vz - t * t;
     if (m2 > R * R) return;
+    const fw = FlexFx.tapFactor(p);             // focus mode: faded or cut away = not tappable, the rest by how much in focus
+    if (fw < 0.2) return;
     const dist = Math.max(0, t - Math.sqrt(R * R - m2));
-    out.push({ object: { _station: st }, distance: dist, miss: Math.sqrt(Math.max(0, m2)) / Math.max(t, 1e-6),
+    out.push({ object: { _station: st }, distance: dist, miss: Math.sqrt(Math.max(0, m2)) / Math.max(t, 1e-6) / (0.25 + 0.75 * fw),
       point: ray.at(dist, new THREE.Vector3()) });
   });
   return out.sort((a, b) => a.miss - b.miss || a.distance - b.distance);
@@ -7035,7 +7037,7 @@ function labelPick(px, py, rect) {
   const consider = (kind, obj, d) => { if (d < bestD) { bestD = d; best = { [kind]: obj }; } };
   stationMap.forEach(st => {
     const sp = st._sprite;
-    if (sp && sp.visible && stationNamed(st)) {                       // the name's box
+    if (sp && sp.visible && stationNamed(st) && FlexFx.tapFactor(st.pos) >= 0.2) {   // the name's box (not one that focus mode has faded or cut away)
       const c = proj(sp.position);
       if (c) {
         const depth = Math.max(0.01, camera.position.distanceTo(sp.position));
@@ -7044,13 +7046,13 @@ function labelPick(px, py, rect) {
         if (dx <= pad && dy <= pad) consider('station', st, Math.hypot(dx, dy));
       }
     }
-    if (st._leadSprite && st._leadSprite.visible) {                    // the lead mark
+    if (st._leadSprite && st._leadSprite.visible && FlexFx.tapFactor(st.pos) >= 0.2) {   // the lead mark
       const c = proj(st._leadSprite.getWorldPosition(v.clone()));
       if (c) { const d = Math.hypot(px - c[0], py - c[1]); if (d <= STATION_HIT_PX) consider('station', st, d); }
     }
   });
   if (areaLabelGroup.visible) areaLabelGroup.children.forEach(sp => {
-    if (!sp.visible) return;
+    if (!sp.visible || FlexFx.tapFactor(sp.position) < 0.2) return;
     const c = proj(sp.position); if (!c) return;
     const hw = (AREA_LABEL_PX * (sp.userData.aspect || 3)) / 2, hh = AREA_LABEL_PX / 2;
     const dx = Math.max(0, Math.abs(px - c[0]) - hw), dy = Math.max(0, Math.abs(py - c[1]) - hh);
@@ -8060,11 +8062,14 @@ function dispRestoreUi() {
   if (colourMode === 2 && !_hgrid) colourMode = 1;
   if (colourMode) applyColourMode();
   applyWallMode();
+  const fb = document.getElementById('tb-focus');             // 🎯 only on a map that has a cave
+  if (fb) fb.style.display = stationMap.size ? '' : 'none';
+  FlexFx.syncUi();
   requestRender(); wakeRender();
 }
 function dispCapture() {
   const sl = id => { const n = document.getElementById(id); return n ? +n.value : undefined; };
-  dispSave({ wallMode, colourMode, wallAlpha: wallOpacity, stationMode, annot: annotMode, tracks: fieldGroup.visible,
+  dispSave({ wallMode, colourMode, wallAlpha: wallOpacity, stationMode, annot: annotMode, tracks: fieldGroup.visible, fx: FlexFx.serialize(),
              opacity: sl('terrain-opacity-slider'), bright: sl('terrain-bright-slider'), fog: sl('terrain-fog-slider') });
 }
 let _dispTimer = null;
