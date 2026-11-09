@@ -5959,7 +5959,7 @@ function ffDeclination(sv, at) {
   const o = sv.decl != null && sv.decl !== '' ? Number(sv.decl) : null;
   let ll, where, name = String(sv.tie || '').trim();
   if (at) { ll = sceneToLatLon(at.x ?? at[0], at.y ?? at[1]); where = sv.gpsStart && sv.gps ? 'gps-start' : 'tie'; }
-  else if (sv.gps && isFinite(sv.gps.lat) && isFinite(sv.gps.lon)) { ll = { lat: sv.gps.lat, lon: sv.gps.lon }; where = 'gps'; }
+  else if (sv.gps && Number.isFinite(sv.gps.lat) && Number.isFinite(sv.gps.lon)) { ll = { lat: sv.gps.lat, lon: sv.gps.lon }; where = 'gps'; }
   else { ll = { lat: META.center_lat, lon: META.center_lon }; where = 'centre'; }
   const wmm = ll && ll.lat != null && isFinite(ll.lat) && isFinite(ll.lon) ? wmmDeclination(ll.lat, ll.lon, 0, yr) : null;
   const acc = sv.gps && sv.gps.acc != null && isFinite(sv.gps.acc) ? ' (±' + Math.max(1, Math.round(sv.gps.acc)) + ' m)' : '';
@@ -6012,10 +6012,10 @@ function ffGpsScene(g) {
 // nearest where it was tapped (tieAt = lat / lon, for a cave that uses the name twice), or the GPS fix a
 // survey that starts away from every station is placed at (approximate). pos is null when "known" decides.
 function ffTiePos(sv) {
-  if (sv.gpsStart && sv.gps && isFinite(sv.gps.lat) && isFinite(sv.gps.lon)) return { pos: ffGpsScene(sv.gps), how: 'gps' };
+  if (sv.gpsStart && sv.gps && Number.isFinite(sv.gps.lat) && Number.isFinite(sv.gps.lon)) return { pos: ffGpsScene(sv.gps), how: 'gps' };
   ffBaseStations();
   const alts = (ffState.caveUpdates || {})[sv.cave || ''] ? null : _ffBaseAlts.get(ffKey(sv.cave, sv.tie));   // (a cave redrawn from a PLT has other places)
-  if (alts && alts.length > 1 && Array.isArray(sv.tieAt) && isFinite(sv.tieAt[0]) && isFinite(sv.tieAt[1])) {
+  if (alts && alts.length > 1 && Array.isArray(sv.tieAt) && Number.isFinite(sv.tieAt[0]) && Number.isFinite(sv.tieAt[1])) {
     const s = gpsToScene(sv.tieAt[0], sv.tieAt[1]);
     let best = alts[0], bd = Infinity;
     alts.forEach(a => { const d = Math.hypot(a.xyz[0] - s.x, a.xyz[1] - s.y); if (d < bd) { bd = d; best = a; } });
@@ -6270,8 +6270,9 @@ async function ffNewSurvey(tieSt) {
   if (!r || !r.value.trim()) return;
   const id = ffUid(), d = new Date();
   // tieAt: where the station was tapped (lat / lon), so a cave that uses the name twice ties to the right one.
-  const survey = { id, name: r.value.trim().slice(0, 60), cave, tie, tieAt: [+ll.lat.toFixed(6), +ll.lon.toFixed(6)], lenUnit: 'ft', lrudAt: 'from',
+  const survey = { id, name: r.value.trim().slice(0, 60), cave, tie, lenUnit: 'ft', lrudAt: 'from',
     decl: null, date: d.toISOString().slice(0, 10), created: d.toISOString(), shots: [] };
+  if (ll && Number.isFinite(ll.lat) && Number.isFinite(ll.lon)) survey.tieAt = [+ll.lat.toFixed(6), +ll.lon.toFixed(6)];
   ffRecord('survey.add', { survey });
   ffOpenPanel(id);
 }
@@ -6455,7 +6456,9 @@ function ffRenderShotForm(body, sv) {
   const save = el('button', 'fp-btn active', editing ? 'Save changes' : 'Add shot');
   save.addEventListener('click', async () => {
     await ffEnsureAuthor();
-    const shot = { id: editing ? editing.id : ffUid() };
+    // An edited shot starts from the shot as it is: what the form does not show (a scanned shot's page and box in `src`,
+    // its `note`) stays; the form's own fields are written over it.
+    const shot = editing ? ffClone(editing) : { id: ffUid() };
     Object.keys(inputs).forEach(k => { shot[k] = inputs[k].value.trim(); });
     if (!shot.from || !shot.to) { showToast('Give both station names'); return; }
     if (ffParseNum(shot.len).v == null) { showToast('Length is needed'); return; }
