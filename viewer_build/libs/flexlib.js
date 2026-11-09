@@ -396,6 +396,15 @@
     return { id: pid, name: '', desc: '', lists: {}, caves: {}, aliases: {}, notes: {}, leads: {},
              surveys: {}, order: [], caveUpdates: {}, surveyVersions: {}, segments: {}, cavefiles: {}, systems: {}, layers: {}, features: {}, groups: {}, arealabels: {}, trips: {}, proposals: {}, archived: null, footprint: null, moves: {}, log: [], byId: new Map() };
   }
+  // Field-survey entries name their survey in `sid`. survey.set and survey.delete once wrote it in `id`, over
+  // the entry's own id ("<dev>.<seq>"), so every later change to a survey looked like a copy of its first and was
+  // dropped as one (a declination typed after anything else was lost), and a sync file's check of the id refused
+  // them. fixLegacy reads such an entry as if it had been written properly.
+  function fixLegacy(e) {
+    if (e && (e.op === 'survey.set' || e.op === 'survey.delete') && e.sid == null && e.dev && e.seq > 0 && e.id !== e.dev + '.' + e.seq)
+      return Object.assign({}, e, { sid: e.id, id: e.dev + '.' + e.seq });
+    return e;
+  }
   function applyFieldSurvey(e, S) {
     const sv = e.sid != null ? S.surveys[e.sid] : null;
     switch (e.op) {
@@ -406,8 +415,8 @@
         if (!S.order.includes(s.id)) S.order.push(s.id);
         return true;
       }
-      case 'survey.set': if (S.surveys[e.id]) Object.assign(S.surveys[e.id], clone(e.patch)); return true;
-      case 'survey.delete': delete S.surveys[e.id]; S.order = S.order.filter(x => x !== e.id); return true;
+      case 'survey.set': { const id = e.sid != null ? e.sid : e.id; if (S.surveys[id]) Object.assign(S.surveys[id], clone(e.patch)); return true; }
+      case 'survey.delete': { const id = e.sid != null ? e.sid : e.id; delete S.surveys[id]; S.order = S.order.filter(x => x !== id); return true; }
       case 'shot.add':
         if (sv) {
           const i = e.index != null && e.index >= 0 && e.index <= sv.shots.length ? e.index : sv.shots.length;
@@ -426,7 +435,7 @@
   function replayProject(entries, pid) {
     const S = emptyProject(pid);
     const recs = { note: {}, lead: {} };
-    const ordered = causalOrder(dedupe(entries));   // the same entry merged twice counts once
+    const ordered = causalOrder(dedupe((entries || []).map(fixLegacy)));   // the same entry merged twice counts once
     ordered.forEach(e => { S.byId.set(e.id, e); S.log.push(e); });
     const R = resolveProposals(ordered);
     S.proposals = R.proposals;
@@ -1409,7 +1418,8 @@
   function newEntries(knownIds, incoming) {
     const out = [];
     const seen = new Set();
-    incoming.forEach(e => {
+    incoming.forEach(e0 => {
+      const e = fixLegacy(e0);                           // (a survey.set / survey.delete written before `sid`: given its own id back)
       if (!e || !e.id || !e.dev || !(e.seq > 0) || knownIds.has(e.id) || seen.has(e.id)) return;
       if (e.id !== e.dev + '.' + e.seq) return;          // malformed: skip rather than guess
       seen.add(e.id);
@@ -1539,6 +1549,43 @@
       if (!out.has(k)) out.set(k, v.map(x => (x == null ? '–' : x)));
     });
     return out;
+  }
+
+  // ── Field survey: station names and declination, as people write them ──────
+  // The next free station name after `name`: its trailing number counted up (T6 → T7, A09 → A10)
+  // until taken(candidate) says it is free; a name with no number gets "1" (X → X1). A form that
+  // suggested the next number without looking would offer names the cave already uses, and a shot
+  // to a name that exists is a loop closure onto that station, not a new station.
+  function nextStationName(name, taken) {
+    const step = n => {
+      const m = /^(.*?)(\d+)$/.exec(String(n || '').trim());
+      if (!m) return (String(n || '').trim() || 'A') + '1';
+      const k = String(Number(m[2]) + 1);
+      return m[1] + (m[2].length > k.length ? k.padStart(m[2].length, '0') : k);
+    };
+    let nm = step(name);
+    for (let i = 0; i < 2000 && typeof taken === 'function' && taken(nm); i++) nm = step(nm);
+    return nm;
+  }
+  // Declination the way it is said: "10.3° E", "12.0° W" (east is positive).
+  function fmtDecl(v, digits) {
+    const d = digits == null ? 1 : digits, x = Number(v);
+    if (!isFinite(x)) return '?';
+    const r = Math.round(x * Math.pow(10, d)) / Math.pow(10, d);
+    return Math.abs(r).toFixed(d) + '° ' + (r < 0 ? 'W' : 'E');
+  }
+  // What a person types for it: "10.3", "-12", "12 W", "e 10.3°", "12,5w" → degrees east, or null.
+  function parseDecl(text) {
+    const s = String(text == null ? '' : text).replace(/°/g, '').replace(',', '.').trim();
+    if (!s) return null;
+    let m = /^([+-]?\d*\.?\d+)\s*([EeWw])?$/.exec(s), num, hemi;
+    if (m) { num = m[1]; hemi = m[2]; }
+    else if ((m = /^([EeWw])\s*([+-]?\d*\.?\d+)$/.exec(s))) { hemi = m[1]; num = m[2]; }
+    else return null;
+    let v = Number(num);
+    if (!isFinite(v)) return null;
+    if (hemi) v = /[Ww]/.test(hemi) ? -Math.abs(v) : Math.abs(v);
+    return Math.abs(v) <= 180 ? v : null;
   }
 
   // ── Caves inside one survey file ─────────────────────────────────────────
@@ -1714,7 +1761,7 @@
     snapshotTime, entriesAt, replayProjectAt, replayDocsAt, changeDays, caveBundle, moveRenames, caveMoveEntries, caveMoveClear, moveRecord, movesOf,
     liveFeatures, liveGroups, groupPath, featuresGeoJSON, featuresKML, featuresGPX, flexTag, makeFlexTag,
     selectForSync, syncManifest, newEntries,
-    parseNum, shotFlags, shotReading, computeSurvey, stationLruds, suggestCaves,
+    parseNum, shotFlags, shotReading, computeSurvey, stationLruds, nextStationName, fmtDecl, parseDecl, fixLegacy, suggestCaves,
     liveSystems, systemsOf, systemTotals, fileGroups, planMulti, systemUndo, multiUndo, entrancesOf, entranceFit,
   };
 });

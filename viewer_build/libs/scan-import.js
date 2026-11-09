@@ -1726,7 +1726,7 @@ body.scan-open #mode-toast { z-index: 95; bottom: 96px; font-size: 14px; }
     if (!sid || !survey(sid)) { sid = await newSurvey(good[0].shot.from); if (!sid) return; }
     const sv = survey(sid);
     let unit = sv.lenUnit || 'ft';
-    if (unit !== S.unit && !sv.shots.length) { ffRecord('survey.set', { id: sid, patch: { lenUnit: S.unit }, prev: { lenUnit: unit } }); unit = S.unit; }
+    if (unit !== S.unit && !sv.shots.length) { ffRecord('survey.set', { sid, patch: { lenUnit: S.unit }, prev: { lenUnit: unit } }); unit = S.unit; }
     const pg = S.page, W0 = S.table.width, H0 = S.table.height;
     const rowBox = ri => {
       if (!W0 || !H0) return null;

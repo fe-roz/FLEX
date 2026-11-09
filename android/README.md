@@ -21,8 +21,17 @@ note pages and new survey added on the phone, all in a change log.
 - **🔧 Tools → 📐 Field survey:** typed shots (from, to, length, azimuth,
   inclination, optional backsights, LRUD in decimal feet; `3/5` = ledge, the
   larger value is used), tied to existing stations, drawn as lines, stations
-  and walls. Declination comes from the World Magnetic Model for the survey
-  date (or type one in); misclosure is shown when a shot closes onto a station.
+  and walls. The form suggests station names the cave does not have yet (a shot
+  to a name that exists closes a loop onto it, and says so). Declination is
+  worked out offline from the World Magnetic Model for the survey date at the
+  tie-in and shown as "Declination 10.3° E (WMM 2026 at T6)" (type one in to
+  override it); 📍 Use my location takes one GPS fix, used for a survey tied to
+  no station of the map, whose first station can be placed at the fix
+  (approximate, marked) or started there from ＋ New survey. Misclosure is
+  shown when a shot closes onto a station.
+- **🔧 Tools → 🚩 Route:** tap the start and end stations (stations only), or
+  type part of a name in the box under the bar at the top; with a route showing
+  only its stations can be tapped and the rest is dimmed.
 - **📷 Import shots from scan** (📐 Field survey, or ⋯ on a document page):
   photograph a page of shot tables with the camera app, or pick a document
   page or a file; the phone reads it with ML Kit's text reader (the bundled

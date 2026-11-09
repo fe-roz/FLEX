@@ -51,7 +51,7 @@
       'doc.del': () => `Deleted ${doc(e.doc)}`,
       'doc.restore': () => `Restored ${doc(e.doc)}`,
       'survey.add': () => `New field survey “${e.survey && e.survey.name}”`,
-      'survey.set': () => `Changed field survey “${sv(e.id)}”`,
+      'survey.set': () => `Changed field survey “${sv(e.sid != null ? e.sid : e.id)}”`,
       'survey.delete': () => `Deleted field survey “${(e.prev && e.prev.name) || ''}”`,
       'survey.restore': () => `Restored field survey “${e.survey && e.survey.name}”`,
       'shot.add': () => `Shot ${e.shot && e.shot.from} → ${e.shot && e.shot.to} in “${sv(e.sid)}”`,
