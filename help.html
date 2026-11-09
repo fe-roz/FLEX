@@ -194,6 +194,7 @@ svg.ico { vertical-align: -2px; }
   <a href="#terrain">Terrain</a>
   <a href="#caltopo">CalTopo</a>
   <a href="#lidar">LiDAR</a>
+  <a href="#routes">Surface routes</a>
   <a href="#jobs">Jobs and settings</a>
   <a href="#export">Offline viewer and FLEX Field</a>
   <a href="#sync">Sync files</a>
@@ -206,7 +207,7 @@ svg.ico { vertical-align: -2px; }
 <h1>FLEX guide</h1>
 <p class="lede">FLEX shows everything about a piece of ground at once: the globe and terrain, map layers, LiDAR point clouds, surface points and tracks, and 3D cave surveys. Work is kept in <b>projects</b> (one per area), and any area can be baked into an offline viewer that runs on a phone underground.</p>
 <div class="toc" aria-label="Contents">
-  <a href="#setup">Setting up</a><a href="#first">First area</a><a href="#screen">The screen</a><a href="#tree">Projects</a><a href="#saving">Saving</a><a href="#select">Selecting in 3D</a><a href="#places">Phone, computer, CalTopo</a><a href="#folder">Project folder</a><a href="#caves">Caves</a><a href="#leads">Leads and inventories</a><a href="#sketches">Sketches and files</a><a href="#docs">Documents</a><a href="#surface">Surface</a><a href="#maplayers">Your map layers</a><a href="#terrain">Terrain</a><a href="#caltopo">CalTopo</a><a href="#lidar">LiDAR</a><a href="#jobs">Jobs and settings</a><a href="#export">Offline viewer and FLEX Field</a><a href="#sync">Sync files</a><a href="#perf">Speed</a><a href="#keys">Keyboard</a><a href="#trouble">Problems</a>
+  <a href="#setup">Setting up</a><a href="#first">First area</a><a href="#screen">The screen</a><a href="#tree">Projects</a><a href="#saving">Saving</a><a href="#select">Selecting in 3D</a><a href="#places">Phone, computer, CalTopo</a><a href="#folder">Project folder</a><a href="#caves">Caves</a><a href="#leads">Leads and inventories</a><a href="#sketches">Sketches and files</a><a href="#docs">Documents</a><a href="#surface">Surface</a><a href="#maplayers">Your map layers</a><a href="#terrain">Terrain</a><a href="#caltopo">CalTopo</a><a href="#lidar">LiDAR</a><a href="#routes">Surface routes</a><a href="#jobs">Jobs and settings</a><a href="#export">Offline viewer and FLEX Field</a><a href="#sync">Sync files</a><a href="#perf">Speed</a><a href="#keys">Keyboard</a><a href="#trouble">Problems</a>
 </div>
 
 <!-- ═════════════════════════════════════════════════════════════════════ -->
@@ -616,10 +617,37 @@ npm install</pre>
   <li><svg class="ico" width="14" height="14"><use href="#i-leaf"/></svg> <b>Analyze</b> works out, for an area, how dense the vegetation is (how bad the bushwhack) and where returns reach below the local ground — often where entrances are. If a run fails, the panel shows the reason in its status line (<b>Error: …</b>), and a <code>log.txt</code> is written next to the output with the same reason.</li>
 </ul>
 
+<h2 id="routes">Surface routes</h2>
+<p><svg class="ico" width="14" height="14"><use href="#i-leaf"/></svg> <b>Analyze → Surface route</b> finds the easiest way to <i>walk over the ground</i> to one end (a cave entrance, a spring, a car) from one or more starts (parking spots, trailheads). It reads the LiDAR of the area, so it needs a point cloud: one loaded in the LiDAR panel, or one of the open project's own. It runs on this computer (it needs the Python environment with PDAL, the same one as the offline viewer export) and shows in the Jobs strip while it works; a few minutes for a big area the first time.</p>
+<h3>Choosing the ends</h3>
+<ul>
+  <li><b>End</b> is one place; <b>Starts</b> is one or more. For each, click <b>Click on the ground</b> and then the map (starts keep going until you press Esc or right-click), or pick a point from the list: points of the open project, My data, CalTopo or a data file; a cave entrance is listed as “entrance of …”. Each pick is a chip with a × to remove it, and shows on the map as S1, S2 … and E.</li>
+  <li><b>LiDAR</b>: tick the point cloud (or several) the ground and the brush are read from. <b>Cell</b> is the size of one square of the map the search works on (auto picks it from how dense the ground returns are; smaller is more exact and slower). <b>DEM from below / above / both</b> is how the bare ground is found under the trees; “both” also compares the two. <b>Brush</b> is the band above the ground, in metres, whose returns count as brush (0.5 to 2 m to start).</li>
+</ul>
+<h3>What matters: the sliders</h3>
+<ul>
+  <li><b>Distance</b>, <b>Steepness</b> and <b>Brush</b> say how much each one costs. 0 ignores it, 1 is the usual, more makes the search go further round to avoid it. Brush is the share of returns in the brush band: a little grass costs next to nothing, thick low growth a lot.</li>
+  <li><b>Cliffs</b>: ground that is nearly vertical over a short step (a cliff or a wall of rock) is a cliff. At <b>Blocked</b> a route never crosses one; towards <b>Very costly</b> it may, when the only other way is much longer. A route that crosses cliffs says so in a warning.</li>
+  <li><b>Sun</b> goes from <b>Prefer shade</b> to <b>Prefer sun</b>. Sun means the sun at noon at the equinox: trees taller than 3 m and the shadow of the ground itself keep it off. It is a guide for hot days or snow, not a forecast.</li>
+  <li><b>Trails</b> and <b>Roads</b> say how much easier walking on one is than going across the ground (0 = no help, 1 = much easier). Lines count as trails or roads when their name or folder says trail, path or road (in the project, My data, CalTopo or a data file); they are listed under <b>Trails and roads</b> with a tick, a trail/road choice, and “also use another line…” for any other.</li>
+  <li><b>Presets</b> (Easiest, Shortest, Least brush, Shadiest, Least climb) set the sliders to a start; <b>Save as my preset…</b> keeps your own on this computer.</li>
+</ul>
+<h3>The results</h3>
+<p><b>Find routes</b> gives one card per option, the recommended one first (the best for your sliders) and then others that differ: shortest, least brush, shadiest, least climb. With several starts there is a recommended route from each. A card gives the length, the time, the climb and descent, the steepest stretch, the share through brush, in the sun and on a trail, and any warning. Tap a card to draw that route bold on the map; below the cards the height graph and the points within 10 m (25 or 50 m with the buttons) show, as for any line. <b>Zoom to it</b> flies there.</p>
+<p>Once you have a result, <b>moving a slider or choosing a preset searches again by itself</b>, a moment after you stop; the ground and brush maps of the area are kept, so it is quick. Changing the ends or the LiDAR needs <b>Find routes</b> again.</p>
+<h3>The time estimate</h3>
+<p>The time is for one person on foot, no pack: Tobler's walking speed (about 5 km/h on the flat, slower up and down), made slower by brush, and quicker on a trail or road. Hover the time (or open the selected card) for the breakdown: walking, climbing, descending, brush, trail. Treat it as a guide: it cannot see water, loose rock or a locked gate.</p>
+<h3>Keeping a route, and the map layers</h3>
+<ul>
+  <li><b>Save as project line…</b> keeps the chosen route as a line (name, the stats as its description) in the open project, or in My data; it then behaves like any line, including sending to CalTopo.</li>
+  <li><b>Show on the map</b>: <b>Brush</b>, <b>Slope</b>, <b>Shade</b> and <b>Ground hillshade</b> are the maps the search used, drawn over the area with one opacity slider. They disappear when you switch them off.</li>
+  <li>If the search stops, the Jobs strip and the panel show the reason (a line the program wrote starting with “!”), for example a point cloud that could not be read.</li>
+</ul>
+
 <h2 id="jobs">Jobs and settings</h2>
 <p>Two things that belong to the whole of FLEX, not to one kind of data: the strip of <b>Jobs</b> along the bottom of the map, and <svg class="ico" width="14" height="14"><use href="#i-sliders"/></svg> <b>Settings</b> (bottom of the icon strip; it opens in the dock panel).</p>
 <h3>Jobs</h3>
-<p>Anything that takes a while shows in a small strip along the bottom of the map, and only while it is running, waiting or failed: terrain and hillshade made from LiDAR, offline-map exports, Analyze runs, sync-file imports, and CalTopo edits waiting for the network. Each row has the job's state, a bar or its step (like “2/4 CSF cloth DEM”), the time it has taken and the buttons that apply: <b>Cancel</b> stops terrain, export and Analyze jobs on the server; <b>Log</b> shows everything the job has written; <b>Retry</b> runs a failed terrain, export, Analyze or sync-file job again with the same settings; <b>Send now</b> (CalTopo edits) tries to send them at once. Click the header (“Jobs: 2 running”) to fold the strip down to a pill; the map stays visible. A finished job shows <b>Done ✓</b> for 30 seconds, then goes; a failed one stays until you dismiss it (×). The last ten jobs stay behind <b>Recent jobs</b>. The first time a job starts, FLEX asks whether it may send a browser notice when a job ends while this tab is in the background; say no and nothing is sent. Terrain, export and Analyze jobs keep running on the server if you reload the page, and the strip picks them up again.</p>
+<p>Anything that takes a while shows in a small strip along the bottom of the map, and only while it is running, waiting or failed: terrain and hillshade made from LiDAR, offline-map exports, Analyze runs, surface route searches, sync-file imports, and CalTopo edits waiting for the network. Each row has the job's state, a bar or its step (like “2/4 CSF cloth DEM”), the time it has taken and the buttons that apply: <b>Cancel</b> stops terrain, export, Analyze and route jobs on the server; <b>Log</b> shows everything the job has written; <b>Retry</b> runs a failed terrain, export, Analyze or sync-file job again with the same settings; <b>Send now</b> (CalTopo edits) tries to send them at once. Click the header (“Jobs: 2 running”) to fold the strip down to a pill; the map stays visible. A finished job shows <b>Done ✓</b> for 30 seconds, then goes; a failed one stays until you dismiss it (×). The last ten jobs stay behind <b>Recent jobs</b>. The first time a job starts, FLEX asks whether it may send a browser notice when a job ends while this tab is in the background; say no and nothing is sent. Terrain, export and Analyze jobs keep running on the server if you reload the page, and the strip picks them up again.</p>
 <h3>Units (Settings → Units)</h3>
 <p>Distances, heights and depths are in metres and kilometres. Switch to <b>Imperial</b> for feet, miles and feet of climb; the choice is kept on this computer. It applies to the details panel and the route graph.</p>
 
