@@ -178,15 +178,6 @@ KAPPA = 2.0
 CLOTH_ITERS = 250
 
 
-def _cloth_inputs(xg, yg, zg, grid):
-    zmin = bin_stat(xg, yg, zg, grid, "min")
-    zmax = bin_stat(xg, yg, zg, grid, "max")
-    valid = np.isfinite(zmin)
-    if not valid.any():
-        raise RuntimeError("no ground points inside the grid")
-    return nearest_fill(zmin), nearest_fill(zmax), valid
-
-
 def cloth_below(zmin, cell, kappa=KAPPA, iters=CLOTH_ITERS):
     """Cloth rising from below onto the lowest return of each cell."""
     g = kappa * cell * cell / 4.0
@@ -253,20 +244,6 @@ def cliff_mask(dem, slope, cell):
     return m | (step > CLIFF_STEP_M)
 
 
-def canopy_grids(x, y, hag, grid):
-    """Cover = fraction of returns >= 3 m above ground; top = highest HAG."""
-    n = grid.nx * grid.ny
-    f = grid.flat(x, y)
-    tot = np.bincount(f, minlength=n).astype(np.float32)
-    hi = hag >= CANOPY_MIN_HAG
-    cnt = np.bincount(f[hi], minlength=n).astype(np.float32)
-    cover = np.where(tot > 0, cnt / np.maximum(tot, 1), 0).reshape(grid.shape)
-    top = np.zeros(n, np.float32)
-    if hi.any():
-        np.maximum.at(top, f[hi], np.minimum(hag[hi], 80.0).astype(np.float32))
-    return cover.astype(np.float32), top.reshape(grid.shape)
-
-
 def terrain_lit(dem, cell, lat):
     """1 where the ground sees the equinox noon sun, by a horizon sweep.
 
@@ -315,61 +292,179 @@ def sun_grid(dem, cover, top, cell, lat):
             canopy_transmit(dem, cover, top, cell, lat))
 
 
+def geojson_lines(fc, zone):
+    """[(name, kind, [[(x, y), ...], ...]), ...] from a FeatureCollection."""
+    out = []
+    feats = fc.get("features", []) if isinstance(fc, dict) else []
+    for i, ft in enumerate(feats):
+        props = ft.get("properties") or {}
+        geom = ft.get("geometry") or {}
+        if geom.get("type") == "LineString":
+            lines = [geom.get("coordinates") or []]
+        elif geom.get("type") == "MultiLineString":
+            lines = geom.get("coordinates") or []
+        else:
+            continue
+        xy = [[lonlat_to_xy(p[0], p[1], zone) for p in ln if len(p) >= 2]
+              for ln in lines]
+        xy = [ln for ln in xy if ln]
+        if xy:
+            out.append((str(props.get("name") or ""),
+                        str(props.get("kind", "trail")).lower(), xy))
+    return out
+
+
+def mark_lines(lines_xy, grid, buffer_m):
+    """Cells within buffer_m of the polylines (at least the cells they cross)."""
+    from scipy import ndimage
+    hit = np.zeros(grid.shape, bool)
+    for ln in lines_xy:
+        if len(ln) == 1:
+            ln = [ln[0], ln[0]]
+        for (x0, y0), (x1, y1) in zip(ln[:-1], ln[1:]):
+            L = math.hypot(x1 - x0, y1 - y0)
+            n = max(2, int(L / (grid.cell / 3)) + 2)
+            t = np.linspace(0, 1, n)
+            xs, ys = x0 + (x1 - x0) * t, y0 + (y1 - y0) * t
+            ok = ((xs >= grid.minx) & (xs < grid.maxx) &
+                  (ys >= grid.miny) & (ys < grid.maxy))
+            if ok.any():
+                c, r = grid.indices(xs[ok], ys[ok])
+                hit[r, c] = True
+    if hit.any() and buffer_m > grid.cell * 0.5:
+        hit = ndimage.distance_transform_edt(~hit) * grid.cell <= buffer_m
+    return hit
+
+
 def rasterize_trails(trails, grid, zone):
     """0 none, 1 trail, 2 road (road wins), from a GeoJSON of lon/lat lines."""
-    from scipy import ndimage
     out = np.zeros(grid.shape, np.uint8)
     if not trails:
         return out
-    feats = trails.get("features", []) if isinstance(trails, dict) else []
+    lines = geojson_lines(trails, zone)
     for kind, code in (("trail", 1), ("road", 2)):
-        hit = np.zeros(grid.shape, bool)
-        for ft in feats:
-            props = ft.get("properties") or {}
-            k = str(props.get("kind", "trail")).lower()
-            if (k == "road") != (kind == "road"):
-                continue
-            geom = ft.get("geometry") or {}
-            lines = []
-            if geom.get("type") == "LineString":
-                lines = [geom.get("coordinates") or []]
-            elif geom.get("type") == "MultiLineString":
-                lines = geom.get("coordinates") or []
-            for ln in lines:
-                pts = [lonlat_to_xy(p[0], p[1], zone) for p in ln if len(p) >= 2]
-                for (x0, y0), (x1, y1) in zip(pts[:-1], pts[1:]):
-                    L = math.hypot(x1 - x0, y1 - y0)
-                    n = max(2, int(L / (grid.cell / 3)) + 2)
-                    t = np.linspace(0, 1, n)
-                    xs, ys = x0 + (x1 - x0) * t, y0 + (y1 - y0) * t
-                    ok = ((xs >= grid.minx) & (xs < grid.maxx) &
-                          (ys >= grid.miny) & (ys < grid.maxy))
-                    if ok.any():
-                        c, r = grid.indices(xs[ok], ys[ok])
-                        hit[r, c] = True
-        if hit.any():
-            rad = TRAIL_BUFFER[kind]
-            dist = ndimage.distance_transform_edt(~hit) * grid.cell
-            out[dist <= max(rad, grid.cell * 0.5)] = code
+        xy = [ln for _n, k, ls in lines if (k == "road") == (kind == "road")
+              for ln in ls]
+        if xy:
+            out[mark_lines(xy, grid, TRAIL_BUFFER[kind])] = code
     return out
+
+
+def nearest_on_lines(lines_xy, p):
+    """The point of the polylines nearest to p."""
+    best, bd = None, np.inf
+    for ln in lines_xy:
+        pts = np.array(ln, float)
+        if len(pts) == 1:
+            pts = np.vstack([pts, pts])
+        a, b = pts[:-1], pts[1:]
+        v = b - a
+        L2 = np.maximum((v ** 2).sum(1), 1e-12)
+        t = np.clip(((p - a) * v).sum(1) / L2, 0, 1)
+        q = a + v * t[:, None]
+        d = np.hypot(*(q - p).T)
+        i = int(np.argmin(d))
+        if d[i] < bd:
+            bd, best = float(d[i]), (float(q[i, 0]), float(q[i, 1]))
+    return best, bd
 
 
 # --------------------------------------------------------------------------
 # Grid building (numpy in, dict of rasters out)
 # --------------------------------------------------------------------------
 
-def build_grids(x, y, z, cls, grid, band, dem_mode, lat, say=ascii_say):
-    """All cached cost inputs from a point cloud already in UTM metres."""
+class Points:
+    """A point cloud kept small: float32 offsets from an origin, float32 z,
+    uint8 class (13 bytes a point; a 2 x 2 km area at 50 pts/m2 is ~2.7 GB).
+    Every per-point pass walks it in chunks so no full-size float64
+    temporaries are made."""
+
+    CHUNK = 4_000_000
+
+    def __init__(self, ox, oy):
+        self.ox, self.oy = float(ox), float(oy)
+        self.parts = []
+
+    def add(self, x, y, z, cls):
+        self.parts.append(((np.asarray(x) - self.ox).astype(np.float32),
+                           (np.asarray(y) - self.oy).astype(np.float32),
+                           np.asarray(z).astype(np.float32),
+                           None if cls is None else
+                           np.clip(np.asarray(cls), 0, 255).astype(np.uint8)))
+
+    def finish(self):
+        if len(self.parts) != 1:
+            xs, ys, zs, cs = zip(*self.parts) if self.parts else ([], [], [], [])
+            has_c = all(c is not None for c in cs) and len(cs) > 0
+            self.parts = [(np.concatenate(xs) if xs else np.zeros(0, np.float32),
+                           np.concatenate(ys) if ys else np.zeros(0, np.float32),
+                           np.concatenate(zs) if zs else np.zeros(0, np.float32),
+                           np.concatenate(cs) if has_c else None)]
+        self.xl, self.yl, self.z, self.cls = self.parts[0]
+        self.parts = None
+        return self
+
+    def __len__(self):
+        return len(self.z)
+
+    def chunks(self, select=None):
+        """(x, y, z, cls, sel) in absolute metres, float64, a chunk at a time;
+        select(cls, z) -> bool mask restricts the chunk."""
+        n = len(self.z)
+        for i in range(0, n, self.CHUNK):
+            j = min(n, i + self.CHUNK)
+            c = self.cls[i:j] if self.cls is not None else None
+            z = self.z[i:j].astype(np.float64)
+            if select is not None:
+                m = select(c, z)
+                if not m.any():
+                    continue
+                yield (self.xl[i:j][m] + self.ox, self.yl[i:j][m] + self.oy,
+                       z[m], None if c is None else c[m])
+            else:
+                yield (self.xl[i:j] + self.ox, self.yl[i:j] + self.oy, z, c)
+
+
+def points_from_arrays(x, y, z, cls):
+    P = Points(float(np.min(x)) if len(x) else 0.0,
+               float(np.min(y)) if len(y) else 0.0)
+    P.add(x, y, z, cls)
+    return P.finish()
+
+
+def build_grids(P, grid, band, dem_mode, lat, say=ascii_say):
+    """All cached cost inputs from a Points cloud in UTM metres."""
     t0 = time.time()
-    if cls is not None and (cls == GROUND_CLASS).sum() >= 50:
-        gsel = cls == GROUND_CLASS
-    else:
+    n_ground = int((P.cls == GROUND_CLASS).sum()) if P.cls is not None else 0
+    use_class = n_ground >= 50
+    if not use_class:
         say("  no ground class: the cloth works on all returns")
-        gsel = np.ones(len(x), bool)
-    zlo, zhi = ld.plausible_ground_band(z, cls if gsel.sum() < len(x) else None)
-    gsel &= (z >= zlo) & (z <= zhi)
-    zmin, zmax, valid = _cloth_inputs(x[gsel], y[gsel], z[gsel], grid)
-    say(f"  ground cells with returns: {valid.mean() * 100:.1f}%")
+    sub = slice(None, None, max(1, len(P) // 2_000_000))
+    zs = P.z[sub].astype(np.float64)
+    cs = P.cls[sub] if (P.cls is not None and use_class) else None
+    zlo, zhi = ld.plausible_ground_band(zs, cs)
+    del zs, cs
+
+    def ground_sel(c, z):
+        m = (z >= zlo) & (z <= zhi)
+        return m & (c == GROUND_CLASS) if use_class else m
+
+    ncell = grid.nx * grid.ny
+    zmin = np.full(ncell, np.inf)
+    zmax = np.full(ncell, -np.inf)
+    for x, y, z, _c in P.chunks(ground_sel):
+        f = grid.flat(x, y)
+        np.minimum.at(zmin, f, z)
+        np.maximum.at(zmax, f, z)
+    zmin[~np.isfinite(zmin)] = np.nan
+    zmax[~np.isfinite(zmax)] = np.nan
+    zmin, zmax = zmin.reshape(grid.shape), zmax.reshape(grid.shape)
+    valid = np.isfinite(zmin)
+    if not valid.any():
+        raise RuntimeError("no ground points inside the grid")
+    zmin, zmax = nearest_fill(zmin), nearest_fill(zmax)
+    say(f"  ground cells with returns: {valid.mean() * 100:.1f}% "
+        f"({time.time() - t0:.1f} s)")
     out = {"valid": valid}
     if dem_mode in ("below", "both"):
         say(f"  cloth from below ({CLOTH_ITERS} passes, {grid.nx}x{grid.ny})")
@@ -377,20 +472,38 @@ def build_grids(x, y, z, cls, grid, band, dem_mode, lat, say=ascii_say):
     if dem_mode in ("above", "both"):
         say(f"  cloth from above ({CLOTH_ITERS} passes)")
         out["above"] = cloth_above(zmin, zmax, grid.cell)
+    del zmin, zmax
     dem = out["above"] if dem_mode == "above" else out["below"]
     out["ground"] = dem
     gx, gy = gradients(dem, grid.cell)
     out["gx"], out["gy"] = gx, gy
     out["slope"] = slope_deg(gx, gy)
     out["cliff"] = cliff_mask(dem, out["slope"], grid.cell)
-    say(f"  slope and cliffs: {out['cliff'].mean() * 100:.2f}% cliff cells")
-    hag = ld.compute_hag(x, y, z, dem, grid)
-    brush, _tot = ld.band_fraction(x, y, hag, grid, band[0], band[1],
-                                   min_points=2)
-    out["brush"] = np.nan_to_num(nearest_fill(brush), nan=0.0).astype(np.float32)
-    cover, top = canopy_grids(x, y, hag, grid)
+    say(f"  slope and cliffs: {out['cliff'].mean() * 100:.2f}% cliff cells "
+        f"({time.time() - t0:.1f} s)")
+
+    # One chunked pass over every return: HAG against the routing DEM, then
+    # the brush band fraction (as lidar_derive.band_fraction) and the canopy.
+    tot = np.zeros(ncell); inband = np.zeros(ncell); high = np.zeros(ncell)
+    top = np.zeros(ncell, np.float32)
+    for x, y, z, _c in P.chunks():
+        hag = z - ld.sample_bilinear(dem, grid, x, y)
+        f = grid.flat(x, y)
+        tot += np.bincount(f, minlength=ncell)
+        inband += np.bincount(f[(hag >= band[0]) & (hag <= band[1])],
+                              minlength=ncell)
+        hi = hag >= CANOPY_MIN_HAG
+        if hi.any():
+            high += np.bincount(f[hi], minlength=ncell)
+            np.maximum.at(top, f[hi], np.minimum(hag[hi], 80.0).astype(np.float32))
+    brush = np.where(tot >= 2, inband / np.maximum(tot, 1), np.nan)
+    out["brush"] = np.nan_to_num(nearest_fill(brush.reshape(grid.shape)),
+                                 nan=0.0).astype(np.float32)
+    cover = np.where(tot > 0, high / np.maximum(tot, 1), 0).reshape(
+        grid.shape).astype(np.float32)
+    top = top.reshape(grid.shape)
     say(f"  brush and canopy: mean brush {out['brush'].mean():.2f}, "
-        f"canopy cover {cover.mean() * 100:.0f}%")
+        f"canopy cover {cover.mean() * 100:.0f}% ({time.time() - t0:.1f} s)")
     out["shade"] = sun_grid(dem, cover, top, grid.cell, lat)
     say(f"  sun at equinox noon: {(out['shade'] >= 0.5).mean() * 100:.0f}% "
         f"of cells in sun ({time.time() - t0:.1f} s for the grids)")
@@ -595,12 +708,12 @@ def corridor_mask(grid, ends_rc, starts_rc, radius_m):
     return m
 
 
-def grow_check(mask, dist, paths, starts_rc, best, model, grid):
+def grow_check(mask, dist, paths, targets, best, model, grid):
     """Cells on the corridor edge from which the corridor should grow:
     the best path runs within 2 cells of the edge, or an edge cell is still
-    cheap (its cost to the end plus the straight distance to a start at a
-    low per-metre cost is under that start's best cost). Unreached starts
-    grow the whole edge."""
+    cheap (its cost to the end plus the straight distance to that start, at
+    a low per-metre cost -- the 25th percentile of the corridor's cells --
+    is under that start's best cost). Unreached starts grow the whole edge."""
     from scipy import ndimage
     inner = ndimage.binary_erosion(mask, border_value=1)
     edge = mask & ~inner
@@ -620,11 +733,16 @@ def grow_check(mask, dist, paths, starts_rc, best, model, grid):
         if near.any():
             trig |= edge & (ndimage.distance_transform_edt(
                 ~_points_mask(mask.shape, pr[near], pc[near])) <= 4)
-    per_m = float(np.percentile((model.base * model.tf)[mask], 25)) / 1.0
+    per_m = float(np.percentile((model.base * model.tf)[mask], 25))
     er, ec = np.nonzero(edge)
     de = dist[er, ec]
-    for (sr, sc), b in zip(starts_rc, best):
-        lb = de + np.hypot(er - sr, ec - sc) * grid.cell * per_m
+    for t, b in zip(targets, best):
+        if t.get("dmap") is not None:
+            dm = t["dmap"][er, ec]
+        else:
+            sr, sc = t["rc"]
+            dm = np.hypot(er - sr, ec - sc) * grid.cell
+        lb = de + dm * per_m
         cheap = np.isfinite(de) & (lb < b * 0.999)
         trig[er[cheap], ec[cheap]] = True
     return trig if trig.any() else None
@@ -655,31 +773,48 @@ def snap_cell(rc, model, grid, radius_m=10.0):
     return (int(rr[i] + r0), int(cc[i] + c0))
 
 
-def solve(model, grid, end_rc, starts_rc, corridor_m, conn, mask0=None,
+def solve(model, grid, end_rc, targets, corridor_m, conn, mask0=None,
           max_rounds=8, say=ascii_say):
-    """Best path from every start to the end, growing the corridor as needed."""
+    """Best path from every target to the end, growing the corridor as needed.
+
+    A target is {"rc": cell} (a start point) or {"rc": the line cell nearest
+    the end, "mask": the line's cells, "dmap": metres to the line} (a start
+    line: every cell of it is a start, the cheapest wins). Returns paths,
+    best costs, the start cell of each, the final mask, growth rounds and
+    the number of settled cells."""
     from scipy import ndimage
+    reps = [t["rc"] for t in targets]
     mask = mask0.copy() if mask0 is not None else corridor_mask(
-        grid, end_rc, starts_rc, corridor_m)
-    for rc in [end_rc] + list(starts_rc):
+        grid, end_rc, reps, corridor_m)
+    for rc in [end_rc] + reps:
         mask[rc] = True
     grew = 0
     # Upper bound for the early exit: walking the straight cell lines.
-    ub = []
-    for s in starts_rc:
-        ub.append(path_cost(model, line_cells(s, end_rc)))
+    ub = [path_cost(model, line_cells(s, end_rc)) for s in reps]
     limit = max(ub) * 1.0001 + 1e-6 if ub and all(np.isfinite(ub)) else np.inf
     while True:
         t0 = time.time()
         dist, nxt, nnz = search(model, mask, end_rc, conn, limit)
-        best = [float(dist[s]) for s in starts_rc]
+        best, chosen = [], []
+        for t in targets:
+            if t.get("mask") is not None:
+                cand = t["mask"] & np.isfinite(dist)
+                if cand.any():
+                    rr, cc = np.nonzero(cand)
+                    i = int(np.argmin(dist[rr, cc]))
+                    chosen.append((int(rr[i]), int(cc[i])))
+                    best.append(float(dist[rr[i], cc[i]]))
+                else:
+                    chosen.append(t["rc"]); best.append(np.inf)
+            else:
+                chosen.append(t["rc"]); best.append(float(dist[t["rc"]]))
         paths = [trace(nxt, s, end_rc, grid.nx) if np.isfinite(b) else None
-                 for s, b in zip(starts_rc, best)]
+                 for s, b in zip(chosen, best)]
         say(f"  search: {int(mask.sum()):,} cells, {nnz:,} steps, "
             f"{time.time() - t0:.1f} s")
         if grew >= max_rounds:
             break
-        trig = grow_check(mask, dist, paths, starts_rc, best, model, grid)
+        trig = grow_check(mask, dist, paths, targets, best, model, grid)
         if trig is None:
             break
         add = ndimage.distance_transform_edt(~trig) * grid.cell <= corridor_m
@@ -690,7 +825,7 @@ def solve(model, grid, end_rc, starts_rc, corridor_m, conn, mask0=None,
         grew += 1
         say(f"  corridor grows ({grew}): now {int(mask.sum()):,} cells")
     settled = int(np.isfinite(dist).sum())
-    return paths, best, mask, grew, settled
+    return paths, best, chosen, mask, grew, settled
 
 
 # --------------------------------------------------------------------------
@@ -873,60 +1008,103 @@ def _smrf_if_needed(x, y, z, cls, say):
     return p.arrays[0]["Classification"].astype(np.int16)
 
 
-def read_points(source, utm_bbox, zone, south, say):
-    """(x, y, z, classification) in UTM metres for the bbox."""
+def _tiles(bbox, tile_m):
+    e0, n0, e1, n1 = bbox
+    nx = max(1, int(math.ceil((e1 - e0) / tile_m)))
+    ny = max(1, int(math.ceil((n1 - n0) / tile_m)))
+    for j in range(ny):
+        for i in range(nx):
+            yield (e0 + (e1 - e0) * i / nx, n0 + (n1 - n0) * j / ny,
+                   e0 + (e1 - e0) * (i + 1) / nx, n0 + (n1 - n0) * (j + 1) / ny)
+
+
+def _read_las_tile(files, epsg_in, utm_epsg, bbox):
+    import pdal
+    stages = [{"type": "readers.las", "filename": f} for f in files]
+    if epsg_in:
+        for s in stages:
+            s["override_srs"] = f"EPSG:{int(epsg_in)}"
+    if len(stages) > 1:
+        stages.append({"type": "filters.merge"})
+    stages.append({"type": "filters.reprojection", "out_srs": f"EPSG:{utm_epsg}"})
+    e0, n0, e1, n1 = bbox
+    stages.append({"type": "filters.crop", "bounds": f"([{e0},{e1}],[{n0},{n1}])"})
+    p = pdal.Pipeline(json.dumps({"pipeline": stages}))
+    p.execute()
+    if not p.arrays or not len(p.arrays[0]):
+        return None
+    a = p.arrays[0]
+    try:
+        c = a["Classification"].astype(np.int16)
+    except Exception:
+        c = None
+    return a["X"], a["Y"], a["Z"], c
+
+
+def read_points(source, utm_bbox, zone, south, say, tile_m=600.0):
+    """A Points cloud (UTM metres) for the bbox. PDAL sources are read in
+    tiles of about tile_m so the full structured arrays never coexist."""
+    e0, n0, e1, n1 = utm_bbox
+    P = Points(e0, n0)
+
+    def add(x, y, z, c, box):
+        k = (x >= box[0]) & (x < box[2]) & (y >= box[1]) & (y < box[3])
+        if k.any():
+            P.add(x[k], y[k], z[k], None if c is None else c[k])
+        return int(k.sum())
+
     if "npz" in source:
         d = np.load(source["npz"])
-        x, y, z = d["x"].astype(np.float64), d["y"].astype(np.float64), \
-            d["z"].astype(np.float64)
-        cls = d["classification"].astype(np.int16) if "classification" in d \
-            else None
-    elif "ept" in source:
-        cover = et().latlon_box_covering(utm_bbox, zone, south)
-        x, y, z, cls, _ = ld.read_ept_all_classes(
-            source["ept"], utm_bbox, cover, zone=zone, south=south,
-            progress=say)
-    elif "las" in source:
+        x, y = d["x"], d["y"]
+        k = (x >= e0) & (x <= e1) & (y >= n0) & (y <= n1)
+        cls = d["classification"][k] if "classification" in d.files else None
+        P.add(x[k], y[k], d["z"][k], cls)
+        del x, y, k
+    elif "ept" in source or "las" in source:
         try:
-            import pdal
+            import pdal  # noqa: F401
         except ImportError:
             raise RuntimeError("pdal not installed (conda install -c "
-                               "conda-forge python-pdal)")
-        files = source["las"] if isinstance(source["las"], list) else [source["las"]]
-        epsg = (32700 if south else 32600) + zone
-        stages = [{"type": "readers.las", "filename": f} for f in files]
-        if source.get("epsg"):
-            for s in stages:
-                s["override_srs"] = f"EPSG:{int(source['epsg'])}"
-        if len(stages) > 1:
-            stages.append({"type": "filters.merge"})
-        stages.append({"type": "filters.reprojection", "out_srs": f"EPSG:{epsg}"})
-        e0, n0, e1, n1 = utm_bbox
-        stages.append({"type": "filters.crop",
-                       "bounds": f"([{e0},{e1}],[{n0},{n1}])"})
-        say(f"  reading {len(files)} LAS/LAZ file(s)")
-        p = pdal.Pipeline(json.dumps({"pipeline": stages}))
-        p.execute()
-        if not p.arrays or not len(p.arrays[0]):
-            raise RuntimeError("no points from the LAS/LAZ files in this area")
-        a = p.arrays[0]
-        x, y, z = (a[k].astype(np.float64) for k in ("X", "Y", "Z"))
-        try:
-            cls = a["Classification"].astype(np.int16)
-        except Exception:
-            cls = None
+                               "conda-forge python-pdal), as for Generate")
+        tiles = list(_tiles(utm_bbox, tile_m))
+        files = None
+        if "las" in source:
+            files = source["las"] if isinstance(source["las"], list) else [source["las"]]
+        for ti, box in enumerate(tiles):
+            say(f"  reading tile {ti + 1}/{len(tiles)}")
+            if files:
+                r = _read_las_tile(files, source.get("epsg"),
+                                   (32700 if south else 32600) + zone, box)
+                if r is None:
+                    continue
+                x, y, z, c = r
+            else:
+                cover = et().latlon_box_covering(box, zone, south)
+                try:
+                    x, y, z, c, _ = ld.read_ept_all_classes(
+                        source["ept"], box, cover, zone=zone, south=south,
+                        progress=lambda m: None)
+                except SystemExit as e:
+                    if "no points" in str(e.code):
+                        continue
+                    raise
+            add(x, y, z, c, box)
+            del x, y, z, c
     else:
         raise RuntimeError("params.source needs 'ept' or 'las'")
-    e0, n0, e1, n1 = utm_bbox
-    k = (x >= e0) & (x <= e1) & (y >= n0) & (y <= n1)
-    x, y, z = x[k], y[k], z[k]
-    cls = cls[k] if cls is not None else None
-    if not len(x):
+    P.finish()
+    if not len(P):
         raise RuntimeError("no LiDAR points in the route area")
-    say(f"  {len(x):,} points in the area")
+    say(f"  {len(P):,} points in the area")
     if "npz" not in source:
-        cls = _smrf_if_needed(x, y, z, cls, say)
-    return x, y, z, cls
+        ng = int((P.cls == GROUND_CLASS).sum()) if P.cls is not None else 0
+        if ng < 1000:
+            x = P.xl.astype(np.float64) + P.ox
+            y = P.yl.astype(np.float64) + P.oy
+            P.cls = _smrf_if_needed(x, y, P.z.astype(np.float64), None,
+                                    say).astype(np.uint8)
+            del x, y
+    return P
 
 
 # --------------------------------------------------------------------------
@@ -1093,8 +1271,10 @@ def run(params, out_dir, cache_dir=None, say=ascii_say):
     src = params.get("source") or {}
     end = params.get("end")
     starts = params.get("starts") or []
-    if not end or not starts:
-        raise RuntimeError("params need 'end' and at least one start")
+    start_lines = params.get("start_lines")
+    if not end or not (starts or start_lines):
+        raise RuntimeError("params need 'end' and at least one start "
+                           "(starts or start_lines)")
     cell_spec = params.get("cell", "auto")
     dem = params.get("dem", "below")
     if dem not in ("below", "above", "both"):
@@ -1125,10 +1305,18 @@ def run(params, out_dir, cache_dir=None, say=ascii_say):
         south = (sum(lats) / len(lats)) < 0
     lat0 = sum(lats) / len(lats)
     pts = [lonlat_to_xy(lo, la, zone) for lo, la in zip(lons, lats)]
+    # Start lines: every cell under them is a start. The area covers the
+    # part of each line nearest the end.
+    slines = geojson_lines(start_lines, zone) if start_lines else []
+    line_near = []
+    for _n, _k, ls in slines:
+        q, dq = nearest_on_lines(ls, np.array(pts[0]))
+        line_near.append((q, dq))
+    bbox_pts = pts + [q for q, _ in line_near]
     margin = float(params.get("area_margin_m", max(2 * corridor_m, 200.0)))
     snap = 50.0
-    need = (min(p[0] for p in pts) - margin, min(p[1] for p in pts) - margin,
-            max(p[0] for p in pts) + margin, max(p[1] for p in pts) + margin)
+    need = (min(p[0] for p in bbox_pts) - margin, min(p[1] for p in bbox_pts) - margin,
+            max(p[0] for p in bbox_pts) + margin, max(p[1] for p in bbox_pts) + margin)
     need = (math.floor(need[0] / snap) * snap, math.floor(need[1] / snap) * snap,
             math.ceil(need[2] / snap) * snap, math.ceil(need[3] / snap) * snap)
     if npz_ext:                            # no data beyond the file
@@ -1162,10 +1350,10 @@ def run(params, out_dir, cache_dir=None, say=ascii_say):
         say(f"[1/4] Reading points (UTM zone {zone}{'S' if south else 'N'}, "
             f"{(need[2] - need[0]):.0f} x {(need[3] - need[1]):.0f} m)")
         t0 = time.time()
-        x, y, z, cls = read_points(src, need, zone, south, say)
+        P = read_points(src, need, zone, south, say)
         timings["read_s"] = round(time.time() - t0, 2)
         area = (need[2] - need[0]) * (need[3] - need[1])
-        ng = int((cls == GROUND_CLASS).sum()) if cls is not None else len(x)
+        ng = int((P.cls == GROUND_CLASS).sum()) if P.cls is not None else len(P)
         if cell_spec == "auto" or cell_spec is None:
             cell = auto_cell(ng, area)
             say(f"  auto cell: {cell} m ({ng / area:.1f} ground returns per m2)")
@@ -1174,9 +1362,9 @@ def run(params, out_dir, cache_dir=None, say=ascii_say):
         grid = ld.Grid(need[0], need[1], need[2], need[3], cell)
         say(f"[2/4] Cost grids {grid.nx}x{grid.ny} @ {cell} m, dem {dem}")
         t0 = time.time()
-        G = build_grids(x, y, z, cls, grid, band, dem, lat0, say)
+        G = build_grids(P, grid, band, dem, lat0, say)
         timings["grids_s"] = round(time.time() - t0, 2)
-        counts.update(points=int(len(x)), ground_points=ng)
+        counts.update(points=int(len(P)), ground_points=ng)
         key = cache_key(sid, need, cell_spec, band, dem)
         cache = {"version": VERSION, "source": sid, "cell_spec": str(cell_spec),
                  "band": band, "dem": dem}
@@ -1191,7 +1379,7 @@ def run(params, out_dir, cache_dir=None, say=ascii_say):
             os.makedirs(gdir, exist_ok=True)
             for f in os.listdir(target):
                 link_or_copy(os.path.join(target, f), os.path.join(gdir, f))
-        del x, y, z, cls
+        del P
     G["cell"] = grid.cell
     counts["cells"] = int(grid.nx * grid.ny)
 
@@ -1207,32 +1395,63 @@ def run(params, out_dir, cache_dir=None, say=ascii_say):
     for p in pts:
         if not (grid.minx <= p[0] <= grid.maxx and grid.miny <= p[1] <= grid.maxy):
             raise RuntimeError("an end or start lies outside the LiDAR grid")
+    from scipy import ndimage
+    line_t = []           # (index, name, kind, mask, dmap, nearest cell)
+    for li, ((name, kind, ls), (q, dq)) in enumerate(zip(slines, line_near)):
+        m = mark_lines(ls, grid, max(grid.cell, float(
+            params.get("start_line_buffer_m", 2.0))))
+        if not m.any():
+            say(f"  start line {li + 1} lies outside the LiDAR grid: skipped")
+            continue
+        dmap = ndimage.distance_transform_edt(~m).astype(np.float32) * grid.cell
+        rr, cc = np.nonzero(m)
+        er, ec = rc_of(end_xy)
+        i = int(np.argmin((rr - er) ** 2 + (cc - ec) ** 2))
+        line_t.append((li, name or f"{kind} {li + 1}", kind, m, dmap,
+                       (int(rr[i]), int(cc[i]))))
+    n_pt = len(start_xy)
+    if slines and not line_t and not n_pt:
+        raise RuntimeError("no start line crosses the LiDAR grid")
 
     conn = params.get("connectivity", "auto")
     say("[3/4] Searching from the end")
     t0 = time.time()
     options = [("recommended", weights)] + [(p, preset_weights(p, weights))
                                             for p in presets]
-    results = []          # (option, start_index, path, best)
+    results = []          # (option, start_index, path, best, model, start cell)
     corridor_grew = 0
     settled = 0
     mask_final = None
     for oi, (name, w) in enumerate(options):
         model = CostModel(G, G["trail"], w)
         end_rc = snap_cell(rc_of(end_xy), model, grid)
-        s_rc = [snap_cell(rc_of(s), model, grid) for s in start_xy]
         if end_rc is None:
             raise RuntimeError("the end is inside a blocked cliff area")
-        live = [i for i, s in enumerate(s_rc) if s is not None]
+        targets, tidx = [], []
+        for i, s in enumerate(start_xy):
+            rc = snap_cell(rc_of(s), model, grid)
+            if rc is not None:
+                targets.append({"rc": rc}); tidx.append(i)
+        for li, _nm, _k, m, dmap, near in line_t:
+            usable = (m & ~model.cliff) if np.isinf(model.cliff_factor) else m
+            if not usable.any():
+                continue
+            rc = near if usable[near] else snap_cell(near, model, grid, 50.0)
+            if rc is None:
+                continue
+            targets.append({"rc": rc, "mask": usable, "dmap": dmap})
+            tidx.append(n_pt + li)
+        if not targets:
+            raise RuntimeError("every start is inside a blocked cliff area")
         if conn == "auto":
-            est = corridor_mask(grid, end_rc, [s_rc[i] for i in live],
+            est = corridor_mask(grid, end_rc, [t["rc"] for t in targets],
                                 corridor_m).sum() if mask_final is None \
                 else mask_final.sum()
             cn = 16 if est <= 2_000_000 else 8
         else:
             cn = int(conn)
-        paths, best, mask, grew, st = solve(
-            model, grid, end_rc, [s_rc[i] for i in live], corridor_m, cn,
+        paths, best, chosen, mask, grew, st = solve(
+            model, grid, end_rc, targets, corridor_m, cn,
             mask0=mask_final, say=say)
         if oi == 0:
             corridor_grew = grew
@@ -1241,22 +1460,45 @@ def run(params, out_dir, cache_dir=None, say=ascii_say):
         else:
             corridor_grew += grew
             mask_final = mask_final | mask
-        for i, p, b in zip(live, paths, best):
-            results.append((name, i, p, b, model))
+        for i, p, b, c in zip(tidx, paths, best, chosen):
+            results.append((name, i, p, b, model, c))
         say(f"  {OPTION_NAMES[name]}: done")
     timings["search_s"] = round(time.time() - t0, 2)
+
+    # With start lines: the cheapest line is the answer; other lines are kept
+    # when within 1.5 x its cost (recommended) -- presets keep only their
+    # cheapest line.
+    def is_line(si):
+        return si >= n_pt
+    line_best = {}
+    for name, si, path, best, model, c in results:
+        if is_line(si) and path is not None:
+            line_best[name] = min(line_best.get(name, np.inf), best)
 
     say("[4/4] Route stats")
     feats = []
     kept = {}
     missing = []
-    for name, si, path, best, model in results:
+    line_names = {n_pt + li: nm for li, nm, _k, _m, _d, _n in line_t}
+    for name, si, path, best, model, c in results:
         if path is None:
             if name == "recommended":
                 missing.append(si)
             continue
+        is_best_line = False
+        if is_line(si):
+            lb = line_best.get(name, np.inf)
+            is_best_line = best <= lb
+            if name == "recommended" and best > 1.5 * lb:
+                continue
+            if name != "recommended" and not is_best_line:
+                continue
+        key_si = "lines" if (is_line(si) and name != "recommended") else si
         if name != "recommended":
-            if not differs(path, kept.get(si, []), grid.cell):
+            others = kept.get(key_si, []) if key_si != "lines" else \
+                [q for k, v in kept.items() if not isinstance(k, str) and is_line(k)
+                 for q in v]
+            if not differs(path, others, grid.cell):
                 say(f"  {OPTION_NAMES[name]} (start {si + 1}): same as an "
                     "option already kept")
                 continue
@@ -1265,23 +1507,39 @@ def run(params, out_dir, cache_dir=None, say=ascii_say):
                                                  south, units)
         label = (f"{OPTION_NAMES[name]}: {fmt_len(stats['length_m'], units)}, "
                  f"{fmt_time(stats['time_min'])}")
-        if len(start_xy) > 1:
+        if is_line(si):
+            label = f"From {line_names[si]} - " + label
+        elif n_pt > 1 or line_t:
             label = f"Start {si + 1} - " + label
-        feats.append({"type": "Feature",
-                      "properties": {"id": f"{name}-{si}", "option": name,
-                                     "start_index": si, "label": label,
-                                     "stats": stats, "warnings": warns,
-                                     "profile": prof},
+        sx = grid.minx + (c[1] + 0.5) * grid.cell
+        sy = grid.maxy - (c[0] + 0.5) * grid.cell
+        slon, slat = xy_to_lonlat(np.array([sx]), np.array([sy]), zone, south)
+        props = {"id": f"{name}-{si}", "option": name, "start_index": si,
+                 "label": label, "stats": stats, "warnings": warns,
+                 "profile": prof,
+                 "start_kind": "line" if is_line(si) else "point",
+                 "start_lonlat": [round(float(slon[0]), 7),
+                                  round(float(slat[0]), 7)]}
+        if is_line(si):
+            props["start_line"] = si - n_pt
+            props["start_name"] = line_names[si]
+            props["best"] = bool(is_best_line)
+        feats.append({"type": "Feature", "properties": props,
                       "geometry": {"type": "LineString", "coordinates": coords}})
         say(f"  {label}")
     for si in missing:
-        say(f"! no route found from start {si + 1} (blocked by cliffs or "
-            "outside the LiDAR)")
+        what = f"start line {si - n_pt + 1}" if is_line(si) else f"start {si + 1}"
+        if is_line(si) and line_best.get("recommended") is not None:
+            say(f"  no route from {what} (other lines have one)")
+        else:
+            say(f"! no route found from {what} (blocked by cliffs or outside "
+                "the LiDAR)")
     with open(os.path.join(out_dir, "routes.geojson"), "w") as f:
         json.dump({"type": "FeatureCollection", "features": feats}, f)
     counts.update(routes=len(feats), corridor_cells=int(mask_final.sum())
                   if mask_final is not None else 0, settled_cells=settled,
-                  starts=len(start_xy), unreachable_starts=len(missing))
+                  starts=len(start_xy), start_lines=len(line_t),
+                  unreachable_starts=len(missing))
     summary = {"cell": grid.cell, "grid_cache_key": key,
                "grid_reused": reused, "corridor_grew": corridor_grew,
                "elapsed_s": round(time.time() - t_start, 2),

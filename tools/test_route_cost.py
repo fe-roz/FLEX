@@ -177,6 +177,38 @@ if rA2:
 else:
     check('cliff 1: a route is found', False)
 
+# Start lines: every cell of a road is a start; the cheapest wins.
+def road(*pts, kind='road', name=''):
+    return {'type': 'Feature', 'properties': {'kind': kind, 'name': name},
+            'geometry': {'type': 'LineString',
+                         'coordinates': [rc.local_lonlat(*p) for p in pts]}}
+
+
+pl = dict(pa, starts=[], corridor_m=40,
+          start_lines={'type': 'FeatureCollection', 'features': [
+              road((10, 5), (10, 195), name='West road')]})
+sL, fcL, _ = run('cliff', pl, out=outA)
+rL = route(fcL, start=0)
+check('start line: grids reused', sL['grid_reused'])
+check('start line: a route from the road', rL is not None and
+      rL['properties']['start_kind'] == 'line' and rL['properties']['best'])
+if rL:
+    import export_terrain as et
+    e0, n0, zone = rc.example_origin()
+    lon, lat = rL['properties']['start_lonlat']
+    ex, ny_, _ = et.latlon_to_utm(lat, lon, zone)
+    check('start line: leaves the road near the cliff gap (north)',
+          ny_ - n0 > 130 and abs(ex - e0 - 10) < 4, (ex - e0, ny_ - n0))
+    check('start line: label names the road', 'West road' in rL['properties']['label'])
+pl2 = dict(pl, start_lines={'type': 'FeatureCollection', 'features': [
+    road((10, 5), (10, 195), name='West road'), road((150, 3), (238, 3), name='East road')]})
+_, fcL2, _ = run('cliff', pl2, out=outA)
+best = [f for f in fcL2['features'] if f['properties'].get('best')]
+check('two start lines: the near one is best', len(best) == 1 and
+      best[0]['properties']['start_name'] == 'East road')
+check('two start lines: the far road (over 1.5x) is not offered',
+      not any(f['properties'].get('start_name') == 'West road' for f in fcL2['features']))
+
 # Shared cache dir: a new OUTDIR finds the grid set by its key.
 cache = os.path.join(TMP, 'cache')
 s1, _, _ = run('cacheA', dict(pa2), out=os.path.join(TMP, 'cA'))  # writes cA/grids
