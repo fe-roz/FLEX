@@ -1542,8 +1542,9 @@ def run(params, out_dir, cache_dir=None, say=ascii_say):
                 [q for k, v in kept.items() if not isinstance(k, str) and is_line(k)
                  for q in v]
             if not differs(path, others, grid.cell):
-                say(f"  {OPTION_NAMES[name]} (start {si + 1}): same as an "
-                    "option already kept")
+                what = line_names[si] if is_line(si) else f"start {si + 1}"
+                say(f"  {OPTION_NAMES[name]} ({what}): same as an option "
+                    "already kept")
                 continue
         kept.setdefault(si, []).append(path)
         stats, warns, prof, coords = route_stats(path, G, model, grid, zone,
@@ -1671,8 +1672,8 @@ def cliff_scene_z(gap_y=170.0):
 
 def demo(out_dir, say=ascii_say):
     """A synthetic case with every ingredient: a cliff band with a gap, a
-    brush patch, a stand of trees and a trail. Writes OUTDIR/points.npz,
-    params.json and the normal outputs."""
+    brush patch, a stand of trees, a trail, two start points and a road as a
+    start line. Writes OUTDIR/points.npz, params.json and the normal outputs."""
     os.makedirs(out_dir, exist_ok=True)
     W, H = 240.0, 200.0
     zf = cliff_scene_z(170.0)
@@ -1691,6 +1692,10 @@ def demo(out_dir, say=ascii_say):
             "geometry": {"type": "LineString", "coordinates": [
                 local_lonlat(20, 150), local_lonlat(110, 185),
                 local_lonlat(200, 120)]}}]},
+        "start_lines": {"type": "FeatureCollection", "features": [{
+            "type": "Feature", "properties": {"kind": "road", "name": "Example road"},
+            "geometry": {"type": "LineString", "coordinates": [
+                local_lonlat(150, 3), local_lonlat(238, 3)]}}]},
         "corridor_m": 60, "presets": list(PRESETS), "units": "m",
         "area_bbox_utm": local_bbox(0, 0, W, H),
     }
