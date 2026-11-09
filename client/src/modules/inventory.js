@@ -588,21 +588,22 @@
     r.addEventListener('click', () => open(x, { fly: true }));
     return r;
   };
-  function cardSection(box, c) {
+  function cardSection(box, c, before) {
     if (!c || !c.imp || c.survey || c.level === 'cave' || !c.name) return;
     const list = atStation(c.imp, c.code || '', c.name);
     if (!list.length) return;
-    box.appendChild(el('div', 'pj-h', 'Inventories'));
-    list.forEach(x => box.appendChild(rowEl(x)));
+    const put = n => box.insertBefore(n, before || null);
+    put(el('div', 'pj-h', 'Inventories'));
+    list.forEach(x => put(rowEl(x)));
   }
   const cardButton = c => btn(['chest', 'Inventory'], () => addAtStation(c.imp, c.code || '', c.name));
-  /** The station card with no project (or a cave outside it): its inventories and the button, under the leads. */
+  /** The station card with no project (or a cave outside it): its inventories above, and the button beside Lead. */
   function cardNoProject(box, c) {
     if (!c || !c.imp || c.survey || c.level === 'cave' || !c.name) return;
-    cardSection(box, c);
-    const row = el('div', 'pj-row pj-card-btns');
-    row.appendChild(cardButton(c));
-    box.appendChild(row);
+    const row = box.querySelector(':scope > .pj-card-btns');          // the Lead button's row (flex-leads.js)
+    cardSection(box, c, row);
+    if (row) row.appendChild(cardButton(c));
+    else { const r = el('div', 'pj-row pj-card-btns'); r.appendChild(cardButton(c)); box.appendChild(r); }
   }
 
   // ── ❓ Leads: the inventories, a section of the pane ───────────────────────

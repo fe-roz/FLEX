@@ -273,6 +273,18 @@ const pid = 'proj1', cid = 'cave1', cid2 = 'cave2';
   ok('invPayload: what the export carries (contents with dates, the log with photo references)', pay.id === 'iv1' && pay.target === st && pay.contents.length === 3 && pay.checked === '2026-03-02' && pay.log.length === 4
     && pay.log[3].photos[0].h === H(1) && pay.log[0].by === 'Ana' && pay.log[1].by === 'Bo and Cy' && pay.contents[0].checked === '2026-03-02' && pay.contents[0].since === '2026-03-02' && pay.contents[1].since === '2026-01-10' && !('created' in pay.log[0]), pay);
   ok('invPayload: it survives JSON (it goes into caves.json)', JSON.stringify(JSON.parse(JSON.stringify(pay))) === JSON.stringify(pay));
+
+  // any order of reading the same entries gives the same inventory (what devices merge into must not depend on file order)
+  {
+    const mixed = [set, left, took, chk, back, over, edit, rm, unrm, e2a, e2b, toList, back2, ph, prop, acc, del, res];
+    const fixedNow = day('2027-01-01'), view = es => JSON.stringify(Object.values(L.replayProject(es, pid).inventories).map(i => L.invMark(i, { now: fixedNow })).map(i => [i.id, i.target, i.name, i.desc, i.mode, i.list, i.deleted, i.heads, i.conflicts || null,
+      i.log.map(e => [e.id, e.date, e.items, e.text, e.removed, e.conflicts || null]), i.contents.map(c => [c.name, c.qty, c.changed, c.checked, c.stale]), i.gone, i.checked, i.stale]));
+    const base0 = view(mixed);
+    let same0 = true, seed = 7;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    for (let k = 0; k < 60 && same0; k++) { const p = mixed.slice().sort(() => rnd() - 0.5); same0 = view(p) === base0; }
+    ok('inventories: 60 random orders of the same mixed log (edits, removals, undo, a suggestion, two devices) replay identically', same0);
+  }
 }
 
 // 4) Documents: pages, tags, rotation, membership, inbox
