@@ -1444,6 +1444,11 @@
       return o;
     });
   }
+  // A date as typed → "2026-03-02" / "2026-03" (2026-3-2, 2026/03/02, 2026.3 are tidied); anything else ("2019", "c. 1975") stays as written.
+  function invDate(v) {
+    const t = String(v == null ? '' : v).trim(), m = /^(\d{4})[-\/.](\d{1,2})(?:[-\/.](\d{1,2}))?$/.exec(t);
+    return m ? m[1] + '-' + m[2].padStart(2, '0') + (m[3] ? '-' + m[3].padStart(2, '0') : '') : t;
+  }
   // Days from the start of a (possibly partial) date, "2026-03-02" / "2026-03" / "2026", to `now` (ms).
   function invAge(dk, now) {
     const m = /^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?/.exec(String(dk || ''));
@@ -1550,7 +1555,7 @@
       E.items = invItems(E.items);
       E.photos = invPhotos(E.photos);
       E.all = E.action === 'checked' && !!E.all;
-      E.by = str(E.by); E.text = str(E.text); E.date = str(E.date);
+      E.by = str(E.by); E.text = str(E.text); E.date = invDate(E.date);
       // The day it happened; an entry with none (or nothing readable) counts from the day it was recorded.
       E.dk = dateKey(E.date) || str(e0.t).slice(0, 10);
       if (!dateKey(E.date)) E.date = E.dk;
@@ -1621,7 +1626,7 @@
     const day = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
     const action = INV.actions.includes(draft.action) ? draft.action : 'note';
     const c = {
-      date: dateKey(draft.date) ? String(draft.date).trim() : day(new Date()), by: String(draft.by == null ? '' : draft.by).trim().slice(0, 80), action,
+      date: dateKey(draft.date) ? invDate(draft.date) : day(new Date()), by: String(draft.by == null ? '' : draft.by).trim().slice(0, 80), action,
       items: invItems(draft.items), all: action === 'checked' && !!draft.all, photos: invPhotos(draft.photos), text: String(draft.text == null ? '' : draft.text).trim(),
     };
     if (action === 'note') c.items = [];
@@ -1704,7 +1709,7 @@
   }
 
   return {
-    INV, invKey, invQty, invItems, invPhotos, invAge, invMark, replayInventories, liveInventories, invsOn, invSetBody, invLogBody, invLogRemoveBody, invUndo, invAdoptBodies, invLine, invPayload,   // inventories (the section above)
+    INV, invKey, invQty, invItems, invPhotos, invDate, invAge, invMark, replayInventories, liveInventories, invsOn, invSetBody, invLogBody, invLogRemoveBody, invUndo, invAdoptBodies, invLine, invPayload,   // inventories (the section above)
     FORMAT, FT, DOCS, projScope, scopeProject, sha256, uid, clone, nowIso, same, cmp, sortEntries, surveyCode,
     T, parseTarget, areaHas, DOC_KINDS, DOC_KIND_LABELS, docMedia, dateKey, resolveProposals, reviewQueue, causalOrder, LEAD, LEAD_FIELDS, leadLists, statusLabel, leadActive, heads,
     replayProject, replayDocs, caveForName, liveCaves, notesOn, leadsOn,

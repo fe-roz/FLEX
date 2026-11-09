@@ -138,7 +138,7 @@
     const tgt = cardTarget(c), below = belowOf(c);
     const files = c.level === 'cave' ? new Set(((pj.P.caves[c.cid] || {}).sources || []).map(s => s.file)) : null;
     const about = e => {
-      const ts = [e.target, e.cave ? FL.T.cave(e.cave) : null].concat(Array.isArray(e.tags) ? e.tags : []).filter(Boolean);   // doc.add carries its tags
+      const ts = [e.target, e.cave ? FL.T.cave(e.cave) : null, e.inv && pj.P.inventories && pj.P.inventories[e.inv] ? pj.P.inventories[e.inv].target : null].concat(Array.isArray(e.tags) ? e.tags : []).filter(Boolean);   // doc.add carries its tags; an inventory's entries are about where it is
       if (ts.some(t => t === tgt || below(t))) return true;
       if (files && (e.op === 'cavefile.set' || e.op === 'arealabel.set') && files.has(e.file || (pj.P.arealabels[e.label] || {}).file)) return true;
       if (c.level === 'cave' && e.op === 'segment.set' && e.cave === c.cid) return true;

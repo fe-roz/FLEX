@@ -144,6 +144,9 @@ const pid = 'proj1', cid = 'cave1', cid2 = 'cave2';
   ok('replay does not depend on the order entries are read', JSON.stringify(L.replayProject(all, pid).inventories.iv1.contents) === JSON.stringify(L.replayProject(shuffled, pid).inventories.iv1.contents));
   ok('the same entry merged twice counts once', L.replayProject(all.concat(all), pid).inventories.iv1.log.length === 5);
 
+  // dates as typed are tidied; approximate ones stay as written
+  ok('dates: 2026-3-2, 2026/03/02 and 2026.3 are tidied; a year or "c. 1975" stay', L.invDate('2026-3-2') === '2026-03-02' && L.invDate(' 2026/03/02 ') === '2026-03-02' && L.invDate('2026.3') === '2026-03' && L.invDate('2019') === '2019' && L.invDate('c. 1975') === 'c. 1975' && L.invDate(null) === ''
+    && L.invLogBody('iv1', { date: '2026-3-2', action: 'note', text: 'x' }).date === '2026-03-02' && L.replayProject([set, mk(D1, 'inv.log', { inv: 'iv1', log: 'e5', date: '2026-3-2', action: 'note', text: 'x' })], pid).inventories.iv1.log[0].dk === '2026-03-02');
   // approximate dates sort and show as typed
   const yr = mk(D1, 'inv.log', { inv: 'iv1', log: 'e6', date: '2019', action: 'left', items: [{ name: 'Old ladder', qty: 1 }], prev: null });
   I = L.replayProject([set, yr, left], pid).inventories.iv1;
