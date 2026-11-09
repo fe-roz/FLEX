@@ -343,11 +343,21 @@ def main():
     tex_b64 = base64.b64encode((out / 'tex_sat.jpg').read_bytes()).decode('ascii')
     hs_b64 = base64.b64encode((out / 'tex_hs.jpg').read_bytes()).decode('ascii') if tiles else None
     docs_files, docs_json = [], None
-    if a.docs or inv_pages:
-        din = make_docs(out) if a.docs else {'project': None, 'caves': [], 'entries': [], 'pages': []}
-        din['pages'] = din['pages'] + [p for p in inv_pages if p['h'] not in {q['h'] for q in din['pages']}]     # inventory photos: pages only
+    if a.docs:
+        din = make_docs(out)
         (out / 'docs_input.json').write_text(json.dumps(din), encoding='utf-8')
         side, docs_files = load_docs(out / 'docs_input.json', progress=lambda m: None)
+        (out / 'docs.json').write_text(json.dumps(side, separators=(',', ':')), encoding='utf-8')
+        for zname, fp in docs_files:
+            shutil.copyfile(fp, out / zname)
+        docs_json = docs_inline_json(side, lambda n: dict(docs_files)[n].read_bytes(), a.docs_inline_cap)
+    if inv_pages:                                  # the photos of inventories: pages in the docs input (with or without documents)
+        dp = out / 'docs_input.json'
+        din = json.loads(dp.read_text(encoding='utf-8')) if dp.exists() else {'project': None, 'caves': [], 'entries': [], 'pages': []}
+        have = {q['h'] for q in din['pages']}
+        din['pages'] = din['pages'] + [q for q in inv_pages if q['h'] not in have]
+        dp.write_text(json.dumps(din), encoding='utf-8')
+        side, docs_files = load_docs(dp, progress=lambda m: None)
         (out / 'docs.json').write_text(json.dumps(side, separators=(',', ':')), encoding='utf-8')
         for zname, fp in docs_files:
             shutil.copyfile(fp, out / zname)

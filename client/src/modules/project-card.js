@@ -70,7 +70,6 @@
     if (!c.survey) {
       const ls = leadsAt(c.cid, c.name);
       sec('Leads', ls.map(x => leadEl(c.cid, c.name, x)));
-      if (window._inventory) window._inventory.cardSection(box, c);
       const fs = FL.docsForStation(pj.D, pj.P, c.cid, c.name, c.code ? [c.code] : []);
       sec('Documents · this station', fs.station.map(d => docEl(d)));
       sec('Documents · pages covering this area', (fs.area || []).map(d => docEl(d)));
@@ -82,6 +81,7 @@
       if (!(window._pjSeg && window._pjSeg.on())) sec('Documents · the cave', FL.docsForTarget(pj.D, FL.T.cave(c.cid)).filter(d => !d.tags[target]).map(d => docEl(d)));
       if (c.ends.length) { const r = el('div', 'pj-row'); c.ends.forEach(n => r.appendChild(btn(['pin', n], () => openCard({ imp: c.imp, code: c.code, cid: c.cid, name: n }), 'small'))); box.appendChild(r); }
     }
+    if (!c.survey && window._inventory) window._inventory.cardSection(box, c);          // the inventories at this station (inventory.js), above the buttons
     const row = el('div', 'pj-row pj-card-btns');
     row.appendChild(btn(['pencil', 'Note'], () => editNote(target)));
     if (!c.survey) row.appendChild(btn(['help', 'Lead'], () => editLead(c.cid, c.name, null)));
