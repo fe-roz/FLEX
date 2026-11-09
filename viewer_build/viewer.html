@@ -481,6 +481,8 @@
     <div class="help-row"><span class="help-icon">✏️</span><span class="help-desc">On a station's card: ✏️ Add note is always there · 📄 documents tagged to the station, its survey or cave (the ones in the export too: scanned notes and photos; PDFs stay in FLEX). Everything else — changing a note, ❓ leads (status, size…), 📐 survey new passage from here, and in a document turning pages, tags, removing — waits behind the small <b>✎ Edit</b> button, which is off again when you close the card.</span></div>
     <div class="help-row"><span class="help-icon">👆</span><span class="help-desc">Taps find the nearest station, lead mark, name or pin within a finger's width of the touch; a drag or a two-finger move is never a tap</span></div>
     <div class="help-row"><span class="help-icon">💾</span><span class="help-desc">Display choices (walls, colour, wall opacity, stations, area names, terrain sliders) are remembered for this map. A new map opens with ghost walls coloured by elevation. The view stays over the map.</span></div>
+    <div class="help-section">SHOTS FROM A SCANNED PAGE</div>
+    <div class="help-row"><span class="help-icon">📷</span><span class="help-desc">🔧 → 📐 Field survey → <b>📷 Import shots from scan</b> (or a document page's ⋯): photograph a page of shot tables, or pick a page or a file. FLEX Field reads it on the phone, offline; check the table beside the scan (tap a cell to see it on the page, tap the page to find its cell; orange = check, red = wrong; each column's menu says what it holds), choose ft or m, then <b>Add … shots</b> to a field survey. Each shot remembers its page. In a browser the page is shown beside an empty table to type into.</span></div>
   </div>
   <div id="help-dismiss">Tap anywhere to dismiss</div>
 </div>
@@ -635,6 +637,7 @@ catch(e) { window.DOCS_EXPORT = null; }
 <script src="libs/jszip.min.js"></script>
 <script src="libs/flexlib.js"></script>
 <script src="libs/utif.js"></script>
+<script src="libs/scan-import.js"></script>
 
 <script>
 'use strict';
@@ -5020,6 +5023,7 @@ function ffToLog(op, data) {
   return d;
 }
 let _ffSaveWarned = false;
+let _ffQuiet = 0;                // > 0 while ffRecordMany logs a batch
 // Record a change: log it, replay, redraw what it touches.
 function ffRecord(op, data, extra, where) {
   if (!ffPid && where !== 'docs') { showToast('No project for this map yet'); return null; }
@@ -5031,9 +5035,19 @@ function ffRecord(op, data, extra, where) {
   ffHost.append(scope, entry).then(ok => {
     if (!ok && !_ffSaveWarned) { _ffSaveWarned = true; showToast('Could not save on this device — export your field data'); }
   }).catch(() => { if (!_ffSaveWarned) { _ffSaveWarned = true; showToast('Could not save on this device — export your field data'); } });
+  if (_ffQuiet) return entry;
   ffReplay();
   ffAfterChange(entry);
   return entry;
+}
+// Many entries at once (a page of shots from a scan): logged one by one, replayed and redrawn once.
+function ffRecordMany(list, where) {
+  const out = [];
+  _ffQuiet++;
+  try { list.forEach(([op, data, extra]) => { const e = ffRecord(op, data, extra, where); if (e) out.push(e); }); }
+  finally { _ffQuiet--; }
+  if (out.length) { ffReplay(); ffAfterChange(out[out.length - 1]); }
+  return out;
 }
 function ffReplay() {
   ffP = FL.replayProject(ffEntries.proj, ffPid || '');
@@ -5623,8 +5637,10 @@ async function ffDocMenu(docId) {
   const r = await ffChoose(d.title || 'Document', `${d.pages.length} page(s) · added by ${(d.created && d.created.who) || '?'}, ${ffWhen(d.created && d.created.t)}`, [
     { label: '✏️ Title, kind, date', value: 'edit' }, { label: '＋ Add pages', value: 'add' },
     ...(d.pages.length ? [{ label: '🗑 Remove this page', value: 'drop' }] : []),
+    ...(window.FlexScan && ffGallery && d.pages[ffGallery.i] && d.pages[ffGallery.i].ext !== 'pdf' ? [{ label: '📷 Import shots from this page', value: 'scan' }] : []),
     { label: '📝 Notes on this document', value: 'note' }, { label: '🗑 Delete the document', value: 'del' }]);
   if (!r) return;
+  if (r === 'scan') { FlexScan.openFromDoc(docId, ffGallery.i); return; }
   await ffEnsureAuthor();
   if (r === 'add') ffAddPages(null, docId);
   if (r === 'note') ffEditNote(FL.T.doc(docId), (FL.notesOn(ffP, FL.T.doc(docId))[0] || {}).id);
@@ -6110,6 +6126,7 @@ function ffRenderPanel() {
   p.appendChild(body);
   const sv = ffPanelSurvey && ffState.surveys[ffPanelSurvey];
   if (!sv) ffRenderSurveyList(body); else ffRenderSurvey(body, sv);
+  if (window.FlexScan) FlexScan.panelHook(body, sv);      // 📷 Import shots from scan (libs/scan-import.js)
 }
 function ffSurveyLength(sv) {
   const unit = (sv.lenUnit || 'ft') === 'ft' ? FF_FT : 1;

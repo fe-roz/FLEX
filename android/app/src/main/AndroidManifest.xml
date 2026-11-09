@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- GPS. Coarse is declared alongside fine because Android 12+ lets the
          user grant only approximate location; the viewer degrades to it. -->
@@ -9,9 +10,19 @@
     <!-- Everything is bundled; the app never touches the network. Declaring no
          INTERNET permission makes that guarantee enforceable rather than a
          promise, and is why the asset loader is used instead of a local server.
-         If the page ever fails to load on some OEM WebView build, uncomment
-         the line below; that is the only thing this would need. -->
-    <!-- <uses-permission android:name="android.permission.INTERNET" /> -->
+         ML Kit (the on-device text reader for scan import) brings Google's
+         usage-log uploader, whose manifest asks for INTERNET: the line below
+         strips it again (check: build/intermediates/merged_manifests). If the
+         page ever fails to load on some OEM WebView build, replace that line
+         with a plain INTERNET uses-permission; nothing else would be needed.
+         The uploader's ACCESS_NETWORK_STATE stays: it only reads whether a
+         network is up (no access to it), and without it the uploader crashes
+         on its connectivity check. Its upload backend is unregistered below,
+         so queued usage logs are dropped without trying to connect.
+         No CAMERA permission either: "Photograph a page" hands the shot to the
+         phone's camera app (ACTION_IMAGE_CAPTURE), which needs no permission
+         as long as this app does not declare CAMERA. -->
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
 
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
     <uses-feature android:name="android.hardware.sensor.compass" android:required="false" />
@@ -57,7 +68,9 @@
         </activity>
 
         <!-- Shares what the app exports (GPX/KML/JSON, field data zips) from its
-             cache, with a per-share read grant. -->
+             cache, with a per-share read grant; also the file the camera app
+             writes a photographed page into (cache/camera/, a write grant for
+             that one shot, added by the system for ACTION_IMAGE_CAPTURE). -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -67,5 +80,14 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- ML Kit's usage-log uploader without its backend: see INTERNET above. -->
+        <service
+            android:name="com.google.android.datatransport.runtime.backends.TransportBackendDiscovery"
+            android:exported="false">
+            <meta-data
+                android:name="backend:com.google.android.datatransport.cct.CctBackendFactory"
+                tools:node="remove" />
+        </service>
     </application>
 </manifest>
