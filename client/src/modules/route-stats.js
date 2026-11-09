@@ -441,23 +441,23 @@
     const css = w.document && w.document.createElement ? w.document.createElement('style') : null;
     if (css) {
       css.textContent = `
-      #info-x .rs-graph { margin: 4px 0 2px; } #info-x .rs-svg { width: 100%; height: auto; display: block; touch-action: none; }
-      #info-x .rs-axis { stroke: rgba(255,255,255,.25); stroke-width: 1; } #info-x .rs-ax { fill: rgba(255,255,255,.55); font-size: 9px; }
-      #info-x .rs-terrain { fill: none; stroke: #8ab4ec; stroke-width: 1.6; } #info-x .rs-lidar { fill: none; stroke: #f2a65a; stroke-width: 1.4; }
-      #info-x .rs-steep { fill: none; stroke: #ff7b7b; stroke-width: 2.6; } #info-x .rs-steep-band { fill: rgba(255,123,123,.14); }
-      #info-x .rs-over { fill: transparent; cursor: crosshair; } #info-x .rs-cross { stroke: rgba(255,255,255,.5); stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
-      #info-x .rs-dot { fill: #ffe600; stroke: #000; stroke-width: 1; pointer-events: none; }
-      #info-x .rs-pt { cursor: pointer; } #info-x .rs-pt-l { stroke: rgba(242,194,78,.45); stroke-width: 1; } #info-x .rs-pt-c { fill: #f2c24e; stroke: #000; stroke-width: 1; }
-      #info-x .rs-pt:hover .rs-pt-c { fill: #fff; }
-      #info-x .rs-tip { min-height: 15px; color: rgba(255,255,255,.7); font-size: 11.5px; margin-bottom: 4px; }
-      #info-x .rs-legend { color: rgba(255,255,255,.6); font-size: 11px; display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: center; }
-      #info-x .rs-k { display: inline-block; width: 12px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 3px; }
-      #info-x .rs-k.t { background: #8ab4ec; } #info-x .rs-k.l { background: #f2a65a; } #info-x .rs-k.s { background: #ff7b7b; } #info-x .rs-k.p { background: #f2c24e; height: 9px; width: 9px; border-radius: 50%; }
-      #info-x .rs-rad { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 11.5px; color: rgba(255,255,255,.6); }
-      #info-x .rs-rad-b, #info-x .rs-way-b { font: inherit; border-radius: 10px; border: 1px solid rgba(255,255,255,.25); background: none; color: #e8e8ee; padding: 0 8px; cursor: pointer; }
-      #info-x .rs-rad-b.on { border-color: #f2c24e; color: #f2c24e; }
-      #info-x .rs-way { margin-top: 5px; line-height: 1.7; } #info-x .rs-way-b { border: none; padding: 0; color: #8ab4ec; border-radius: 0; } #info-x .rs-way-b:hover { text-decoration: underline; }
-      #info-x .rs-note { margin-top: 6px; font-size: 11px; color: rgba(255,255,255,.4); }`;
+      :is(#info-x, .rs-host) .rs-graph { margin: 4px 0 2px; } :is(#info-x, .rs-host) .rs-svg { width: 100%; height: auto; display: block; touch-action: none; }
+      :is(#info-x, .rs-host) .rs-axis { stroke: rgba(255,255,255,.25); stroke-width: 1; } :is(#info-x, .rs-host) .rs-ax { fill: rgba(255,255,255,.55); font-size: 9px; }
+      :is(#info-x, .rs-host) .rs-terrain { fill: none; stroke: #8ab4ec; stroke-width: 1.6; } :is(#info-x, .rs-host) .rs-lidar { fill: none; stroke: #f2a65a; stroke-width: 1.4; }
+      :is(#info-x, .rs-host) .rs-steep { fill: none; stroke: #ff7b7b; stroke-width: 2.6; } :is(#info-x, .rs-host) .rs-steep-band { fill: rgba(255,123,123,.14); }
+      :is(#info-x, .rs-host) .rs-over { fill: transparent; cursor: crosshair; } :is(#info-x, .rs-host) .rs-cross { stroke: rgba(255,255,255,.5); stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
+      :is(#info-x, .rs-host) .rs-dot { fill: #ffe600; stroke: #000; stroke-width: 1; pointer-events: none; }
+      :is(#info-x, .rs-host) .rs-pt { cursor: pointer; } :is(#info-x, .rs-host) .rs-pt-l { stroke: rgba(242,194,78,.45); stroke-width: 1; } :is(#info-x, .rs-host) .rs-pt-c { fill: #f2c24e; stroke: #000; stroke-width: 1; }
+      :is(#info-x, .rs-host) .rs-pt:hover .rs-pt-c { fill: #fff; }
+      :is(#info-x, .rs-host) .rs-tip { min-height: 15px; color: rgba(255,255,255,.7); font-size: 11.5px; margin-bottom: 4px; }
+      :is(#info-x, .rs-host) .rs-legend { color: rgba(255,255,255,.6); font-size: 11px; display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: center; }
+      :is(#info-x, .rs-host) .rs-k { display: inline-block; width: 12px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 3px; }
+      :is(#info-x, .rs-host) .rs-k.t { background: #8ab4ec; } :is(#info-x, .rs-host) .rs-k.l { background: #f2a65a; } :is(#info-x, .rs-host) .rs-k.s { background: #ff7b7b; } :is(#info-x, .rs-host) .rs-k.p { background: #f2c24e; height: 9px; width: 9px; border-radius: 50%; }
+      :is(#info-x, .rs-host) .rs-rad { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 11.5px; color: rgba(255,255,255,.6); }
+      :is(#info-x, .rs-host) .rs-rad-b, :is(#info-x, .rs-host) .rs-way-b { font: inherit; border-radius: 10px; border: 1px solid rgba(255,255,255,.25); background: none; color: #e8e8ee; padding: 0 8px; cursor: pointer; }
+      :is(#info-x, .rs-host) .rs-rad-b.on { border-color: #f2c24e; color: #f2c24e; }
+      :is(#info-x, .rs-host) .rs-way { margin-top: 5px; line-height: 1.7; } :is(#info-x, .rs-host) .rs-way-b { border: none; padding: 0; color: #8ab4ec; border-radius: 0; } :is(#info-x, .rs-host) .rs-way-b:hover { text-decoration: underline; }
+      :is(#info-x, .rs-host) .rs-note { margin-top: 6px; font-size: 11px; color: rgba(255,255,255,.4); }`;
       w.document.head.appendChild(css);
     }
     return Object.assign({ routeNode, clearHover, setHover, profileOf, RADII, radius: getRadius }, P);
