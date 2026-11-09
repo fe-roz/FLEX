@@ -11,8 +11,8 @@ const NAME = /^([0-9a-f]{64})\.(jpg|jpeg|png|webp)$/;
 
 /** The photo files named in a caves payload: ['<sha256>.<ext>', …], each once. */
 function photoNames(caves) {
-  const out = new Set();
-  ((caves && caves.inventories) || []).forEach(iv => ((iv && iv.log) || []).forEach(e => ((e && e.photos) || []).forEach(p => {
+  const out = new Set(), list = x => (Array.isArray(x) ? x : []);
+  list(caves && caves.inventories).forEach(iv => list(iv && iv.log).forEach(e => list(e && e.photos).forEach(p => {
     const n = p && typeof p.h === 'string' ? p.h + '.' + String(p.ext || 'jpg').toLowerCase() : '';
     if (NAME.test(n)) out.add(n);
   })));
