@@ -2,6 +2,8 @@
 // (client/src/modules/surface-route.js). It runs route_cost.py, which reads the LiDAR of the area, builds the cost grids
 // (ground, slope, cliffs, brush, shade, trails) and searches the cheapest ways from each start to the end.
 //
+//   Grids are shared between jobs through a cache folder (route_cost.py --cache-dir; server.js: FLEX_ROUTE_CACHE or
+//   user_files/jobs/route/_cache): the script links them into the job's grids/ and keeps the newest few sets.
 //   POST /api/route/plan     { project?, params, reuse? } → { ok, jobId }
 //                            params: see route_cost.py (starts: points; start_lines: road/trail lines, every cell under them is a start). reuse: the id of an earlier job of the same
 //                            area; its grids/ are linked into the new job, so a changed weight only re-runs the search.
@@ -24,7 +26,7 @@ const FILE_RE = /^(routes\.geojson|summary\.json|grids\/(grid\.json|brush\.png|s
 const PRESETS = ['shortest', 'least_brush', 'shadiest', 'least_climb'];
 const KEEP_DIRS = 12;
 
-module.exports = function routeApi({ python, script, outRoot }) {
+module.exports = function routeApi({ python, script, outRoot, cacheDir }) {
   const jobs = {};
   const json = (res, d, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(d)); };
   const num = v => typeof v === 'number' && Number.isFinite(v);
@@ -70,6 +72,8 @@ module.exports = function routeApi({ python, script, outRoot }) {
       end: [+p.end[0], +p.end[1]], starts,
       cell: p.cell === 'auto' || p.cell == null ? 'auto' : clampN(+p.cell, 0.1, 20, 'auto'),
       dem: ['below', 'above', 'both'].includes(p.dem) ? p.dem : 'below',
+      dem_method: p.dem_method === 'export' ? 'export' : 'csf',                // the cloth: route_cost's own (csf) or export_terrain.build_dem
+      connectivity: [8, 16].includes(p.connectivity) ? p.connectivity : 'auto',
       brush_band: band, weights,
       trails,
       corridor_m: clampN(p.corridor_m, 50, 5000, 300),
@@ -83,9 +87,9 @@ module.exports = function routeApi({ python, script, outRoot }) {
   /** The newest few job folders stay; older ones go (grids can be large). */
   function prune(keep) {
     let names = [];
-    try { names = fs.readdirSync(outRoot).filter(n => ID_RE.test(n)); } catch (_) { return; }
+    try { names = fs.readdirSync(outRoot).filter(n => ID_RE.test(n) && !n.startsWith('_')); } catch (_) { return; }
     const info = names.map(n => { let t = 0; try { t = fs.statSync(path.join(outRoot, n)).mtimeMs; } catch (_) {} return { n, t }; }).sort((a, b) => b.t - a.t);
-    info.slice(KEEP_DIRS).forEach(x => {
+    info.filter(x => !x.n.startsWith('_')).slice(KEEP_DIRS).forEach(x => {
       if (x.n === keep || (jobs[x.n] && jobs[x.n].status === 'running')) return;
       try { fs.rmSync(path.join(outRoot, x.n), { recursive: true, force: true }); } catch (_) {}
     });
@@ -112,7 +116,8 @@ module.exports = function routeApi({ python, script, outRoot }) {
     const jobId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const outDir = path.join(outRoot, jobId);
     fs.mkdirSync(outDir, { recursive: true });
-    const reused = o.reuse ? reuseGrids(String(o.reuse), outDir) : false;
+    // With a shared cache (route_cost.py --cache-dir) the script reuses grids itself; linking the last job's grids stays as the fallback.
+    const reused = o.reuse && !cacheDir ? reuseGrids(String(o.reuse), outDir) : false;
     const paramsFile = path.join(outDir, 'params.json');
     fs.writeFileSync(paramsFile, JSON.stringify(c.params));
     const job = jobs[jobId] = { status: 'running', progress: reused ? ['Reusing the cost grids of the last run'] : [], outDir, project, name: 'Surface route', label: 'Surface route', error: null, errLines: [], reused,
@@ -121,7 +126,8 @@ module.exports = function routeApi({ python, script, outRoot }) {
     setTimeout(() => prune(jobId), 50);
 
     let proc;
-    try { proc = spawn(python, [script, '--params', paramsFile, '--out', outDir], { cwd: path.dirname(script) }); }
+    const args = [script, '--params', paramsFile, '--out', outDir].concat(cacheDir ? ['--cache-dir', cacheDir] : []);
+    try { proc = spawn(python, args, { cwd: path.dirname(script), env: Object.assign({}, process.env, { FLEX_APP_DIR: __dirname }) }); }
     catch (e) { job.status = 'error'; job.error = 'could not start Python: ' + e.message; job.ended = Date.now(); return; }
     job.proc = proc;
     const take = err => d => d.toString().split('\n').forEach(l => {

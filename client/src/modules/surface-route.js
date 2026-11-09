@@ -81,6 +81,7 @@
       starts: (st.starts || []).map(s => [s.at[0], s.at[1]]),
       cell: st.cell === 'auto' || st.cell == null ? 'auto' : +st.cell,
       dem: st.dem || 'below',
+      dem_method: st.demMethod === 'export' ? 'export' : 'csf',
       brush_band: [lead(+st.band[0], 0.5), lead(+st.band[1], 2)],
       weights: Object.assign({}, WDEF, st.weights || {}),
       trails: { type: 'FeatureCollection', features: feats },
@@ -134,12 +135,12 @@
   const lset = (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} };
   const SKEY = 'flex.surfroute', PKEY = 'flex.surfroute.presets';
 
-  const S = { end: null, starts: [], anyRoad: false, epts: [], cell: 'auto', dem: 'below', band: [0.5, 2], weights: Object.assign({}, WDEF),
+  const S = { end: null, starts: [], anyRoad: false, epts: [], cell: 'auto', dem: 'below', demMethod: 'csf', band: [0.5, 2], weights: Object.assign({}, WDEF),
     trailOff: new Set(), trailOn: new Set(), trailKind: {},
     running: false, dirty: false, jobId: null, lastId: null, result: null, routes: [], sel: 0, msg: '', msgBad: false,
     overlays: {}, opacity: 0.6, ovLayers: {}, units: null, rerunTimer: null };
-  try { const sv = JSON.parse(lget(SKEY) || 'null'); if (sv) { Object.assign(S.weights, sv.weights || {}); if (sv.cell != null) S.cell = sv.cell; if (sv.dem) S.dem = sv.dem; if (Array.isArray(sv.band)) S.band = sv.band; } } catch (_) {}
-  const save = () => lset(SKEY, JSON.stringify({ weights: S.weights, cell: S.cell, dem: S.dem, band: S.band }));
+  try { const sv = JSON.parse(lget(SKEY) || 'null'); if (sv) { Object.assign(S.weights, sv.weights || {}); if (sv.cell != null) S.cell = sv.cell; if (sv.dem) S.dem = sv.dem; if (sv.demMethod) S.demMethod = sv.demMethod; if (Array.isArray(sv.band)) S.band = sv.band; } } catch (_) {}
+  const save = () => lset(SKEY, JSON.stringify({ weights: S.weights, cell: S.cell, dem: S.dem, demMethod: S.demMethod, band: S.band }));
   const myPresets = () => { try { return JSON.parse(lget(PKEY) || '[]').filter(p => p && p.name && p.w); } catch (_) { return []; } };
 
   // ── What can be picked / used ─────────────────────────────────────────────
@@ -190,7 +191,7 @@
   }
   const trailsOn = () => trails().filter(t => t.on);
   function params() {
-    return buildParams({ epts: S.epts, end: S.end, starts: S.starts, anyRoad: S.anyRoad, cell: S.cell, dem: S.dem, band: S.band, weights: S.weights, units: U().system(),
+    return buildParams({ epts: S.epts, end: S.end, starts: S.starts, anyRoad: S.anyRoad, cell: S.cell, dem: S.dem, demMethod: S.demMethod, band: S.band, weights: S.weights, units: U().system(),
       trails: trailsOn().map(t => ({ coords: t.coords, kind: t.kind, name: t.name })) });
   }
 
@@ -211,6 +212,18 @@
     S.starts.forEach((s, i) => mk('sr-start-' + i, s, 'S' + (i + 1), '#46d17a'));
     const v = V(); if (v && v.scene.requestRender) v.scene.requestRender();
   }
+  /** Where the walk leaves the road: a marker at the selected route's start_lonlat (routes that start from a line). */
+  function drawLeave() {
+    const d = source(); if (!d) return;
+    d.entities.values.filter(e => e.properties && e.properties.srLeave).forEach(e => d.entities.remove(e));
+    const f = S.routes[S.sel], p = f && f.properties;
+    if (p && p.start_kind === 'line' && Array.isArray(p.start_lonlat)) {
+      d.entities.add({ id: 'sr-leave', name: 'Leaves the road' + (p.start_name ? ': ' + p.start_name : ''), position: Cesium.Cartesian3.fromDegrees(p.start_lonlat[0], p.start_lonlat[1], 0), properties: { srLeave: true },
+        point: { pixelSize: 10, color: Cesium.Color.fromCssColorString('#ffd24d'), outlineColor: Cesium.Color.BLACK, outlineWidth: 2, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+        label: { text: 'leaves ' + (p.start_name || 'the road'), font: 'bold 12px sans-serif', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -16), heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY } });
+    }
+    const v = V(); if (v && v.scene.requestRender) v.scene.requestRender();
+  }
   function drawRoutes() {
     const d = source(); if (!d) return;
     d.entities.values.filter(e => e.properties && e.properties.srRoute).forEach(e => d.entities.remove(e));
@@ -221,6 +234,7 @@
           material: on ? col : col.withAlpha(0.65) } });
     });
     const v = V(); if (v && v.scene.requestRender) v.scene.requestRender();
+    drawLeave();
   }
   function zoomTo() {
     const v = V(), f = S.routes[S.sel]; if (!v || !f) return;
@@ -503,6 +517,7 @@
       c.appendChild(h);
       const t = el('div', 'sr-cs', L.top); t.title = L.breakdown ? 'Time: ' + L.breakdown : ''; c.appendChild(t);
       c.appendChild(el('div', 'sr-cs2', L.mid));
+      if (p.start_kind === 'line' && Array.isArray(p.start_lonlat)) { const lv = el('div', 'sr-leave', 'leaves ' + (p.start_name || 'the road') + ' at ' + p.start_lonlat[1].toFixed(5) + ', ' + p.start_lonlat[0].toFixed(5)); lv.title = 'Where the walk leaves the road or trail (the yellow marker on the map)'; c.appendChild(lv); }
       (p.warnings || []).forEach(wn => c.appendChild(el('div', 'sr-warn', '⚠ ' + wn)));
       if (i === S.sel && L.breakdown) { const d = el('div', 'sr-det', 'Time: ' + L.breakdown); c.appendChild(d); }
       const go = () => select(i); c.addEventListener('click', go); c.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
@@ -594,12 +609,14 @@
     cell.addEventListener('change', () => { S.cell = cell.value === 'auto' ? 'auto' : +cell.value; save(); });
     const dem = sel('sr-dem', [['below', 'DEM from below'], ['above', 'DEM from above'], ['both', 'both, compared']], S.dem); dem.title = 'How the ground is found under the trees';
     dem.addEventListener('change', () => { S.dem = dem.value; save(); });
+    const dm = sel('sr-dem-method', [['csf', 'cloth: FLEX’s'], ['export', 'cloth: the export’s']], S.demMethod); dm.title = 'Which ground-finding cloth: the route search’s own, or the one the offline-viewer export uses (to compare)';
+    dm.addEventListener('change', () => { S.demMethod = dm.value; save(); });
     const lo = el('input', 'sr-in sr-num'); lo.type = 'number'; lo.step = 0.1; lo.min = 0; lo.id = 'sr-band-lo'; lo.value = S.band[0];
     const hi = el('input', 'sr-in sr-num'); hi.type = 'number'; hi.step = 0.1; hi.min = 0; hi.id = 'sr-band-hi'; hi.value = S.band[1];
     const bandCh = () => { const a = parseFloat(lo.value), z = parseFloat(hi.value); if (Number.isFinite(a) && Number.isFinite(z) && z > a) { S.band = [a, z]; save(); } };
     lo.addEventListener('change', bandCh); hi.addEventListener('change', bandCh);
     const bl = el('label', 'sr-inl'); bl.title = 'Returns this far above the ground count as brush (metres)'; bl.append('Brush ', lo, ' to ', hi, ' m');
-    ro.append(el('span', 'sr-l', 'Cell'), cell, dem, bl); b.appendChild(ro);
+    ro.append(el('span', 'sr-l', 'Cell'), cell, dem, dm, bl); b.appendChild(ro);
 
     // Weights
     b.appendChild(h('What matters'));
@@ -667,7 +684,7 @@
   #surfroute-host .sr-ch { display: flex; align-items: center; gap: 6px; } #surfroute-host .sr-sw { width: 14px; height: 4px; border-radius: 2px; background: var(--c); }
   #surfroute-host .sr-rec { font-size: 9px; text-transform: uppercase; letter-spacing: .05em; background: var(--c); color: #111; border-radius: 3px; padding: 0 4px; } #surfroute-host .sr-from { color: rgba(255,255,255,.5); }
   #surfroute-host .sr-cs { margin-top: 2px; color: #eee; } #surfroute-host .sr-cs2 { color: rgba(255,255,255,.6); font-size: 10.5px; }
-  #surfroute-host .sr-warn { color: #f2c24e; font-size: 10.5px; margin-top: 2px; } #surfroute-host .sr-det { color: rgba(255,255,255,.55); font-size: 10.5px; margin-top: 3px; border-top: 1px dashed rgba(255,255,255,.15); padding-top: 3px; }
+  #surfroute-host .sr-leave { color: #ffd24d; font-size: 10.5px; } #surfroute-host .sr-warn { color: #f2c24e; font-size: 10.5px; margin-top: 2px; } #surfroute-host .sr-det { color: rgba(255,255,255,.55); font-size: 10.5px; margin-top: 3px; border-top: 1px dashed rgba(255,255,255,.15); padding-top: 3px; }
   #surfroute-host .sr-ov { display: flex; flex-direction: column; gap: 3px; } #surfroute-host .sw-row.off { opacity: .4; } #surfroute-host .sr-op { font-size: 11px; display: flex; gap: 6px; align-items: center; }
   #surfroute-host .sr-strips { margin-top: -2px; } #surfroute-host .sr-strip-svg { width: 100%; height: auto; display: block; }
   #surfroute-host .sr-strip-l { fill: rgba(255,255,255,.55); font-size: 8px; } #surfroute-host .sr-strip-bg { fill: rgba(255,255,255,.07); }
