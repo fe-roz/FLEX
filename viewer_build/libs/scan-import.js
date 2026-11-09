@@ -960,6 +960,9 @@ body.scan-open #mode-toast { z-index: 95; bottom: 96px; font-size: 14px; }
 .sr-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .sr-scan { flex: 0 0 40%; position: relative; overflow: hidden; background: #000; touch-action: none; }
 .sr-side { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+@media (orientation: portrait) {
+  #scan-review.typing .sr-scan { flex-basis: 26%; }
+}
 @media (orientation: landscape) {
   .sr-main { flex-direction: row; }
   .sr-scan { flex: 0 0 50%; border-right: 1px solid rgba(255,255,255,.12); }
@@ -1223,6 +1226,7 @@ body.scan-open #mode-toast { z-index: 95; bottom: 96px; font-size: 14px; }
       z: 1, x: 0, y: 0, img: null, reading: false, dirty: false, pushed: false };
     S.known = knownStations(sid);
     R.root.classList.add('open');
+    R.root.classList.remove('typing');
     document.body.classList.add('scan-open');
     if (keep) S.pushed = true;
     else { try { history.pushState({ flexScan: 1 }, ''); S.pushed = true; } catch (_) {} }
@@ -1542,7 +1546,8 @@ body.scan-open #mode-toast { z-index: 95; bottom: 96px; font-size: 14px; }
         inp.enterKeyHint = 'next';
         inp.dataset.r = ri; inp.dataset.c = k;
         inp.setAttribute('aria-label', `Row ${ri + 1}, ${LABEL[f]}`);
-        inp.addEventListener('focus', () => select(ri, k, false));
+        inp.addEventListener('focus', () => { typing(true); select(ri, k, false); });
+        inp.addEventListener('blur', () => setTimeout(() => { if (!R.wrap.contains(document.activeElement)) typing(false); }, 150));
         inp.addEventListener('input', () => { const c = row.cells[k]; c.edited = true; c.text = inp.value; S.dirty = true; soon(); });
         inp.addEventListener('keydown', e => {
           if (e.key !== 'Enter') return;
@@ -1560,6 +1565,13 @@ body.scan-open #mode-toast { z-index: 95; bottom: 96px; font-size: 14px; }
     markRows();
     if (S.sel) select(S.sel.r, S.sel.c, null);
     counts();
+  }
+  // While typing in portrait the page shrinks, so the cell stays above the
+  // keyboard (the app's full-screen WebView is not always resized for it).
+  function typing(on) {
+    if (!S || R.root.classList.contains('typing') === on) return;
+    R.root.classList.toggle('typing', on);
+    if (on) { void R.scan.clientHeight; const a = document.activeElement; if (a && a.tagName === 'INPUT') setTimeout(() => a.scrollIntoView({ block: 'nearest', inline: 'nearest' }), 50); }
   }
   // After typing: flags and the other cells follow (a ditto, a From filled in)
   let soonT = 0;
