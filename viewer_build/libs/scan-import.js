@@ -1147,6 +1147,7 @@ body.scan-open #mode-toast { z-index: 95; bottom: 96px; font-size: 14px; }
     if (res.error) { toast(res.error); return; }
     const pg = (res.pages || [])[0];
     if (!pg) { if (!res.cancelled) toast((res.failed || []).length ? 'Could not read the photo' : 'No photo'); return; }
+    if (ctx.inv && W.ViewerInv) { W.ViewerInv.pagesPicked(ctx, [pg]); return; }      // a photo for an inventory entry (libs/viewer-inventory.js)
     const sv = survey(ctx.sid);
     const tags = [FL.T.project(pid())];
     const cid = sv && typeof ffCaveId === 'function' ? ffCaveId(sv.cave || '') : null;
