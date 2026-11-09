@@ -851,7 +851,16 @@
           });
           body.append(player, grid);
         }
-      } else b.entries.forEach(({ d, item }) => body.appendChild(A.docEl(d, s.target, item)));
+      } else {
+        const rows = b.entries.map(({ d, item }) => A.docEl(d, s.target, item));
+        // a wider level shows a few (the project's untagged documents none) and the rest behind a link
+        const keep = b.from && b.entries[0].item && b.entries[0].item.level === 'project' ? 0 : b.from && rows.length > 6 ? 5 : rows.length;
+        rows.slice(0, keep).forEach(r => body.appendChild(r));
+        if (keep < rows.length) {
+          const more = btn(keep ? `${rows.length - keep} more…` : `Show ${rows.length} not yet sorted…`, () => { rows.slice(keep).forEach(r => body.insertBefore(r, more)); more.remove(); }, 'small');
+          body.appendChild(more);
+        }
+      }
     });
   }
   function render() {

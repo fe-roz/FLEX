@@ -33,9 +33,12 @@
       return false;
     });
   }
+  // targets: most recent first. The cave of the newest becomes the cave the next picker starts with.
   function pushRecent(targets) {
     const keep = recentTags().filter(t => !targets.includes(t));
     lsSet(RECENT, JSON.stringify(targets.filter(t => !/^project:/.test(t)).concat(keep).slice(0, 12)));
+    const c = targets.map(t => FL.parseTarget(t).cave).find(Boolean);
+    if (c) lsSet(LASTCAVE, c);
   }
 
   // ── What is in a cave's loaded survey files: surveys and station names ───────────────────
@@ -189,7 +192,7 @@
       hint.textContent = S.cave && !inf.all.length ? 'This cave’s survey file is not loaded, so stations cannot be suggested: type a name or a range (T6~T8) and it is taken as written.' : '';
     }
     function paint() { paintKind(); paintScope(); paintChips(); paintRecent(); paintSelects(); paintSug(); }
-    caveSel.addEventListener('change', () => { S.cave = caveSel.value; S.survey = ''; lsSet(LASTCAVE, S.cave); paint(); });
+    caveSel.addEventListener('change', () => { S.cave = caveSel.value; S.survey = ''; paint(); });
     surSel.addEventListener('change', () => { S.survey = surSel.value; paintSug(); });
     q.addEventListener('input', () => { S.text = q.value; paintSug(); });
     q.addEventListener('keydown', e => {
@@ -199,7 +202,7 @@
       if (first) { addTag(first.target); q.value = ''; q.focus(); }
     });
     // "Add": the most specific thing filled in: the typed station or range, else the survey chosen, else the cave
-    const addBtn = btn(['plus', 'Add'], () => {
+    const addBtn = btn(['plus', 'Add tag'], () => {
       const first = S.text.trim() ? suggestions()[0] : null;
       if (first) addTag(first.target);
       else if (S.cave && S.survey) addTag(FL.T.survey(S.cave, S.survey));
@@ -212,7 +215,7 @@
     const title = o.title || (o.newDoc ? 'Add ' + (o.newDoc.names.length === 1 ? 'a file' : o.newDoc.names.length + ' files') : 'Tags · ' + (d.title || 'document'));
     const r = await dialog({ title, body, wide: true, buttons: [{ label: 'Cancel', value: null }, { label: o.newDoc ? 'Add' : 'Done', value: 'ok', primary: true }] });
     if (!r) return null;
-    if (o.newDoc) { pushRecent(added); return { tags: [...S.docWant], kind: S.kind || '' }; }
+    if (o.newDoc) { pushRecent(added.slice().reverse()); return { tags: [...S.docWant], kind: S.kind || '' }; }
     return { S, added, d };
   }
 
@@ -233,7 +236,7 @@
     if (!ops.length) return;
     let done = 0;
     for (let i = 0; i < ops.length; i++) { if (await record(ops[i][0], ops[i][1], 'docs', { quiet: true })) done++; }
-    if (done) { pushRecent(added); refresh('doc.tag'); }
+    if (done) { pushRecent(added.slice().reverse()); refresh('doc.tag'); }
   }
   // Before files are added as a new document: what they are and what they are about.
   async function askNewDoc(o) {

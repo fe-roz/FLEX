@@ -571,8 +571,10 @@
     const tag = FL.T.segment(cid, g.id), out = [];
     Object.values(pj.D.docs).forEach(d => {
       if (d.deleted) return;
-      if (d.tags[tag]) out.push({ d, at: FL.pageFor(d, tag), why: 'pages of this segment' });
-      else if (d.tagList.some(t => { const p = FL.parseTarget(t); return p.kind === 'station' && p.cave === cid && stSet.has(p.name); })) out.push({ d, at: 0, why: 'tagged to a station' });
+      const inSeg = t => { const p = FL.parseTarget(t); return p.kind === 'station' && p.cave === cid && stSet.has(p.name); };
+      const pg = d.pages.findIndex(p => (p.targets || []).includes(tag));                    // a page of it tagged to this segment
+      if (d.tags[tag] || pg >= 0) out.push({ d, at: d.tags[tag] ? FL.pageFor(d, tag) : pg, why: 'pages of this segment' });
+      else if (FL.docTargets(d).some(inSeg)) out.push({ d, at: Math.max(0, d.pages.findIndex(p => (p.targets || []).some(inSeg))), why: 'tagged to a station' });
     });
     return out.sort((a, b) => String(a.d.date || '').localeCompare(String(b.d.date || '')));
   }
@@ -673,8 +675,8 @@
     if (p.ext === 'pdf') { const f = el('iframe'); f.src = '/api/lib/blob/' + p.h + '.pdf'; box.appendChild(f); }
     else { const im = el('img'); im.src = '/api/lib/blob/' + p.h + '.' + (p.ext || 'jpg'); if (p.rot) im.style.transform = `rotate(${p.rot}deg)`; im.addEventListener('click', () => { seg.view.zoom = !seg.view.zoom; renderDock(); }); box.appendChild(im); }
     B.appendChild(box);
-    const segs = (p.targets || []).map(FL.parseTarget).filter(x => x.kind === 'segment').map(x => segName(x.seg));
-    B.appendChild(el('div', 'pj-sub', (segs.length ? 'This page: segment ' + segs.join(', ') + ' · ' : '') + (d.desc || '')));
+    const tg = (p.targets || []).map(t => { const x = FL.parseTarget(t); return x.kind === 'segment' ? 'segment ' + segName(x.seg) : A.targetLabel(t); });
+    B.appendChild(el('div', 'pj-sub', (tg.length ? 'This page: ' + tg.join(', ') + ' · ' : '') + (d.desc || '')));
   }
 
   // ── Station card: hand the segment to the panel ──────────────────────────

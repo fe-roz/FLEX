@@ -59,10 +59,11 @@
       if (g.from) h.appendChild(el('span', 'pj-from', ' · from ' + g.from));
       box.appendChild(h);
       const rows = g.items.map(it => docEl(it.doc, null, it));
-      const cut = g.fallback && rows.length > lim + 1;
-      (cut ? rows.slice(0, lim) : rows).forEach(r => box.appendChild(r));
-      if (cut) {
-        const more = btn(`${rows.length - lim} more…`, () => { rows.slice(lim).forEach(r => box.insertBefore(r, more)); more.remove(); }, 'link');
+      // the project's untagged documents are the last resort: out of the way until asked for; a wider level shows a few
+      const keep = g.fallback && g.level === 'project' ? 0 : g.fallback && rows.length > lim + 1 ? lim : rows.length;
+      rows.slice(0, keep).forEach(r => box.appendChild(r));
+      if (keep < rows.length) {
+        const more = btn(keep ? `${rows.length - keep} more…` : `Show ${rows.length} not yet sorted…`, () => { rows.slice(keep).forEach(r => box.insertBefore(r, more)); more.remove(); }, 'link');
         box.appendChild(more);
       }
     });
@@ -172,31 +173,51 @@
     if (!(await ensureAuthor())) return;
     files = files || await pickFiles('image/*,.tif,.tiff,application/pdf');
     if (!files.length) return;
-    let useTags = tags && tags.length ? tags : null, useKind = kind;
-    if (!docId) {
-      if (useKind == null) useKind = await kindForFiles(files);
-      if (!useTags && askNewDoc) {
-        const r = await askNewDoc({ names: files.map(f => f.name), kind: useKind });
-        if (!r) return;
-        useTags = r.tags; useKind = r.kind;
-      }
+    let useTags = tags && tags.length ? tags : null, explicitKind = kind != null ? kind : null;      // explicit: the caller's, or what the picker was told
+    if (!docId && !useTags && askNewDoc) {
+      const r = await askNewDoc({ names: files.map(f => f.name), kind: kind != null ? kind : await kindForFiles(files) });
+      if (!r) return;
+      useTags = r.tags; explicitKind = r.kind;
     }
     toast(`Adding ${files.length} file(s)…`);
-    const { pages, failed } = await filesToPages(files, n => toast('Adding ' + n));
-    failed.forEach(n => toast('Could not read ' + n));
-    if (!pages.length) return;
+    const isPdf = f => /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
+    const strip = n => n.replace(/\.[^.]*$/, '').replace(/ \(\d+\)$/, '');
+    const tagsOut = useTags && useTags.length ? useTags : [FL.T.project(pj.pid)];
+    const date = new Date().toISOString().slice(0, 10);
     if (docId && pj.D.docs[docId]) {
+      const { pages, failed } = await filesToPages(files, n => toast('Adding ' + n));
+      failed.forEach(n => toast('Could not read ' + n));
+      if (!pages.length) return;
       await record('doc.pages', { doc: docId, add: pages }, 'docs');
       toast(`Added ${pages.length} page(s)`);
       return;
     }
-    const strip = n => n.replace(/\.[^.]*$/, '').replace(/ \(\d+\)$/, '');
-    const title = pages.length === 1 || new Set(pages.map(p => strip(p.name))).size === 1 ? strip(pages[0].name) : `${strip(pages[0].name)} +${pages.length - 1}`;
-    const id = FL.uid(12);
-    await record('doc.add', { doc: id, title: title.slice(0, 80), kind: useKind || '', date: new Date().toISOString().slice(0, 10), pages,
-      tags: useTags && useTags.length ? useTags : [FL.T.project(pj.pid)] }, 'docs');
-    toast(`New document, ${pages.length} page(s)`);
-    docOpen(id, 0);
+    // Each PDF is a document of its own, its pages turned into images (what the viewer and the export carry) and the
+    // PDF itself kept as the original (doc.file); photos and scans together are one document, as before.
+    const groups = files.filter(isPdf).map(f => [f]);
+    const rest = files.filter(f => !isPdf(f));
+    if (rest.length) groups.push(rest);
+    let first = null;
+    for (const fs of groups) {
+      const { pages, failed } = await filesToPages(fs, n => toast('Adding ' + n));
+      failed.forEach(n => toast('Could not read ' + n));
+      if (!pages.length) continue;
+      const title = pages.length === 1 || new Set(pages.map(pg => strip(pg.name))).size === 1 ? strip(pages[0].name) : `${strip(pages[0].name)} +${pages.length - 1}`;
+      const id = FL.uid(12);
+      const k = explicitKind != null ? explicitKind : await kindForFiles(fs);
+      await record('doc.add', { doc: id, title: title.slice(0, 80), kind: k || '', date, pages, tags: tagsOut }, 'docs');
+      if (fs.length === 1 && isPdf(fs[0])) {
+        try {
+          const buf = new Uint8Array(await fs[0].arrayBuffer());
+          await storeBytes(buf.buffer, 'pdf');
+          await record('doc.file', { doc: id, file: { h: FL.sha256(buf), ext: 'pdf', name: fs[0].name, path: '', size: buf.length } }, 'docs');
+        } catch (e) { console.warn('[project] original of', fs[0].name, e); toast('The pages were added, but the PDF itself could not be kept'); }
+      }
+      first = first || id;
+    }
+    if (!first) return;
+    toast(groups.length > 1 ? `${groups.length} new documents` : `New document, ${pj.D.docs[first] ? pj.D.docs[first].pages.length : ''} page(s)`);
+    docOpen(first, 0);
   }
 
   // Gallery

@@ -136,6 +136,13 @@
           rows.get(g).forEach(d => b.appendChild(docEl(d)));
         });
         if (none.length) { head('Not in a trip', none.length); none.forEach(d => b.appendChild(docEl(d))); }
+      } else if (pj.docTab === 'inbox' || pj.docTab === 'all') {
+        // by group (Survey notes, Sketches, Media, Other), each with its count
+        FL.groupDocs(list.slice(0, 300)).forEach(g => {
+          const h = el('div', 'pj-h pj-gh', `${g.label} (${g.docs.length})`); h.dataset.group = g.id;
+          b.appendChild(h);
+          g.docs.forEach(d => b.appendChild(docEl(d)));
+        });
       } else list.slice(0, 300).forEach(d => b.appendChild(docEl(d)));
     });
     section(root, 'Field survey', false, b => {
