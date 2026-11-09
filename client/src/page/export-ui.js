@@ -664,7 +664,7 @@
         if (window._inventory) for (const x of window._inventory.exportAt(imp, stnByName)) {
           if (hidden(x.s.survey || '')) continue;
           const p = ll(x.s);
-          if (!p || !inBox(p[0], p[1])) continue;
+          if (!p || !inBox(p[0], p[1]) || invOut.some(i => i.id === x.data.id)) continue;           // (once, even if two files of a cave both have the station)
           invOut.push(Object.assign(x.data, { station: x.station, cave: entryFor(x.s.survey || '').cave, lon: p[0], lat: p[1], elev: p[2] }));
         }
       });
