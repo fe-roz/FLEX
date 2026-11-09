@@ -23,6 +23,12 @@ note pages and new survey added on the phone, all in a change log.
   larger value is used), tied to existing stations, drawn as lines, stations
   and walls. Declination comes from the World Magnetic Model for the survey
   date (or type one in); misclosure is shown when a shot closes onto a station.
+- **📷 Import shots from scan** (📐 Field survey, or ⋯ on a document page):
+  photograph a page of shot tables with the camera app, or pick a document
+  page or a file; the phone reads it with ML Kit's text reader (the bundled
+  model, inside the APK: offline, no Play Services download), and the table
+  opens beside the scan to check (tap a cell to see it on the page) before
+  the shots go into a field survey, each linked to its page.
 - **🔧 Tools → 📝 Change log:** who changed what and when, with undo. Everything
   is logged under the name shown on ✍ (switchable, last used by default).
 - **⋯ → Export field data** writes the notes, field surveys (with computed
@@ -35,7 +41,12 @@ Chrome refuses geolocation and device orientation to `file://`, `content://`
 and bare LAN-IP pages. The app serves everything through `WebViewAssetLoader`
 at `https://appassets.androidplatform.net/`, a trustworthy origin, and grants
 location itself. It declares no `INTERNET` permission, so it is offline by
-construction.
+construction. ML Kit's usage-log uploader asks for `INTERNET` in its own
+manifest; the app's manifest removes it again (`tools:node="remove"`) and
+unregisters the uploader's backend. Check a new build with
+`aapt2 dump permissions app-debug.apk`: location and `ACCESS_NETWORK_STATE`
+only. No `CAMERA` permission either: "Photograph a page" goes through the
+phone's camera app, which needs none while the app does not declare it.
 
 ## Layout
 
@@ -106,8 +117,10 @@ export JAVA_HOME=~/opt/jdk17 ANDROID_HOME=~/opt/android-sdk ANDROID_SDK_ROOT=~/o
 # -> app/build/outputs/apk/debug/app-debug.apk
 ```
 
-The APK bundles only `viewer_build/` (viewer template and `libs/`) and
-`flexfield-assets/`; no map data. `unzip -l` the APK and check `assets/` before
+The APK bundles only `viewer_build/` (viewer template and `libs/`),
+`flexfield-assets/` and ML Kit's text reader (~18 MB of native code for the
+two ARM ABIs, `ndk.abiFilters` in `app/build.gradle.kts`; drop that line for
+an x86 emulator); no map data. `unzip -l` the APK and check `assets/` before
 handing it out. Gradle puts its caches in `~/.gradle`.
 
 ## Debugging on device

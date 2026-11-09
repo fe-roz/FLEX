@@ -652,6 +652,7 @@
     ['from', 'to', 'az', 'inc', 'len', 'l', 'r', 'u', 'd', 'note'],
   ];
   const STN_RE = /^[A-Za-z]{0,4}[-_.]?\d+[A-Za-z]?$|^[A-Za-z]{1,3}\d*[A-Za-z]?\d*$/;
+  const CORE = { len: 1, az: 1, inc: 1 };
   function colStats(texts) {
     const ne = texts.map(t => String(t || '').trim()).filter(Boolean);
     const s = { n: ne.length, fill: texts.length ? ne.length / texts.length : 0 };
@@ -733,7 +734,8 @@
         if (sk > dp[i + 1][p]) { dp[i + 1][p] = sk; from[i + 1][p] = [p, 'skip']; }
         for (let q = p; q < S; q++) {
           const f = seq[q], nx = f === 'note' ? q : q + 1;
-          const v = dp[i][p] + fieldScore(f, stats[k]);
+          // Length, Azimuth and Incl. are in nearly every book: a short table's small numbers are those before LRUD
+          const v = dp[i][p] + fieldScore(f, stats[k]) + (CORE[f] && stats[k].n ? 1.5 : 0);
           if (v > dp[i + 1][nx]) { dp[i + 1][nx] = v; from[i + 1][nx] = [p, f]; }
         }
       }

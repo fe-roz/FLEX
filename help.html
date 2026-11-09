@@ -575,6 +575,17 @@ svg.ico { vertical-align: -2px; }
   <li><b>Big exports are tiled</b>: an export over about 5 km is cut into tiles, each with its own satellite and hillshade picture, so the imagery stays sharp at any zoom. Nothing to set.</li>
 </ul>
 
+<h3 id="scan">Shots from a scanned page</h3>
+<p>Notes written as a shot table (From, To, Length, Azimuth, Inclination, LRUD, notes; feet or metres, backsights too) go straight into a field survey on the phone, with no connection:</p>
+<ol class="steps">
+  <li>In FLEX Field: 🔧 → 📐 <b>Field survey</b> (a survey, or the list) → <b>📷 Import shots from scan</b>. Or on a document's page: ✎ Edit → ⋯ → <b>Import shots from this page</b>.</li>
+  <li>Choose <b>Photograph a page</b> (the phone's camera app takes it; the photo is kept as a <i>Shot table</i> document), a page from Documents, or a photo or scan file. Flat, well lit, the whole table in the picture.</li>
+  <li>The phone reads the page itself, offline, and shows the table under the page (beside it when the phone is on its side). Orange cells are worth a look (a letter read as a digit, a decimal comma, a word the reader was unsure of), red ones are wrong as they stand (an azimuth over 360). Tap a cell to see it on the page; tap the page to find its cell; pinch to zoom; ⟳ turns a sideways page.</li>
+  <li>Each column has a menu saying what it holds (From, To, Length, Azimuth, Incl., Back az, Back incl., L, R, U, D, Notes, Ignore). Type in any cell to fix it; ＋ Row, ⊘ Skip, ⇅ Merge (one shot read as two rows) and 🗑 Delete act on the rows whose numbers you tap. Choose <b>ft</b> or <b>m</b>.</li>
+  <li><b>Add … shots</b> to a field survey, or a new one. They are worked out and drawn like typed shots, each remembers its page, and the page is tagged with the stations it covers (for example <code>T6~T12</code>), so a station's card lists it.</li>
+</ol>
+<p>A half-checked table is kept for its page until its shots are added. In a browser (the offline viewer on a computer) the page is shown beside an empty table to type into: reading handwriting needs FLEX Field.</p>
+
 <p><b>Exports need Python</b> with PDAL, GDAL, NumPy, SciPy and Pillow. The simplest route is conda:</p>
 <pre>conda create -n entwine -c conda-forge python pdal python-pdal gdal numpy scipy pillow</pre>
 <p><b>Building FLEX Field</b> needs Android Studio's SDK; in PowerShell:</p>
