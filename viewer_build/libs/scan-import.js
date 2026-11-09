@@ -867,6 +867,22 @@
       out.shots.push(item);
       prev = item; prevRow = ri;
     });
+    // A decimal point the reader lost: in a column where most numbers carry
+    // one ("12.5", "8.3"), a whole number ten times the others ("125").
+    cols.forEach((col, k) => {
+      if (!(col.field === 'len' || LRUD[col.field])) return;
+      const live = table.rows.map((r, ri) => (r.off ? null : out.cells[ri][k])).filter(c => c && /^\d+(\.\d+)?$/.test(c.text));
+      if (live.length < 4) return;
+      const dec = live.filter(c => /\./.test(c.text));
+      if (dec.length < 0.6 * live.length) return;
+      const med = median(dec.map(c => +c.text));
+      live.forEach(c => {
+        const v = +c.text;
+        if (/\./.test(c.text) || c.text.length < 2 || v < 5 * med || v / 10 < 0.3 * med || v / 10 > 3 * med) return;
+        const guess = c.text.slice(0, -1) + '.' + c.text.slice(-1);
+        c.flags.push(`a decimal point missing? (${guess})`); c.level = Math.max(c.level, DOUBT);
+      });
+    });
     return out;
   }
 

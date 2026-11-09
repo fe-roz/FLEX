@@ -106,6 +106,13 @@ ok('a low-confidence reading is flagged', c.level >= S.DOUBT && /not sure/.test(
 c = cellText(t, 1, 'inc');
 ok('a clean cell has no flag', c.level === 0 && !c.flags.length, c);
 
+// a decimal point lost: "125" among lengths with one decimal each
+const rows2b = [H1, ['A4', 'X1', '12.5', '245', '-5', '', '', '', '', ''], ['X1', 'X2', '83', '260', '+2', '', '', '', '', ''], ['X2', 'X3', '15.0', '271', '-12', '', '', '', '', ''],
+  ['X3', 'X4', '6.2', '190', '0', '', '', '', '', ''], ['X4', 'X5', '9.4', '200', '-3', '', '', '', '', '']];
+t = S.buildTable(makeOcr(rows2b, { colX: X1, seed: 26 }));
+c = cellText(t, 2, 'len');
+ok('a lost decimal point is suspected (83 among 12.5, 15.0, 6.2, 9.4 → 8.3?)', c.level === S.DOUBT && /decimal point missing\? \(8\.3\)/.test(c.flags.join()) && cellText(t, 1, 'len').level === 0, c);
+
 // ── 3. A page photographed at an angle ─────────────────────────────────────
 t = S.buildTable(makeOcr(rows1, { colX: X1, skew: 4, seed: 3 }));
 ok('tilted page (4°): skew found', Math.abs(Math.atan(t.skew) * 180 / Math.PI - 4) < 1, Math.atan(t.skew) * 180 / Math.PI);
