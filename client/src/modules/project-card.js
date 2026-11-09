@@ -40,12 +40,14 @@
     if (!pj.pid) {
       box.appendChild(el('div', 'pj-note', 'Notes and documents belong to a project: open Project to choose or create one. A lead can be kept in My data without one.'));
       if (window._flexLeads) window._flexLeads.card(box, c);
+      if (window._inventory) window._inventory.cardNoProject(box, c);
       return;
     }
     if (!c.cid) {
       box.appendChild(el('div', 'pj-note', `“${c.imp ? c.imp.name : 'This file'}” isn’t a cave of “${pj.P.name || 'this project'}” yet.`));
       if (c.imp) box.appendChild(btn('Link it to a cave…', async () => { await linkFile(c.imp); c.cid = caveFor(c.imp, c.code); renderCard(); }, 'primary'));
       if (window._flexLeads) window._flexLeads.card(box, c);          // a lead there goes to My data
+      if (window._inventory) window._inventory.cardNoProject(box, c);
       return;
     }
     // Picked with selection.js: Details / Files / History.
@@ -68,6 +70,7 @@
     if (!c.survey) {
       const ls = leadsAt(c.cid, c.name);
       sec('Leads', ls.map(x => leadEl(c.cid, c.name, x)));
+      if (window._inventory) window._inventory.cardSection(box, c);
       const fs = FL.docsForStation(pj.D, pj.P, c.cid, c.name, c.code ? [c.code] : []);
       sec('Documents · this station', fs.station.map(d => docEl(d)));
       sec('Documents · pages covering this area', (fs.area || []).map(d => docEl(d)));
@@ -82,6 +85,7 @@
     const row = el('div', 'pj-row pj-card-btns');
     row.appendChild(btn(['pencil', 'Note'], () => editNote(target)));
     if (!c.survey) row.appendChild(btn(['help', 'Lead'], () => editLead(c.cid, c.name, null)));
+    if (!c.survey && c.imp && window._inventory) row.appendChild(window._inventory.cardButton(c));
     row.appendChild(btn(['doc', 'Add pages'], () => addPages({ tags: [target] })));
     row.appendChild(btn(['tag', 'From inbox'], () => tagFromInbox(target)));
     box.appendChild(row);

@@ -848,7 +848,7 @@
         <button type="button" data-target="#caveCollapsible" title="Caves"><svg class="ico"><use href="#i-cave"/></svg><small>Caves</small></button>
         <div class="rail-sep"></div>
         <button type="button" data-target="#docsCollapsible" data-pj-only title="The project's folder and documents"><svg class="ico"><use href="#i-doc"/></svg><small>Docs</small></button>
-        <button type="button" data-target="#leadsCollapsible" title="Leads: the project's, or My data's without a project"><svg class="ico"><use href="#i-help"/></svg><small>Leads</small></button>
+        <button type="button" data-target="#leadsCollapsible" title="Leads and inventories: the project's, or My data's without a project"><svg class="ico"><use href="#i-help"/></svg><small>Leads</small></button>
         <button type="button" data-target="#reviewCollapsible" data-pj-only title="Suggestions to review, segments"><svg class="ico"><use href="#i-check"/></svg><small>Review</small><span class="rail-dot" id="rail-review-dot" hidden></span></button>
         <div class="rail-sep"></div>
         <button type="button" data-target="#exportCollapsible" title="Export an offline map"><svg class="ico"><use href="#i-pack"/></svg><small>Export</small></button>
@@ -1099,6 +1099,10 @@
                   <label class="lp-row" style="margin:0; cursor:pointer;" title="Also draw closed leads (dead end, surveyed into, mop-up done), faded">
                     <input type="checkbox" id="lp-cave-leads-closed-toggle" style="margin:0;" onchange="window._flexLeads && window._flexLeads.setClosed(this.checked)">
                     <span style="font-size:10px; opacity:0.7; margin-left:4px;">Closed leads</span>
+                  </label>
+                  <label class="lp-row" style="margin:0; cursor:pointer;" title="The chests: inventories at stations and surface points (what was left, taken and checked there)">
+                    <input type="checkbox" id="lp-cave-inv-toggle" checked style="margin:0;" onchange="window._inventory && window._inventory.setVisible(this.checked)">
+                    <span style="font-size:10px; opacity:0.7; margin-left:4px;">Inventories</span>
                   </label>
                   <label class="lp-row" style="margin:0; cursor:pointer;" title="Area names placed with Labels, for every cave (each cave also has its own switch in its Labels panel)">
                     <input type="checkbox" id="lp-cave-areas-toggle" checked style="margin:0;" onchange="window._setCaveAreaLabelsVisible(this.checked)">
@@ -2099,6 +2103,7 @@
 <script src="client/src/modules/height-model.js"></script>  <!-- one height model: own heights with their source, imports, the finer-terrain offer (window._heightModel) -->
 <script src="client/src/modules/label-cull.js"></script>  <!-- only the readable labels: distance, nearest few hundred, no overlaps (window._labelCull) -->
 <script src="client/src/modules/flex-leads.js"></script>  <!-- leads at cave stations: project, My data, file; add / draw / export (window._flexLeads) -->
+<script src="client/src/modules/inventory.js"></script>  <!-- inventories: a chest at a station or surface point with a dated log; project or My data (window._inventory) -->
 <script src="client/src/modules/project-features.js"></script>
 <!-- One details panel on the right: card, segment panel, map feature info -->
 <script src="client/src/modules/inspector.js"></script>

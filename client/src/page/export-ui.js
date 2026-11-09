@@ -533,6 +533,7 @@
     const surveyMap = {};
     const handledIds = new Set();
     const areaLabels = [];
+    const invOut = [];                       // inventories (inventory.js): chests at stations and surface points
     // In the box, and inside the export polygon when there is one.
     const inBox = (lon, lat) => lon >= minLon && lon <= maxLon && lat >= minLat && lat <= maxLat &&
                                 (!poly || _pointInPoly(lon, lat, poly));
@@ -659,6 +660,13 @@
           addLead(s, ld.station, { desc: ld.d, w: ld.w, h: ld.h, date: ld.t, status: 'open', source: 'file' });
         }
         if (FX) for (const fl of FX.leads) addLead(fl.s, fl.station, { desc: fl.fields.desc, w: fl.fields.w, h: fl.fields.h, date: fl.fields.found, status: fl.status, source: 'flex', id: fl.id, priority: fl.fields.priority });
+        // Inventories at this file's stations (the project's and My data's, each once): station, the survey's cave name, position, contents and log.
+        if (window._inventory) for (const x of window._inventory.exportAt(imp, stnByName)) {
+          if (hidden(x.s.survey || '')) continue;
+          const p = ll(x.s);
+          if (!p || !inBox(p[0], p[1])) continue;
+          invOut.push(Object.assign(x.data, { station: x.station, cave: entryFor(x.s.survey || '').cave, lon: p[0], lat: p[1], elev: p[2] }));
+        }
       });
     } catch(e) { console.warn('Cave export (parsed) error:', e); }
 
@@ -806,7 +814,9 @@
     } catch(e) { console.warn('Cave passage export error:', e); }
 
     surveys = surveys.filter(sv => sv.shots.length || (sv.stations && sv.stations.length) || (sv.leads && sv.leads.length));
+    if (window._inventory) for (const x of window._inventory.exportSurface()) if (inBox(x.lon, x.lat)) invOut.push(Object.assign(x.data, { lon: x.lon, lat: x.lat, elev: x.elev }));
     const out = { surveys };
+    if (invOut.length) out.inventories = invOut;
     if (passages.length) out.passages = passages;
     if (areaLabels.length) out.labels = areaLabels;
     if (pjx) {                               // FLEX Field links these without asking

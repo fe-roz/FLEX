@@ -800,7 +800,7 @@ function handleExportTerrain(req, res) {
 
         // Write caves JSON to a temp file so Python can read it
         let cavesFilePath = null;
-        if (caves && caves.surveys && caves.surveys.length > 0) {
+        if (caves && ((caves.surveys && caves.surveys.length > 0) || (caves.inventories && caves.inventories.length > 0))) {      // (a surface point's chest alone is enough)
             cavesFilePath = path.join(EXPORT_OUT_DIR, `caves_${jobId}.json`);
             fs.writeFileSync(cavesFilePath, JSON.stringify(caves));
         }
@@ -853,6 +853,11 @@ function handleExportTerrain(req, res) {
                 }
             } catch (e) { _exportJobs[jobId].progress.push('⚠ Documents left out: ' + (e.message || e)); }
         }
+        // The photos of inventories (caves.inventories): page images in the same docs input, with or without a project (export_inventory.js)
+        try {
+            const made = require('./export_inventory').addToDocsInput(library, caves, args, EXPORT_OUT_DIR, jobId, m => _exportJobs[jobId].progress.push(m));
+            if (made) demFiles.push(made);          // (cleaned up with the other temporary files when the job ends)
+        } catch (e) { _exportJobs[jobId].progress.push('⚠ Inventory photos left out: ' + (e.message || e)); }
         if (typeof z_offset === 'number' && Number.isFinite(z_offset) && Math.abs(z_offset) < 200)
             args.push('--z-offset', String(z_offset));
 

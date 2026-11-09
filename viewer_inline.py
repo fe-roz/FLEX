@@ -68,7 +68,7 @@ def docs_inline_json(side, read_page, cap=DOCS_INLINE_CAP):
     for as many pages as fit under `cap` (smallest first). read_page(name) -> bytes.
     None when there is nothing to carry."""
     import base64
-    if not side or not side.get('entries'):
+    if not side or not (side.get('entries') or side.get('pages')):     # (pages alone: inventory photos)
         return None
     out = dict(side)
     inline, used = {}, 0

@@ -267,7 +267,7 @@ export class ContextMenuController {
     const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const row = (it, i) => `<div class="context-menu-item" data-action="select" data-i="${i}"><span class="context-menu-text">${esc(it.label)}</span></div>`;
     if (selEl) {
-      const items = (this._selItems || []).map((it, i) => [it, i]).filter(([it]) => !it.lead);
+      const items = (this._selItems || []).map((it, i) => [it, i]).filter(([it]) => !it.lead && !it.inv);
       selEl.innerHTML = items.length ? '<div class="context-menu-head">Select</div>' + items.map(([it, i]) => row(it, i)).join('') + '<div class="context-menu-divider"></div>' : '';
     }
     // Items with lead: true (flex-leads.js: Add lead at a station) get their own section.
@@ -276,6 +276,13 @@ export class ContextMenuController {
     if (leadEl) {
       const items = (this._selItems || []).map((it, i) => [it, i]).filter(([it]) => it.lead);
       leadEl.innerHTML = items.length ? '<div class="context-menu-head">Leads</div>' + items.map(([it, i]) => row(it, i)).join('') + '<div class="context-menu-divider"></div>' : '';
+    }
+    // Items with inv: true (inventory.js: Add inventory here) are a section of their own, after the leads.
+    let invEl = this.menuElement.querySelector('#contextMenuInv');
+    if (!invEl && leadEl) { invEl = this.document.createElement('div'); invEl.id = 'contextMenuInv'; leadEl.after(invEl); }
+    if (invEl) {
+      const items = (this._selItems || []).map((it, i) => [it, i]).filter(([it]) => it.inv);
+      invEl.innerHTML = items.length ? '<div class="context-menu-head">Inventory</div>' + items.map(([it, i]) => row(it, i)).join('') + '<div class="context-menu-divider"></div>' : '';
     }
     const zoom = altitudeToZoom(this.currentAltitude, lat);
 

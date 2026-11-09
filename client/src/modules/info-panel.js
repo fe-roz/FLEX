@@ -553,6 +553,7 @@
     if (prop(ent, 'isCaveSurvey') || prop(ent, 'isFieldStation') || prop(ent, 'isProjectFootprint') || ent._caveLazy) return null;
     if (prop(ent, 'isProjectFeature')) { if (window._pjfState && window._pjfState.draw) return null; return featureSubject(prop(ent, 'featureId')); }
     if (prop(ent, 'isFeatureLead')) return leadSubject(prop(ent, 'leadId'));
+    if (prop(ent, 'isInventory')) return window._inventory ? window._inventory.subject(prop(ent, 'invId')) : null;     // inventory.js: its card (contents, log) is s.card
     if (!ent.name && !ent.description && !prop(ent, 'myFeature') && !prop(ent, 'isUserLabel')) return null;
     return entitySubject(ent);
   }
@@ -777,6 +778,7 @@
       const pos = (s.facts.find(f => f[0] === 'Position' || f[0] === 'Length' || f[0] === 'Area') || [])[1];
       if (pos) b.appendChild(el('div', 'inf-counts', pos));
     }
+    if (s.card) b.appendChild(s.card(false));
     const row = el('div', 'inf-acts');
     if (s.edit) row.appendChild(btn('Edit', () => { collapse(true); s.edit(); }, 'small inf-edit'));
     if (paneOf(s)) row.appendChild(btn('Show in list', () => reveal(s, { open: true }), 'small inf-list'));
@@ -823,6 +825,7 @@
     const ro = s.ref && !s.refIsHost && !s.ref.editable && s.ref.reason;
     if (ro) body.appendChild(el('div', 'inf-ro', s.ref.reason));
     if (s.desc) { sec(body, 'Description'); body.appendChild(el('div', 'inf-desc', s.desc)); }
+    if (s.card) body.appendChild(s.card(true));
     let rel = [];
     try { rel = s.related ? s.related() : []; } catch (e) { console.warn('[info] related', e); }
     if (rel.length) { sec(body, 'Related'); body.appendChild(table(rel, 'inf-rel')); }
@@ -963,10 +966,11 @@
       let fresh;
       if (s.kind === 'feature') fresh = featureSubject(s.key.slice(8));
       else if (s.kind === 'lead') fresh = leadSubject(s.key.slice(5));
+      else if (s.kind === 'inventory') fresh = s.refresh ? s.refresh() : null;
       else if (s.kind === 'entity') { const e = entityNow(s); fresh = e && (!s.ref || (FE() && FE().refOf(e))) ? entitySubject(e) : null; }
       else fresh = cardSubject();
       if (!fresh) { clear(); return; }
-      if (s.kind === 'feature' || s.kind === 'lead' || s.kind === 'entity') show(fresh);
+      if (s.kind === 'feature' || s.kind === 'lead' || s.kind === 'entity' || s.kind === 'inventory') show(fresh);
       else { I.subject = fresh; if (I.x && !I.x.querySelector('.inf-player video')) render(); }
     }, 150);
   }
