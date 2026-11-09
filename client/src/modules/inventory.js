@@ -346,7 +346,7 @@
   }
   /** A photo full size over everything (click or Esc closes; ← → walk the entry's photos). */
   function lightbox(photos, i) {
-    const w = el('div', 'inv-lightbox');
+    const w = el('div', 'pj-modal inv-lightbox');                  // (a modal: Esc closes only this, the panels behind stay)
     let k = i || 0;
     const img = el('img'), cap = el('div', 'inv-lb-cap');
     const show = n => { k = (n + photos.length) % photos.length; img.src = blobUrl(photos[k]); cap.textContent = photos.length > 1 ? `${k + 1} / ${photos.length}` + (photos[k].date ? ' · ' + photos[k].date : '') : (photos[k].date || ''); };
@@ -480,8 +480,8 @@
       const tr = el('tr', c.stale ? 'inv-stale' : '');
       tr.dataset.item = c.name;
       const nm = td(c.name); if (c.short) nm.title = 'More was taken than the log had; the record may be incomplete.';
-      const ck = td(c.checked ? c.checked : ['warn', 'never'], c.checked ? '' : 'inv-never');
-      if (c.stale) { ck.title = 'Possibly out of date: ' + (c.checked ? 'counted ' + c.checked : 'never counted, first seen ' + c.first); if (c.checked) window.iconLabel(ck, ['warn', c.checked]); }
+      const ck = td(c.checked || 'never', c.checked ? '' : 'inv-never');
+      if (c.stale) { ck.title = 'Possibly out of date: ' + (c.checked ? 'counted ' + c.checked : 'never counted, first seen ' + c.first); window.iconLabel(ck, ['warn', c.checked || 'never']); }
       tr.append(nm, td(String(c.qty), 'inv-q'), td(c.changed || '–'), ck);
       tb.appendChild(tr);
     });
@@ -679,7 +679,7 @@
   .inv-tbl th { text-align: left; font-weight: 500; font-size: 10.5px; color: rgba(255,255,255,.5); padding: 2px 6px 2px 0; white-space: nowrap; border-bottom: 1px solid rgba(255,255,255,.12); }
   .inv-tbl td { padding: 3px 6px 3px 0; vertical-align: top; border-bottom: 1px solid rgba(255,255,255,.06); overflow-wrap: anywhere; }
   .inv-tbl td.inv-q { font-variant-numeric: tabular-nums; }
-  .inv-tbl td.inv-never, .inv-tbl tr.inv-stale td:last-child { color: #f2c24e; }
+  .inv-tbl td.inv-never { color: rgba(255,255,255,.5); } .inv-tbl tr.inv-stale td:last-child { color: #f2c24e; }
   .inv-tbl td.inv-none { color: rgba(255,255,255,.5); font-style: italic; }
   .inv-log tr.inv-entry { cursor: pointer; } .inv-log tr.inv-entry:hover td { background: rgba(255,255,255,.05); }
   .inv-log tr.inv-conf td { background: rgba(255,159,28,.08); }
