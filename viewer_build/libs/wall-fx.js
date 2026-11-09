@@ -1,8 +1,8 @@
 /* wall-fx.js -- see-through cave walls and focus mode for the portable viewer / FLEX Field.
  *
- * Loaded by viewer.html with one <script src="libs/wall-fx.js"> (viewer_inline.py inlines it, the
- * app serves it). Exposes window.FlexFx. three.js r128: no multiple render targets, so everything
- * here is plain materials patched with onBeforeCompile and a few shared uniforms.
+ * Loaded by viewer.html with one script tag (viewer_inline.py inlines it, the app serves it from
+ * libs/). Exposes window.FlexFx. three.js r128: no multiple render targets, so everything here is
+ * plain materials patched with onBeforeCompile and a few shared uniforms.
  *
  * WHY THE OLD WALLS LOOKED WRONG
  *   - One big mesh: its triangles are drawn in index order, never sorted. "On" wrote depth while
@@ -20,9 +20,13 @@
  *         is blended, at exactly the opacity on the slider. A layer that is nearly invisible (route
  *         dimming, reach, focus fade, depth fade) does not take part in the pre-pass, so it can
  *         never hide a strong wall behind it.
- *   Ghost One pass, both faces, no depth: every layer adds a little (an x-ray), which is order
- *         independent for low alpha. Alpha rises towards the silhouette (the edge slider, a
- *         fresnel-style rim) and falls with distance behind the orbit point (depth fade).
+ *   Ghost The same pre-pass, then every layer BEHIND the nearest at a share of the ghost strength
+ *         (depth test GREATER), then the nearest layer at the full strength, drawn last: at a
+ *         crossing the nearer passage always dominates, which the old single blended pass got
+ *         wrong half the time (it painted in index order). Alpha rises towards the silhouette (the
+ *         edge slider, a fresnel-style rim) and falls with distance behind the orbit point (depth
+ *         fade). A mesh past LIMITS.layeredMaxTris triangles falls back to one pass over every
+ *         layer (order dependent, the cheapest).
  *   Focus Shader uniforms shared by the walls, the survey lines, station dots and names, leads
  *         and area names: (a) things farther than R from the orbit target fade out, (b) things in
  *         a cone from the camera to the target (a hole as wide as the cut radius at the target)
@@ -40,6 +44,10 @@
   // ── Settings (saved per map by the viewer, under DISP.fx) ───────────────────
   const DEFAULTS = { ghost: 0.2, edge: 0.7, fade: 0.35, focus: false, around: true, cut: true, r: null, cutR: null };
   const S = Object.assign({}, DEFAULTS);
+  // Ghost draws the nearest wall layer at the ghost strength and every layer behind it at restShare of
+  // that, in three passes (depth pre-pass, the layers behind, the nearest). Past layeredMaxTris
+  // triangles (a phone's budget) it falls back to one pass over every layer.
+  const LIMITS = { layeredMaxTris: 700000, restShare: 0.6, layered: true };
   const RANGE = { ghost: [0.03, 0.5], edge: [0, 1], fade: [0, 1], r: [3, 5000], cutR: [1, 500] };
 
   // ── Shader pieces ───────────────────────────────────────────────────────────
@@ -230,16 +238,21 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
       const m = new THREE.MeshLambertMaterial({
         vertexColors: true, transparent: true, opacity: 0.5, side: THREE.DoubleSide,
         depthWrite: pass === 1, colorWrite: pass === 0,
-        polygonOffset: pass === 1, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
+        // The pre-pass is pushed back by one depth step only (factor 0: a slope-scaled offset lets a
+        // second layer through at every grazing edge). Both passes run the same program, so the
+        // nearest layer's depth matches its pre-pass depth exactly; the step is just a safety margin.
+        polygonOffset: pass === 1, polygonOffsetFactor: 0, polygonOffsetUnits: 1,
       });
       m.userData.fxPass = pass;
       m.onBeforeCompile = patchWall;
       return m;
     };
-    const col = new THREE.Mesh(geo, mk(0)), pre = new THREE.Mesh(geo, mk(1));
-    pre.renderOrder = order; col.renderOrder = order + 0.1;
+    const col = new THREE.Mesh(geo, mk(0)), pre = new THREE.Mesh(geo, mk(1)), rest = new THREE.Mesh(geo, mk(0));
+    rest.material.depthFunc = THREE.GreaterDepth;      // ghost: the layers behind the nearest one, fainter
+    pre.renderOrder = order; rest.renderOrder = order + 0.05; col.renderOrder = order + 0.1;
     col.onBeforeRender = pre.onBeforeRender = clearOnce;
-    sets.push({ col, pre });
+    col.add(rest);                                      // a child, so the set is still [colour, pre-pass]
+    sets.push({ col, pre, rest });
     return [col, pre];
   }
 
@@ -248,10 +261,14 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
     for (let i = sets.length - 1; i >= 0; i--) if (!sets[i].col.parent) sets.splice(i, 1);   // rebuilt or removed
     const ghost = mode === 1;
     const a = ghost ? S.ghost : opacity;
-    sets.forEach(({ col, pre }) => {
+    sets.forEach(({ col, pre, rest }) => {
+      const geo = col.geometry, tris = (geo.index ? geo.index.count : geo.attributes.position.count) / 3;
+      const layered = ghost && LIMITS.layered && tris <= LIMITS.layeredMaxTris;
       col.material.opacity = pre.material.opacity = a;
-      col.material.depthTest = !ghost;          // ghost: every layer; on: only the nearest (pre-pass)
-      pre.visible = !ghost && mode !== 2;
+      rest.material.opacity = a * LIMITS.restShare;
+      col.material.depthTest = !ghost || layered;   // On, layered ghost: against the pre-pass; big ghost: every layer
+      pre.visible = (!ghost || layered) && mode !== 2;
+      rest.visible = layered;
     });
     update(true);
   }
@@ -325,9 +342,9 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
   function sheetFocus(H) {
     const len = H.units && H.units.len ? m => H.units.len(m) : m => Math.round(m) + ' m';
     H.head('Focus');
-    H.row('🎯', 'Focus mode', S.focus ? 'on' : 'solid near the orbit point, the rest fades', () => { toggleFocus(); H.rerender(); }, S.focus);
+    H.row('🎯', 'Focus mode', 'near the orbit point only', () => { toggleFocus(); H.rerender(); }, S.focus);
     H.chips([
-      ['⭕', 'Around centre', S.around, on => { S.around = on; changed(); }],
+      ['⭕', 'Near centre', S.around, on => { S.around = on; changed(); }],
       ['✂️', 'Cut in front', S.cut, on => { S.cut = on; changed(); }],
     ]);
     slider(H, 'focus-radius-slider', 'Radius', 0, 100, toT(getR(), rRange()), t => len(fromT(t, rRange())), t => { S.r = fromT(t, rRange()); changed(); });
@@ -340,7 +357,7 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
 
   const FX = {
     init, restore, serialize, update, patch, makeWalls, applyWalls,
-    state: S, defaults: DEFAULTS, uniforms: null, range: RANGE,
+    state: S, defaults: DEFAULTS, limits: LIMITS, uniforms: null, range: RANGE,
     setFocus, toggleFocus, focusActive, focusAt, tapFactor, bindButton, syncUi, sheetWalls, sheetFocus,
     radius: getR, cutRadius: getCutR, defaultRadius: defaultR, caveSize,
     wallSets: sets,
