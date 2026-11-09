@@ -71,24 +71,33 @@
   }
   .layer-btn.active { background:rgba(33,150,243,.35); border-color:#2196F3; }
 
-  /* Help overlay */
+  /* Help overlay: a card that scrolls; the heading with its ✕ and the Close button stay in view */
   #help-overlay {
     position:fixed; inset:0; background:rgba(0,0,0,.78); z-index:90;
-    display:flex; flex-direction:column; align-items:center; justify-content:center;
-    padding:24px; cursor:pointer; transition:opacity .4s;
+    display:flex; align-items:center; justify-content:center;
+    padding:max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom)); transition:opacity .4s;
   }
   #help-overlay.hidden { opacity:0; pointer-events:none; }
   #help-box {
-    background:rgba(15,15,25,.95); border:1px solid rgba(255,255,255,.13);
-    border-radius:14px; padding:20px 22px; max-width:340px; width:100%;
-    pointer-events:none;
+    background:rgba(15,15,25,.97); border:1px solid rgba(255,255,255,.13); border-radius:14px;
+    width:100%; max-width:380px; max-height:100%; display:flex; flex-direction:column; overflow:hidden;
   }
-  #help-box h2 { font-size:15px; font-weight:600; margin-bottom:14px; opacity:.9; text-align:center; }
+  #help-head { flex:none; display:flex; align-items:center; gap:8px; padding:6px 8px 6px 18px; border-bottom:1px solid rgba(255,255,255,.1); }
+  #help-head h2 { flex:1; font-size:15px; font-weight:600; opacity:.9; }
+  #help-close { flex:none; width:44px; height:44px; font-size:18px; line-height:1; color:#fff; background:none; border:0; border-radius:22px; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+  #help-close:active { background:rgba(255,255,255,.14); }
+  #help-body { flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; touch-action:pan-y; padding:2px 18px 10px; }
+  #help-foot { flex:none; padding:8px 18px 12px; border-top:1px solid rgba(255,255,255,.1); text-align:center; }
+  #help-done { font:inherit; font-size:14px; color:#fff; background:rgba(33,150,243,.35); border:1px solid #2196F3; border-radius:10px; padding:10px 34px; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+  .help-sec { border-bottom:1px solid rgba(255,255,255,.07); }
+  .help-sec:last-child { border-bottom:0; }
+  .help-section { display:flex; align-items:center; gap:6px; padding:12px 0 10px; font-size:11px; font-weight:600; opacity:.6; letter-spacing:.07em; cursor:pointer; list-style:none; -webkit-tap-highlight-color:transparent; }
+  .help-section::-webkit-details-marker { display:none; }
+  .help-section::before { content:"▸"; width:10px; font-size:10px; }
+  .help-sec[open] > .help-section::before { content:"▾"; }
   .help-row { display:flex; align-items:baseline; gap:10px; margin-bottom:9px; font-size:13px; }
   .help-icon { font-size:17px; width:26px; text-align:center; flex-shrink:0; }
-  .help-desc { opacity:.75; line-height:1.4; }
-  .help-section { font-size:10px; opacity:.38; letter-spacing:.07em; margin:12px 0 8px; }
-  #help-dismiss { margin-top:16px; font-size:11px; opacity:.35; text-align:center; }
+  .help-desc { opacity:.8; line-height:1.4; }
 
   #legend { display: none; }
 
@@ -468,41 +477,70 @@
 
 </div>
 
-<!-- Help overlay -->
-<div id="help-overlay">
+<!-- Help overlay: the card scrolls; ✕ and Close stay in view; a tap on a heading opens or closes its section -->
+<div id="help-overlay" role="dialog" aria-modal="true" aria-labelledby="help-title">
   <div id="help-box">
-    <h2 id="help-title">FLEX Portable Viewer</h2>
-    <div class="help-section">GESTURES</div>
-    <div class="help-row"><span class="help-icon">☝️</span><span class="help-desc">Drag to orbit · Two-finger drag to pan</span></div>
-    <div class="help-row"><span class="help-icon">🤏</span><span class="help-desc">Pinch to zoom</span></div>
-    <div class="help-section">TOOLBAR</div>
-    <div class="help-row"><span class="help-icon">📍</span><span class="help-desc">GPS: off / pin / follow / heading-up · record a track · drop pins · export GPX/KML · compass calibration</span></div>
-    <div class="help-row"><span class="help-icon">🔧</span><span class="help-desc">Tools: find (stations, leads — active / closed), measure, route, reach, fly, crane, import KML · 📐 field survey · 📚 documents · 📝 change log (undo)</span></div>
-    <div class="help-row"><span class="help-icon">🚩</span><span class="help-desc">Route: tap the start station, then the end station (only stations answer: not a lead, a name or a pin), or type part of a name in the box under the bar at the top, with the cave in the list. With a route showing only its stations can be tapped; the rest of the cave, its names and leads are dimmed until you clear it (✕ on the bar).</span></div>
-    <div class="help-row"><span class="help-icon">🎨</span><span class="help-desc">Display: colour by survey / elevation / depth / difficulty (narrow blue, low red, steep green); walls (On: one see-through layer, the nearest, at the opacity you set · Ghost: see-through, every layer, with sliders for strength, edges and depth fade · Off); stations (with their names); show or hide leads, inventories, area names, tracks, imported layers; imagery and terrain; Focus</span></div>
-    <div class="help-row"><span class="help-icon">🎯</span><span class="help-desc">Focus (the small button under ⋯, or Display → Focus): <b>Near centre</b> keeps walls, lines, stations and names within a radius of the orbit point (the middle of the screen) as they are and fades the rest; <b>Cut in front</b> cuts away the passages between you and the orbit point, a hole as wide as the cut radius there. Taps only find what is in focus. Turn the button off to see everything again. The wall sliders and focus settings are remembered for this map too.</span></div>
-    <div class="help-row"><span class="help-icon">⋯</span><span class="help-desc">Units (ft / m), what counts as narrow, stooping, crawling or steep (Route difficulty), who is entering data, ⇄ project & sync files (share with other phones and FLEX), export project data, fullscreen, help</span></div>
-    <div class="help-section">STATIONS</div>
-    <div class="help-row"><span class="help-icon">👆</span><span class="help-desc">Tap: info · again: caver for scale · again: reach (what's within range along the survey) · again: off</span></div>
-    <div class="help-row"><span class="help-icon">✏️</span><span class="help-desc">On a station's card: ✏️ Add note is always there · 📄 its documents (see Documents below; the ones in the export too: scanned notes and photos; PDFs stay in FLEX). Everything else — changing a note, ❓ leads (status, size…), 📐 survey new passage from here, and in a document turning pages, tags, removing — waits behind the small <b>✎ Edit</b> button, which is off again when you close the card.</span></div>
-    <div class="help-row"><span class="help-icon">👆</span><span class="help-desc">Taps find the nearest station, lead mark, name or pin within a finger's width of the touch; a drag or a two-finger move is never a tap</span></div>
-    <div class="help-section">DOCUMENTS</div>
-    <div class="help-row"><span class="help-icon">📄</span><span class="help-desc">A station's card lists its documents in four groups, each with a count: <b>Survey notes</b>, <b>Sketches</b>, <b>Media</b>, <b>Other</b>. Most specific first: the sketch page that covers the station (a page tagged <b>A6~A8</b>) or the book that holds it; if there are none, its survey's; then the cave's; never another survey's or cave's. A group that comes from a wider level says so (“Survey notes (1) · from survey T”). A document opens at the page that was found (“page 2: stations A2–A4”). The project's untagged documents wait behind “Show N not yet sorted…”.</span></div>
-    <div class="help-row"><span class="help-icon">〰️</span><span class="help-desc">Tap the survey or the cave on a station's card (or 📚 → <b>Surveys</b>) for its own card: the survey's documents, or the cave's when it has none. 📚 lists every document by group, with counts.</span></div>
-    <div class="help-row"><span class="help-icon">🏷</span><span class="help-desc">Tagging waits behind <b>✎ Edit</b> in a document: <b>🏷 Tags</b> for the whole document, <b>🏷 Tag this page…</b> for one page (a station, or a range such as <b>A6~A8</b>: <b>A6 to A8</b> and <b>A6–A8</b> mean the same). Pick the cave and the survey, type the station or the range (the map's stations are suggested, Enter takes the first); recent tags are one tap away; <b>Done</b> saves them together, undo is in 📝 Change log. The caption says what the page is tagged to (“This page: stations A6–A8”).</span></div>
-    <div class="help-row"><span class="help-icon">📷</span><span class="help-desc">A station whose shots were read from a scanned page says <b>From page 2 of “…”</b>: tap it to see that page. Pages and photos you add get a kind from their name (a camera photo is Media, a scan Survey notes, a PDF Other); change it in <b>✎ Edit → ⋯ → Title, kind, date</b>.</span></div>
-    <div class="help-section">FIELD SURVEY</div>
-    <div class="help-row"><span class="help-icon">📐</span><span class="help-desc">Shots start at the station you tied the survey to (✎ Edit on its card → Survey from here). The form suggests station names the cave does not have yet; a shot to a name that exists closes a loop onto that station and is drawn over the line already there. <b>🗺 Show on map</b> takes the view to your shots.</span></div>
-    <div class="help-row"><span class="help-icon">🧭</span><span class="help-desc">Declination is worked out offline (World Magnetic Model, for the survey's date) at the tie-in: “Declination 10.3° E (WMM 2026 at T6)”. Type your own (12 W) to override it; Use WMM goes back. <b>Backsights</b> shows the back readings; tap again to hide them.</span></div>
-    <div class="help-row"><span class="help-icon">📍</span><span class="help-desc"><b>Use my location</b> takes one GPS fix (no network): the declination is worked out there for a survey tied to no station of the map, and its first station can be placed at the fix (approximate, marked ≈). ＋ New survey with no station selected starts at your location.</span></div>
-    <div class="help-row"><span class="help-icon">💾</span><span class="help-desc">Display choices (walls, colour, wall opacity, stations, area names, terrain sliders) are remembered for this map. A new map opens with ghost walls coloured by elevation. The view stays over the map.</span></div>
-    <div class="help-section">INVENTORIES</div>
-    <div class="help-row"><span class="help-icon">📦</span><span class="help-desc">A chest at a station or a surface point keeps a dated log of what is stored there; the export carries them and <b>Display → Inventories</b> shows or hides them (a faded chest has something possibly out of date). Tap a chest, or the <b>📦</b> line on its station's card, for the contents table (item, quantity, last change, last checked) and the log (date, who, action, items, photos: tap one for full screen); a simple list shows as text. 🔍 finds an inventory by its name or by what is in it.</span></div>
-    <div class="help-row"><span class="help-icon">＋</span><span class="help-desc"><b>＋ Add entry</b> is always there, like a note: <i>left</i> adds, <i>took</i> subtracts, <i>checked</i> sets the counts you saw (<b>✓ Check…</b> starts from the contents; leave “that was everything here” on and a line you take out counts as gone), <i>note</i> is text and photos only. The date is today, who is remembered, photos come from the camera or from files. Making an inventory (a station's card → ✎ Edit → 📦 Add inventory here), renaming it, keeping it as a simple list and changing or removing an entry wait behind the card's small <b>✎ Edit</b>.</span></div>
-    <div class="help-section">SHOTS FROM A SCANNED PAGE</div>
-    <div class="help-row"><span class="help-icon">📷</span><span class="help-desc">🔧 → 📐 Field survey → <b>📷 Import shots from scan</b> (or a document page's ⋯): photograph a page of shot tables, or pick a page or a file. FLEX Field reads it on the phone, offline; check the table beside the scan (tap a cell to see it on the page, tap the page to find its cell; orange = check, red = wrong; each column's menu says what it holds), choose ft or m, then <b>Add … shots</b> to a field survey. Each shot remembers its page. In a browser the page is shown beside an empty table to type into.</span></div>
+    <div id="help-head">
+      <h2 id="help-title">FLEX Portable Viewer</h2>
+      <button type="button" id="help-close" aria-label="Close help">✕</button>
+    </div>
+    <div id="help-body">
+      <details class="help-sec" open>
+        <summary class="help-section">GESTURES</summary>
+        <div class="help-row"><span class="help-icon">☝️</span><span class="help-desc">Drag to orbit · two-finger drag to pan · pinch to zoom</span></div>
+        <div class="help-row"><span class="help-icon">👆</span><span class="help-desc">Tap a station for its card · again: a caver for scale · again: reach (what is within range along the survey) · again: off</span></div>
+        <div class="help-row"><span class="help-icon">👆</span><span class="help-desc">A tap finds the nearest station, lead, name or pin within a finger’s width. A drag or a two-finger move is never a tap.</span></div>
+      </details>
+      <details class="help-sec" open>
+        <summary class="help-section">TOOLBAR</summary>
+        <div class="help-row"><span class="help-icon">📍</span><span class="help-desc">GPS: off / pin / follow / heading-up. Record a track, drop pins, export GPX or KML, calibrate the compass.</span></div>
+        <div class="help-row"><span class="help-icon">🔧</span><span class="help-desc">Tools: find (stations, leads active or closed, inventories), measure, route, reach, fly, crane, import KML. Also 📐 field survey, 📚 documents and 📝 change log (with undo).</span></div>
+        <div class="help-row"><span class="help-icon">⋯</span><span class="help-desc">More: units (ft / m), what counts as narrow, stooping, crawling or steep (Route difficulty), who is entering data, ⇄ project &amp; sync files (to share with other phones and FLEX), export project data, fullscreen, help.</span></div>
+      </details>
+      <details class="help-sec">
+        <summary class="help-section">ROUTE</summary>
+        <div class="help-row"><span class="help-icon">🚩</span><span class="help-desc">Tap the start station, then the end station. Only stations answer (not a lead, a name or a pin). Or type part of a station name in the box under the bar at the top: the cave is shown, and the cave you are in comes first.</span></div>
+        <div class="help-row"><span class="help-icon">✕</span><span class="help-desc">With a route showing, only its stations can be tapped, and the rest of the cave, its names and leads are dimmed. Clear it with ✕ on the bar.</span></div>
+      </details>
+      <details class="help-sec">
+        <summary class="help-section">DISPLAY AND FOCUS</summary>
+        <div class="help-row"><span class="help-icon">🎨</span><span class="help-desc">Colour by survey / elevation / depth / difficulty (narrow blue, low red, steep green).</span></div>
+        <div class="help-row"><span class="help-icon">🧱</span><span class="help-desc">Walls: On = one see-through layer, the nearest, at the opacity you set · Ghost = see-through, every layer, with sliders for strength, edges and depth fade · Off.</span></div>
+        <div class="help-row"><span class="help-icon">👁</span><span class="help-desc">Show or hide stations (with their names), leads, inventories, area names, tracks and imported layers. Choose imagery and terrain.</span></div>
+        <div class="help-row"><span class="help-icon">🎯</span><span class="help-desc">Focus (the small button under ⋯, or Display → Focus) is for looking at one place when other passages are in the way. <b>Near centre</b> keeps walls, lines, stations and names within a radius of the orbit point (the middle of the screen) as they are and fades the rest. <b>Cut in front</b> cuts away the passages between you and the orbit point (a hole as wide as the cut radius there). Taps only find what is in focus. Turn the button off to see everything again.</span></div>
+        <div class="help-row"><span class="help-icon">💾</span><span class="help-desc">Display choices, wall sliders and focus settings are remembered for this map. A new map opens with ghost walls coloured by elevation.</span></div>
+      </details>
+      <details class="help-sec">
+        <summary class="help-section">STATIONS</summary>
+        <div class="help-row"><span class="help-icon">✏️</span><span class="help-desc">On a station’s card, ✏️ Add note is always there, and so is 📄 its documents (scanned notes and photos that are in the export; PDFs stay in FLEX).</span></div>
+        <div class="help-row"><span class="help-icon">✎</span><span class="help-desc">Everything else waits behind the small <b>✎ Edit</b> button, which is off again when you close the card: changing a note, ❓ leads (status, size…), 📐 survey a new passage from here, and in a document turning pages, tags and removing.</span></div>
+      </details>
+      <details class="help-sec">
+        <summary class="help-section">DOCUMENTS</summary>
+        <div class="help-row"><span class="help-icon">📄</span><span class="help-desc">A station’s card lists its documents in four groups, each with a count: <b>Survey notes</b>, <b>Sketches</b>, <b>Media</b>, <b>Other</b>. The most specific come first: the sketch page that covers the station (a page tagged <b>A6~A8</b>) or the book that holds it; if there are none, its survey’s; then the cave’s; never another survey’s or cave’s.</span></div>
+        <div class="help-row"><span class="help-icon">🔎</span><span class="help-desc">A group that comes from a wider level says so (“Survey notes (1) · from survey T”). A document opens at the page that was found (“page 2: stations A2–A4”). The project’s untagged documents wait behind “Show N not yet sorted…”.</span></div>
+        <div class="help-row"><span class="help-icon">〰️</span><span class="help-desc">Tap the survey or the cave on a station’s card (or 📚 → <b>Surveys</b>) for its own card: the survey’s documents, or the cave’s when it has none. 📚 lists every document by group, with counts.</span></div>
+        <div class="help-row"><span class="help-icon">🏷</span><span class="help-desc">Tagging waits behind <b>✎ Edit</b> in a document: <b>🏷 Tags</b> for the whole document, <b>🏷 Tag this page…</b> for one page (a station, or a range such as <b>A6~A8</b>; <b>A6 to A8</b> and <b>A6–A8</b> mean the same). Pick the cave and the survey, type the station or the range (the map’s stations are suggested, Enter takes the first). Recent tags are one tap away; <b>Done</b> saves them together, and undo is in 📝 Change log.</span></div>
+        <div class="help-row"><span class="help-icon">📷</span><span class="help-desc">A station whose shots were read from a scanned page says <b>From page 2 of “…”</b>: tap it to see that page. Pages and photos you add get a kind from their name (a camera photo is Media, a scan Survey notes, a PDF Other); change it in <b>✎ Edit → ⋯ → Title, kind, date</b>.</span></div>
+      </details>
+      <details class="help-sec">
+        <summary class="help-section">FIELD SURVEY</summary>
+        <div class="help-row"><span class="help-icon">📐</span><span class="help-desc">Shots start at the station you tied the survey to (✎ Edit on its card → Survey from here). The form suggests station names the cave does not have yet; a shot to a name that exists closes a loop onto that station and is drawn over the line already there. <b>🗺 Show on map</b> takes the view to your shots.</span></div>
+        <div class="help-row"><span class="help-icon">🧭</span><span class="help-desc">Declination is worked out offline (World Magnetic Model, for the survey’s date) at the tie-in: “Declination 10.3° E (WMM 2026 at T6)”. Type your own (12 W) to override it; <b>Use WMM</b> goes back. <b>Backsights</b> shows the back readings; tap again to hide them.</span></div>
+        <div class="help-row"><span class="help-icon">📍</span><span class="help-desc"><b>Use my location</b> takes one GPS fix (no network). For a survey tied to no station of the map, the declination is worked out there, and its first station can be placed at the fix (approximate, marked ≈). ＋ New survey with no station selected starts at your location.</span></div>
+      </details>
+      <details class="help-sec">
+        <summary class="help-section">INVENTORIES</summary>
+        <div class="help-row"><span class="help-icon">📦</span><span class="help-desc">A chest at a station or a surface point keeps a dated log of what is stored there. The export carries them, and <b>Display → Inventories</b> shows or hides them (a faded chest has something possibly out of date). Tap a chest, or the <b>📦</b> line on its station’s card, for the contents table (item, quantity, last change, last checked) and the log (date, who, action, items, photos: tap one for full screen); a simple list shows as text. 🔍 finds an inventory by its name or by what is in it.</span></div>
+        <div class="help-row"><span class="help-icon">＋</span><span class="help-desc"><b>＋ Add entry</b> is always there, like a note: <i>left</i> adds, <i>took</i> subtracts, <i>checked</i> sets the counts you saw (<b>✓ Check…</b> starts from the contents; leave “that was everything here” on and a line you take out counts as gone), <i>note</i> is text and photos only. The date is today, who is remembered, photos come from the camera or from files. Making an inventory (a station’s card → ✎ Edit → 📦 Add inventory here), renaming it, keeping it as a simple list, and changing or removing an entry wait behind the card’s small <b>✎ Edit</b>.</span></div>
+      </details>
+      <details class="help-sec">
+        <summary class="help-section">SHOTS FROM A SCANNED PAGE</summary>
+        <div class="help-row"><span class="help-icon">📷</span><span class="help-desc">🔧 → 📐 Field survey → <b>📷 Import shots from scan</b> (or a document page’s ⋯): photograph a page of shot tables, or pick a page or a file. FLEX Field reads it on the phone, offline. Check the table beside the scan (tap a cell to see it on the page, tap the page to find its cell; orange = check, red = wrong; each column’s menu says what it holds), choose ft or m, then <b>Add … shots</b> to a field survey. Each shot remembers its page. In a browser the page is shown beside an empty table to type into.</span></div>
+      </details>
+    </div>
+    <div id="help-foot"><button type="button" id="help-done">Close</button></div>
   </div>
-  <div id="help-dismiss">Tap anywhere to dismiss</div>
 </div>
 
 <div id="legend" class="empty"><h3>Surveys</h3></div>
@@ -7814,22 +7852,27 @@ document.getElementById('btn-layer-hs').addEventListener('click', function() {
 });
 
 // ── Help overlay ─────────────────────────────────────────────────────────────
+// A card that scrolls. It closes with ✕, Close, a tap on the dark backdrop or Esc; a tap inside the card only scrolls or opens
+// a section. The card shown at start goes by itself after 12 s unless the reader touches it; one opened with ? stays.
 const helpOverlay = document.getElementById('help-overlay');
+let helpAuto = null, helpGone = null;
 function dismissHelp() {
+  clearTimeout(helpAuto); clearTimeout(helpGone);
   helpOverlay.classList.add('hidden');
-  setTimeout(() => helpOverlay.remove(), 450);
+  helpGone = setTimeout(() => helpOverlay.remove(), 450);
 }
-helpOverlay.addEventListener('click', dismissHelp);
-// Auto-dismiss after 12 s
-setTimeout(dismissHelp, 12000);
+helpOverlay.addEventListener('click', e => { if (e.target === helpOverlay || e.target.closest('#help-close, #help-done')) dismissHelp(); });
+['pointerdown', 'touchstart', 'wheel'].forEach(ev => helpOverlay.addEventListener(ev, () => clearTimeout(helpAuto), { passive: true }));
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && helpOverlay.isConnected && !helpOverlay.classList.contains('hidden')) dismissHelp(); });
+helpAuto = setTimeout(dismissHelp, 12000);
 
 document.getElementById('btn-help').addEventListener('click', () => {
   // Re-create if removed, otherwise just show
+  clearTimeout(helpGone); clearTimeout(helpAuto);
   document.body.appendChild(helpOverlay);
   helpOverlay.classList.remove('hidden');
   helpOverlay.style.display = 'flex';
-  helpOverlay.addEventListener('click', dismissHelp, { once: true });
-  setTimeout(dismissHelp, 12000);
+  document.getElementById('help-body').scrollTop = 0;
 });
 
 // ── Fullscreen ────────────────────────────────────────────────────────────────

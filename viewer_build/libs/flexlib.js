@@ -88,6 +88,9 @@
     return (a.seq || 0) - (b.seq || 0);
   }
   function sortEntries(list) { return list.slice().sort(cmp); }
+  // The entries an entry builds on (`base`) as a list of ids. A damaged or foreign entry may carry something else (one
+  // id as a string, null, an object): read as well as it can be, never an error that stops a replay.
+  const baseOf = e => { const b = e && e.base; return Array.isArray(b) ? b : (typeof b === 'string' && b ? [b] : []); };
   // Replay order that respects cause and effect even when device clocks
   // disagree: an entry comes after the earlier entries of its own device and
   // after every entry it builds on (`base`); otherwise by time.
@@ -101,7 +104,7 @@
       const prev = lastOfDev.get(e.dev);
       if (prev) d.push(prev.id);
       lastOfDev.set(e.dev, e);
-      (e.base || []).forEach(b => { if (byId.has(b) && b !== e.id) d.push(b); });
+      baseOf(e).forEach(b => { if (byId.has(b) && b !== e.id) d.push(b); });
       deps.set(e.id, d);
     });
     const done = new Set(), out = [], waiting = new Map();
@@ -309,7 +312,7 @@
           const x = clone(p);
           delete x.proposed;
           if (e.fields) { if (x.fields) Object.assign(x.fields, clone(e.fields)); else Object.assign(x, clone(e.fields)); }
-          x.base = [...new Set((p.base || []).concat((e.base || []).filter(b => b !== p.id)))];
+          x.base = [...new Set(baseOf(p).concat(baseOf(e).filter(b => b !== p.id)))];
           x.t = e.t;
           x.accepted = { id: e.id, who: e.who, t: e.t, by: rec.by };
           out.push(x);
@@ -386,7 +389,7 @@
   // never saw each other.
   function heads(rec) {
     const sup = new Set();
-    rec.entries.forEach(e => (e.base || []).forEach(b => sup.add(b)));
+    rec.entries.forEach(e => baseOf(e).forEach(b => sup.add(b)));
     return rec.entries.filter(e => !sup.has(e.id));
   }
 
@@ -1031,8 +1034,9 @@
   }
   const targetCave = t => { const p = parseTarget(t); return p.cave || null; };
   // Everything that goes with a project cave when it moves: its survey files (stored by fingerprint), aliases,
-  // segments, area labels, notes and leads on it, and the documents tagged to it (sketches included — they follow
-  // by the cave's id, so they need no copy of their entries; their files are copied by the host).
+  // segments, area labels, notes and leads on it, the inventories at its stations (with their photos), and the
+  // documents tagged to it (sketches included — they follow by the cave's id, so they need no copy of their entries;
+  // their files are copied by the host).
   // `shared`: survey files other live caves also use — the host refuses to move those.
   function caveBundle(S, D, cid) {
     const c = S && S.caves[cid];
@@ -1048,6 +1052,7 @@
     const notes = Object.values(S.notes).filter(n => !n.deleted && !n.conflict && (targetCave(n.target) === cid || (parseTarget(n.target).kind === 'lead' && leadIds.has(parseTarget(n.target).lead))));
     const labels = Object.values(S.arealabels).filter(a => !a.removed && a.text && names.includes(a.file));
     const docs = D ? Object.values(D.docs).filter(d => !d.deleted && docTargets(d).some(t => targetCave(t) === cid)) : [];
+    const inventories = Object.values(S.inventories || {}).filter(i => !i.deleted && i.target && targetCave(i.target) === cid);       // chests at its stations
     const blobs = new Map();
     names.forEach(n => { const f = S.cavefiles[n]; blobs.set(f.h + '.' + (f.ext || 'plt'), { h: f.h, ext: f.ext || 'plt' }); });
     const readable = [];
@@ -1055,10 +1060,11 @@
       d.pages.forEach(p => { if (p.h) blobs.set(p.h + '.' + (p.ext || 'jpg'), { h: p.h, ext: p.ext || 'jpg' }); });
       if (d.file && d.file.h) { blobs.set(d.file.h + '.' + d.file.ext, { h: d.file.h, ext: d.file.ext }); if (d.file.path) readable.push({ h: d.file.h, ext: d.file.ext, path: d.file.path }); }
     });
+    invPhotoBlobs(inventories).forEach(b => blobs.set(b.h + '.' + b.ext, b));                  // the photos of the chests' entries
     names.forEach(n => { if (S.cavefiles[n].multi && !shared.includes(n)) shared.push(n); });   // a multi-cave file never goes with one cave
     return { cave: clone(c), id: cid, aliases, files: names.map(n => clone(S.cavefiles[n])), shared, segments: clone(segments), leads: clone(leads), notes: clone(notes),
-             labels: clone(labels), docs: docs.map(d => d.id), blobs: [...blobs.values()], readable,
-             counts: { files: names.length, segments: segments.length, leads: leads.length, notes: notes.length, labels: labels.length, docs: docs.length } };
+             labels: clone(labels), docs: docs.map(d => d.id), inventories: clone(inventories), blobs: [...blobs.values()], readable,
+             counts: { files: names.length, segments: segments.length, leads: leads.length, notes: notes.length, labels: labels.length, docs: docs.length, inventories: inventories.length } };
   }
   // A survey file name free in the destination (a different file already uses it): "name (2).plt".
   function moveRenames(B, destS) {
@@ -1105,6 +1111,7 @@
       if (d && !d.deleted && !d.conflict && d.text === n.text && d.target === n.target) return;
       out.push(Object.assign({ op: 'note.set', note: n.id, target: n.target, text: n.text }, d ? { base: d.heads } : {}, n.kind ? { kind: n.kind } : {}, n.page ? { page: n.page } : {}));
     });
+    invMoveEntries(B.inventories, destS, null).forEach(e => out.push(e));
     return out;
   }
   // What the source records to let the cave go: it is removed (its history stays; History can undo each step).
@@ -1112,6 +1119,7 @@
     const out = [];
     B.leads.forEach(L => { if (S.leads[L.id] && !S.leads[L.id].deleted) out.push({ op: 'lead.del', lead: L.id }); });
     B.notes.forEach(n => { if (S.notes[n.id] && !S.notes[n.id].deleted) out.push({ op: 'note.set', note: n.id, target: n.target, text: '', prev: n.text, base: S.notes[n.id].heads }); });
+    invMoveClear(B.inventories, S).forEach(e => out.push(e));
     if (B.segments.length) out.push({ op: 'segment.del', segs: B.segments.map(g => g.id) });
     B.labels.forEach(a => out.push({ op: 'arealabel.set', label: a.id, file: a.file, removed: true }));
     B.files.forEach(f => out.push({ op: 'cavefile.set', file: f.file, removed: true }));
@@ -1759,6 +1767,7 @@
   // Four records, in the project's log, or My data's when there is no project (same rules as leads: append only,
   // merged by entry id, `base` links show edits that never saw each other):
   //   inv.set      { inv, target, fields: { name, desc, mode ('log' | 'list'), list }, prev, base }   create / edit
+  //                (a chest carried by a move also has listBy: { who, t }, when its list was last edited: its age carries over)
   //   inv.log      { inv, log, date, by, action, items: [{ name, qty }], all, photos: [{ h, ext, w?, ht?, name? }], text,
   //                  removed, prev, base }                                                              one dated entry
   //   inv.del / inv.restore { inv, base }
@@ -1884,7 +1893,12 @@
       if (e.target) I.target = String(e.target);
       if (e.op === 'inv.del') { I.deleted = true; return; }
       if (e.op === 'inv.restore') { I.deleted = false; return; }
-      Object.keys(e.fields || {}).forEach(k => { I.fields[k] = clone(e.fields[k]); I.fieldBy[k] = { who: e.who, t: e.t }; });
+      Object.keys(e.fields || {}).forEach(k => {
+        I.fields[k] = clone(e.fields[k]);
+        // (a list carried by a move keeps when it was last edited and by whom, so "possibly out of date" does not start over)
+        const lb = k === 'list' && e.listBy && Number.isFinite(Date.parse(e.listBy.t)) ? e.listBy : null;
+        I.fieldBy[k] = lb ? { who: String(lb.who == null ? e.who : lb.who), t: String(lb.t) } : { who: e.who, t: e.t };
+      });
       if (e.source) I.source = e.source;
     });
     const f = I.fields, str = v => (v == null ? '' : String(v));
@@ -2047,6 +2061,47 @@
     });
     return out;
   }
+  // Inventories go where their place goes: with a cave that moves to another project (caveBundle), or with a surface
+  // point that moves between a project and My data (the point has a new id there, so the target is rewritten).
+  // `list`: replayed inventories of the source. The destination gets the same inventory id and the same log entry ids,
+  // so moving again, or finishing a move that stopped halfway, adds nothing twice; what the destination already has is
+  // left as it is (a removed copy there is restored first). Bodies without id / dev / seq / t / who, which the host adds.
+  // Each entry keeps its writer in `by`. Photos are pages by content hash: the host copies the files (invPhotoBlobs).
+  function invMoveEntries(list, destS, retarget) {
+    const out = [];
+    (list || []).forEach(I => {
+      if (!I || !I.id) return;
+      const d = destS && destS.inventories && destS.inventories[I.id], cur = d && d.target ? d : null;
+      if (cur && cur.deleted) out.push({ op: 'inv.restore', inv: I.id, base: cur.heads.slice() });
+      const set = invSetBody(cur, { target: retarget ? retarget(I.target) : I.target, name: I.name, desc: I.desc, mode: I.mode, list: I.list });
+      if (set) out.push(Object.assign(set, { inv: I.id }, I.source ? { source: I.source } : {}, set.fields.list !== undefined && I.fieldBy && I.fieldBy.list ? { listBy: { who: I.fieldBy.list.who, t: I.fieldBy.list.t } } : {}));
+      const have = new Set(cur ? cur.log.map(e => e.id) : []);
+      (I.log || []).forEach(e => {
+        if (!have.has(e.id)) out.push({ op: 'inv.log', inv: I.id, log: e.id, date: e.date, by: e.by || (e.created && e.created.who) || '', action: e.action, items: invItems(e.items),
+          all: !!e.all, photos: invPhotos(e.photos), text: e.text || '', prev: null });
+      });
+    });
+    return out;
+  }
+  // What the source records to let them go: each is removed (its history stays; History can undo it).
+  function invMoveClear(list, S) {
+    const out = [];
+    (list || []).forEach(I => { const c = I && S && S.inventories && S.inventories[I.id]; if (c && !c.deleted) out.push({ op: 'inv.del', inv: I.id, base: c.heads.slice() }); });
+    return out;
+  }
+  // The photo files of some inventories: [{ h, ext }], once each.
+  function invPhotoBlobs(list) {
+    const m = new Map();
+    (list || []).forEach(I => ((I && I.photos) || []).forEach(p => m.set(p.h + '.' + p.ext, { h: p.h, ext: p.ext })));
+    return [...m.values()];
+  }
+  // The chests at a surface point that moves between a project and My data (it has a new id there: `toId`):
+  // { put: entries for the destination, clear: entries that let them go at the source, photos: [{ h, ext }] }.
+  function featureInvMove(S, fromId, destS, toId) {
+    const list = invsOn(S, T.feature(fromId)), target = T.feature(toId);
+    return { put: invMoveEntries(list, destS, () => target), clear: invMoveClear(list, S), photos: invPhotoBlobs(list) };
+  }
+
   // A one-line account of what is there ("Rope 50 m ×2, Stove"), for lists and markers.
   function invLine(I, max) {
     if (I.mode === 'list') return String(I.list || '').split('\n').map(s => s.trim()).filter(Boolean).join(', ');
@@ -2070,7 +2125,7 @@
   }
 
   return {
-    INV, invKey, invQty, invItems, invPhotos, invDate, invAge, invMark, replayInventories, liveInventories, invsOn, invSetBody, invLogBody, invLogRemoveBody, invUndo, invAdoptBodies, invLine, invPayload,   // inventories (the section above)
+    INV, invKey, invQty, invItems, invPhotos, invDate, invAge, invMark, replayInventories, liveInventories, invsOn, invSetBody, invLogBody, invLogRemoveBody, invUndo, invAdoptBodies, invMoveEntries, invMoveClear, invPhotoBlobs, featureInvMove, invLine, invPayload,   // inventories (the section above)
     FORMAT, FT, DOCS, projScope, scopeProject, sha256, uid, clone, nowIso, same, cmp, sortEntries, surveyCode,
     T, parseTarget, areaHas, DOC_KINDS, DOC_KIND_LABELS, docMedia, dateKey, resolveProposals, reviewQueue, causalOrder, LEAD, LEAD_FIELDS, leadLists, statusLabel, leadActive, heads,
     replayProject, replayDocs, caveForName, liveCaves, notesOn, leadsOn,
