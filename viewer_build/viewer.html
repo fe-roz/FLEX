@@ -158,6 +158,7 @@
     position: fixed; bottom: 88px; left: 50%; transform: translateX(-50%);
     background: rgba(0,0,0,.72); border: 1px solid rgba(255,255,255,.15);
     border-radius: 20px; padding: 6px 16px; font-size: 12px; color: #eee;
+    width: max-content; max-width: min(92vw, 420px); text-align: center;    /* a long message wraps instead of running off the screen */
     pointer-events: none; z-index: 40;
     opacity: 0; transition: opacity .2s;
   }
@@ -474,12 +475,17 @@
     <div class="help-section">TOOLBAR</div>
     <div class="help-row"><span class="help-icon">📍</span><span class="help-desc">GPS: off / pin / follow / heading-up · record a track · drop pins · export GPX/KML · compass calibration</span></div>
     <div class="help-row"><span class="help-icon">🔧</span><span class="help-desc">Tools: find (stations, leads — active / closed), measure, route, reach, fly, crane, import KML · 📐 field survey · 📚 documents · 📝 change log (undo)</span></div>
+    <div class="help-row"><span class="help-icon">🚩</span><span class="help-desc">Route: tap the start station, then the end station (only stations answer: not a lead, a name or a pin), or type part of a name in the box under the bar at the top, with the cave in the list. With a route showing only its stations can be tapped; the rest of the cave, its names and leads are dimmed until you clear it (✕ on the bar).</span></div>
     <div class="help-row"><span class="help-icon">🎨</span><span class="help-desc">Display: colour by survey / elevation / depth / difficulty (narrow blue, low red, steep green), walls, stations (with their names); show or hide leads, area names, tracks, imported layers; imagery and terrain</span></div>
     <div class="help-row"><span class="help-icon">⋯</span><span class="help-desc">Units (ft / m), what counts as narrow, stooping, crawling or steep (Route difficulty), who is entering data, ⇄ project & sync files (share with other phones and FLEX), export project data, fullscreen, help</span></div>
     <div class="help-section">STATIONS</div>
     <div class="help-row"><span class="help-icon">👆</span><span class="help-desc">Tap: info · again: caver for scale · again: reach (what's within range along the survey) · again: off</span></div>
     <div class="help-row"><span class="help-icon">✏️</span><span class="help-desc">On a station's card: ✏️ Add note is always there · 📄 documents tagged to the station, its survey or cave (the ones in the export too: scanned notes and photos; PDFs stay in FLEX). Everything else — changing a note, ❓ leads (status, size…), 📐 survey new passage from here, and in a document turning pages, tags, removing — waits behind the small <b>✎ Edit</b> button, which is off again when you close the card.</span></div>
     <div class="help-row"><span class="help-icon">👆</span><span class="help-desc">Taps find the nearest station, lead mark, name or pin within a finger's width of the touch; a drag or a two-finger move is never a tap</span></div>
+    <div class="help-section">FIELD SURVEY</div>
+    <div class="help-row"><span class="help-icon">📐</span><span class="help-desc">Shots start at the station you tied the survey to (✎ Edit on its card → Survey from here). The form suggests station names the cave does not have yet; a shot to a name that exists closes a loop onto that station and is drawn over the line already there. <b>🗺 Show on map</b> takes the view to your shots.</span></div>
+    <div class="help-row"><span class="help-icon">🧭</span><span class="help-desc">Declination is worked out offline (World Magnetic Model, for the survey's date) at the tie-in: “Declination 10.3° E (WMM 2026 at T6)”. Type your own (12 W) to override it; Use WMM goes back. <b>Backsights</b> shows the back readings; tap again to hide them.</span></div>
+    <div class="help-row"><span class="help-icon">📍</span><span class="help-desc"><b>Use my location</b> takes one GPS fix (no network): the declination is worked out there for a survey tied to no station of the map, and its first station can be placed at the fix (approximate, marked ≈). ＋ New survey with no station selected starts at your location.</span></div>
     <div class="help-row"><span class="help-icon">💾</span><span class="help-desc">Display choices (walls, colour, wall opacity, stations, area names, terrain sliders) are remembered for this map. A new map opens with ghost walls coloured by elevation. The view stays over the map.</span></div>
   </div>
   <div id="help-dismiss">Tap anywhere to dismiss</div>
@@ -3613,7 +3619,9 @@ function routeApplyAlpha() {
     if (st._leadSprite) st._leadSprite.material.opacity = a;
   });
   areaLabelGroup.children.forEach(sp => { sp.material.opacity = ROUTE_LABEL_DIM; });
-  if (typeof ffApplyWallMode === 'function') ffApplyWallMode();      // the field survey's walls dim with the rest
+  // the field survey's walls dim with the rest (clearing the route puts the wall mode back, field walls included)
+  const fw = (wallMode === 1 ? Math.min(wallOpacity, 0.2) : wallOpacity) * 0.15;
+  ffWallGroup.children.forEach(m => { m.material.opacity = fw; m.material.needsUpdate = true; });
   requestRender(); wakeRender();
 }
 
@@ -3650,7 +3658,9 @@ function routeClear() {
   routeClearDrawing();
   document.getElementById('btn-route').classList.remove('active');
   applyReach();                       // restores full opacity (reach is off)
+  applyWallMode();                    // …and the walls (a route lifted them), the field survey's included
   routeRenderPanel();
+  updateModeBar(true);                // the bar and the search box under it go at once
 }
 function routeSet(which, st) {
   if (which === 'from') routeFrom = st; else routeTo = st;
@@ -3672,6 +3682,7 @@ document.getElementById('btn-route').addEventListener('click', function () {
   openFind('route');
   findPicked();
   showToast('Tap the start station');
+  updateModeBar(true);                // the flag, and the search box under it, at once
 });
 // A station picked to start or end the route, by a tap or by name; the first is the start, the second the end.
 function routePicked(st) {
@@ -3683,6 +3694,7 @@ function routePicked(st) {
     selectStation(st);
     routeRenderPanel();
     showToast(`Start: ${st.name || 'station'} — now tap the end, or type its name`);
+    updateModeBar(true);
   } else {
     routePick = null;
     document.getElementById('btn-route').classList.remove('active');
@@ -6002,7 +6014,7 @@ function ffGpsScene(g) {
 function ffTiePos(sv) {
   if (sv.gpsStart && sv.gps && isFinite(sv.gps.lat) && isFinite(sv.gps.lon)) return { pos: ffGpsScene(sv.gps), how: 'gps' };
   ffBaseStations();
-  const alts = _ffBaseAlts.get(ffKey(sv.cave, sv.tie));
+  const alts = (ffState.caveUpdates || {})[sv.cave || ''] ? null : _ffBaseAlts.get(ffKey(sv.cave, sv.tie));   // (a cave redrawn from a PLT has other places)
   if (alts && alts.length > 1 && Array.isArray(sv.tieAt) && isFinite(sv.tieAt[0]) && isFinite(sv.tieAt[1])) {
     const s = gpsToScene(sv.tieAt[0], sv.tieAt[1]);
     let best = alts[0], bd = Infinity;
@@ -6135,9 +6147,8 @@ function ffBuildWalls() {
 }
 function ffApplyWallMode() {
   ffWallGroup.visible = wallMode !== 2;
-  let dim = 1; try { if (routes.length) dim = 0.15; } catch (_) {}              // a route is showing: the rest is dimmed
   ffWallGroup.children.forEach(m => {
-    m.material.opacity = (wallMode === 1 ? Math.min(wallOpacity, 0.2) : wallOpacity) * dim;
+    m.material.opacity = wallMode === 1 ? Math.min(wallOpacity, 0.2) : wallOpacity;
     m.material.depthWrite = wallMode !== 1;
     m.material.needsUpdate = true;
   });
