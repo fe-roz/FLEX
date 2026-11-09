@@ -452,5 +452,174 @@ const pid = 'proj1', cid = 'cave1', cid2 = 'cave2';
   ok('area labels: an op a reader does not know changes nothing else', JSON.stringify(Object.keys(L.replayProject([a1, D1('arealabel.frobnicate', { label: 'l1' })], pid).arealabels)) === '["l1"]');
 }
 
+// Inventories (inv.set / inv.log / inv.del / inv.restore): contents worked out from a dated log, conflicts, undo,
+// list mode, photos, "possibly out of date".
+{
+  const D1 = device('invA', 'Ana'), D2 = device('invB', 'Bo');
+  const st = L.T.station(cid, 'T6'), H = n => String(n).repeat(64).slice(0, 64);
+  const mk = (dev, op, data, at) => dev(op, data, at);
+  const day = d => Date.parse(d + 'T12:00:00Z');
+  const set = mk(D1, 'inv.set', { inv: 'iv1', target: st, fields: { name: 'Rope cache', desc: 'Blue barrel behind the boulder', mode: 'log' }, prev: null });
+  const left = mk(D1, 'inv.log', { inv: 'iv1', log: 'e1', date: '2026-01-10', action: 'left', items: [{ name: 'Rope 50 m', qty: 2 }, { name: 'Stove', qty: 1 }], text: 'In the blue barrel', prev: null });
+  const took = mk(D2, 'inv.log', { inv: 'iv1', log: 'e2', date: '2026-02-01', by: 'Bo and Cy', action: 'took', items: [{ name: 'rope 50 m', qty: 1 }], prev: null });
+  let S = L.replayProject([set, left, took], pid);
+  let I = S.inventories.iv1;
+  ok('inventory: one, at its target, with name, description, mode', I && I.target === st && I.name === 'Rope cache' && I.desc.startsWith('Blue barrel') && I.mode === 'log' && !I.deleted && !I.orphan, I);
+  ok('inventory: listed live, found by target, none elsewhere', L.liveInventories(S).length === 1 && L.invsOn(S, st).length === 1 && L.invsOn(S, L.T.station(cid, 'T7')).length === 0 && L.invsOn(S, L.T.feature('f1')).length === 0);
+  ok('inventory: log sorted by date, with who (by, else the author)', I.log.map(e => e.id).join() === 'e1,e2' && I.log[0].created.who === 'Ana' && I.log[1].by === 'Bo and Cy');
+  ok('contents: left adds, took subtracts (names match without case), by name', I.contents.map(c => c.name + ' ' + c.qty).join('|') === 'Rope 50 m 1|Stove 1', I.contents);
+  ok('contents: last change per item; never checked yet', I.contents[0].changed === '2026-02-01' && I.contents[1].changed === '2026-01-10' && !I.contents[0].checked && I.checked === '', I.contents);
+  ok('contents: an empty replay has no inventories', Object.keys(L.replayProject([PC('project.set', { name: 'x' })], pid).inventories).length === 0);
+
+  // checked sets the counts seen; items it does not list are untouched, unless it was a complete count
+  const chk = mk(D1, 'inv.log', { inv: 'iv1', log: 'e3', date: '2026-03-02', action: 'checked', items: [{ name: 'Rope 50 m', qty: 3 }, { name: 'Tarp', qty: 1 }], prev: null });
+  I = L.replayProject([set, left, took, chk], pid).inventories.iv1;
+  ok('checked: sets the counts it lists, adds new items, leaves the others', I.contents.map(c => c.name + ' ' + c.qty).join('|') === 'Rope 50 m 3|Stove 1|Tarp 1', I.contents);
+  ok('checked: last-checked date for the item and the inventory; changed only where the number changed', I.contents[0].checked === '2026-03-02' && I.contents[0].changed === '2026-03-02' && !I.contents[1].checked && I.contents[2].checked === '2026-03-02' && I.checked === '2026-03-02', I.contents);
+  const chkSame = mk(D1, 'inv.log', { inv: 'iv1', log: 'e3', date: '2026-03-02', action: 'checked', items: [{ name: 'Rope 50 m', qty: 1 }], prev: null });
+  I = L.replayProject([set, left, took, chkSame], pid).inventories.iv1;
+  ok('checked: the same number is a check, not a change', I.contents[0].qty === 1 && I.contents[0].changed === '2026-02-01' && I.contents[0].checked === '2026-03-02', I.contents[0]);
+  const chkAll = mk(D1, 'inv.log', { inv: 'iv1', log: 'e3', date: '2026-03-02', action: 'checked', all: true, items: [{ name: 'Rope 50 m', qty: 1 }], prev: null });
+  I = L.replayProject([set, left, took, chkAll], pid).inventories.iv1;
+  ok('checked, complete count: what it does not list is gone (kept as gone, with the date)', I.contents.map(c => c.name).join() === 'Rope 50 m' && I.gone.length === 1 && I.gone[0].name === 'Stove' && I.gone[0].checked === '2026-03-02', I);
+  const chk0 = mk(D1, 'inv.log', { inv: 'iv1', log: 'e3', date: '2026-03-02', action: 'checked', items: [{ name: 'Stove', qty: 0 }], prev: null });
+  I = L.replayProject([set, left, took, chk0], pid).inventories.iv1;
+  ok('checked with 0: that item is gone, the rest stays', I.contents.map(c => c.name).join() === 'Rope 50 m' && I.gone[0].name === 'Stove');
+  // took more than was recorded: never below zero, the record is flagged short
+  const over = mk(D1, 'inv.log', { inv: 'iv1', log: 'e4', date: '2026-04-01', action: 'took', items: [{ name: 'Stove', qty: 3 }, { name: 'Carbide', qty: 1 }], prev: null });
+  I = L.replayProject([set, left, took, over], pid).inventories.iv1;
+  ok('took more than there was: 0 left and the shortfall noted (not negative)', I.contents.map(c => c.name).join() === 'Rope 50 m' && I.gone.some(g => g.name === 'Stove') && I.gone.some(g => g.name === 'Carbide'), I);
+  const short = L.replayProject([set, left, over], pid).inventories.iv1;
+  ok('...and its short count is kept for the table', short.gone.length === 2, short.gone);
+  // quantities: none means 1, comma decimals, the same item twice in one entry
+  ok('quantities: none counts as 1, "2,5" is 2.5, text is 1, 0 stays 0', L.invQty(undefined) === 1 && L.invQty('') === 1 && L.invQty('2,5') === 2.5 && L.invQty('abc') === 1 && L.invQty(0) === 0 && L.invQty('0') === 0 && L.invQty(-3) === 1);
+  ok('items: tidied, the same item twice is added up, empty names dropped', JSON.stringify(L.invItems([{ name: '  Rope  50 m ', qty: 2 }, { name: 'rope 50 M', qty: '1' }, { name: '', qty: 4 }, null])) === '[{"name":"Rope 50 m","qty":3}]');
+
+  // a backdated entry slots into its day; the order of reading changes nothing
+  const back = mk(D2, 'inv.log', { inv: 'iv1', log: 'e5', date: '2026-01-20', action: 'took', items: [{ name: 'Stove', qty: 1 }], prev: null });
+  I = L.replayProject([set, left, took, chk, back], pid).inventories.iv1;
+  ok('dates: a late entry for an earlier day is counted at that day (the later check wins)', I.log.map(e => e.id).join() === 'e1,e5,e2,e3' && I.contents.map(c => c.name + ' ' + c.qty).join('|') === 'Rope 50 m 3|Tarp 1', { log: I.log.map(e => e.id), c: I.contents });
+  const all = [set, left, took, chk, back, over];
+  const shuffled = [over, back, chk, took, left, set];
+  ok('replay does not depend on the order entries are read', JSON.stringify(L.replayProject(all, pid).inventories.iv1.contents) === JSON.stringify(L.replayProject(shuffled, pid).inventories.iv1.contents));
+  ok('the same entry merged twice counts once', L.replayProject(all.concat(all), pid).inventories.iv1.log.length === 5);
+
+  // approximate dates sort and show as typed
+  const yr = mk(D1, 'inv.log', { inv: 'iv1', log: 'e6', date: '2019', action: 'left', items: [{ name: 'Old ladder', qty: 1 }], prev: null });
+  I = L.replayProject([set, yr, left], pid).inventories.iv1;
+  ok('dates: a year-only entry sorts first and shows as typed; an entry with no date counts from the day it was recorded', I.log[0].date === '2019' && I.log[1].date === '2026-01-10'
+    && L.replayProject([set, mk(D1, 'inv.log', { inv: 'iv1', log: 'e7', action: 'note', text: 'hi' }, day('2026-05-05'))], pid).inventories.iv1.log[0].date === '2026-05-05');
+
+  // possibly out of date: counted long ago, or never counted and left long ago
+  const base = L.replayProject([set, left, took, chk], pid).inventories.iv1;
+  const m1 = L.invMark(base, { now: day('2026-09-01') }), m2 = L.invMark(base, { now: day('2027-04-01') }), m3 = L.invMark(base, { now: day('2027-04-01'), staleDays: 800 });
+  ok('stale: nothing is, within a year of the last count (Stove: left 2026-01-10, never counted)', m1.contents.every(c => !c.stale) && !m1.stale, m1.contents);
+  ok('stale: counted items turn stale after the limit, and uncounted ones from the day they were first left', m2.contents.map(c => c.name + ':' + c.stale).join('|') === 'Rope 50 m:true|Stove:true|Tarp:true' && m2.stale, m2.contents);
+  ok('stale: the limit can be set; the copy leaves the replayed inventory alone', m3.contents.every(c => !c.stale) && base.contents.every(c => c.stale === (c.age > 365)));
+  const mixed = L.invMark(L.replayProject([set, left, chk], pid).inventories.iv1, { now: day('2026-12-01') });
+  ok('stale: an item counted recently is fresh next to one never counted and left a year ago', mixed.contents.find(c => c.name === 'Tarp').stale === false && mixed.contents.find(c => c.name === 'Stove').stale === (Math.floor((day('2026-12-01') - Date.UTC(2026, 0, 10)) / 864e5) > 365) && L.invAge('2026-01-10', day('2026-01-20')) === 10 && L.invAge('x', 0) === null);
+
+  // conflicts: inv.set fields per field; a log entry edited twice without seeing the other
+  const e2a = mk(D1, 'inv.set', { inv: 'iv1', fields: { name: 'Rope store' }, prev: { name: 'Rope cache' }, base: [set.id] });
+  const e2b = mk(D2, 'inv.set', { inv: 'iv1', fields: { desc: 'Under the ledge' }, prev: { desc: 'Blue barrel behind the boulder' }, base: [set.id] });
+  I = L.replayProject([set, e2a, e2b], pid).inventories.iv1;
+  ok('inv.set: edits of different fields both count, no conflict', I.name === 'Rope store' && I.desc === 'Under the ledge' && !I.conflicts, I.conflicts);
+  const e3b = mk(D2, 'inv.set', { inv: 'iv1', fields: { name: 'Rope depot' }, base: [set.id] });
+  I = L.replayProject([set, e2a, e3b], pid).inventories.iv1;
+  ok('inv.set: the same field changed on two devices is a conflict, both kept', I.conflicts && I.conflicts.name && I.conflicts.name.length === 2 && ['Rope store', 'Rope depot'].includes(I.name), I.conflicts);
+  const fix = mk(D1, 'inv.set', { inv: 'iv1', fields: { name: 'Rope depot' }, base: [e2a.id, e3b.id] });
+  ok('inv.set: saving over both resolves it', !L.replayProject([set, e2a, e3b, fix], pid).inventories.iv1.conflicts);
+  const l2a = mk(D1, 'inv.log', { inv: 'iv1', log: 'e1', items: [{ name: 'Rope 50 m', qty: 5 }], base: [left.id] });
+  const l2b = mk(D2, 'inv.log', { inv: 'iv1', log: 'e1', items: [{ name: 'Rope 50 m', qty: 4 }], base: [left.id] });
+  const l2c = mk(D2, 'inv.log', { inv: 'iv1', log: 'e1', text: 'Both barrels', base: [left.id] });
+  I = L.replayProject([set, left, l2a, l2b], pid).inventories.iv1;
+  ok('inv.log: one entry edited on two devices: conflict on that field, both kept', I.log[0].conflicts && I.log[0].conflicts.items.length === 2, I.log[0].conflicts);
+  I = L.replayProject([set, left, l2a, l2c], pid).inventories.iv1;
+  ok('inv.log: edits of different fields of one entry both count', !I.log[0].conflicts && I.log[0].text === 'Both barrels' && I.log[0].items[0].qty === 5, I.log[0]);
+  I = L.replayProject([set, left, l2a, l2b, mk(D1, 'inv.log', { inv: 'iv1', log: 'e1', items: [{ name: 'Rope 50 m', qty: 4 }], base: [l2a.id, l2b.id] })], pid).inventories.iv1;
+  ok('inv.log: saving over both resolves it', !I.log[0].conflicts && I.log[0].items[0].qty === 4);
+
+  // remove and undo
+  const rm = mk(D1, 'inv.log', { inv: 'iv1', log: 'e2', removed: true, prev: { date: '2026-02-01', by: 'Bo and Cy', action: 'took', items: [{ name: 'rope 50 m', qty: 1 }], all: false, photos: [], text: '' }, base: [took.id] });
+  I = L.replayProject([set, left, took, rm], pid).inventories.iv1;
+  ok('inv.log: a removed entry is out of the log and the counts', I.log.length === 1 && I.contents.find(c => c.name === 'Rope 50 m').qty === 2, I.log);
+  const unrm = Object.assign(D1('x', {}), L.invUndo(Object.assign({ id: 'invA.99' }, rm)));
+  I = L.replayProject([set, left, took, rm, unrm], pid).inventories.iv1;
+  ok('undo of a removed entry brings it back as it was', I.log.map(e => e.id).join() === 'e1,e2' && I.log[1].by === 'Bo and Cy' && I.contents.find(c => c.name === 'Rope 50 m').qty === 1, I.log);
+  const undoNew = Object.assign(D1('x', {}), L.invUndo(left));
+  I = L.replayProject([set, left, took, undoNew], pid).inventories.iv1;
+  ok('undo of a new entry takes it out', I.log.map(e => e.id).join() === 'e2' && undoNew.removed === true && undoNew.log === 'e1');
+  const edit = Object.assign(mk(D1, 'inv.log', { inv: 'iv1', log: 'e1', items: [{ name: 'Rope 50 m', qty: 9 }], prev: { items: left.items }, base: [left.id] }));
+  const undoEdit = Object.assign(D1('x', {}), L.invUndo(edit));
+  I = L.replayProject([set, left, edit, undoEdit], pid).inventories.iv1;
+  ok('undo of an edit puts the earlier items back', I.log[0].items.length === 2 && I.log[0].items[0].qty === 2, I.log[0].items);
+  const del = mk(D1, 'inv.del', { inv: 'iv1', base: set.heads });
+  S = L.replayProject([set, left, del], pid);
+  ok('inv.del: gone from the live list, the record and its log kept', S.inventories.iv1.deleted && L.liveInventories(S).length === 0 && S.inventories.iv1.log.length === 1);
+  const res = Object.assign(D1('x', {}), L.invUndo(del));
+  ok('undo of a removal: inv.restore brings it back; undo of that removes it again', res.op === 'inv.restore' && L.liveInventories(L.replayProject([set, left, del, res], pid)).length === 1 && L.invUndo(Object.assign({ id: 'q.1' }, res)).op === 'inv.del');
+  const un1 = L.invUndo(set);
+  ok('undo of a new inventory removes it', un1.op === 'inv.del' && un1.inv === 'iv1');
+  const un2 = Object.assign(D1('x', {}), L.invUndo(e2a));
+  ok('undo of a rename puts the name back', L.replayProject([set, e2a, un2], pid).inventories.iv1.name === 'Rope cache' && un2.fields.name === 'Rope cache');
+  ok('undo: proposals and unknown things have none', L.invUndo(Object.assign({}, left, { proposed: { by: 'x' } })) === null && L.invUndo({ id: 'a.1', op: 'note.set', inv: 'iv1' }) === null && L.invUndo(null) === null);
+
+  // list mode: a simple list; the log stays for when it is switched back
+  const toList = mk(D1, 'inv.set', { inv: 'iv1', fields: { mode: 'list', list: '2 ropes\nstove\nblue tarp' }, prev: { mode: 'log', list: '' }, base: [set.id] });
+  I = L.replayProject([set, left, took, toList], pid).inventories.iv1;
+  ok('list mode: mode and text kept; the log still replays', I.mode === 'list' && I.list.startsWith('2 ropes') && I.log.length === 2 && I.contents.length === 2, I);
+  ok('list mode: one line for lists and markers', L.invLine(I) === '2 ropes, stove, blue tarp' && L.invLine(base) === 'Rope 50 m ×3, Stove, Tarp' && L.invLine(L.replayProject([set, left], pid).inventories.iv1) === 'Rope 50 m ×2, Stove' && L.invLine(base, 2) === 'Rope 50 m ×3, Stove +1');
+  const listLate = L.invMark(I, { now: Date.parse(toList.t) + 400 * 864e5 }), listSoon = L.invMark(I, { now: Date.parse(toList.t) + 10 * 864e5 });
+  ok('list mode: a list nobody edited for a year is possibly out of date', listLate.stale && !listSoon.stale && listLate.listAge === 400, [listLate.stale, listSoon.stale, listLate.listAge]);
+  const back2 = mk(D1, 'inv.set', { inv: 'iv1', fields: { mode: 'log' }, prev: { mode: 'list' }, base: [toList.id] });
+  ok('switching back to the log shows the counts again', L.replayProject([set, left, took, toList, back2], pid).inventories.iv1.mode === 'log');
+
+  // photos: page references with the date of their entry, newest first; page types kept; bad hashes dropped
+  const ph = mk(D1, 'inv.log', { inv: 'iv1', log: 'e8', date: '2026-05-01', action: 'note', text: 'Barrel lid', photos: [{ h: H(1), ext: 'jpg', w: 800, ht: 600, name: 'lid.jpg' }, { h: 'zz', ext: 'jpg' }, { h: H(2), ext: 'PNG' }], prev: null });
+  I = L.replayProject([set, left, ph], pid).inventories.iv1;
+  ok('photos: kept as pages with the entry date, newest first, bad hashes dropped', I.photos.length === 2 && I.photos[0].date === '2026-05-01' && I.photos[0].log === 'e8' && I.photos[1].ext === 'png' && I.photos[0].w === 800, I.photos);
+  const sel = L.selectForSync([set, left, ph].map((e, i) => Object.assign({ scope: 'x' }, e)), [], L.replayProject([set, left, ph], pid), L.replayDocs([]), null, 'all');
+  ok('sync file: the photos of inventory entries travel as pages', sel.blobs.includes(H(1) + '.jpg') && sel.blobs.includes(H(2) + '.png') && sel.count === 3, sel.blobs);
+
+  // an archive's suggestion changes nothing until accepted
+  const prop = mk(D2, 'inv.log', { inv: 'iv1', log: 'e9', date: '1998-07-01', action: 'left', items: [{ name: 'Ladder', qty: 1 }], proposed: { by: 'archive', confidence: 0.7, evidence: [] } });
+  I = L.replayProject([set, left, prop], pid).inventories.iv1;
+  ok('proposal: not counted before it is accepted', !I.contents.some(c => c.name === 'Ladder'));
+  const acc = mk(D1, 'accept', { ref: prop.id });
+  I = L.replayProject([set, left, prop, acc], pid).inventories.iv1;
+  ok('proposal: accepted, it is an entry of the log at its date', I.contents.some(c => c.name === 'Ladder') && I.log[0].id === 'e9' && I.log[0].date === '1998-07-01', I.log.map(e => e.id));
+
+  // a log with no inv.set yet (the other half arrives in a later sync file): kept, not listed
+  S = L.replayProject([left], pid);
+  ok('orphan log: the inventory is there but not placed, so not listed', S.inventories.iv1.orphan && S.inventories.iv1.log.length === 1 && L.liveInventories(S).length === 0);
+  ok('orphan log: it joins its inventory once the inv.set comes', !L.replayProject([left, set], pid).inventories.iv1.orphan && L.liveInventories(L.replayProject([left, set], pid)).length === 1);
+
+  // surface point target, move to another target
+  const fset = mk(D1, 'inv.set', { inv: 'iv2', target: L.T.feature('f1'), fields: { name: 'Dig kit', mode: 'log' }, prev: null });
+  S = L.replayProject([set, fset], pid);
+  ok('surface point: found by its feature target', L.invsOn(S, 'feature:f1').map(i => i.name).join() === 'Dig kit' && L.liveInventories(S).map(i => i.name).join() === 'Dig kit,Rope cache');
+  const mv = mk(D1, 'inv.set', { inv: 'iv2', target: L.T.station(cid, 'T7'), fields: {}, prev: { target: 'feature:f1' }, base: [fset.id] });
+  ok('moved to another place: the target follows the latest edit', L.replayProject([set, fset, mv], pid).inventories.iv2.target === L.T.station(cid, 'T7'));
+
+  // building the records
+  const nb = L.invSetBody(null, { target: st, name: '  Rope   cache ', desc: 'x', mode: 'list', list: 'a' });
+  ok('invSetBody: a new inventory', nb.op === 'inv.set' && nb.target === st && nb.fields.name === 'Rope cache' && nb.fields.mode === 'list' && nb.prev === null && !('base' in nb), nb);
+  const cur = L.replayProject([set, left], pid).inventories.iv1;
+  ok('invSetBody: nothing changed is null; a change carries prev and base', L.invSetBody(cur, { name: 'Rope cache', mode: 'log' }) === null
+    && JSON.stringify(L.invSetBody(cur, { name: 'Depot' }).prev) === '{"name":"Rope cache"}' && L.invSetBody(cur, { name: 'Depot' }).base[0] === set.id);
+  const lb = L.invLogBody('iv1', { date: '2026-06-01', action: 'left', items: [{ name: 'Tarp', qty: '2' }], photos: [{ h: H(3), ext: 'jpg' }] });
+  ok('invLogBody: a new entry (id, normalised items, prev null)', lb.op === 'inv.log' && lb.inv === 'iv1' && /^[a-z0-9]{12}$/.test(lb.log) && lb.items[0].qty === 2 && lb.prev === null && lb.photos.length === 1 && lb.all === false, lb);
+  ok('invLogBody: today when no date; a note carries no items; "all" only on a check', /^\d{4}-\d{2}-\d{2}$/.test(L.invLogBody('iv1', { action: 'note', items: [{ name: 'x' }], all: true, text: 't' }).date) && L.invLogBody('iv1', { action: 'note', items: [{ name: 'x' }] }).items.length === 0 && L.invLogBody('iv1', { action: 'left', all: true, items: [] }).all === false && L.invLogBody('iv1', { action: 'checked', all: true, items: [] }).all === true);
+  const ent = L.replayProject([set, left], pid).inventories.iv1.log[0];
+  ok('invLogBody: an edit with no change is null; with a change it keeps the log id, prev and base', L.invLogBody('iv1', { date: ent.date, by: ent.by, action: ent.action, items: ent.items, photos: ent.photos, text: ent.text }, ent) === null
+    && (e => e.log === 'e1' && e.prev.text === 'In the blue barrel' && e.base[0] === left.id && e.text === 'Changed')(L.invLogBody('iv1', { date: ent.date, action: ent.action, items: ent.items, text: 'Changed' }, ent)));
+  const lrm = L.invLogRemoveBody('iv1', ent);
+  ok('invLogRemoveBody: removed, with the entry as it was for the undo', lrm.removed === true && lrm.log === 'e1' && lrm.prev.items.length === 2 && lrm.base[0] === left.id);
+  const pay = L.invPayload(L.replayProject([set, left, took, chk, ph], pid).inventories.iv1);
+  ok('invPayload: what the export carries (contents with dates, the log with photo references)', pay.id === 'iv1' && pay.target === st && pay.contents.length === 3 && pay.checked === '2026-03-02' && pay.log.length === 4
+    && pay.log[3].photos[0].h === H(1) && pay.log[0].by === 'Ana' && pay.log[1].by === 'Bo and Cy' && pay.contents[0].checked === '2026-03-02' && !('created' in pay.log[0]), pay);
+  ok('invPayload: it survives JSON (it goes into caves.json)', JSON.stringify(JSON.parse(JSON.stringify(pay))) === JSON.stringify(pay));
+}
+
 console.log((fail ? 'FAILED ' : 'ok ') + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
