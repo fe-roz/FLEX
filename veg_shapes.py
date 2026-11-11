@@ -1271,7 +1271,7 @@ def synth_scene(seed=3, density=20.0):
     W, H = 200.0, 160.0
 
     def zf(x, y):
-        return 300.0 + 0.08 * x + 0.03 * y + 1.5 * np.sin(x / 40.0)
+        return 300.0 + 0.08 * x + 0.03 * y + 1.5 * np.sin(x * 0.025)
 
     trees = []      # x, y, height, radius, base, kind
     # Conifers in the west, spaced 9-11 m.
