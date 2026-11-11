@@ -890,7 +890,8 @@ def hillshade(dem, cell):
     return np.clip(s, 0, 1)
 
 
-def preview(path, frame, dem, ggrid, chm, cg, recs, bbox, max_px=900):
+def preview(path, frame, dem, ggrid, chm, cg, recs, bbox, has_data=None,
+            max_px=640):
     """Top-down, north up, in the local frame: hillshade, canopy height in
     greens, crown rims (cones darker), brush mounds in brown."""
     x0, y0, x1, y1 = bbox
@@ -916,6 +917,8 @@ def preview(path, frame, dem, ggrid, chm, cg, recs, bbox, max_px=900):
     img[..., :3] = np.clip(rgb, 0, 255)
     out = ((E < ggrid.minx) | (E > ggrid.maxx) | (N < ggrid.miny) |
            (N > ggrid.maxy)).reshape(H, W)
+    if has_data is not None:                  # no returns at all: blank
+        out |= ~has_data[r2, c2].reshape(H, W)
     img[..., 3] = np.where(out, 0, 255)
 
     def ring(xc, yc, rad, col, fill=False):
@@ -1200,7 +1203,7 @@ def run(params, out_dir, say=say_default):
     timings["write_s"] = round(time.time() - t0, 2)
     try:
         preview(os.path.join(out_dir, "preview.png"), frame, dem, ggrid, chm,
-                cg, recs, bbox)
+                cg, recs, bbox, has_data=tot_c > 0)
         veg["preview"] = "preview.png"
     except Exception as e:                       # preview is optional
         say(f"  (no preview: {type(e).__name__})")
