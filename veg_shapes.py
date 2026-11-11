@@ -55,7 +55,8 @@ How, in plain words:
             own branches and are left out. Brushy cells are pooled in tiles
             a few metres across: one mound per tile at the brushy cells'
             centre, radius from their area, height = 75th percentile of the
-            cells' tops. Tiles grow if the record budget is exceeded.
+            cells' tops, density = twice the band's share of all returns
+            (0.05..1). Tiles grow if the record budget is exceeded.
   shell     occupancy voxels (x, y, HAG; half as tall as wide) of the
             cleaned returns, Gaussian smoothed, surface nets (a vertex per
             crossing cube, a quad per crossing edge), Taubin smoothed;
