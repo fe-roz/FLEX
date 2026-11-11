@@ -194,7 +194,7 @@ svg.ico { vertical-align: -2px; }
   <a href="#terrain">Terrain</a>
   <a href="#caltopo">CalTopo</a>
   <a href="#lidar">LiDAR</a>
-  <a href="#routes">Surface routes</a>
+  <a href="#routes">Surface routes</a><a href="#vegshapes">Vegetation shapes</a>
   <a href="#jobs">Jobs and settings</a>
   <a href="#export">Offline viewer and FLEX Field</a>
   <a href="#sync">Sync files</a>
@@ -207,7 +207,7 @@ svg.ico { vertical-align: -2px; }
 <h1>FLEX guide</h1>
 <p class="lede">FLEX shows everything about a piece of ground at once: the globe and terrain, map layers, LiDAR point clouds, surface points and tracks, and 3D cave surveys. Work is kept in <b>projects</b> (one per area), and any area can be baked into an offline viewer that runs on a phone underground.</p>
 <div class="toc" aria-label="Contents">
-  <a href="#setup">Setting up</a><a href="#first">First area</a><a href="#screen">The screen</a><a href="#tree">Projects</a><a href="#saving">Saving</a><a href="#select">Selecting in 3D</a><a href="#places">Phone, computer, CalTopo</a><a href="#folder">Project folder</a><a href="#caves">Caves</a><a href="#leads">Leads and inventories</a><a href="#sketches">Sketches and files</a><a href="#docs">Documents</a><a href="#surface">Surface</a><a href="#maplayers">Your map layers</a><a href="#terrain">Terrain</a><a href="#caltopo">CalTopo</a><a href="#lidar">LiDAR</a><a href="#routes">Surface routes</a><a href="#jobs">Jobs and settings</a><a href="#export">Offline viewer and FLEX Field</a><a href="#sync">Sync files</a><a href="#perf">Speed</a><a href="#keys">Keyboard</a><a href="#trouble">Problems</a>
+  <a href="#setup">Setting up</a><a href="#first">First area</a><a href="#screen">The screen</a><a href="#tree">Projects</a><a href="#saving">Saving</a><a href="#select">Selecting in 3D</a><a href="#places">Phone, computer, CalTopo</a><a href="#folder">Project folder</a><a href="#caves">Caves</a><a href="#leads">Leads and inventories</a><a href="#sketches">Sketches and files</a><a href="#docs">Documents</a><a href="#surface">Surface</a><a href="#maplayers">Your map layers</a><a href="#terrain">Terrain</a><a href="#caltopo">CalTopo</a><a href="#lidar">LiDAR</a><a href="#routes">Surface routes</a><a href="#vegshapes">Vegetation shapes</a><a href="#jobs">Jobs and settings</a><a href="#export">Offline viewer and FLEX Field</a><a href="#sync">Sync files</a><a href="#perf">Speed</a><a href="#keys">Keyboard</a><a href="#trouble">Problems</a>
 </div>
 
 <!-- ═════════════════════════════════════════════════════════════════════ -->
@@ -645,6 +645,14 @@ npm install</pre>
   <li>If the search stops, the Jobs strip and the panel show the reason (a line the program wrote starting with “!”), for example a point cloud that could not be read.</li>
 </ul>
 
+<h2 id="vegshapes">Vegetation shapes</h2>
+<p><svg class="ico" width="14" height="14"><use href="#i-leaf"/></svg> <b>Analyze → Vegetation shapes</b> turns the LiDAR of an area into light green shapes of the trees and the brush, drawn on the map and mostly see-through. They are much lighter than the points, so they are quick to draw and small to keep. This is a <b>first version</b>: it builds two looks so you can compare them, and which one stays is for you to decide. It needs the same Python environment as Surface route and shows in the Jobs strip while it works.</p>
+<ul>
+  <li><b>Area</b> is picked as for Terrain (draw it, the project footprint, or a polygon on the map); up to 25 km². <b>LiDAR</b> is the point cloud it reads (the same list as Surface route). <b>Detail</b> goes from Rough (quick) to Fine (slow): finer makes more, smaller shapes.</li>
+  <li><b>Build</b> makes both looks and tells you what each weighs, for example “Tree shapes: 12 340 trees, 5 120 brush patches, 0.5 MB” and “Canopy cloud: 210 000 triangles, 3.1 MB”. <b>Tree shapes</b> is one simple crown for each tree (round or pointed) and a low mound for each patch of brush. <b>Canopy cloud</b> is a blobby skin round the vegetation, which shows clumps and gaps better and weighs more.</li>
+  <li><b>Show</b> chooses Tree shapes, Canopy cloud, Both or Off. <b>Transparency</b> makes the shapes more or less see-through; <b>Edges</b> lights the rims so crowns can be told apart; <b>Fill</b> sets how solid the faces are; <b>Hide lower than</b> hides vegetation under that height above the ground. The switches show or hide <b>Trees</b> and <b>Brush</b>, make the shapes <b>Follow the terrain shown</b> (they move onto the terrain you are looking at, instead of the ground the LiDAR found), and <b>Colour by height</b> (darker green low, lighter high). Everything takes effect at once and is remembered on this computer.</li>
+  <li><b>Keep</b> (with a name) stores the files on this computer so a new build does not replace them; they are listed under <b>Saved</b> with <b>Show</b> and <b>Delete</b>. For now they are not saved into the project and do not go to the phone.</li>
+</ul>
 <h2 id="jobs">Jobs and settings</h2>
 <p>Two things that belong to the whole of FLEX, not to one kind of data: the strip of <b>Jobs</b> along the bottom of the map, and <svg class="ico" width="14" height="14"><use href="#i-sliders"/></svg> <b>Settings</b> (bottom of the icon strip; it opens in the dock panel).</p>
 <h3>Jobs</h3>
