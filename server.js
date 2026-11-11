@@ -117,6 +117,9 @@ const server = http.createServer((req, res) => {
     // ── Surface routes (route_api.js) ────────────────────────────────────────
     } else if (sanitizedPath.startsWith('/api/route/')) {
         routeGen.handle(req, res, sanitizedPath.slice('/api/route/'.length), parsedUrl.query);
+    // ── Vegetation shapes (veg_api.js) ───────────────────────────────────────
+    } else if (sanitizedPath.startsWith('/api/veg/')) {
+        vegGen.handle(req, res, sanitizedPath.slice('/api/veg/'.length), parsedUrl.query);
     // ── LiDAR derivations (vegetation density, voids) ────────────────────────
     } else if (sanitizedPath === '/api/lidar/derive' && req.method === 'POST') {
         handleLidarDerive(req, res);
@@ -734,6 +737,9 @@ const terrainGen = require('./terrain_generate')({ python: CONDA_PYTHON, script:
 const routeGen = require('./route_api')({ python: process.env.FLEX_ROUTE_PYTHON || CONDA_PYTHON, script: process.env.FLEX_ROUTE_SCRIPT || path.join(__dirname, 'route_cost.py'),
     outRoot: path.join(__dirname, 'user_files', 'jobs', 'route'),
     cacheDir: process.env.FLEX_ROUTE_CACHE || path.join(__dirname, 'user_files', 'jobs', 'route', '_cache') });
+// Vegetation shapes (veg_api.js → veg_shapes.py); FLEX_VEG_SCRIPT / FLEX_VEG_PYTHON point at another script / interpreter (the tests' stub)
+const vegGen = require('./veg_api')({ python: process.env.FLEX_VEG_PYTHON || CONDA_PYTHON, script: process.env.FLEX_VEG_SCRIPT || path.join(__dirname, 'veg_shapes.py'),
+    outRoot: path.join(__dirname, 'user_files', 'jobs', 'veg'), savedRoot: path.join(__dirname, 'user_files', 'veg') });
 
 function handleExportTerrain(req, res) {
     let body = '';
@@ -958,6 +964,7 @@ const jobsApi = require('./jobs_api')({ sources: {
     terrain: { jobs: terrainGen.jobs, pct: terrainGen.pctOf },
     analyze: { jobs: _lidarJobs, pct: lidarPct },
     route:   { jobs: routeGen.jobs, pct: routeGen.pctOf },
+    veg:     { jobs: vegGen.jobs, pct: vegGen.pctOf },
 } });
 
 function handleLidarDerive(req, res) {
