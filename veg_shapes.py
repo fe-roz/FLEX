@@ -38,8 +38,9 @@ How, in plain words:
             ground); on steep ground returns that do not clear the highest
             ground within 1 m (> 45 deg) or 2 m (> 60 deg) by min_height (a cliff face
             beside its own top); and "rock": returns in cells where
-            the ground is steep and no return in 3 m around reaches the
-            ground (a cliff face the cloth bridged is not brush).
+            the ground is steep, no return in 3 m around reaches the
+            ground and nothing within 6 m stands 4 m tall (a rock knob the
+            cloth bridged is not brush; a crown hiding the ground is taller).
   trees     canopy height model (max HAG per cell, pits filled), smoothed;
             tops = local maxima in a window that grows with height (octagon
             max filters); crowns by a marker watershed (flooding by levels from the tops),
@@ -93,6 +94,7 @@ GROUND_CLASS = 2
 VEG_CLASSES = (0, 1, 3, 4, 5)      # never classified, unclassified, veg
 NOISE_CLASSES = (7, 18)
 MAX_HAG = 100.0                    # taller "vegetation" is an error
+ROCK_MAX_H = 4.0                   # bare-rock "vegetation" is lower than this
 RECORD = 8                         # float32 per shapes.bin record
 
 DETAIL = {
@@ -389,12 +391,18 @@ def clean(V, cg, lowest, slope_c, density, say):
     V = take(V, keep)
     n_high = 0
 
-    # 3. rock: steep ground and no return near the ground within 3 m.
+    # 3. rock: steep ground, no return near the ground within 3 m and
+    # nothing tall there either (a knob the cloth bridged reads as a few
+    # metres of "vegetation"; a crown that hides the ground stands taller).
     r = max(1, int(round(1.5 / cg.cell)))
     lo = np.where(np.isfinite(lowest), lowest, 99.0)
     near = ndimage.minimum_filter(lo, size=2 * r + 1, mode="nearest")
-    rock = (slope_c > 35.0) & (near > 0.6)
     f = flat_local(V, cg)
+    top = np.zeros(cg.nx * cg.ny, np.float32)
+    np.maximum.at(top, f, V.h)
+    tall = ndimage.maximum_filter(top.reshape(cg.shape), size=4 * r + 1,
+                                  mode="nearest")
+    rock = (slope_c > 35.0) & (near > 0.6) & (tall < ROCK_MAX_H)
     is_rock = rock.ravel()[f]
     n_rock = int(is_rock.sum())
     V = take(V, ~is_rock)
