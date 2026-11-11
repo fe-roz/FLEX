@@ -7,14 +7,18 @@
 //           (turn, lean, lumps) from a hash of the position so it does not look stamped.
 //   shell   the job's blobby skin around the vegetation points (shell.bin), as it is.
 //
-// How it is drawn (custom DrawCommands in Cesium's OPAQUE pass, through one primitive in scene.primitives):
-//   1. depth pre-pass  every visible mesh, colour writes off, depth on: the nearest vegetation surface per pixel.
-//   2. behind          the rims only of the layers BEHIND that nearest surface, faint (`behind`, a share of the edge),
-//                      depth test GREATER: crowns behind crowns read as outlines instead of piling up into mud.
-//   3. colour          the nearest surface only (depth test LEQUAL against the pre-pass), alpha-blended once:
-//                      height tint, soft light, a fresnel rim (`edge`), face amount (`fill`), overall `opacity`.
-//   Cesium clears the globe's depth before the opaque pass (depthTestAgainstTerrain is off in FLEX), so every pass
-//   reads czm_globeDepthTexture and drops fragments behind the terrain: trees behind a hill stay hidden.
+// How it is drawn (custom DrawCommands through one primitive in scene.primitives):
+//   1. pre-pass   (Cesium OPAQUE pass, into FLEX's own target, not the scene) every visible mesh writes the distance
+//                 of the nearest vegetation surface per pixel; the target's depth buffer keeps the nearest.
+//   2. behind     (OVERLAY pass) the rims only of the layers BEHIND that nearest surface, faint (`behind`, a share of
+//                 the edge): crowns behind crowns read as outlines instead of piling up into mud.
+//   3. colour     (OVERLAY pass) the nearest surface only, blended once over the finished picture: height tint, soft
+//                 light, a fresnel rim (`edge`), face amount (`fill`), overall `opacity`.
+//   Why the overlay pass: FLEX's globe is translucent (alpha by distance), so Cesium draws the ground's colour late, in
+//   the TRANSLUCENT pass with order-independent transparency: depth written earlier hides the ground under the trees,
+//   and a faint layer inside OIT next to the opaque ground all but vanishes. Cesium clears the globe's depth before the
+//   opaque pass (depthTestAgainstTerrain is off in FLEX), so every pass reads czm_globeDepthTexture and drops fragments
+//   behind the terrain: trees behind a hill stay hidden.
 //   All sliders are uniforms (no rebuild); minHeight / trees / brush are tested per shape in the vertex shader
 //   (the shape collapses) and per fragment for the shell (its hag). Not pickable (clicks go to the ground).
 //   Positions are local east-north-up metres (float32) around veg.json's origin, placed with the ENU frame as the
@@ -38,7 +42,7 @@
   const EARTH_R = 6371000;
   const DEFAULTS = {
     look: 'shapes', opacity: 0.35, edge: 0.6, fill: 0.5, minHeight: 0, trees: true, brush: true,
-    tint: 'height', colourLow: '#1d5a2c', colourHigh: '#d2ec78', brushColour: '#8a8f45', onTerrain: true, behind: 0.3,
+    tint: 'height', colourLow: '#1a5e28', colourHigh: '#a9d65e', brushColour: '#7f8c3c', onTerrain: true, behind: 0.3,
   };
   const LOOKS = ['shapes', 'shell', 'both', 'off'], TINTS = ['height', 'plain'];
   const HEX = /^#[0-9a-f]{6}$/i;
@@ -235,11 +239,22 @@
     return m;
   }
 
-  const pure = { DEFAULTS, LOOKS, PROFILES, EARTH_R, clampSettings, hexRgb, parseShapes, parseShell, parseGround, bilinear, terrainGridSpec, makeShift, hash01, profileCounts, buildShapes, buildShell };
+  /** The height the tint reaches its top colour at: the 95th percentile of the tree heights (one 60 m giant does not
+   *  leave the rest of the forest dark), else stats.max_height, else 20 m. */
+  function tintTop(rec, n, veg) {
+    const hs = [];
+    for (let i = 0; i < n; i++) if (Math.round(rec[i * 8 + 6]) !== 2 && isFinite(rec[i * 8 + 3])) hs.push(rec[i * 8 + 3]);
+    if (hs.length >= 5) { hs.sort((a, b) => a - b); return Math.max(3, hs[Math.min(hs.length - 1, Math.floor(hs.length * 0.95))]); }
+    return Number(veg && veg.stats && veg.stats.max_height) || 20;
+  }
+
+  const pure = { tintTop, DEFAULTS, LOOKS, PROFILES, EARTH_R, clampSettings, hexRgb, parseShapes, parseShell, parseGround, bilinear, terrainGridSpec, makeShift, hash01, profileCounts, buildShapes, buildShell };
   if (typeof module !== 'undefined' && module.exports) module.exports = pure;
   if (typeof window === 'undefined') return;
 
   // ── Shaders ───────────────────────────────────────────────────────────────
+  // One vertex shader for every pass. u_overlay = 1 in the colour passes (drawn in Cesium's OVERLAY pass, after the
+  // scene is composited, with no depth test): z is clamped into the clip volume there so nothing is cut by the far plane.
   const VS = `
 in vec3 position;
 in vec4 normal;
@@ -248,6 +263,7 @@ in vec4 meta;
 uniform float u_minH;
 uniform float u_trees;
 uniform float u_brush;
+uniform float u_overlay;
 out vec3 v_nEC;
 out vec3 v_pEC;
 out float v_hag;
@@ -261,7 +277,9 @@ void main() {
   v_nEC = czm_normal * normal.xyz;
   v_hag = aux.x;
   v_meta = meta;
-  gl_Position = hide ? vec4(2.0, 2.0, 2.0, 1.0) : czm_projection * pEC;
+  vec4 p = czm_projection * pEC;
+  if (u_overlay > 0.5 && p.w > 0.0) p.z = clamp(p.z, -p.w, p.w) * 0.999;
+  gl_Position = hide ? vec4(2.0, 2.0, 2.0, 1.0) : p;
 }`;
   const FS_COMMON = `
 in vec3 v_nEC;
@@ -284,16 +302,20 @@ bool vegHidden() {
   if (d > 0.0 && d < 1.0) {
     vec4 e = czm_windowToEyeCoordinates(gl_FragCoord.xy, d);
     float gz = e.z / e.w;
-    if (v_pEC.z < gz - (0.4 + 0.002 * abs(gz))) return true;
+    if (v_pEC.z < gz - (0.3 + 0.002 * abs(gz))) return true;
   }
   return false;
 }`;
+  const PACK_FAR = 50000.0;
+  // Pre-pass, into FLEX's own target: the distance of the nearest visible vegetation surface per pixel (packed RGBA8,
+  // the target's own depth buffer keeps the nearest).
   const FS_PRE = FS_COMMON + `
 void main() {
   if (vegHidden()) discard;
-  out_FragColor = vec4(0.0);
+  out_FragColor = czm_packDepth(clamp(-v_pEC.z / ${PACK_FAR.toFixed(1)}, 0.0, 0.999999));
 }`;
   const FS_COL = FS_COMMON + `
+uniform sampler2D u_near;
 uniform vec3 u_cLow;
 uniform vec3 u_cHigh;
 uniform vec3 u_cBrush;
@@ -306,28 +328,37 @@ uniform float u_behind;
 uniform float u_mode;      // 0 = the nearest layer, 1 = the rims of the layers behind it
 void main() {
   if (vegHidden()) discard;
+  float dist = -v_pEC.z;
+  float nearest = czm_unpackDepth(texture(u_near, gl_FragCoord.xy / czm_viewport.zw)) * ${PACK_FAR.toFixed(1)};
+  float tol = 0.05 + 0.002 * dist;
+  bool isNearest = dist <= nearest + tol;
+  if (u_mode < 0.5 ? !isNearest : isNearest) discard;
   vec3 N = normalize(v_nEC);
   if (!gl_FrontFacing) N = -N;
   vec3 V = normalize(-v_pEC);
   float ndv = clamp(dot(N, V), 0.0, 1.0);
   float rim = pow(1.0 - ndv, 2.2);
+  // far away a crown is a few pixels: rims there are only sparkle, so they fade and the faces fill in instead
+  float mpp = czm_metersPerPixel(vec4(v_pEC, 1.0));
+  float far = smoothstep(0.08, 0.8, mpp);
+  rim *= mix(1.0, 0.35, far);
   vec3 up = normalize(czm_normal * vec3(0.0, 0.0, 1.0));
   vec3 L = normalize(czm_normal * vec3(-0.45, 0.55, 0.7));
   bool brushy = v_meta.w > 0.5 ? v_hag < u_brushTop : v_meta.x > 0.75;
   float t = clamp(v_hag / max(u_hMax, 1.0), 0.0, 1.0);
   vec3 base = brushy ? u_cBrush : (u_tint > 0.5 ? mix(u_cLow, u_cHigh, smoothstep(0.0, 1.0, t)) : mix(u_cLow, u_cHigh, 0.45));
   base *= 0.88 + 0.24 * v_meta.z;
-  float lit = 0.5 + 0.3 * max(dot(N, L), 0.0) + 0.25 * (0.5 + 0.5 * dot(N, up));
+  float lit = 0.55 + 0.3 * max(dot(N, L), 0.0) + 0.25 * (0.5 + 0.5 * dot(N, up));
   vec3 col = base * lit;
-  vec3 rimCol = mix(base, vec3(0.9, 1.0, 0.75), 0.55) * 1.15;
+  vec3 rimCol = mix(base, vec3(0.75, 1.0, 0.5), 0.4) * 1.12;
   float er = clamp(u_edge * rim * 1.6, 0.0, 1.0);
   float dens = 0.55 + 0.45 * v_meta.y;
   float a;
   if (u_mode > 0.5) {
-    a = u_opacity * u_behind * u_edge * rim * 1.6;
+    a = u_behind * u_edge * rim * (0.45 + u_opacity) * 0.6 * (1.0 - far);
     col = rimCol;
   } else {
-    a = u_opacity * (u_fill * dens + u_edge * rim * 1.8);
+    a = u_opacity * u_fill * dens * mix(1.4, 1.9, far) + u_edge * rim * (0.45 + u_opacity);
     col = mix(col, rimCol, er);
   }
   a = clamp(a, 0.0, 0.97);
@@ -348,19 +379,28 @@ void main() {
   const fire = () => { try { window.dispatchEvent(new CustomEvent('flex-veg-changed', { detail: { loaded: !!D } })); } catch (_) {} };
 
   // ── The primitive ─────────────────────────────────────────────────────────
-  // One object in scene.primitives; update() pushes the commands of the visible meshes, pre-pass first.
+  // One object in scene.primitives. Per frame (render passes only, so it is never picked):
+  //   update()  clears FLEX's own target (the drawing buffer's size: RGBA8 + a 16-bit depth buffer);
+  //   OPAQUE    pre-pass of the visible meshes into that target (Cesium adds its log-depth version);
+  //   OVERLAY   the rims behind the nearest layer, then the nearest layer, blended over the finished picture.
+  // Why not blend in the scene itself: FLEX's globe is translucent (globe.translucency with an alpha by distance), so
+  // Cesium draws the ground's colour in the TRANSLUCENT pass with order-independent transparency; anything that writes
+  // depth before it hides the ground under the trees, and a faint layer blended in OIT next to the opaque ground all
+  // but vanishes. The overlay pass sees the finished ground and still has the globe's depth, so the hill test works.
   function makePrimitive() {
     const C = Ces();
-    const gpu = { shapes: null, shell: null };           // { va, sphere, triangles, mesh }
-    let progPre = null, progCol = null, rsPre = null, rsCol = null, rsBehind = null, ctx = null, destroyed = false;
+    const gpu = { shapes: null, shell: null };           // { va, sphere, triangles, pre, behind, col }
+    let progPre = null, progCol = null, progColLog = null, rsPre = null, rsCol = null, ctx = null, destroyed = false;
+    let fbo = null, nearTex = null, fboW = 0, fboH = 0, clearCmd = null;
     const ATTR = { position: 0, normal: 1, aux: 2, meta: 3 };
     const rgb = { low: new C.Cartesian3(), high: new C.Cartesian3(), brush: new C.Cartesian3() };
     const setRgb = (c, h) => { const a = hexRgb(h); c.x = a[0]; c.y = a[1]; c.z = a[2]; return c; };
     const common = {
       u_minH: () => S.minHeight, u_trees: () => (S.trees ? 1 : 0), u_brush: () => (S.brush ? 1 : 0),
-      u_brushTop: () => (D && D.brushTop) || 2,
+      u_brushTop: () => (D && D.brushTop) || 2, u_overlay: () => 0,
     };
     const colMap = mode => Object.assign({}, common, {
+      u_overlay: () => 1, u_near: () => nearTex,
       u_cLow: () => setRgb(rgb.low, S.colourLow), u_cHigh: () => setRgb(rgb.high, S.colourHigh), u_cBrush: () => setRgb(rgb.brush, S.brushColour),
       u_hMax: () => (D && D.hMax) || 20, u_tint: () => (S.tint === 'height' ? 1 : 0),
       u_opacity: () => S.opacity, u_edge: () => S.edge, u_fill: () => S.fill, u_behind: () => S.behind, u_mode: () => mode,
@@ -371,10 +411,22 @@ void main() {
       ctx = context;
       progPre = C.ShaderProgram.fromCache({ context, vertexShaderSource: VS, fragmentShaderSource: FS_PRE, attributeLocations: ATTR });
       progCol = C.ShaderProgram.fromCache({ context, vertexShaderSource: VS, fragmentShaderSource: FS_COL, attributeLocations: ATTR });
+      // overlay commands get no derived log-depth program from Cesium; the globe depth is then a log depth, so say so
+      progColLog = C.ShaderProgram.fromCache({ context, vertexShaderSource: VS, fragmentShaderSource: new C.ShaderSource({ sources: [FS_COL], defines: ['LOG_DEPTH'] }), attributeLocations: ATTR });
       const cull = { enabled: true, face: C.CullFace.BACK };
-      rsPre = C.RenderState.fromCache({ cull, depthTest: { enabled: true, func: C.DepthFunction.LESS }, depthMask: true, colorMask: { red: false, green: false, blue: false, alpha: false } });
-      rsCol = C.RenderState.fromCache({ cull, depthTest: { enabled: true, func: C.DepthFunction.LESS_OR_EQUAL }, depthMask: false, blending: C.BlendingState.ALPHA_BLEND });
-      rsBehind = C.RenderState.fromCache({ cull, depthTest: { enabled: true, func: C.DepthFunction.GREATER }, depthMask: false, blending: C.BlendingState.ALPHA_BLEND });
+      rsPre = C.RenderState.fromCache({ cull, depthTest: { enabled: true, func: C.DepthFunction.LESS }, depthMask: true });
+      rsCol = C.RenderState.fromCache({ cull, depthTest: { enabled: false }, depthMask: false, blending: C.BlendingState.ALPHA_BLEND });
+    }
+    function ensureTarget(context) {
+      const w = context.drawingBufferWidth, h = context.drawingBufferHeight;
+      if (fbo && w === fboW && h === fboH) return;
+      if (fbo) fbo.destroy();
+      nearTex = new C.Texture({ context, width: w, height: h, pixelFormat: C.PixelFormat.RGBA, pixelDatatype: C.PixelDatatype.UNSIGNED_BYTE, sampler: C.Sampler.NEAREST });
+      const depthRenderbuffer = new C.Renderbuffer({ context, width: w, height: h, format: C.RenderbufferFormat.DEPTH_COMPONENT16 });
+      fbo = new C.Framebuffer({ context, colorTextures: [nearTex], depthRenderbuffer, destroyAttachments: true });
+      fboW = w; fboH = h;
+      clearCmd = new C.ClearCommand({ color: new C.Color(1, 1, 1, 1), depth: 1, framebuffer: fbo, renderState: C.RenderState.fromCache() });
+      for (const k of ['shapes', 'shell']) if (gpu[k]) gpu[k].pre.framebuffer = fbo;
     }
     function upload(context, mesh, modelMatrix) {
       const vb = (a, n, type, norm) => ({ vertexBuffer: C.Buffer.createVertexBuffer({ context, typedArray: a, usage: C.BufferUsage.STATIC_DRAW }), componentsPerAttribute: n, componentDatatype: type, normalize: !!norm });
@@ -390,39 +442,55 @@ void main() {
       const centre = new C.Cartesian3((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2);
       const radius = 0.5 * Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) + 1;
       const sphere = new C.BoundingSphere(C.Matrix4.multiplyByPoint(modelMatrix, centre, new C.Cartesian3()), radius);
-      const cmd = (prog, rs, map) => new C.DrawCommand({ vertexArray: va, primitiveType: C.PrimitiveType.TRIANGLES, shaderProgram: prog, renderState: rs,
-        uniformMap: map, modelMatrix, boundingVolume: sphere, pass: C.Pass.OPAQUE, owner: api, cull: true });
-      return { va, sphere, triangles: mesh.triangles, pre: cmd(progPre, rsPre, maps.pre), col: cmd(progCol, rsCol, maps.col), behind: cmd(progCol, rsBehind, maps.behind) };
+      const cmd = (pass, prog, rs, map, framebuffer) => new C.DrawCommand({ vertexArray: va, primitiveType: C.PrimitiveType.TRIANGLES, shaderProgram: prog, renderState: rs,
+        uniformMap: map, modelMatrix, boundingVolume: sphere, pass, owner: api, cull: true, framebuffer });
+      return { va, sphere, triangles: mesh.triangles,
+        pre: cmd(C.Pass.OPAQUE, progPre, rsPre, maps.pre, fbo),
+        behind: cmd(C.Pass.OVERLAY, progCol, rsCol, maps.behind), col: cmd(C.Pass.OVERLAY, progCol, rsCol, maps.col) };
     }
     const free = k => { if (gpu[k]) { try { gpu[k].va.destroy(); } catch (_) {} gpu[k] = null; } };
     const api = {
       show: true,
       pending: null,              // { modelMatrix, shapes: mesh|null, shell: mesh|null } waiting for a context
+      frames: 0,
       update(frameState) {
         if (destroyed || !this.show) return;
         if (!frameState.passes.render) return;                 // never in a pick or depth-only pass: not pickable
-        ensure(frameState.context);
+        const context = frameState.context;
+        ensure(context);
         if (this.pending) {
           const p = this.pending; this.pending = null;
           free('shapes'); free('shell');
-          if (p.shapes) gpu.shapes = upload(frameState.context, p.shapes, p.modelMatrix);
-          if (p.shell) gpu.shell = upload(frameState.context, p.shell, p.modelMatrix);
+          ensureTarget(context);
+          if (p.shapes) gpu.shapes = upload(context, p.shapes, p.modelMatrix);
+          if (p.shell) gpu.shell = upload(context, p.shell, p.modelMatrix);
         }
         const on = [];
         if ((S.look === 'shapes' || S.look === 'both') && gpu.shapes) on.push(gpu.shapes);
         if ((S.look === 'shell' || S.look === 'both') && gpu.shell) on.push(gpu.shell);
-        if (!on.length) return;
+        const cv = frameState.cullingVolume;
+        const vis = on.filter(g => !cv || cv.computeVisibility(g.sphere) !== C.Intersect.OUTSIDE);
+        if (!vis.length) return;
+        ensureTarget(context);
+        clearCmd.execute(context);
+        const prog = frameState.useLogDepth ? progColLog : progCol;
         const list = frameState.commandList;
-        for (const g of on) list.push(g.pre);
-        if (S.behind > 0 && S.edge > 0) for (const g of on) list.push(g.behind);
-        for (const g of on) list.push(g.col);
+        for (const g of vis) list.push(g.pre);
+        if (S.behind > 0 && S.edge > 0) for (const g of vis) { g.behind.shaderProgram = prog; list.push(g.behind); }
+        for (const g of vis) { g.col.shaderProgram = prog; list.push(g.col); }
+        this.frames++;
       },
       uploaded: k => !!gpu[k],
       triangles: k => (gpu[k] ? gpu[k].triangles : 0),
       sphere: () => (gpu.shapes || gpu.shell || {}).sphere,
       release() { free('shapes'); free('shell'); this.pending = null; },
       isDestroyed: () => destroyed,
-      destroy() { free('shapes'); free('shell'); if (progPre) { progPre.destroy(); progCol.destroy(); } destroyed = true; return undefined; },
+      destroy() {
+        free('shapes'); free('shell');
+        if (progPre) { progPre.destroy(); progCol.destroy(); progColLog.destroy(); }
+        if (fbo) fbo.destroy();
+        destroyed = true; return undefined;
+      },
     };
     return api;
   }
@@ -499,8 +567,7 @@ void main() {
       const shell = veg.shell ? parseShell(o.shell, veg.shell.vertices, veg.shell.triangles) : parseShell(null);
       const g = veg.ground || null;
       const ground = g ? parseGround(o.ground, g.nx, g.ny) : null;
-      let hMax = Number(veg.stats && veg.stats.max_height) || 0;
-      for (let i = 0; i < sh.n; i++) if (sh.rec[i * 8 + 6] !== 2 && sh.rec[i * 8 + 3] > hMax) hMax = sh.rec[i * 8 + 3];
+      const hMax = tintTop(sh.rec, sh.n, veg);
       const bytes = ['shapes', 'shell', 'ground'].reduce((a, k) => a + ((asAB(o[k]) || {}).byteLength || 0), 0);
       clear(true);
       D = { veg, sh, shell, ground, gspec: g ? { nx: g.nx, ny: g.ny, x0: Number(g.x0) || 0, y0: Number(g.y0) || 0, cell: Number(g.cell) || 10 } : null,
