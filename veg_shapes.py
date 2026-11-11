@@ -35,7 +35,9 @@ How, in plain words:
             Dropped: noise (7, 18), buildings (6), water, wires and other
             classes; returns with almost no others in the 6 x 6 x 6 m box
             hanging below them (birds, stray multipath, wires over open
-            ground); and "rock": returns in cells where
+            ground); on steep ground returns that do not clear the highest
+            ground within 1 m (> 45 deg) or 2 m (> 60 deg) by min_height (a cliff face
+            beside its own top); and "rock": returns in cells where
             the ground is steep and no return in 3 m around reaches the
             ground (a cliff face the cloth bridged is not brush).
   trees     canopy height model (max HAG per cell, pits filled), smoothed;
@@ -53,10 +55,11 @@ How, in plain words:
             a few metres across: one mound per tile at the brushy cells'
             centre, radius from their area, height = 75th percentile of the
             cells' tops. Tiles grow if the record budget is exceeded.
-  shell     occupancy voxels (x, y, HAG) of the cleaned returns, Gaussian
-            smoothed, surface nets (a vertex per crossing cube, a quad per
-            crossing edge), Laplacian smoothed; coarser voxels until the
-            triangle count fits max_triangles. Vertices go back to absolute
+  shell     occupancy voxels (x, y, HAG; half as tall as wide) of the
+            cleaned returns, Gaussian smoothed, surface nets (a vertex per
+            crossing cube, a quad per crossing edge), Taubin smoothed;
+            coarser voxels until the triangle count fits the budget (the
+            smaller of max_triangles and the detail's triangles per km2). Vertices go back to absolute
             heights on the job's ground.
 
 The local frame: x, y are metres east and north of the origin on the tangent
@@ -93,14 +96,16 @@ MAX_HAG = 100.0                    # taller "vegetation" is an error
 RECORD = 8                         # float32 per shapes.bin record
 
 DETAIL = {
-    #        CHM cell, CHM smoothing sigma (m), shell voxel, brush tile,
-    #        ground.bin cell, records per km2
+    #        CHM cell, CHM smoothing sigma (m), finest shell voxel, brush
+    #        tile, ground.bin cell, shape records per km2, shell triangles
+    #        per km2 (the job's budget is the smaller of this and
+    #        max_triangles)
     "low":    dict(chm=1.0, smooth=0.9, voxel=3.0, tile=6.0, gcell=10.0,
-                   budget=30000),
+                   budget=30000, tri_km2=100000),
     "medium": dict(chm=0.5, smooth=0.6, voxel=2.0, tile=4.0, gcell=5.0,
-                   budget=60000),
+                   budget=60000, tri_km2=300000),
     "high":   dict(chm=0.5, smooth=0.5, voxel=1.25, tile=3.0, gcell=5.0,
-                   budget=120000),
+                   budget=120000, tri_km2=1000000),
 }
 
 say_default = rc.ascii_say
@@ -276,7 +281,23 @@ class Veg:
     """The cleaned vegetation returns: local UTM offsets (float32) and HAG."""
 
 
-def collect(P, dem, ggrid, cg, bg, inside_c, min_h, say):
+def cliff_guard(dem, slope, cell):
+    """The highest ground within 1 m on steep cells (> 45 deg) and within
+    2 m on cliffs (> 60 deg); elsewhere the ground itself. A return must
+    clear it by min_height to count as vegetation: a cliff face stands next
+    to its own top, a shrub does not."""
+    from scipy import ndimage
+    out = dem.astype(np.float32).copy()
+    for reach, steep in ((1.0, 45.0), (2.0, 60.0)):
+        k = 2 * max(1, int(round(reach / cell))) + 1
+        hi = ndimage.maximum_filter(dem, size=k, mode="nearest")
+        # The cells beside a steep one too: the foot of a face is flat.
+        m = ndimage.maximum_filter(slope > steep, size=3, mode="nearest")
+        out = np.where(m, np.maximum(hi, out), out)
+    return out.astype(np.float32)
+
+
+def collect(P, dem, ggrid, cg, bg, inside_c, min_h, say, dem_hi=None):
     """One chunked pass: HAG of every return; per CHM cell the lowest return
     HAG and the count of all returns; per brush cell the same count; the
     vegetation candidates (class, height, inside the area)."""
@@ -298,6 +319,8 @@ def collect(P, dem, ggrid, cg, bg, inside_c, min_h, say):
         tot_b += np.bincount(bg.flat(x, y), minlength=nb)
         np.minimum.at(lowest, fc, hag)
         v = (hag >= min_h) & (hag <= MAX_HAG) & inside_flat[fc]
+        if dem_hi is not None:
+            v &= (z - dem_hi.ravel()[ggrid.flat(x, y)]) >= min_h
         if c is not None:
             v &= np.isin(c, VEG_CLASSES)
         xs.append((x[v] - P.ox).astype(np.float32))
@@ -574,7 +597,10 @@ def tree_records(V, f_c, chm, chm_s, lab, cg, tops_r, tops_c, tot_c,
         np.maximum(np.bincount(L[rim], minlength=n + 1)[1:], 1)
     shape_q = dm / np.maximum(dr, 0.1)
     slender = (height - base) / np.maximum(radius, 0.5)
-    cone = (apex >= 0.9) & (shape_q >= 0.33) & (slender >= 1.6)
+    # Pointed and steep, or simply much longer than wide (a narrow crown
+    # whose smoothed top reads rounded is still a conifer's).
+    cone = ((apex >= 0.9) & (shape_q >= 0.33) & (slender >= 1.6)) | \
+        (slender >= 2.8)
     if kinds_mode == "dome":
         cone[:] = False
     kind = np.where(cone, 1.0, 0.0)
@@ -661,16 +687,17 @@ def brush_mounds(V, bg, tot_b, lab, cg, trees_low_base, min_h, brush_top,
 # Shell: occupancy voxels -> surface nets
 # --------------------------------------------------------------------------
 
-def occupancy(V, sg, v, hmax, density):
+def occupancy(V, sg, vh, vz, hmax, density):
+    """Share of 'full' per voxel (vh across, vz tall, in HAG), 0..1."""
     nx, ny = sg.nx, sg.ny
-    nz = int(math.ceil(hmax / v)) + 1
-    ix = np.clip(((V.x + (V.ox - sg.minx)) / v).astype(np.int64), 0, nx - 1)
-    iy = np.clip(((V.y + (V.oy - sg.miny)) / v).astype(np.int64), 0, ny - 1)
-    iz = np.clip((V.h / v).astype(np.int64), 0, nz - 1)
+    nz = int(math.ceil(hmax / vz)) + 1
+    ix = np.clip(((V.x + (V.ox - sg.minx)) / vh).astype(np.int64), 0, nx - 1)
+    iy = np.clip(((V.y + (V.oy - sg.miny)) / vh).astype(np.int64), 0, ny - 1)
+    iz = np.clip((V.h / vz).astype(np.int64), 0, nz - 1)
     cnt = np.bincount((ix * ny + iy) * nz + iz, minlength=nx * ny * nz)
     cnt = cnt.reshape(nx, ny, nz).astype(np.float32)
-    full = max(2.0, 0.06 * density * v * v)
-    return np.minimum(1.0, cnt / full), nz
+    full = max(2.0, 0.06 * density * vh * vz)
+    return np.minimum(1.0, cnt / full)
 
 
 def surface_nets(F, iso):
@@ -777,28 +804,69 @@ def laplacian(verts, tris, iters=2, lam=0.5):
     return v
 
 
-def build_shell(V, sg, voxel, max_tri, density, say):
+SHELL_SIGMA = 0.75       # Gaussian smoothing of the occupancy, in voxels
+SHELL_ISO = 0.18         # surface where the smoothed occupancy crosses this
+
+
+def shell_at(V, need, vh, density, hmax):
     from scipy import ndimage
-    hmax = float(V.h.max()) + voxel if len(V.h) else voxel
+    vz = max(1.0, 0.5 * vh)
+    sg = ld.Grid(need[0], need[1], need[2], need[3], vh)
+    F = occupancy(V, sg, vh, vz, hmax, density)
+    F = ndimage.gaussian_filter(F, SHELL_SIGMA)
+    verts, tris = surface_nets(np.pad(F, 1), SHELL_ISO)
+    return verts, tris, vz
+
+
+def build_shell(V, need, voxel, max_tri, density, say):
+    """Surface nets at `voxel` across (half that tall, at least 1 m), made
+    coarser until it fits max_tri. The size is searched in log-log (the
+    count falls roughly as a power of the voxel size) toward 90 % of the
+    budget; the finest result that fits is kept."""
+    hmax = float(V.h.max()) + voxel
+    target = 0.9 * max_tri
+    samples = []                 # (v, triangles)
+    best = None
     v = voxel
-    for attempt in range(8):
-        sg_v = ld.Grid(sg.minx, sg.miny, sg.maxx, sg.maxy, v)
-        F, nz = occupancy(V, sg_v, v, hmax, density)
-        F = ndimage.gaussian_filter(F, 0.75)
-        F = np.pad(F, 1)
-        verts, tris = surface_nets(F, 0.18)
-        del F
-        say(f"  shell at {v:.2f} m voxels: {len(verts):,} vertices, "
-            f"{len(tris):,} triangles")
-        if len(tris) <= max_tri:
+    for attempt in range(7):
+        verts, tris, vz = shell_at(V, need, v, density, hmax)
+        T = len(tris)
+        say(f"  shell at {v:.2f} x {vz:.2f} m voxels: {len(verts):,} "
+            f"vertices, {T:,} triangles")
+        samples.append((v, max(T, 1)))
+        if T <= max_tri and (best is None or v < best[2]):
+            best = (verts, tris, v, vz)
+        if best is not None and (best[2] <= voxel + 1e-9 or
+                                 len(best[1]) >= 0.75 * max_tri):
             break
-        v *= max(1.15, math.sqrt(len(tris) / max_tri) * 1.05)
+        over = [s_ for s_ in samples if s_[1] > max_tri]
+        under = [s_ for s_ in samples if s_[1] <= max_tri]
+        if over and under:
+            (v0, t0) = max(over)              # coarsest that did not fit
+            (v1, t1) = min(under)             # finest that fits
+            p = math.log(t0 / t1) / max(1e-6, math.log(v1 / v0))
+            v_new = v0 * (t0 / target) ** (1.0 / max(p, 0.5))
+            v_new = min(max(v_new, v0 * 1.02), v1 * 0.98)
+            if v_new >= v1 * 0.97 or v_new <= v0 * 1.01:
+                break
+        else:
+            p = 2.6
+            if len(samples) >= 2:
+                (va, ta), (vb, tb) = samples[-2], samples[-1]
+                if vb != va and ta != tb:
+                    p = max(0.5, math.log(ta / tb) / math.log(vb / va))
+            v_new = v * (T / target) ** (1.0 / p)
+            v_new = max(v_new, v * 1.05)
+        v = v_new
+    if best is None:
+        raise RuntimeError("the shell does not fit max_triangles")
+    verts, tris, v, vz = best
     verts = laplacian(verts, tris, iters=4)
     # Index units -> metres (x, y in UTM, z = HAG); the pad shifts by one.
-    xs = sg.minx + (verts[:, 0] - 1) * v
-    ys = sg.miny + (verts[:, 1] - 1) * v
-    hag = np.maximum(0.0, (verts[:, 2] - 1) * v)
-    return xs, ys, hag, tris.astype(np.uint32), v
+    xs = need[0] + (verts[:, 0] - 1) * v
+    ys = need[1] + (verts[:, 1] - 1) * v
+    hag = np.maximum(0.0, (verts[:, 2] - 1) * vz)
+    return xs, ys, hag, tris.astype(np.uint32), v, vz
 
 
 # --------------------------------------------------------------------------
@@ -838,7 +906,9 @@ def preview(path, frame, dem, ggrid, chm, cg, recs, bbox, max_px=900):
     rgb = rgb * (1 - a) + green * a
     img = np.zeros((H, W, 4), np.uint8)
     img[..., :3] = np.clip(rgb, 0, 255)
-    img[..., 3] = 255
+    out = ((E < ggrid.minx) | (E > ggrid.maxx) | (N < ggrid.miny) |
+           (N > ggrid.maxy)).reshape(H, W)
+    img[..., 3] = np.where(out, 0, 255)
 
     def ring(xc, yc, rad, col, fill=False):
         n = max(8, int(2 * math.pi * rad / px))
@@ -991,11 +1061,12 @@ def run(params, out_dir, say=say_default):
     bg = ld.Grid(need[0], need[1], need[2], need[3], 2 * cchm)
     inside_c = polygon_mask(ring_xy, cg)
     inside_b = polygon_mask(ring_xy, bg)
-    V, lowest, tot_c, tot_b = collect(P, dem, ggrid, cg, bg, inside_c,
-                                      min_h, say)
-    del P
     gx, gy = rc.gradients(dem, ggrid.cell)
     slope = rc.slope_deg(gx, gy)
+    V, lowest, tot_c, tot_b = collect(P, dem, ggrid, cg, bg, inside_c,
+                                      min_h, say,
+                                      cliff_guard(dem, slope, ggrid.cell))
+    del P
     # Slope on the CHM grid (nearest).
     cx = cg.minx + (np.arange(cg.nx) + 0.5) * cg.cell
     cy = cg.maxy - (np.arange(cg.ny) + 0.5) * cg.cell
@@ -1054,16 +1125,16 @@ def run(params, out_dir, say=say_default):
     if "shell" in prm["looks"]:
         say("[5/6] Shell")
         t0 = time.time()
+        max_tri = min(prm["max_triangles"],
+                      max(20000, int(D["tri_km2"] * area_m2 / 1e6)))
         if n_veg:
-            sg = ld.Grid(need[0], need[1], need[2], need[3], D["voxel"])
-            sx, sy, shag, tris, vox = build_shell(V, sg, D["voxel"],
-                                                  prm["max_triangles"],
-                                                  density, say)
+            sx, sy, shag, tris, vox, voxz = build_shell(V, need, D["voxel"],
+                                                        max_tri, density, say)
         else:
             sx = sy = shag = np.zeros(0)
             tris = np.zeros((0, 3), np.uint32)
-            vox = D["voxel"]
-        shell = (sx, sy, shag, tris, vox)
+            vox, voxz = D["voxel"], max(1.0, D["voxel"] / 2)
+        shell = (sx, sy, shag, tris, vox, voxz, max_tri)
         timings["shell_s"] = round(time.time() - t0, 2)
 
     # Outputs in the local frame.
@@ -1088,7 +1159,7 @@ def run(params, out_dir, say=say_default):
         veg["shapes"] = {"file": "shapes.bin", "count": int(len(recs)),
                          **counts, "record": RECORD * 4}
     if shell is not None:
-        sx, sy, shag, tris, vox = shell
+        sx, sy, shag, tris, vox, voxz, max_tri = shell
         V4 = np.zeros((len(sx), 4), np.float32)
         if len(sx):
             zg = ld.sample_bilinear(dem, ggrid, sx, sy)
@@ -1100,7 +1171,8 @@ def run(params, out_dir, say=say_default):
             f.write(V4.astype("<f4").tobytes())
             f.write(np.ascontiguousarray(tris, "<u4").tobytes())
         veg["shell"] = {"file": "shell.bin", "vertices": int(len(V4)),
-                        "triangles": int(len(tris)), "voxel_m": round(vox, 3)}
+                        "triangles": int(len(tris)), "voxel_m": round(vox, 3),
+                        "voxel_z_m": round(voxz, 3), "budget": int(max_tri)}
     # Ground in the local frame, row 0 south; x0, y0 = the south-west sample.
     gc_ = D["gcell"]
     gx0 = math.floor(bbox[0] / gc_) * gc_ - gc_
