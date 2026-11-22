@@ -144,8 +144,9 @@ function renderLayerList() {
     const nameSpan = document.createElement('span');
     const ctl = layer._custom && layer._custom.owner === 'c';      // from the CalTopo map (caltopo-layers.js): a line icon, read-only
     if (ctl && window.icon) { nameSpan.innerHTML = window.icon('map', 12, 'lp-ct-ico'); nameSpan.appendChild(document.createTextNode(' ' + layer.name)); }
-    else window.iconLabel(nameSpan, layer._custom ? [layer._custom.owner === 'p' ? 'folder' : 'user', layer.name] : layer.name);
-    if (layer._custom) nameSpan.title = ctl ? 'From the CalTopo map (change or remove it in CalTopo)' : layer._custom.owner === 'p' ? 'Part of the project' : 'In My data';
+    else window.iconLabel(nameSpan, layer._custom ? [layer._custom.owner === 'p' ? 'folder' : layer._custom.owner === 'a' ? 'chart' : 'user', layer.name] : layer.name);
+    if (layer._custom) nameSpan.title = ctl ? 'From the CalTopo map (change or remove it in CalTopo)' : layer._custom.owner === 'p' ? 'Part of the project' : layer._custom.owner === 'a' ? 'From a processed area on this computer (Analyze → Processed areas)' + (layer._custom.note ? ': ' + layer._custom.note : '') : 'In My data';
+    if (layer._custom && layer._custom.note) { const n = document.createElement('span'); n.className = 'lp-note'; n.textContent = ' (' + layer._custom.note + ')'; n.style.opacity = '.6'; nameSpan.appendChild(n); }
     if (layer._custom && layer._custom.warn) { const w = document.createElement('span'); w.className = 'lp-warn'; w.textContent = ' no tiles'; w.style.color = '#fc6'; nameSpan.appendChild(w); nameSpan.title += '. ' + layer._custom.warn; }
     nameSpan.style.cssText = 'flex:1; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
 
@@ -162,6 +163,7 @@ function renderLayerList() {
     removeBtn.textContent = '×';
     removeBtn.title = 'Remove from active layers';
     removeBtn.style.cssText = 'background:none; border:none; cursor:pointer; color:rgba(255,100,100,0.65); font-size:15px; flex-shrink:0; padding:0 2px; line-height:1;';
+    if (layer._custom && layer._custom.owner === 'a') removeBtn.title = 'Hide (it comes with its area: switch the area off in Analyze to drop its maps)';
     if (layer._custom && layer._custom.owner === 'c') { removeBtn.title = 'Part of the CalTopo map: remove it there'; removeBtn.style.visibility = 'hidden'; }   // read-only: no ✕ (space kept so sliders line up)
     removeBtn.addEventListener('mouseenter', () => { removeBtn.style.color = 'rgba(255,60,60,1)'; });
     removeBtn.addEventListener('mouseleave', () => { removeBtn.style.color = 'rgba(255,100,100,0.65)'; });
@@ -176,6 +178,12 @@ function renderLayerList() {
     row.appendChild(chk);
     row.appendChild(nameSpan);
     row.appendChild(slider);
+    if (layer._custom && layer._custom.colours && window._areaMaps) {      // an area's map (area-maps.js): its colours
+      const cb = document.createElement('button'); cb.type = 'button'; cb.className = 'lp-am-col'; cb.title = 'Colours…'; cb.setAttribute('aria-label', 'Colours of ' + layer.name);
+      cb.innerHTML = window.icon ? window.icon('palette', 13) : '🎨'; cb.style.cssText = 'background:none;border:0;cursor:pointer;color:inherit;padding:0 2px;flex-shrink:0;';
+      cb.addEventListener('click', () => window._areaMaps.dialog(layer._custom.id));
+      row.appendChild(cb);
+    }
     row.appendChild(removeBtn);
     body.appendChild(row);
 

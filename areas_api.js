@@ -11,6 +11,7 @@
 //   POST /api/areas/run     { id? | name+ring, project?, lidar, tools, options } → { ok, runId, areaId }
 //   GET  /api/areas/status/<runId>            { ok, status, step, steps, progress, message, notes, error, areaId }
 //   GET  /api/areas/file/<areaId>/<result>/<name>   (allow-list per result folder)
+//   GET  /api/areas/maps/<areaId>   GET /api/areas/tiles/<areaId>/<map>/<z>/<x>/<y>.png?ramp=&lo=&hi=   (area_tiles.js)
 //   POST /api/areas/import[?overwrite=1]   body: an area package zip (tools/area_pack.js) → { ok, area, written, refused }
 //
 // One run = ordered steps, each a child process (terrain: the Terrain panel's generation, called in-process): ground (skipped when
@@ -39,9 +40,9 @@ const LIMITS = {
   bush:    { max: 32, coarseMax: 80, defaultCell: 1, coarseCell: 2, offer: { key: 'cell-2', label: 'Coarser cells (2 m)', options: { cell: 2 } } },
 };
 const FILES = {
-  ground: /^(grid\.json|summary\.json|coverage\.png|pits\.geojson|ground\.npy)$/,
+  ground: /^(grid\.json|summary\.json|coverage\.png|pits\.geojson|ground\.npy|maps\.json|slope\.u8|hillshade\.u8)$/,
   veg: /^(veg\.json|shapes\.bin|shell\.bin|ground\.bin|preview\.png)$/,
-  bush: /^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,80}\.(png|json|tif)$/,
+  bush: /^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,80}\.(png|json|tif|u8)$/,
   terrain: /^ref\.json$/,
   prospect: /^(candidates|candidates_areas|candidates_isolated)\.geojson$|^candidates\.(kml|csv)$|^(depth|below|steep)\.png$|^(layers|summary)\.json$/,
 };
@@ -50,6 +51,7 @@ const MIME = { '.png': 'image/png', '.json': 'application/json', '.geojson': 'ap
 
 module.exports = function areasApi({ python, groundScript, vegScript, lidarScript, prospectScript, root, terrainGen, pollMs, fetchTimeoutMs }) {
   const jobs = {};
+  const tiles = require('./area_tiles.js')({ root });     // the area's maps as coloured tiles (GET tiles/…, maps/…)
   const eptCache = new Map();
   const json = (res, d, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(d)); };
   const num = v => typeof v === 'number' && Number.isFinite(v);
@@ -561,6 +563,8 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
       if (req.method === 'POST' && rest === 'run') return void post(run);
       if (req.method === 'GET' && rest.startsWith('status/')) return status(res, rest.slice(7));
       if (req.method === 'GET' && rest.startsWith('file/')) return file(res, rest.slice(5));
+      if (req.method === 'GET' && rest.startsWith('tiles/')) return tiles.tile(res, rest.slice(6), query);
+      if (req.method === 'GET' && rest.startsWith('maps/')) return tiles.maps(res, rest.slice(5));
       if (req.method === 'POST' && rest === 'import') return importPack(req, res, query);
       return json(res, { ok: false, error: 'not found' }, 404);
     } catch (e) { return fail(e); }

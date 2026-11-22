@@ -593,6 +593,9 @@ def run(params, area_dir, say=say_default):
             "version": VERSION, "row0": "south"}
     with open(os.path.join(gd, "grid.json"), "w") as f:
         json.dump(meta, f, indent=1)
+    # slope and hillshade as value rasters for the coloured map layers (area_maps.py)
+    import area_maps
+    area_maps.ground_maps(np.load(os.path.join(gd, "ground.npy"), mmap_mode="r"), meta, gd)
     with open(os.path.join(gd, "pits.geojson"), "w") as f:
         json.dump({"type": "FeatureCollection", "features": pits}, f, indent=1)
     rgba = np.zeros(grid.shape + (4,), np.uint8)
