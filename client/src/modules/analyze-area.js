@@ -25,10 +25,11 @@
     { id: 'terrain', name: 'Terrain + hillshade', icon: '⛰' },
     { id: 'veg', name: 'Vegetation shapes', icon: '🌲' },
     { id: 'bush', name: 'Bushwhack / voids', icon: '∴' },
+    { id: 'prospect', name: 'Prospects', icon: '◎', desc: 'Possible entrances: hollows, points below the ground, cliff openings. A list to look at, not a ranking.' },
   ];
-  const RNAME = { ground: 'Ground', terrain: 'Terrain', veg: 'Vegetation', bush: 'Bushwhack' };
-  const RKEYS = ['ground', 'terrain', 'veg', 'bush'];
-  const SHOWABLE = ['terrain', 'veg', 'bush'];
+  const RNAME = { ground: 'Ground', terrain: 'Terrain', veg: 'Vegetation', bush: 'Bushwhack', prospect: 'Prospects' };
+  const RKEYS = ['ground', 'terrain', 'veg', 'bush', 'prospect'];
+  const SHOWABLE = ['terrain', 'veg', 'bush', 'prospect'];
   const CHIP = { fits: ['ok', 'Fits'], partly: ['warn', 'Partly covered'], toobig: ['bad', 'Too big'], needslidar: ['bad', 'Needs LiDAR'] };
 
   /** An offer → the options patch for its tool. { options } wins; else "name=value" / "name:value"; else { [key]: true }. */
@@ -58,7 +59,7 @@
       const used = fix[t.id] && !bad ? fix[t.id] : null;
       if (used) why = (why ? why + ' ' : '') + 'Using: ' + (used.label || used.key) + '.';
       if (res[t.id] && !bad) why = 'Already made ' + shortDate(res[t.id].date) + '; running again replaces it. ' + why;
-      return { id: t.id, name: t.name, icon: t.icon, status: k, st: chip[0], chip: chip[1], why: why.trim(), offers, used,
+      return { id: t.id, name: t.name, icon: t.icon, desc: t.desc || '', status: k, st: chip[0], chip: chip[1], why: why.trim(), offers, used,
         minutes: c && +c.minutes || 0, ticked: !!ticks[t.id] && !bad, disabled: !c || (bad && !offers) };
     });
   }
@@ -271,6 +272,7 @@
     if (!tools.length) return { ok: false, error: 'nothing ticked' };
     const name = S.cur.id ? S.cur.name : ((S.draftName || '').trim() || S.cur.name || 'New area');
     const body = Object.assign(S.cur.id ? { id: S.cur.id } : { name, ring: S.cur.ring }, { project: PJ().pid || '', lidar: lidar(), tools, options: options || optionsOf(S.fix) });
+    if (tools.includes('prospect') && w._areaProspects) { body.options.prospect = Object.assign({ known: await w._areaProspects.known() }, body.options.prospect || {}); }
     if (tools.includes('bush')) body.options.bush = Object.assign(bushParams(), body.options.bush || {});
     let j;
     try { j = await post('/api/areas/run', body); } catch (e) { j = { ok: false, error: e.message || String(e) }; }
@@ -370,6 +372,7 @@
       drawn.terrain[a.id] = want1;
       try { ids.forEach(id => CL().api.setView(id, { show: want1 })); await CL().sync(); if (w._terrainPanel && w._terrainPanel.render) w._terrainPanel.render(true); } catch (e) { console.warn('[areas] terrain', e); }
     }
+    try { if (w._areaProspects) w._areaProspects.sync(want, S.areas); } catch (e) { console.warn('[areas] prospect', e); }
     if (v && v.scene && v.scene.requestRender) v.scene.requestRender();
   }
   // The Terrain panel's keep(): the job's patch(es) and hillshade become layer records (project or My data), once.
@@ -406,7 +409,7 @@
   // ── Delete ──
   async function remove(id) {
     const j = await post('/api/areas/delete', { id });
-    if (j && j.ok) { dispatch({ type: 'show', id, on: false }); await apply(); SHOW = reduce(SHOW, { type: 'forget', id }); lset(SKEY, JSON.stringify(SHOW)); if (S.cur && S.cur.id === id) setCurrent(null); }
+    if (j && j.ok) { dispatch({ type: 'show', id, on: false }); await apply(); if (w._areaProspects) w._areaProspects.forget(id); SHOW = reduce(SHOW, { type: 'forget', id }); lset(SKEY, JSON.stringify(SHOW)); if (S.cur && S.cur.id === id) setCurrent(null); }
     S.delAsk = null; await refresh(); return j;
   }
   async function removeResult(id, result) {
@@ -414,6 +417,7 @@
     const j = await post('/api/areas/delete-result', { id, result });
     SHOW = reduce(SHOW, { type: 'forgetResult', id, result }); lset(SKEY, JSON.stringify(SHOW));
     if (result === 'terrain') delete drawn.terrain[id];
+    if (result === 'prospect' && w._areaProspects) w._areaProspects.forget(id);
     if (result === 'bush' && drawn.bush[id]) { const v = V(); drawn.bush[id].layers.forEach(L => { try { v.imageryLayers.remove(L, true); } catch (_) {} }); delete drawn.bush[id]; }
     S.delRes = null; await refresh(); return j;
   }
@@ -462,6 +466,7 @@
     let h = `<div class="ar-item ${g.st}" data-tool="ground"><div class="ar-hd"><span class="ar-lock" title="Always first">🔒</span><span class="ar-nm">Ground</span><span class="ar-chip ${g.st}">${g.chip}</span></div><div class="ar-why">${esc(g.why)}</div></div>`;
     rows.forEach(r => {
       h += `<div class="ar-item ${r.st}" data-tool="${r.id}"><div class="ar-hd"><input type="checkbox" class="keep-box" data-act="tick" data-id="${r.id}"${r.ticked ? ' checked' : ''}${r.disabled ? ' disabled' : ''} aria-label="${esc(r.name)}"><span class="ar-ic">${r.icon}</span><span class="ar-nm">${esc(r.name)}</span><span class="ar-chip ${r.st}">${esc(r.chip)}</span></div>`;
+      if (r.desc) h += `<div class="ar-why ar-desc">${esc(r.desc)}</div>`;
       if (r.why) h += `<div class="ar-why">${esc(r.why)}</div>`;
       if (r.offers) h += `<div class="ar-offers">${r.offers.map((o, i) => `<button type="button" class="ar-btn" data-act="fix" data-id="${r.id}" data-i="${i}">${esc(o.label || o.key)}</button>`).join('')}</div>`;
       if (r.used) h += `<div class="ar-offers"><button type="button" class="ar-btn" data-act="unfix" data-id="${r.id}">Back to the normal setting</button></div>`;
@@ -478,7 +483,8 @@
     bar.classList.remove('running');
     const p = plan(toolRows(S.check, { ticks: S.ticks, fix: S.fix, area: curArea() }), S.check, curArea());
     t.textContent = S.cur ? p.text : 'Choose an area.'; b.textContent = 'Run ticked';
-    b.disabled = !S.cur || !p.tools.length || !!(S.cur && S.cur.crossing) || !lidar().length;
+    const ca = curArea(), noLidarOk = p.tools.every(t => t === 'prospect') && !!(ca && ca.results && ca.results.ground);   // Prospects reads only the area's ground and points
+    b.disabled = !S.cur || !p.tools.length || !!(S.cur && S.cur.crossing) || (!lidar().length && !noLidarOk);
     const lr = $('ar-last'); if (lr) { lr.hidden = !S.lastRun; lr.textContent = S.lastRun ? 'Run finished: ' + S.lastRun.text : ''; }
   }
   function resultRows(a) {
@@ -490,19 +496,21 @@
       const del = S.delRes === a.id + ':' + k
         ? `<button type="button" class="ar-btn ar-danger" data-act="delresyes" data-id="${esc(a.id)}" data-res="${k}">Yes, delete</button><button type="button" class="ar-btn" data-act="delresno">No</button>`
         : `<button type="button" class="ar-x" data-act="delres" data-id="${esc(a.id)}" data-res="${k}" title="Delete this result">✕</button>`;
-      return `<div class="ar-rr" data-res="${k}"><span class="ar-grow">${RNAME[k]}${r.coarse ? ' <span class="ar-coarse" title="Made with a coarser setting">coarse</span>' : ''}<br><span class="ar-dim">${fmtMB(r.bytes)} · ${shortDate(r.date)}${extra}</span>${vegNote}${notes}</span>${showable ? eyeBtn(st, 'ressw', a.id, k, 'Show ' + RNAME[k] + ' of ' + a.name, true) : '<span class="ar-dim">kept</span>'}${del}</div>`;
+      const pros = k === 'prospect' ? `<div class="ar-prospect" data-area="${esc(a.id)}"></div>` : '';
+      return `<div class="ar-rr" data-res="${k}"><span class="ar-grow">${RNAME[k]}${r.coarse ? ' <span class="ar-coarse" title="Made with a coarser setting">coarse</span>' : ''}<br><span class="ar-dim">${fmtMB(r.bytes)} · ${shortDate(r.date)}${extra}</span>${vegNote}${notes}${pros}</span>${showable ? eyeBtn(st, 'ressw', a.id, k, 'Show ' + RNAME[k] + ' of ' + a.name, true) : '<span class="ar-dim">kept</span>'}${del}</div>`;
     }).join('');
   }
   function paintProcs() {
     const box = $('ar-procs'); if (!box) return;
     const list = S.areas.filter(a => a.results && Object.keys(a.results).length);
     if (!list.length) { box.innerHTML = '<div class="ar-none">Nothing yet. Run a tool and its area is kept here.</div>'; return; }
+    const done = () => { try { if (w._areaProspects) w._areaProspects.mount(box); } catch (e) { console.warn('[areas] prospect mount', e); } };
     box.innerHTML = list.map(a => {
       const open = S.open === a.id, ks = RKEYS.filter(k => a.results[k]);
       let h = `<div class="ar-proc" data-id="${esc(a.id)}"><div class="ar-ph">${eyeBtn(eyeOf(SHOW, a.id), 'procsw', a.id, null, 'Show ' + a.name + ' on the map')}
         <button type="button" class="ar-pm" data-act="procopen" data-id="${esc(a.id)}" aria-expanded="${open}"><span class="ar-pt"><span class="ar-nm">${esc(a.name)}</span><span class="ar-tag">${esc(tagOf(a))}</span><span class="ar-chev${open ? ' open' : ''}">›</span></span>
         <span class="ar-dim">${(+a.km2 || 0).toFixed(1)} km² · ${shortDate(a.updated || a.created)}</span>
-        <span class="ar-chips">${ks.map(k => `<span class="ar-mini">${RNAME[k]}${a.results[k].coarse ? ' <i title="coarse">◦</i>' : ''}</span>`).join('')}</span></button></div>`;
+        <span class="ar-chips">${ks.map(k => `<span class="ar-mini">${RNAME[k]}${k === 'prospect' && a.results[k].counts ? ' ' + ['A', 'B', 'C'].map(c => c + ' ' + (a.results[k].counts[c] || 0)).join(' · ') : ''}${a.results[k].coarse ? ' <i title="coarse">◦</i>' : ''}</span>`).join('')}</span></button></div>`;
       if (open) {
         h += `<div class="ar-pb">${resultRows(a)}<div class="ar-btns"><button type="button" class="ar-btn" data-act="more" data-id="${esc(a.id)}">Run more tools here</button>`
           + (w._weather ? `<button type="button" class="ar-btn" data-act="wx" data-id="${esc(a.id)}">Weather</button>` : '')
@@ -511,6 +519,7 @@
       }
       return h + '</div>';
     }).join('');
+    done();
   }
   /** Layers / Terrain groups: rows of loaded (switched on) areas, the same switches. */
   function paintGroups() {
@@ -630,6 +639,7 @@
   .ar-pb { padding: 0 9px 7px 41px; }
   .ar-rr, .ar-grow-row { display: flex; gap: 8px; align-items: center; padding: 5px 0; border-top: 1px solid rgba(255,255,255,.07); }
   .ar-grow-row { padding: 5px 4px; }
+  .ar-desc { padding-left: 21px; }
   .ar-note { color: #f2c24e; font-size: 10.5px; }
   .ar-coarse { font-size: 9.5px; color: #f2c24e; border: 1px solid rgba(242,194,78,.5); border-radius: 8px; padding: 0 5px; }
   .ar-x { background: none; border: 0; color: rgba(255,255,255,.45); cursor: pointer; font-size: 11px; padding: 0 2px; } .ar-x:hover { color: #ef7b6e; }`;
