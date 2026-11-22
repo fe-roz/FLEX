@@ -11,6 +11,7 @@
 //   POST /api/areas/run     { id? | name+ring, project?, lidar, tools, options } → { ok, runId, areaId }
 //   GET  /api/areas/status/<runId>            { ok, status, step, steps, progress, message, notes, error, areaId }
 //   GET  /api/areas/file/<areaId>/<result>/<name>   (allow-list per result folder)
+//   POST /api/areas/import[?overwrite=1]   body: an area package zip (tools/area_pack.js) → { ok, area, written, refused }
 //
 // One run = ordered steps, each a child process (terrain: the Terrain panel's generation, called in-process): ground (skipped when
 // DIR/ground exists for the same lidar, ring and cell), then veg, bush, terrain. Each success is written into area.json (replacing
@@ -44,6 +45,7 @@ const FILES = {
   terrain: /^ref\.json$/,
   prospect: /^(candidates|candidates_areas|candidates_isolated)\.geojson$|^candidates\.(kml|csv)$|^(depth|below|steep)\.png$|^(layers|summary)\.json$/,
 };
+const IMPORT_MAX = 2048 * 1048576;    // an area package (zip) for POST /api/areas/import
 const MIME = { '.png': 'image/png', '.json': 'application/json', '.geojson': 'application/json', '.tif': 'image/tiff', '.kml': 'application/vnd.google-earth.kml+xml', '.csv': 'text/csv; charset=utf-8' };
 
 module.exports = function areasApi({ python, groundScript, vegScript, lidarScript, prospectScript, root, terrainGen, pollMs, fetchTimeoutMs }) {
@@ -532,6 +534,18 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
     });
   }
 
+  /** An area package (tools/area_pack.js) into the store; the same allow-list as file(). */
+  function importPack(req, res, query) {
+    const chunks = []; let n = 0, dead = false;
+    req.on('data', c => { n += c.length; if (n > IMPORT_MAX) { dead = true; json(res, { ok: false, error: 'the package is too large' }, 413); req.destroy(); } else chunks.push(c); });
+    req.on('end', () => {
+      if (dead) return;
+      require('./tools/area_pack.js').unpack(Buffer.concat(chunks), root, FILES, { overwrite: String((query || {}).overwrite || '') === '1' })
+        .then(r => json(res, r))
+        .catch(e => json(res, { ok: false, error: e.message || String(e), exists: e.code === 'EXISTS' }, e.code === 'EXISTS' ? 409 : 400));
+    });
+  }
+
   /** /api/areas[/<rest>] */
   function handle(req, res, rest, query) {
     const fail = e => json(res, { ok: false, error: e.message || String(e) }, 500);
@@ -547,8 +561,10 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
       if (req.method === 'POST' && rest === 'run') return void post(run);
       if (req.method === 'GET' && rest.startsWith('status/')) return status(res, rest.slice(7));
       if (req.method === 'GET' && rest.startsWith('file/')) return file(res, rest.slice(5));
+      if (req.method === 'POST' && rest === 'import') return importPack(req, res, query);
       return json(res, { ok: false, error: 'not found' }, 404);
     } catch (e) { return fail(e); }
   }
   return { jobs, pctOf, handle, check, LIMITS };
 };
+module.exports.FILES = FILES;
