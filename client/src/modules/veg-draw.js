@@ -488,6 +488,7 @@ out float v_hag;
 out vec4 v_meta;
 out float v_fade;
 out float v_lodm;
+out vec3 v_lp;
 void main() {
   bool shell = meta.w > 0.9;
   bool brushy = meta.x > 0.75;
@@ -510,6 +511,7 @@ void main() {
   v_pEC = pEC.xyz;
   v_nEC = czm_normal * normal.xyz;
   v_hag = aux.x * 655.35;
+  v_lp = position;
   v_meta = meta;
   vec4 p = czm_projection * pEC;
   if (u_overlay > 0.5 && p.w > 0.0) p.z = clamp(p.z, -p.w, p.w) * 0.999;
@@ -522,6 +524,7 @@ in float v_hag;
 in vec4 v_meta;
 in float v_fade;
 in float v_lodm;
+in vec3 v_lp;
 uniform float u_minH;
 uniform float u_trees;
 uniform float u_brush;
@@ -571,6 +574,13 @@ uniform float u_edge;
 uniform float u_fill;
 uniform float u_behind;
 uniform float u_mode;      // 0 = the nearest layer, 1 = the rims of the layers behind it
+// value noise in the result's local metres: leafy mottling up close, so a low-poly face reads as foliage, not a facet
+float h3(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float vnoise(vec3 x) {
+  vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(h3(i), h3(i + vec3(1, 0, 0)), f.x), mix(h3(i + vec3(0, 1, 0)), h3(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(h3(i + vec3(0, 0, 1)), h3(i + vec3(1, 0, 1)), f.x), mix(h3(i + vec3(0, 1, 1)), h3(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
 void main() {
   if (vegHidden()) discard;
   float dist = -v_pEC.z;
@@ -599,6 +609,8 @@ void main() {
   vec3 col = base * lit;
   float topF = smoothstep(0.35, 0.95, nup);
   float dens = 0.55 + 0.45 * v_meta.y;
+  float leaf = 1.0;
+  if (!shell && mpp < 0.12) leaf = mix(0.8 + 0.4 * (0.65 * vnoise(v_lp * 1.4) + 0.35 * vnoise(v_lp * 3.7)), 1.0, smoothstep(0.03, 0.12, mpp));
   float a;
   if (brushy && !shell) {
     // brush: more solid than crowns, lumps lit harder with a lighter top, darker at the foot (it sits on the ground)
@@ -606,15 +618,15 @@ void main() {
     float foot = 1.0 - smoothstep(0.0, 0.8, v_hag);
     col = base * (0.5 + 0.55 * max(dot(N, L), 0.0) + 0.3 * (0.5 + 0.5 * nup));
     col = mix(col, mix(base, vec3(0.82, 0.88, 0.5), 0.3) * 1.08, 0.5 * topF);
-    col *= 1.0 - 0.4 * foot;
-    vec3 rimCol = base * 0.5;
-    float er = clamp(u_edge * rim * 1.2, 0.0, 1.0);
+    col *= (1.0 - 0.4 * foot) * leaf;
+    vec3 rimCol = base * 0.55;
+    float er = clamp(u_edge * rim * 0.9, 0.0, 1.0);
     if (u_mode > 0.5) { a = u_behind * u_edge * rim * (0.45 + u_opacity) * 0.4 * (1.0 - far); col = rimCol; }
     else { a = u_opacity * u_fill * dens * mix(3.4, 3.0, far) + u_edge * rim * (0.35 + u_opacity) * 0.7; col = mix(col, rimCol, er); }
   } else {
     vec3 rimCol = mix(base, vec3(0.75, 1.0, 0.5), 0.4) * 1.12;
     vec3 topCol = mix(base, vec3(0.96, 1.0, 0.62), 0.38) * 1.08;
-    col = mix(col, topCol, topF * 0.7);
+    col = mix(col, topCol, topF * 0.7) * mix(1.0, leaf, 0.6);
     float er = clamp(u_edge * rim * 1.6, 0.0, 1.0);
     if (u_mode > 0.5) {
       a = u_behind * u_edge * rim * (0.45 + u_opacity) * 0.6 * (1.0 - far);
