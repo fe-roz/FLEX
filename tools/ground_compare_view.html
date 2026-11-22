@@ -226,7 +226,7 @@ function march(r) {                   // walk the ray over the height grid (no t
   return null;
 }
 function jump(x, y) {
-  var h = hAt(st.a, x, y) - zmid, P = new THREE.Vector3(x - W / 2, h, L / 2 - y), d = Math.min(150, Math.max(W, L) / 3);
+  var h = hAt(st.a, x, y) - zmid, P = new THREE.Vector3(x - W / 2, h, L / 2 - y), d = Math.min(220, Math.max(W, L) / 2);
   var off = camera.position.clone().sub(controls.target).normalize().multiplyScalar(d);
   controls.target.copy(P); camera.position.copy(P).add(off); controls.update();
   showSpot(x, y);
