@@ -314,7 +314,7 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
   async function terrainStep(job, step, area, lidar, options, notes) {
     const s = settingsOf('terrain', options);
     const payload = { project: area.project || undefined, dest: area.project ? undefined : 'mine', bbox: bboxOf(area.ring), polygon: area.ring.slice(0, -1),
-      ept: lidar, resolution: s.cell, name: area.name };
+      ept: lidar, resolution: s.cell, name: area.name, area: area.id };
     const req = Readable.from([JSON.stringify(payload)]); req.method = 'POST';
     const answer = await new Promise(resolve => {
       let txt = '';

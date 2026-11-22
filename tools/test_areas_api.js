@@ -124,6 +124,7 @@ const srv = http.createServer((q, s) => {
   ok('veg got area-dir', JSON.parse(fs.readFileSync(path.join(root, AR, 'veg/veg.json'))).ad === path.join(root, AR) && JSON.parse(fs.readFileSync(path.join(root, AR, 'veg/veg.json'))).detail === 'low');
   ok('terrain called with ring bbox, polygon, project, ept', terrainCalls[0].project === 'p1' && terrainCalls[0].bbox.length === 4 && terrainCalls[0].polygon.length === 4 && terrainCalls[0].ept[0] === L[0], terrainCalls[0]);
   ok('terrain pointer written', fs.existsSync(path.join(root, AR, 'terrain/ref.json')));
+  ok('terrain request carries the area id, and ground ran first', terrainCalls[0].area === AR && s.steps.map(x => x.key).indexOf('ground') < s.steps.map(x => x.key).indexOf('terrain') && fs.existsSync(path.join(root, AR, 'ground/grid.json')), terrainCalls[0]);
   const gOnce = fs.readFileSync(path.join(root, 'ground-count.txt'), 'utf8').length;
   const before = a.results.veg.date;
   await new Promise(r => setTimeout(r, 15));
