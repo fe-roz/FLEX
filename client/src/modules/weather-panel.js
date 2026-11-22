@@ -395,10 +395,10 @@
     hints(rows, sys).forEach(t => card.appendChild(el('div', 'wx-hint', t)));
     // charts
     const [a, b] = hourSpan(P, S.i0, S.i1), now = P.t.indexOf(nowLocal(P).slice(0, 13) + ':00');
+    const sl = snowLine(P, a, b, pt.elev, sys); if (sl.text) { const t = el('div', 'wx-snow', sl.text); t.id = 'wx-snowline'; card.appendChild(t); }
     const ch = el('div', 'wx-charts'); ch.id = 'wx-charts';
     ch.innerHTML = chartTemp(P, a, b, sys, now) + chartPrecip(P, a, b, sys, now) + chartWind(P, a, b, sys, now) + chartCloud(P, a, b, sys, now) + chartFreeze(P, a, b, pt.elev, sys, now);
     card.appendChild(ch);
-    const sl = snowLine(P, a, b, pt.elev, sys); if (sl.text) { const t = el('div', 'wx-snow', sl.text); t.id = 'wx-snowline'; card.appendChild(t); }
     card.appendChild(el('div', 'wx-note', 'Orange or blue-grey thick line: best-match model; thin lines: the other models. Wider gaps between lines mean the models disagree.'));
     // NWS
     const ns = rec.nws && rec.nws.length ? rec.nws.filter(p => p.start >= P.dates[S.i0] && p.start <= P.dates[S.i1]) : [];
