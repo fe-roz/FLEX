@@ -200,7 +200,7 @@ def child_main(argv):
 
 def default_workers():
     """FLEX_AREA_WORKERS, else 4, fewer when the machine has little memory
-    free (a reading child peaks near 1.2 GB; 2 GB kept for the rest)."""
+    free (a reading child peaks near 1.5 GB (measured, 20 M points); 2 GB kept for the rest)."""
     if os.environ.get("FLEX_AREA_WORKERS"):
         return max(1, int(os.environ["FLEX_AREA_WORKERS"]))
     try:
@@ -213,7 +213,7 @@ def default_workers():
             avail = psutil.virtual_memory().available / 1e9
         except Exception:
             return 2
-    return int(max(1, min(4, (avail - 2.0) // 1.5)))
+    return int(max(1, min(4, (avail - 2.0) // 1.6)))
 
 
 def fetch_all(area_dir, source, bbox, tile_m, zone, south, say, stop_after=None):
