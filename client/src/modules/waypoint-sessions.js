@@ -4,6 +4,7 @@
 // Pure core (browser: window._wptSessions, Node: module.exports; tools/test_waypoint_sessions.js):
 //   parse(text, fileName)         → { points, stats }   format sniffed: GPX (<wpt>), GeoJSON (Point features), KML (Placemark/Point)
 //   parseAsync(text, name, onProgress)   same, in slices so the page stays alive (progress 0..1)
+//   (dialog: the area is window._areas.current().ring when there is one, else the area picker's, else all points)
 //   inRing(lon, lat, ring)        point in polygon; filterRing(points, ring)
 //   dedupe(points)                same place (≤ 3 m) and same name → one, with a count; earliest time, every distinct note
 //   sessionsByGap(points, gapMs, tz?)  sorted by time; a gap longer than gapMs starts a session; no time → "No time"
@@ -201,7 +202,7 @@
         <div class="wpt-prog" hidden><div></div></div>
         <div class="wpt-note wpt-stat"></div>
         <div class="wpt-r"><label><input type="radio" name="wpt-area" value="all" checked class="keep-box"> All points</label>
-          <label><input type="radio" name="wpt-area" value="area" class="keep-box"> Only inside the area below</label></div>
+          <label><input type="radio" name="wpt-area" value="area" class="keep-box"> Only inside the area: <span class="wpt-an">the current Analyze area, or the one chosen below</span></label></div>
         <div class="wpt-picker"></div>
         <div class="wpt-r"><label><input type="radio" name="wpt-mode" value="gap" checked class="keep-box"> Sessions: new one after a gap of</label>
           <input type="range" class="wpt-gap" min="0.5" max="6" step="0.5" value="2"> <b class="wpt-gapv">2 h</b>
@@ -226,6 +227,8 @@
     $('.wpt-dest').onchange = e => { D.dest = e.target.value; };
     $('.wpt-go').onclick = doImport;
     if (root._areaPicker) D.picker = root._areaPicker.create({ host: $('.wpt-picker'), hasFootprint: projectOpen, onChange: () => { if (D.area) recompute(); } });
+    const c0 = root._areas && root._areas.current && root._areas.current();
+    if (c0 && c0.ring) { D.area = true; el.querySelector('[name=wpt-area][value=area]').checked = true; $('.wpt-an').textContent = '“' + (c0.name || 'current area') + '” (Analyze by area)'; }
     syncDest();
     return el;
   }
@@ -251,9 +254,15 @@
     $('.wpt-stat').textContent = D.stats.map(s => `${s.file}: ${s.points} waypoints (${s.format.toUpperCase()})` + (s.tracks || s.routes ? `; ${s.tracks} tracks and ${s.routes} routes ignored` : '') + (s.skipped ? `; ${s.skipped} skipped (no usable point)` : '')).join('  |  ');
     recompute();
   }
+  /** The ring to keep points in: the current area of Analyze by area (window._areas), else the area picker's. */
+  function areaRing() {
+    const c = root._areas && root._areas.current && root._areas.current();
+    if (c && c.ring && c.ring.length >= 3) return c.ring;
+    const a = D.picker && D.picker.area && D.picker.area(); return a && a.polygon ? a.polygon : null;
+  }
   function recompute() {
     if (!D.el) return;
-    const a = D.picker && D.picker.area && D.picker.area(); const ring = D.area && a ? a.polygon : null;
+    const ring = D.area ? areaRing() : null;
     if (D.area && !ring) $('.wpt-msg').textContent = 'No area chosen yet: draw or pick one above, or switch to All points.'; else if ($('.wpt-msg').textContent.startsWith('No area')) $('.wpt-msg').textContent = '';
     let pts = D.area ? (ring ? filterRing(D.pts, ring) : []) : D.pts;
     const before = pts.length; if ($('.wpt-dd').checked) pts = dedupe(pts);
