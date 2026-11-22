@@ -209,7 +209,10 @@ dz = (V[::max(1, len(V) // 300), 2] - V[::max(1, len(V) // 300), 3]) - gzv
 check('shell z = ground + hag', np.abs(dz).max() < 0.3, np.abs(dz).max())
 e = np.sort(np.concatenate([T[:, [0, 1]], T[:, [1, 2]], T[:, [2, 0]]]), axis=1)
 _, cnt = np.unique(e[:, 0].astype(np.int64) * len(V) + e[:, 1], return_counts=True)
-check('shell closed (edges shared by 2)', (cnt == 2).mean() > 0.995, (cnt == 2).mean())
+check('shell closed (edges shared by 2)', (cnt == 2).all(), (cnt == 2).mean())
+check('shell extracted fine, then simplified', veg['shell']['voxel_m'] <= 2.0 and
+      veg['shell']['simplified_from'] >= len(T) and 0 <= veg['shell']['error_m'] < 0.5,
+      veg['shell'])
 P = V[:, :3].astype(np.float64) - V[:, :3].mean(0)
 vol = np.einsum('ij,ij->i', P[T[:, 0]], np.cross(P[T[:, 1]], P[T[:, 2]])).sum() / 6
 check('shell outward (CCW from outside)', vol > 0, vol)
@@ -222,6 +225,8 @@ p2 = dict(params, looks=['shell'], max_triangles=2000)
 veg_b, _ = quiet_run(p2, out_b)
 check('max_triangles honoured', veg_b['shell']['triangles'] <= 2000,
       veg_b['shell']['triangles'])
+check('small budget: simplified from more', veg_b['shell']['simplified_from'] > 2000,
+      veg_b['shell'])
 check('only the asked look', 'shapes' not in veg_b and
       not os.path.exists(os.path.join(out_b, 'shapes.bin')))
 
