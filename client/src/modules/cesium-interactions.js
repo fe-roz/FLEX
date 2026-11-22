@@ -91,8 +91,9 @@ export const isLatchedFlag = name => LATCHED_FLAGS.has(name);
 export const FLY_MULT_MIN = 0.1, FLY_MULT_MAX = 64;
 export const clampFlyMult = m => (Number.isFinite(m) ? Math.min(FLY_MULT_MAX, Math.max(FLY_MULT_MIN, m)) : 1);
 
-// Fly speed (m/s) from the height above ground (m): 20 m/s at 20 m, floor 2, cap 20000.
-export const flySpeedMps = hag => Math.min(20000, Math.max(2, 0.5 * (hag + 20)));
+// Fly speed (m/s) from the height above ground (m): 10 m/s at the ground, +0.125 m/s per metre above it
+// (a quarter of the earlier climb), floor 2, cap 20000.
+export const flySpeedMps = hag => Math.min(20000, Math.max(2, 10 + 0.125 * hag));
 
 export function downloadBlob(filename, blob) {
 if (window.navigator.msSaveOrOpenBlob) {

@@ -29,11 +29,11 @@ for (const f of ['Fly', 'TouchFly', 'hideCesium', 'showlidar', 'removePC', 'togg
   ok('latched ' + f, M.isLatchedFlag(f));
 
 // fly speed: ~20 m/s at 20 m height and x1; floor 2; cap 20000
-ok('speed at 20 m', M.flySpeedMps(20) === 20, M.flySpeedMps(20));
+ok('speed at 20 m', M.flySpeedMps(20) === 12.5, M.flySpeedMps(20));
 ok('speed at 0 m', M.flySpeedMps(0) === 10);
 ok('speed floor', M.flySpeedMps(-100) === 2);
 ok('speed cap', M.flySpeedMps(1e9) === 20000);
-ok('speed grows with height', M.flySpeedMps(1000) === 510);
+ok('speed grows with height', M.flySpeedMps(1000) === 135);
 
 // multiplier clamp
 ok('clamp low', M.clampFlyMult(0.001) === M.FLY_MULT_MIN && M.FLY_MULT_MIN === 0.1);
