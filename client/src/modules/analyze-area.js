@@ -161,6 +161,7 @@
     let j = null; try { j = await r.json(); } catch (_) {}
     if (!j || !j.ok) { if (S.avail !== true) setAvail(false); return S.areas; }
     S.areas = Array.isArray(j.areas) ? j.areas : [];
+    setTimeout(outline, 0);
     if (S.cur && S.cur.id) { const a = S.areas.find(x => x.id === S.cur.id); if (a) S.cur = curOf(a); }
     setAvail(true);
     paint(); fire('list');
@@ -194,23 +195,35 @@
   // ── The current area ──
   function current() { return S.cur ? { id: S.cur.id, name: S.cur.name, ring: S.cur.ring } : null; }
   function setCurrent(a) {
-    if (!a) { S.cur = null; S.fix = {}; S.check = null; paint(); outline(null); return null; }
+    if (!a) { S.cur = null; S.fix = {}; S.check = null; paint(); outline(); return null; }
     if (a.id && areaById(a.id)) S.cur = curOf(areaById(a.id));
     else S.cur = { id: a.id, name: a.name || 'New area', ring: a.ring, src: a.src || 'Drawn' };
     S.fix = {}; S.check = null;
-    if (S.cur.id) { S.picking = true; try { if (picker) picker.clear(); } finally { S.picking = false; } outline(S.cur.ring); }
+    if (S.cur.id) { S.picking = true; try { if (picker) picker.clear(); } finally { S.picking = false; } outline(); }
     paint(); scheduleCheck(); fire('current');
     return current();
   }
   let ods = null;
-  function outline(ring) {
+  // The areas' outlines, drawn only while the Analyze pane is open: the chosen area bright, the other saved ones dim;
+  // green = processed (has results), grey-blue = saved but not processed, orange = chosen and not saved yet.
+  const paneOpen = () => { const p = $('lidarDeriveCollapsible'); return !!(p && p.classList.contains('show')); };
+  function outline() {
     const v = V(); if (!v || !w.Cesium) return;
     try {
       if (!ods || !v.dataSources.contains(ods)) { ods = new Cesium.CustomDataSource('analyze-area'); v.dataSources.add(ods); }
       ods.entities.removeAll();
-      if (ring && ring.length >= 3) {
-        const pos = ring.map(p => Cesium.Cartesian3.fromDegrees(p[0], p[1])), col = Cesium.Color.fromCssColorString('#ff9a62');
-        ods.entities.add({ polyline: { positions: pos.concat([pos[0]]), width: 3, material: col, clampToGround: true } });
+      const open = paneOpen(); ods.show = open;
+      if (picker && picker.outline && !(picker.isDrawing && picker.isDrawing())) { try { picker.outline(open && !(S.cur && S.cur.id)); } catch (_) {} }
+      if (open) {
+        const curId = S.cur && S.cur.id;
+        const line = (ring, css, sel) => {
+          if (!ring || ring.length < 3) return;
+          const pos = ring.map(q => Cesium.Cartesian3.fromDegrees(q[0], q[1]));
+          ods.entities.add({ polyline: { positions: pos.concat([pos[0]]), width: sel ? 3.5 : 1.5,
+            material: Cesium.Color.fromCssColorString(css).withAlpha(sel ? 1 : 0.5), clampToGround: true } });
+        };
+        (S.areas || []).forEach(a => { if (a.id !== curId) line(a.ring, a.results && Object.keys(a.results).length ? '#6fd49b' : '#9fb4c8', false); });
+        if (curId) { const a = areaById(curId); line(S.cur.ring, a ? (a.results && Object.keys(a.results).length ? '#6fd49b' : '#9fb4c8') : '#ff9a62', true); }
       }
       if (v.scene.requestRender) v.scene.requestRender();
     } catch (e) { console.warn('[areas] outline', e); }
@@ -224,10 +237,9 @@
       onChange: a => {
         if (S.picking) return;
         if (!a) { if (S.cur && !S.cur.id) setCurrent(null); return; }
-        outline(null);
         const ring = a.polygon && a.polygon.length >= 3 ? a.polygon : [[a.bbox[0], a.bbox[1]], [a.bbox[2], a.bbox[1]], [a.bbox[2], a.bbox[3]], [a.bbox[0], a.bbox[3]]];
         S.cur = { name: (S.draftName || '').trim() || 'New area', ring, src: a.label ? a.label.charAt(0).toUpperCase() + a.label.slice(1) : 'Drawn', crossing: a.crossing };
-        S.fix = {}; S.check = null; paint(); scheduleCheck(); fire('current');
+        S.fix = {}; S.check = null; paint(); outline(); scheduleCheck(); fire('current');
       },
     });
     // The picker's drawing banner shares the Surface route banner's class; hidden, it must not look like a live "picking" banner
@@ -660,6 +672,7 @@
     const watch = (id, fn) => { const p = $(id); if (p) new MutationObserver(() => { if (p.classList.contains('show')) fn(); }).observe(p, { attributes: true, attributeFilter: ['class'] }); };
     const opened = async () => { await restore(); if (S.avail) { ensurePicker(); hideOld(); await refresh(); if (picker) picker.refresh(); paint(); if (S.cur && !S.check) scheduleCheck(); } };
     watch('lidarDeriveCollapsible', opened);
+    { const p = $('lidarDeriveCollapsible'); if (p) new MutationObserver(() => outline()).observe(p, { attributes: true, attributeFilter: ['class'] }); }
     watch('mapLayersCollapsible', () => restore());
     watch('terrainCollapsible', () => restore());
     ['flex-layer-view', 'flex-area-maps'].forEach(ev => w.addEventListener(ev, () => { if (S.avail) paint(); }));
