@@ -72,6 +72,10 @@ PIT_MAX_SPAN = 40.0      # m
 PIT_MIN_SHARE = 0.3
 NEAR_GROUND = 2.0        # |HAG| under this = a return near ground level
 DEFAULT_CAP_MB = 3072
+TILE_M = 630.0           # read tiles; a whole number of every auto cell (0.5..2 m in 0.25 steps)
+AUTO_UNIT = 210.0        # tile size steps when the cell is auto
+MAX_FAILED_SHARE = 0.25  # more tiles than this unread: the run fails (resumable)
+KEEP_FREE_GB = 20.0
 
 say_default = rc.ascii_say
 
@@ -111,7 +115,11 @@ def ground_from_points(P, grid, say=say_default):
     del fs, zs
     med, cnt = cell_median(f, z, ncell)
     del f, z
-    med = med.reshape(grid.shape)
+    return finish_ground(med.reshape(grid.shape), grid)
+
+
+def finish_ground(med, grid):
+    """Cells with a class-2 median keep it; cloth_below fills the rest."""
     direct = np.isfinite(med)
     if not direct.any():
         raise RuntimeError("no ground points inside the area")
@@ -211,6 +219,97 @@ def find_pits(B, near, grid, zone, south):
 # Reading back (for the other tools)
 # --------------------------------------------------------------------------
 
+class ChunkPoints:
+    """The chunked points store (area_tiles.py) seen as a route_cost.Points:
+    len(), chunks(select) walk it tile by tile without loading it all;
+    .xl / .yl / .z / .cls (whole arrays) load it, cropped to bbox, the first
+    time they are asked for (veg_shapes does; lidar_derive does not)."""
+
+    CHUNK = 4_000_000
+
+    def __init__(self, cdir, tiles, ox, oy, bbox=None):
+        self.cdir, self.ox, self.oy, self.bbox = cdir, float(ox), float(oy), bbox
+        self.tiles = []
+        for t, m in tiles:
+            b = m["box"]
+            if bbox is None or not (b[2] < bbox[0] or b[0] > bbox[2] or
+                                    b[3] < bbox[1] or b[1] > bbox[3]):
+                if m["n"]:
+                    self.tiles.append((t, m))
+        self._P = None
+        self.parts = None
+
+    def __len__(self):
+        if self._P is not None:
+            return len(self._P)
+        return sum(m["n"] for _t, m in self.tiles)
+
+    def chunks(self, select=None):
+        if self._P is not None:
+            yield from self._P.chunks(select)
+            return
+        import area_tiles
+        bb = self.bbox
+        for t, m in self.tiles:
+            A = area_tiles.tile_arrays(self.cdir, t, m)
+            n = m["n"]
+            for i in range(0, n, self.CHUNK):
+                j = min(n, i + self.CHUNK)
+                x = A["xl"][i:j].astype(np.float64) + self.ox
+                y = A["yl"][i:j].astype(np.float64) + self.oy
+                z = A["z"][i:j].astype(np.float64)
+                c = np.asarray(A["cls"][i:j])
+                k = None
+                if bb is not None:
+                    k = (x >= bb[0]) & (x <= bb[2]) & (y >= bb[1]) & (y <= bb[3])
+                if select is not None:
+                    s_ = select(c, z)
+                    k = s_ if k is None else (k & s_)
+                if k is not None:
+                    if not k.any():
+                        continue
+                    x, y, z, c = x[k], y[k], z[k], c[k]
+                yield x, y, z, c
+
+    def materialize(self):
+        if self._P is None:
+            P = rc.Points(self.ox, self.oy)
+            for x, y, z, c in self.chunks():
+                P.add(x, y, z, c)
+            self._P = P.finish()
+        return self._P
+
+    def __getattr__(self, k):
+        if k in ("xl", "yl", "z", "cls"):
+            return getattr(self.materialize(), k)
+        raise AttributeError(k)
+
+
+def ground_tiled(P, done, grid, say=say_default):
+    """As ground_from_points, tile by tile: each ground cell lies in one tile
+    (tile edges are whole cells from the grid's origin), so the per-cell
+    medians are made per tile and never need all points at once."""
+    lo = [m["zg_lo"] for m in done.values() if m.get("zg_lo") is not None]
+    hi = [m["zg_hi"] for m in done.values() if m.get("zg_hi") is not None]
+    if sum(m["n_ground"] for m in done.values()) < 50:
+        raise RuntimeError("the points have (almost) no ground class (2)")
+    zlo, zhi = min(lo) - 250.0, max(hi) + 250.0
+    med = np.full(grid.nx * grid.ny, np.nan)
+    for t, m in P.tiles:
+        one = ChunkPoints(P.cdir, [(t, m)], P.ox, P.oy)
+        fs, zs = [], []
+        for x, y, z, _c in one.chunks(lambda c, z: (c == GROUND_CLASS) &
+                                      (z >= zlo) & (z <= zhi)):
+            fs.append(grid.flat(x, y)); zs.append(z)
+        if not fs:
+            continue
+        f = np.concatenate(fs); z = np.concatenate(zs)
+        uf, inv = np.unique(f, return_inverse=True)
+        mm, _cnt = cell_median(inv, z, len(uf))
+        med[uf] = mm
+    return finish_ground(med.reshape(grid.shape), grid)
+
+
 def load_ground(area_dir):
     """(ground north-up float32, ld.Grid, grid.json meta) or None."""
     d = os.path.join(area_dir, "ground")
@@ -290,6 +389,19 @@ def load_points(area_dir, bbox=None):
         return None
     with open(mp) as f:
         m = json.load(f)
+    if m.get("format") == "chunks":
+        import area_tiles
+        cdir = area_tiles.chunk_dir(area_dir)
+        tiles = []
+        for t in m["tiles"]:
+            tm = area_tiles.tile_meta(cdir, t)
+            if tm is None:
+                return None
+            tiles.append((t, tm))
+        cb = m["bbox_utm"]
+        crop = None if (bbox is None or (bbox[0] <= cb[0] and bbox[1] <= cb[1] and
+                                         bbox[2] >= cb[2] and bbox[3] >= cb[3])) else bbox
+        return ChunkPoints(cdir, tiles, m["ox"], m["oy"], crop)
     try:
         arrs = {k: np.load(os.path.join(d, k + ".npy"), mmap_mode="r")
                 for k in ("xl", "yl", "z", "cls")}
@@ -394,18 +506,51 @@ def run(params, area_dir, say=say_default):
     say(f"[1/4] Reading points (UTM zone {zone}{'S' if south else 'N'}, "
         f"{bbox[2] - bbox[0]:.0f} x {bbox[3] - bbox[1]:.0f} m)")
     t0 = time.time()
-    P = rc.read_points(src, bbox, zone, south, say)
+    tiled = params.get("tiled")
+    if tiled is None:
+        tiled = "npz" not in src            # network / file sources: tiles
+    tiles_info = None
+    if tiled:
+        import area_tiles
+        tile_m = float(params.get("tile_m") or TILE_M)
+        unit = AUTO_UNIT if cell_spec in (None, "auto") else float(cell_spec)
+        tile_m = max(unit, round(tile_m / unit) * unit)
+        done, failed, tiles = area_tiles.fetch_all(area_dir, src, bbox, tile_m, zone, south,
+                                                   say, stop_after=params.get("_stop_after"))
+        ntile = len(tiles)
+        missing = ntile - len(done)
+        tiles_info = {"tile_m": tile_m, "tiles": ntile, "read": len(done),
+                      "failed": missing}
+        if params.get("_stop_after") is not None and missing:
+            raise RuntimeError(f"stopped after {len(done)} of {ntile} tiles (test)")
+        if not done or missing > MAX_FAILED_SHARE * ntile:
+            raise RuntimeError(f"LiDAR could not be read for {missing} of {ntile} tiles "
+                               f"(network): run again to fill them")
+        if missing:
+            notes.append(f"LiDAR could not be read for {missing} of {ntile} tiles "
+                         f"(network): run again to fill them")
+        P = ChunkPoints(area_tiles.chunk_dir(area_dir), sorted(done.items()), bbox[0], bbox[1])
+        if not len(P):
+            raise RuntimeError("no LiDAR points in the area")
+        say(f"  {len(P):,} points in the area ({len(done)} tiles, "
+            f"{13 * len(P) / 1e6:.0f} MB on disk)")
+        n_ground = sum(m["n_ground"] for m in done.values())
+    else:
+        P = rc.read_points(src, bbox, zone, south, say)
+        n_ground = int((P.cls == GROUND_CLASS).sum()) if P.cls is not None else 0
     timings["read_s"] = round(time.time() - t0, 2)
 
     say("[2/4] Ground (median of class 2, cloth below fills the rest)")
     t0 = time.time()
-    n_ground = int((P.cls == GROUND_CLASS).sum()) if P.cls is not None else 0
     if cell_spec in (None, "auto"):
         cell = rc.auto_cell(n_ground, area_m2, lo=0.5, hi=2.0)
     else:
         cell = float(cell_spec)
     grid = ld.Grid(bbox[0], bbox[1], bbox[2], bbox[3], cell)
-    ground, direct = ground_from_points(P, grid, say)
+    if tiled:
+        ground, direct = ground_tiled(P, done, grid, say)
+    else:
+        ground, direct = ground_from_points(P, grid, say)
     inside = polygon_mask(ring_xy, grid)
     say(f"  ground {grid.nx}x{grid.ny} @ {cell} m, cells with class 2: "
         f"{direct[inside].mean() * 100:.1f}% of the area")
@@ -462,7 +607,30 @@ def run(params, area_dir, say=say_default):
         cap_mb = os.environ.get("FLEX_AREA_POINTS_CAP_MB") or DEFAULT_CAP_MB
     cap_mb = float(cap_mb)
     kept_points = False
-    if params.get("keep_points", True) and nbytes <= cap_mb * 1e6:
+    if tiled:
+        import shutil
+        free = shutil.disk_usage(area_dir).free
+        # the chunks are already on disk (they are how the area was read):
+        # kept whatever their size while the disk keeps KEEP_FREE_GB free
+        if params.get("keep_points", True) and free > KEEP_FREE_GB * 1e9:
+            pm = {"format": "chunks", "ox": P.ox, "oy": P.oy, "n": len(P),
+                  "tiles": [t for t, _m in P.tiles], "bbox_utm": list(bbox),
+                  "zone": int(zone), "south": bool(south), "epsg": int(epsg),
+                  "source": rc.source_id(src), "bytes": nbytes}
+            with open(os.path.join(pd, "points.json"), "w") as f:
+                json.dump(pm, f, indent=1)
+            for old in ("xl", "yl", "z", "cls"):
+                q = os.path.join(pd, old + ".npy")
+                if os.path.exists(q):
+                    os.remove(q)
+            kept_points = True
+            say(f"  the points stay on disk for the other tools ({nbytes / 1e6:.0f} MB, "
+                f"{len(P.tiles)} chunks)")
+        else:
+            shutil.rmtree(pd, ignore_errors=True)
+            say(f"  points not kept ({nbytes / 1e6:.0f} MB; disk free "
+                f"{free / 1e9:.0f} GB)")
+    elif params.get("keep_points", True) and nbytes <= cap_mb * 1e6:
         save_points(P, pd, {"ox": P.ox, "oy": P.oy, "n": len(P),
                             "bbox_utm": list(bbox), "zone": int(zone),
                             "south": bool(south), "epsg": int(epsg),
@@ -491,6 +659,8 @@ def run(params, area_dir, say=say_default):
                             "min_cells": PIT_MIN_CELLS, "max_span_m": PIT_MAX_SPAN,
                             "min_share": PIT_MIN_SHARE},
                "points_kept": kept_points, "points_bytes": nbytes,
+               "points_store": ("chunks" if tiled else "single") if kept_points else None,
+               "tiles": tiles_info,
                "source": rc.source_id(src), "notes": notes,
                "timings": timings, "seconds": timings["total_s"]}
     with open(os.path.join(gd, "summary.json"), "w") as f:
