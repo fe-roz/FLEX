@@ -1332,10 +1332,22 @@ def clean_params(params):
     return out
 
 
-def run(params, out_dir, say=say_default):
+def run(params, out_dir, say=say_default, area_dir=None):
+    """area_dir: an analysed area (area_ground.py): its ground (and its
+    points cache when present) are used instead of building them here."""
     t_start = time.time()
     timings = {}
     os.makedirs(out_dir, exist_ok=True)
+    ag = None
+    if area_dir:
+        import area_ground as ag
+        if ag.load_ground(area_dir) is None:
+            raise RuntimeError("the area folder has no ground (run area_ground.py)")
+        params = dict(params)
+        if not params.get("area"):
+            params["area"] = ag.area_ring(area_dir)
+        if not params.get("source") and ag.points_meta(area_dir):
+            params["source"] = {"area_points": True}
     prm = clean_params(params)
     src = prm["source"]
     D = DETAIL[prm["detail"]]
@@ -1357,6 +1369,12 @@ def run(params, out_dir, say=say_default):
         npz_ext = (float(nz["x"].min()), float(nz["y"].min()),
                    float(nz["x"].max()), float(nz["y"].max()))
         del nz
+    elif ag is not None and ("area_points" in src or not
+                             ("ept" in src or "las" in src)):
+        if ring_ll is None:
+            raise RuntimeError("params need 'area' (a lon/lat ring)")
+        gm = ag.load_ground(area_dir)[2]
+        zone, south = int(gm["zone"]), bool(gm["south"])
     elif "ept" in src or "las" in src:
         if ring_ll is None:
             raise RuntimeError("params need 'area' (a lon/lat ring)")
@@ -1392,19 +1410,39 @@ def run(params, out_dir, say=say_default):
         f"{need[2] - need[0]:.0f} x {need[3] - need[1]:.0f} m, "
         f"detail {prm['detail']})")
     t0 = time.time()
-    P = rc.read_points(src, need, zone, south, say)
+    P = None
+    if ag is not None:
+        gm = ag.load_ground(area_dir)[2]
+        if (int(gm["zone"]), bool(gm["south"])) != (zone, south):
+            raise RuntimeError("the area ground is in another UTM zone")
+        P = ag.load_points(area_dir, need)
+        if P is not None:
+            say(f"  {len(P):,} points from the area's cache")
+    if P is None:
+        if "area_points" in src:
+            raise RuntimeError("the area folder has no points and params "
+                               "have no source")
+        P = rc.read_points(src, need, zone, south, say)
     timings["read_s"] = round(time.time() - t0, 2)
     n_points = len(P)
     density = n_points / max(area_m2, 1.0)
 
     # Ground.
-    say("[2/6] Ground (cloth from below)")
     t0 = time.time()
-    ng = int((P.cls == GROUND_CLASS).sum()) if P.cls is not None else n_points
-    gcell = rc.auto_cell(ng, (need[2] - need[0]) * (need[3] - need[1]),
-                         lo=0.5, hi=2.0)
-    ggrid = ld.Grid(need[0], need[1], need[2], need[3], gcell)
-    dem, gvalid = build_ground(P, ggrid, say)
+    crop = ag.ground_crop(area_dir, need) if ag is not None else None
+    if ag is not None and crop is None:
+        raise RuntimeError("the area ground does not cover this area")
+    if crop is not None:
+        say("[2/6] Ground (the area's)")
+        dem, ggrid = crop
+        gcell = ggrid.cell
+    else:
+        say("[2/6] Ground (cloth from below)")
+        ng = int((P.cls == GROUND_CLASS).sum()) if P.cls is not None else n_points
+        gcell = rc.auto_cell(ng, (need[2] - need[0]) * (need[3] - need[1]),
+                             lo=0.5, hi=2.0)
+        ggrid = ld.Grid(need[0], need[1], need[2], need[3], gcell)
+        dem, gvalid = build_ground(P, ggrid, say)
     timings["ground_s"] = round(time.time() - t0, 2)
 
     # The frame: origin at the middle of the area, h = ground there.
@@ -1755,20 +1793,25 @@ def main(argv=None):
                          "(a UTM code, 326zz or 327zz)")
     ap.add_argument("--demo", metavar="OUTDIR", default=None,
                     help="write a made-up scene to OUTDIR")
+    ap.add_argument("--area-dir", default=None,
+                    help="an analysed area (area_ground.py): use its ground "
+                         "and points instead of building them")
     a = ap.parse_args(argv)
     try:
         if a.demo:
             demo(a.demo)
             return 0
-        if not a.params or not a.out:
+        if not a.out or not (a.params or a.area_dir):
             ap.error("--params and --out are required (or --demo OUTDIR)")
-        with open(a.params) as f:
-            params = json.load(f)
+        params = {}
+        if a.params:
+            with open(a.params) as f:
+                params = json.load(f)
         if a.points_npz:
             params["source"] = {"npz": a.points_npz}
             if a.points_epsg:
                 params["source"]["epsg"] = a.points_epsg
-        run(params, a.out)
+        run(params, a.out, area_dir=a.area_dir)
         return 0
     except SystemExit as e:
         if e.code not in (None, 0):
