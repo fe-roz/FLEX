@@ -101,10 +101,10 @@ const srv = http.createServer((q, s) => {
   r = await post('check', { ring: RING, lidar: [U('far')], tools: ['veg'] }); ok('check: not reaching → needslidar', r.j.tools.veg.status === 'needslidar' && /does not reach/.test(r.j.tools.veg.why), r.j);
   r = await post('check', { ring: RING, lidar: [U('missing')], tools: ['veg'] }); ok('check: unreadable bounds → assumed covered', r.j.tools.veg.status === 'fits', r.j);
   r = await post('check', { ring: RING, lidar: [U('west'), U('all')], tools: ['veg'] }); ok('check: two clouds union', r.j.tools.veg.status === 'fits');
-  r = await post('check', { ring: bigRing(30), lidar: [U('all')], tools: ['terrain', 'veg', 'bush'] });
-  ok('check 30 km²: veg, bush and terrain too big, each with its offer', r.j.tools.veg.status === 'toobig' && r.j.tools.veg.offers[0].key === 'detail-low' && r.j.tools.bush.status === 'toobig' && r.j.tools.bush.offers[0].key === 'cell-2' && r.j.tools.terrain.status === 'toobig' && r.j.tools.terrain.offers[0].key === 'cell-2', r.j);
-  r = await post('check', { ring: bigRing(30), lidar: [U('all')], tools: ['veg', 'bush'], options: { veg: { detail: 'low' }, bush: { cell: 2 } } });
-  ok('check 30 km² with the coarse options → fits and coarse', r.j.tools.veg.status === 'fits' && r.j.tools.veg.coarse && r.j.tools.bush.status === 'fits' && r.j.tools.bush.coarse, r.j);
+  r = await post('check', { ring: bigRing(40), lidar: [U('all')], tools: ['terrain', 'veg', 'bush'] });
+  ok('check 40 km²: veg, bush and terrain too big, each with its offer', r.j.tools.veg.status === 'toobig' && r.j.tools.veg.offers[0].key === 'detail-low' && r.j.tools.bush.status === 'toobig' && r.j.tools.bush.offers[0].key === 'cell-2' && r.j.tools.terrain.status === 'toobig' && r.j.tools.terrain.offers[0].key === 'cell-2', r.j);
+  r = await post('check', { ring: bigRing(40), lidar: [U('all')], tools: ['veg', 'bush'], options: { veg: { detail: 'low' }, bush: { cell: 2 } } });
+  ok('check 40 km² with the coarse options → fits and coarse', r.j.tools.veg.status === 'fits' && r.j.tools.veg.coarse && r.j.tools.bush.status === 'fits' && r.j.tools.bush.coarse, r.j);
   r = await post('check', { ring: bigRing(90), lidar: [U('all')], tools: ['veg', 'bush', 'terrain'] });
   ok('check 90 km²: veg and bush too big without offers, terrain offers 2 m', r.j.tools.veg.status === 'toobig' && !r.j.tools.veg.offers.length && r.j.tools.bush.offers.length === 0 && r.j.tools.terrain.status === 'toobig' && r.j.tools.terrain.offers[0].key === 'cell-2', r.j);
   r = await post('check', { ring: bigRing(150), lidar: [U('all')], tools: ['veg'] }); ok('check 150 km²: ground too big too', r.j.ground.status === 'toobig' && r.j.tools.veg.status === 'toobig');
@@ -149,7 +149,7 @@ const srv = http.createServer((q, s) => {
   // ── run refusals
   r = await post('run', { id: AF, lidar: [], tools: ['veg'] }); ok('run without lidar → 400', r.code === 400);
   r = await post('run', { id: AF, lidar: L, tools: [] }); ok('run without tools → 400', r.code === 400);
-  r = await post('run', { name: 'Big', ring: bigRing(30), lidar: L, tools: ['veg'] }); ok('run too big → 400 with the reason', r.code === 400 && /km²/.test(r.j.error), r.j);
+  r = await post('run', { name: 'Big', ring: bigRing(40), lidar: L, tools: ['veg'] }); ok('run too big → 400 with the reason', r.code === 400 && /km²/.test(r.j.error), r.j);
   r = await post('run', { id: 'nope', lidar: L, tools: ['veg'] }); ok('run unknown area → 404', r.code === 404);
   r = await get('/status/zzzz'); ok('status unknown → 404', r.code === 404);
 
