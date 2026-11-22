@@ -147,7 +147,7 @@ for frac in (0.1, 0.01):
 n = 80
 g = np.mgrid[0:n, 0:n, 0:30].astype(np.float64)
 h = 12 + 3 * np.sin(g[0] / 6.0) * np.cos(g[1] / 9.0) + \
-    4 * np.exp(-((g[0] - 50) ** 2 + (g[1] - 30) ** 2) / 40.0)
+    4 * np.exp(-((g[0] - 50) ** 2 + (g[1] - 30) ** 2) / 45.0)
 Fb = np.minimum(h - g[2], g[2] - 3)
 Fb = np.minimum(Fb, np.minimum(g[0] - 4, n - 5 - g[0]))
 Fb = np.minimum(Fb, np.minimum(g[1] - 4, n - 5 - g[1]))

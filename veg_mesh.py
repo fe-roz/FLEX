@@ -6,7 +6,8 @@ veg_mesh.py -- triangle mesh tools for FLEX's vegetation shell (numpy + scipy).
     clean(verts, tris, attrs=None, ...)                 -> verts, tris, attrs
     distance_to_mesh(points, verts, tris)               -> distances
     mesh_error(verts0, tris0, verts1, tris1)            -> {mean, p90, max, ...}
-    edge_counts(tris), volume(verts, tris)              checks used by the tests
+    surface_nets(F, iso), taubin(verts, tris), well_composed(F, iso)
+    edge_counts(tris), volume(verts, tris), components(nv, tris)
 
 simplify is quadric error edge collapse (Garland and Heckbert), run in passes
 so that each pass is plain numpy over all edges at once instead of a priority
@@ -19,17 +20,21 @@ queue walked one edge at a time:
      merged vertex (the quadric's minimum when it lies near the edge, else
      the best of the ends and the midpoint), plus a small term for the
      edge's length so long thin triangles are not made;
-  3. a pass collapses the edges that are the cheapest within two rings of
-     both their ends. No two of them touch a common triangle, so every
-     check below sees each triangle once and they can all be applied
-     together;
+  3. a pass lets the cheaper part of the edges (pass_frac) compete; the
+     ones that are the cheapest within two rings of both their ends are
+     taken. No two of them touch a common triangle, so every check below
+     sees each triangle once and they can all be applied together. Refused
+     edges drop out and the rest choose again, a few rounds per pass; an
+     edge refused once is skipped until something around it changes;
   4. a collapse is refused when the surface would stop being a manifold
      (the two ends must share exactly two neighbours, the link condition;
-     no vertex may drop under three neighbours), when a triangle around it
+     no vertex may drop under three triangles), when a triangle around it
      would flip or turn by more than ~75 degrees, or when it would leave a
      needle triangle;
   5. repeat until the triangle count reaches the target (the last pass takes
-     only the cheapest collapses it needs) or nothing can be collapsed.
+     only the cheapest collapses it needs) or nothing can be collapsed
+     (topology is never changed, so a surface with many tunnels has a
+     floor; stats['stopped'] says why it ended).
 
 A pass removes several percent of the vertices, so a few million triangles
 take a few dozen passes; each pass is a handful of sorts and bincounts.
@@ -218,14 +223,15 @@ def simplify(verts, tris, target_tris, attrs=None, shape_weight=0.001,
     verts (n, 3), tris (m, 3) counter-clockwise, attrs (n,) or (n, k) or
     None. shape_weight: cost of an edge's length relative to the error (a
     collapse costs error + shape_weight * length^2 per unit area), keeps
-    triangles near even. max_error (m, optional): stop early when the
+    triangles from growing without limit on flat parts. pass_frac: the
+    share of edges (cheapest first) that compete in a pass; rounds: how
+    many times per pass the rest choose again. max_error (m, optional): stop early when the
     cheapest remaining collapse would move the surface by more than this
     (rms over the merged vertex's planes). Returns (verts, tris, attrs),
     compacted; stats (a dict, optional) gets passes, collapses, the rms
     error estimate of the last accepted collapses ('last_rms') and seconds.
     """
     import time
-    from scipy import sparse
     say = say or _say_none
     t0 = time.time()
     V = np.array(verts, np.float64)
@@ -562,12 +568,10 @@ def clean(verts, tris, attrs=None, min_tris=20, min_size=0.0,
         pos = np.bincount(g, par == 0, minlength=len(cnt))
         neg = np.bincount(g, par == 1, minlength=len(cnt))
         same = (pos == 0) | (neg == 0)
-        first = np.zeros(len(cnt), bool)
         o = np.argsort(g, kind='stable')
         gs = g[o]
         firsts = o[np.r_[True, gs[1:] != gs[:-1]]]
         keep[di[firsts]] = same[g[firsts]]
-        del first
     info["duplicates"] = int(dup.sum() - keep[dup].sum()) if dup.any() else 0
     T = T[keep]
     # Zero-area triangles.
