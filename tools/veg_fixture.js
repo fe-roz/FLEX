@@ -3,12 +3,15 @@
 //
 //   const { makeVegFixture } = require('./veg_fixture');
 //   const { veg, shapes, shell, ground } = makeVegFixture({ seed: 1 });   // shapes / shell / ground: ArrayBuffer
-//   node tools/veg_fixture.js OUTDIR      writes veg.json, shapes.bin, shell.bin, ground.bin there
+//   makeVegFixture({ version: 1 })        the round-1 format (shapes.bin record 32, no outline)
+//   node tools/veg_fixture.js OUTDIR [1]  writes veg.json, shapes.bin, shell.bin, ground.bin there (1: version 1)
 //
 // The scene (300 m x 300 m, gentle hill, ground ~1000 m):
-//   west   a stand of conifers (cones), tallest in the middle
-//   east   broadleaf trees (domes), some crowns touching
+//   west   a stand of conifers (cones), tallest in the middle: narrow spires and broad cones
+//   east   broadleaf trees (domes), some crowns touching, and a few umbrella crowns (widest high up)
 //   middle an open meadow with brush mounds; a few brush mounds under the trees too (lower density)
+// Version 2 (default) records are 48 bytes: + r1..r4, the crown's radius at 10/35/60/85 % of its depth as a share of
+// its widest radius, made up per profile type with a little noise (FIX_PROFILES).
 //   shell  blobby closed meshes over the stands and a low one over the brush (hag per vertex)
 'use strict';
 
@@ -19,8 +22,12 @@ function rng(seed) {                 // mulberry32
 
 function groundAt(x, y) { return 1000 + 0.04 * x + 9 * Math.sin(x / 55) * Math.cos(y / 70) + 4 * Math.sin((x + y) / 37); }
 
+// made-up outlines (r1..r4) per profile type
+const FIX_PROFILES = { spire: [1.0, 0.78, 0.48, 0.18], broadCone: [1.0, 0.88, 0.62, 0.3], dome: [0.72, 1.0, 0.9, 0.52], umbrella: [0.32, 0.62, 1.0, 0.72], brush: [1.0, 0.9, 0.7, 0.4] };
+
 function makeVegFixture(opts) {
   opts = opts || {};
+  const version = opts.version === 1 ? 1 : 2, NF = version === 2 ? 12 : 8;
   const R = rng(opts.seed || 1);
   const half = opts.half || 150;
   const nTrees = opts.trees || 320, nBrush = opts.brush || 160;
@@ -37,9 +44,11 @@ function makeVegFixture(opts) {
     }
     const d = conifer ? Math.hypot(x + 85, y) : Math.hypot(x - 90, y - 20);
     const h = (conifer ? 14 + 18 * (1 - d / 120) : 9 + 11 * (1 - d / 130)) * (0.8 + 0.4 * R());
-    const r = conifer ? h * (0.16 + 0.06 * R()) : h * (0.28 + 0.12 * R());
-    const base = conifer ? h * (0.15 + 0.2 * R()) : h * (0.3 + 0.2 * R());
-    shapes.push([x, y, groundAt(x, y), h, r, base, conifer ? 1 : 0, 0.5 + 0.5 * R()]);
+    const type = conifer ? (R() < 0.5 ? 'spire' : 'broadCone') : (R() < 0.8 ? 'dome' : 'umbrella');
+    const r = type === 'spire' ? h * (0.15 + 0.05 * R()) : type === 'broadCone' ? h * (0.24 + 0.06 * R()) : type === 'dome' ? h * (0.28 + 0.12 * R()) : h * (0.36 + 0.1 * R());
+    const base = conifer ? h * (0.1 + 0.2 * R()) : type === 'umbrella' ? h * (0.45 + 0.15 * R()) : h * (0.3 + 0.2 * R());
+    const prof = FIX_PROFILES[type].map(v => Math.min(1, Math.max(0.05, v + 0.06 * (R() - 0.5))));
+    shapes.push([x, y, groundAt(x, y), h, r, base, conifer ? 1 : 0, 0.5 + 0.5 * R()].concat(prof));
   }
   shapes.sort((a, b) => b[3] - a[3]);
   // brush: the meadow, and a few under the trees with a lower density
@@ -48,11 +57,11 @@ function makeVegFixture(opts) {
     const under = i < nBrush * 0.25;
     const x = under ? -half + 10 + R() * (2 * half - 20) : -30 + R() * 70;
     const y = -half + 10 + R() * (2 * half - 20);
-    brush.push([x, y, groundAt(x, y), 0.6 + 1.3 * R(), 1.2 + 2.5 * R(), 0, 2, under ? 0.2 + 0.2 * R() : 0.5 + 0.5 * R()]);
+    brush.push([x, y, groundAt(x, y), 0.6 + 1.3 * R(), 1.2 + 2.5 * R(), 0, 2, under ? 0.2 + 0.2 * R() : 0.5 + 0.5 * R()].concat(FIX_PROFILES.brush));
   }
   const all = shapes.concat(brush);
-  const sb = new Float32Array(all.length * 8);
-  all.forEach((s, i) => sb.set(s, i * 8));
+  const sb = new Float32Array(all.length * NF);
+  all.forEach((s, i) => sb.set(s.slice(0, NF), i * NF));
 
   // ground.bin: nodes at x0 + i*cell, y0 + j*cell, row 0 = south
   const cell = 10, x0 = -half, y0 = -half, nx = Math.round(2 * half / cell) + 1, ny = nx;
@@ -86,17 +95,18 @@ function makeVegFixture(opts) {
 
   const nT = shapes.length, nC = shapes.filter(s => s[6] === 1).length;
   const veg = {
-    version: 1,
+    version,
     origin: { lon: -100.5678, lat: 45.1234, h: groundAt(0, 0) },
     frame: 'enu',
     bbox: [-half, -half, half, half],
     area_m2: 4 * half * half,
-    shapes: { file: 'shapes.bin', count: all.length, trees: nT, cones: nC, domes: nT - nC, brush: brush.length, record: 32 },
+    shapes: { file: 'shapes.bin', count: all.length, trees: nT, cones: nC, domes: nT - nC, brush: brush.length, record: NF * 4 },
     shell: { file: 'shell.bin', vertices: V, triangles: T, voxel_m: 2 },
     ground: { file: 'ground.bin', nx, ny, cell, x0, y0 },
     stats: { points: 123456, veg_points: 65432, max_height: Math.max(...shapes.map(s => s[3])), mean_tree_height: shapes.reduce((a, s) => a + s[3], 0) / nT, seconds: 1.5 },
     params: { detail: 'medium', min_height: 0.5, brush_top: 2, looks: ['shapes', 'shell'] },
   };
+  if (version === 2) veg.shapes.profile = [0.1, 0.35, 0.6, 0.85];
   return { veg, shapes: sb.buffer, shell: shellBuf, ground: gb.buffer, groundAt };
 }
 
@@ -115,14 +125,14 @@ function icosphere(sub) {
   return { v: v.flat(), t: f.flat() };
 }
 
-module.exports = { makeVegFixture, groundAt };
+module.exports = { makeVegFixture, groundAt, FIX_PROFILES };
 
 if (require.main === module) {
   const fs = require('fs'), path = require('path');
   const out = process.argv[2];
-  if (!out) { console.error('usage: node tools/veg_fixture.js OUTDIR'); process.exit(2); }
+  if (!out) { console.error('usage: node tools/veg_fixture.js OUTDIR [1]'); process.exit(2); }
   fs.mkdirSync(out, { recursive: true });
-  const f = makeVegFixture({});
+  const f = makeVegFixture({ version: process.argv[3] === '1' ? 1 : 2 });
   fs.writeFileSync(path.join(out, 'veg.json'), JSON.stringify(f.veg, null, 1));
   fs.writeFileSync(path.join(out, 'shapes.bin'), Buffer.from(f.shapes));
   fs.writeFileSync(path.join(out, 'shell.bin'), Buffer.from(f.shell));
