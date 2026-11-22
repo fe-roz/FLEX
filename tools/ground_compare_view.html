@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ground Models Compared</title>
+<!-- Built by tools/ground_compare.py --html: data and three.js r128 are inlined, no network. -->
+<style>
+:root{--bg:#1d2126;--panel:rgba(28,32,38,.93);--fg:#e8ecef;--mute:#9aa4ad;--line:#3a424b;--acc:#7fc8a9;
+--routes:#f0a03c;--export:#4aa3f0;--bush:#5cc96b;--truth:#f4f4f4}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:13px/1.4 system-ui,Segoe UI,Roboto,sans-serif;overflow:hidden}
+#view{position:fixed;inset:0}
+.panel{position:fixed;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;box-shadow:0 4px 16px rgba(0,0,0,.4)}
+#ctl{top:10px;left:10px;width:270px;max-height:calc(100% - 20px);overflow:auto}
+#info{top:10px;right:10px;width:380px;display:none}
+#sum{bottom:10px;left:10px;width:270px;max-height:38%;overflow:auto}
+h1{font-size:15px;margin:0 0 6px} h2{font-size:12px;margin:10px 0 4px;color:var(--mute);text-transform:uppercase;letter-spacing:.04em}
+label{display:block;margin:3px 0} select,button{background:#2b3138;color:var(--fg);border:1px solid var(--line);border-radius:5px;padding:3px 6px;font:inherit}
+button{cursor:pointer} button:hover{border-color:var(--acc)} button.on{background:#2f5a49;border-color:var(--acc)}
+.row{display:flex;gap:6px;align-items:center;flex-wrap:wrap} .row select{flex:1}
+input[type=range]{width:100%}
+.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:middle}
+#legend{margin-top:6px} #lgbar{height:10px;border-radius:3px;border:1px solid var(--line)}
+#lglab{display:flex;justify-content:space-between;color:var(--mute);font-size:11px}
+#lgtxt{color:var(--mute);font-size:11px;margin-top:2px}
+table{border-collapse:collapse;width:100%;font-size:12px} td,th{padding:2px 4px;text-align:right} td:first-child,th:first-child{text-align:left}
+#prof{width:100%;height:200px;background:#15181c;border-radius:5px;margin-top:6px;display:block}
+.mute{color:var(--mute);font-size:11px} #sum p{margin:4px 0}
+#close{float:right}
+kbd{background:#2b3138;border:1px solid var(--line);border-radius:3px;padding:0 4px;font-size:11px}
+</style>
+</head>
+<body>
+<div id="view"></div>
+<div id="ctl" class="panel">
+  <h1>Ground models compared</h1>
+  <div class="row" id="dsrow"><select id="ds"></select></div>
+  <h2>Surface shown</h2>
+  <div class="row"><select id="ma"></select></div>
+  <h2>Compare with</h2>
+  <div class="row"><select id="mb"></select><button id="flip" title="Swap the two (key F)">Swap</button></div>
+  <div class="mute">Key <kbd>F</kbd> swaps the shown surface and the one compared with.</div>
+  <h2>Colour</h2>
+  <label><input type="radio" name="col" value="shade" checked> Plain terrain</label>
+  <label><input type="radio" name="col" value="diff"> Difference: shown minus compared</label>
+  <label><input type="radio" name="col" value="resid"> Shown surface minus the ground returns</label>
+  <div id="rangebox"><span class="mute">Colour range: &plusmn;<b id="rv">2.0</b> m</span>
+  <input id="range" type="range" min="0.5" max="5" step="0.5" value="2"></div>
+  <div id="legend"><div id="lgbar"></div><div id="lglab"><span id="l0"></span><span>0</span><span id="l1"></span></div><div id="lgtxt"></div></div>
+  <h2>Second surface on top</h2>
+  <div class="row"><button data-ov="none" class="on">None</button><button data-ov="glass">See-through</button><button data-ov="wire">Wireframe</button></div>
+  <span class="mute">Stretch the gap: x<b id="xv">1</b></span>
+  <input id="xg" type="range" min="1" max="10" step="1" value="1">
+  <h2>Jump to</h2>
+  <div class="row" id="jumps"></div>
+  <div class="mute" style="margin-top:8px">Drag to turn, right-drag to pan, wheel to zoom. Click the ground for the heights there and a cross-section.</div>
+</div>
+<div id="info" class="panel"><button id="close">Close</button><div id="infotxt"></div>
+  <div class="row" style="margin-top:4px"><span class="mute" id="proftxt"></span><button id="rot">Turn section 90&deg;</button></div>
+  <canvas id="prof" width="760" height="400"></canvas>
+  <div class="mute" id="proflg"></div>
+</div>
+<div id="sum" class="panel"><h2 style="margin-top:0">In short</h2><div id="sumtxt"></div></div>
+<script>/*THREE_JS*/</script>
+<script>/*ORBIT_JS*/</script>
+<script>
+var DATA = "__DATA__";
+(function () {
+'use strict';
+var NAMES = {routes: 'Routes ground', export: 'Export ground', bushwhack: 'Bushwhack ground', truth: 'True ground'};
+var COLS = {routes: '#f0a03c', export: '#4aa3f0', bushwhack: '#5cc96b', truth: '#f4f4f4'};
+function b64(s, T) { var bin = atob(s), n = bin.length, u = new Uint8Array(n); for (var i = 0; i < n; i++) u[i] = bin.charCodeAt(i); return new T(u.buffer); }
+function $(id) { return document.getElementById(id); }
+
+var renderer = new THREE.WebGLRenderer({antialias: true, preserveDrawingBuffer: true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setSize(innerWidth, innerHeight);
+$('view').appendChild(renderer.domElement);
+var scene = new THREE.Scene(); scene.background = new THREE.Color(0x1d2126);
+var camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 1, 20000);
+var controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = false;
+scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+var sun = new THREE.DirectionalLight(0xffffff, 0.75); sun.position.set(-1, 1.6, -0.8); scene.add(sun);
+
+var D, H = {}, R = {}, nx, ny, cell, W, L, zmid, mesh, over, marker, pts;
+var st = {a: 'export', b: 'routes', col: 'shade', range: 2, ov: 'none', xg: 1, spot: null, rot: 0};
+var needs = true;
+function draw() { needs = true; }
+controls.addEventListener('change', draw);
+
+function loadDataset(i) {
+  D = DATA.datasets[i]; nx = D.nx; ny = D.ny; cell = D.cell; W = nx * cell; L = ny * cell;
+  H = {}; R = {};
+  var keys = Object.keys(D.models), lo = Infinity, hi = -Infinity;
+  keys.forEach(function (k) {
+    var q = b64(D.models[k], Uint16Array), a = new Float32Array(q.length);
+    for (var j = 0; j < q.length; j++) { a[j] = D.zmin + q[j] * D.zscale; if (a[j] < lo) lo = a[j]; if (a[j] > hi) hi = a[j]; }
+    H[k] = a; R[k] = b64(D.resid[k], Int8Array);
+  });
+  zmid = (lo + hi) / 2;
+  var q = b64(D.pts, Uint16Array), n = q.length / 3; pts = new Float32Array(n * 3);
+  for (var j = 0; j < n; j++) { pts[3 * j] = q[3 * j] * 0.02; pts[3 * j + 1] = q[3 * j + 1] * 0.02; pts[3 * j + 2] = D.zmin + q[3 * j + 2] * D.zscale; }
+  ['ma', 'mb'].forEach(function (id) {
+    var s = $(id); s.innerHTML = '';
+    keys.forEach(function (k) { var o = document.createElement('option'); o.value = k; o.textContent = NAMES[k] || k; s.appendChild(o); });
+  });
+  if (!H[st.a]) st.a = keys[0]; if (!H[st.b] || st.b === st.a) st.b = keys.filter(function (k) { return k !== st.a; })[0];
+  if (H.truth) { st.a = 'export'; st.b = 'truth'; }
+  $('ma').value = st.a; $('mb').value = st.b;
+  var j = $('jumps'); j.innerHTML = '';
+  (D.spots || []).forEach(function (s) { var b = document.createElement('button'); b.textContent = s.label; b.title = 'Fly there and show the section'; b.onclick = function () { jump(s.x, s.y); }; j.appendChild(b); });
+  $('sumtxt').innerHTML = '<p class="mute">' + D.label + '</p>' + (D.summary || []).map(function (t) { return '<p>' + t + '</p>'; }).join('');
+  buildMesh(); $('info').style.display = 'none'; st.spot = null; if (marker) marker.visible = false;
+  var d = Math.max(W, L);
+  controls.target.set(0, 0, 0); camera.position.set(-0.35 * d, 0.75 * d, 0.85 * d); camera.near = d / 2000; camera.far = d * 20; camera.updateProjectionMatrix();
+  controls.update(); draw();
+}
+
+function vx(c) { return (c + 0.5) * cell - W / 2; }
+function vz(r) { return (r + 0.5) * cell - L / 2; }          // row 0 north = -z
+function makeGeom(step) {
+  var cx = Math.floor((nx - 1) / step) + 1, cy = Math.floor((ny - 1) / step) + 1;
+  var g = new THREE.BufferGeometry(), pos = new Float32Array(cx * cy * 3), idx = [];
+  for (var r = 0; r < cy; r++) for (var c = 0; c < cx; c++) { var k = (r * cx + c) * 3; pos[k] = vx(c * step); pos[k + 2] = vz(r * step); }
+  var I = (cx * cy > 65535) ? new Uint32Array((cx - 1) * (cy - 1) * 6) : new Uint16Array((cx - 1) * (cy - 1) * 6), p = 0;
+  for (var r = 0; r < cy - 1; r++) for (var c = 0; c < cx - 1; c++) { var a = r * cx + c, b = a + 1, d = a + cx, e = d + 1; I[p++] = a; I[p++] = d; I[p++] = b; I[p++] = b; I[p++] = d; I[p++] = e; }
+  g.setIndex(new THREE.BufferAttribute(I, 1));
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.userData = {cx: cx, cy: cy, step: step};
+  return g;
+}
+function buildMesh() {
+  if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); }
+  if (over) { scene.remove(over); over.geometry.dispose(); }
+  var g = makeGeom(1);
+  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(nx * ny * 3), 3));
+  mesh = new THREE.Mesh(g, new THREE.MeshLambertMaterial({vertexColors: true}));
+  scene.add(mesh);
+  var step = nx * ny > 120000 ? 2 : 1;
+  over = new THREE.Mesh(makeGeom(step), new THREE.MeshLambertMaterial({color: 0xffffff, transparent: true, opacity: 0.4, depthWrite: false, side: THREE.DoubleSide}));
+  over.renderOrder = 2; scene.add(over);
+  if (!marker) {
+    marker = new THREE.Group();
+    var m1 = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({color: 0xff3366, depthTest: false}));
+    var ln = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({color: 0xff3366, depthTest: false}));
+    marker.add(m1); marker.add(ln); marker.userData = {ball: m1, line: ln}; marker.renderOrder = 5; scene.add(marker); marker.visible = false;
+  }
+  refresh();
+}
+
+function heights() {
+  var A = H[st.a], g = mesh.geometry, pos = g.attributes.position.array;
+  for (var i = 0, n = nx * ny; i < n; i++) pos[3 * i + 1] = A[i] - zmid;
+  g.attributes.position.needsUpdate = true; g.computeVertexNormals();
+  var o = over.geometry, op = o.attributes.position.array, cx = o.userData.cx, cy = o.userData.cy, s = o.userData.step, B = H[st.b];
+  for (var r = 0; r < cy; r++) for (var c = 0; c < cx; c++) { var k = (r * s) * nx + c * s, a = A[k]; op[3 * (r * cx + c) + 1] = a + st.xg * (B[k] - a) - zmid; }
+  o.attributes.position.needsUpdate = true; o.computeVertexNormals();
+}
+function diverge(t, out, k) {          // -1 blue .. 0 near white .. +1 red
+  t = Math.max(-1, Math.min(1, t)); var a = Math.abs(t);
+  var r, g, b;
+  if (t >= 0) { r = 0.95 - 0.25 * a; g = 0.94 - 0.75 * a; b = 0.92 - 0.78 * a; }
+  else { r = 0.95 - 0.83 * a; g = 0.94 - 0.55 * a; b = 0.92 - 0.12 * a; }
+  out[k] = r; out[k + 1] = g; out[k + 2] = b;
+}
+function colours() {
+  var col = mesh.geometry.attributes.color.array, A = H[st.a], B = H[st.b], n = nx * ny, rg = st.range;
+  if (st.col === 'shade') {
+    var lo = Infinity, hi = -Infinity; for (var i = 0; i < n; i++) { if (A[i] < lo) lo = A[i]; if (A[i] > hi) hi = A[i]; }
+    for (var i = 0; i < n; i++) { var t = (A[i] - lo) / (hi - lo + 1e-6); col[3 * i] = 0.62 + 0.25 * t; col[3 * i + 1] = 0.66 + 0.18 * t; col[3 * i + 2] = 0.55 + 0.25 * t; }
+  } else if (st.col === 'diff') {
+    for (var i = 0; i < n; i++) diverge((A[i] - B[i]) / rg, col, 3 * i);
+  } else {
+    var Rs = R[st.a];
+    for (var i = 0; i < n; i++) { if (Rs[i] === -128) { col[3 * i] = col[3 * i + 1] = col[3 * i + 2] = 0.45; } else diverge(Rs[i] * 0.05 / rg, col, 3 * i); }
+  }
+  mesh.geometry.attributes.color.needsUpdate = true;
+  var leg = $('legend'), box = $('rangebox');
+  leg.style.display = box.style.display = st.col === 'shade' ? 'none' : '';
+  $('lgbar').style.background = 'linear-gradient(90deg,rgb(31,99,204),rgb(242,240,235),rgb(179,48,36))';
+  $('l0').textContent = '-' + rg + ' m'; $('l1').textContent = '+' + rg + ' m';
+  $('lgtxt').textContent = st.col === 'diff' ? ('Red: ' + NAMES[st.a] + ' is higher than ' + NAMES[st.b] + '. Blue: lower.')
+    : ('Red: ' + NAMES[st.a] + ' sits above the ground returns. Blue: below them. Grey: no ground returns.');
+}
+function refresh() {
+  heights(); colours();
+  over.visible = st.ov !== 'none';
+  over.material.wireframe = st.ov === 'wire'; over.material.opacity = st.ov === 'wire' ? 0.55 : 0.4;
+  over.material.color.set(COLS[st.b]);
+  $('rv').textContent = st.range.toFixed(1); $('xv').textContent = st.xg;
+  if (st.spot) showSpot(st.spot[0], st.spot[1]);
+  draw();
+}
+
+// height of model k at local metres (x east from the west edge, y north from the south edge)
+function hAt(k, x, y) {
+  var fx = x / cell - 0.5, fr = (L - y) / cell - 0.5;
+  var c0 = Math.max(0, Math.min(nx - 1, Math.floor(fx))), r0 = Math.max(0, Math.min(ny - 1, Math.floor(fr)));
+  var c1 = Math.min(nx - 1, c0 + 1), r1 = Math.min(ny - 1, r0 + 1), tx = Math.max(0, Math.min(1, fx - c0)), ty = Math.max(0, Math.min(1, fr - r0)), A = H[k];
+  return (A[r0 * nx + c0] * (1 - tx) + A[r0 * nx + c1] * tx) * (1 - ty) + (A[r1 * nx + c0] * (1 - tx) + A[r1 * nx + c1] * tx) * ty;
+}
+function slopeAt(k, x, y) {
+  var d = Math.max(cell, 2), gx = (hAt(k, x + d, y) - hAt(k, x - d, y)) / (2 * d), gy = (hAt(k, x, y + d) - hAt(k, x, y - d)) / (2 * d);
+  return {deg: Math.atan(Math.hypot(gx, gy)) * 180 / Math.PI, gx: gx, gy: gy};
+}
+
+var ray = new THREE.Raycaster(), mouse = new THREE.Vector2(), down = null;
+renderer.domElement.addEventListener('pointerdown', function (e) { down = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerup', function (e) {
+  if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) return;
+  mouse.set(e.clientX / innerWidth * 2 - 1, -e.clientY / innerHeight * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  var hit = march(ray.ray); if (hit) showSpot(hit[0], hit[1]);
+});
+function march(r) {                   // walk the ray over the height grid (no triangle raycast)
+  var o = r.origin, d = r.direction, step = cell * 0.5, far = Math.max(W, L) * 6, prev = null;
+  function below(t) { var X = o.x + d.x * t + W / 2, Y = L / 2 - (o.z + d.z * t); if (X < 0 || Y < 0 || X > W || Y > L) return null; return (o.y + d.y * t) <= hAt(st.a, X, Y) - zmid; }
+  for (var t = 0; t < far; t += step) {
+    var b = below(t);
+    if (b === true) { var lo = prev === null ? t : t - step, hi = t; for (var i = 0; i < 20; i++) { var m = (lo + hi) / 2; if (below(m)) hi = m; else lo = m; } return [o.x + d.x * hi + W / 2, L / 2 - (o.z + d.z * hi)]; }
+    if (b === false) prev = t;
+  }
+  return null;
+}
+function jump(x, y) {
+  var h = hAt(st.a, x, y) - zmid, P = new THREE.Vector3(x - W / 2, h, L / 2 - y), d = Math.min(150, Math.max(W, L) / 3);
+  var off = camera.position.clone().sub(controls.target).normalize().multiplyScalar(d);
+  controls.target.copy(P); camera.position.copy(P).add(off); controls.update();
+  showSpot(x, y);
+}
+function showSpot(x, y) {
+  st.spot = [x, y];
+  var keys = Object.keys(H), hs = {}; keys.forEach(function (k) { hs[k] = hAt(k, x, y); });
+  var sl = slopeAt(st.a, x, y);
+  var t = '<b>Spot ' + x.toFixed(0) + ' m east, ' + y.toFixed(0) + ' m north of the corner</b><br><span class="mute">slope ' + sl.deg.toFixed(0) + '&deg; (' + NAMES[st.a] + ')</span>';
+  t += '<table><tr><th></th><th>height</th>' + keys.map(function (k) { return '<th>&minus; ' + (NAMES[k] || k).split(' ')[0] + '</th>'; }).join('') + '</tr>';
+  keys.forEach(function (k) {
+    t += '<tr><td><span class="sw" style="background:' + COLS[k] + '"></span>' + NAMES[k] + '</td><td>' + (hs[k] - hs[keys[0]] >= 0 ? '' : '') + hs[k].toFixed(2) + '</td>' +
+      keys.map(function (j) { var v = hs[k] - hs[j]; return '<td>' + (j === k ? '' : (v >= 0 ? '+' : '') + v.toFixed(2)) + '</td>'; }).join('') + '</tr>';
+  });
+  t += '</table><div class="mute">Heights in metres above an arbitrary datum; differences are row minus column.</div>';
+  $('infotxt').innerHTML = t; $('info').style.display = 'block';
+  var h = hs[st.a] - zmid, P = new THREE.Vector3(x - W / 2, h, L / 2 - y), s = Math.max(W, L) / 300;
+  marker.visible = true; marker.userData.ball.position.copy(P); marker.userData.ball.scale.setScalar(s);
+  marker.userData.line.geometry.setFromPoints([P, P.clone().add(new THREE.Vector3(0, s * 15, 0))]);
+  profile(x, y, sl); draw();
+}
+function profile(x, y, sl) {
+  var ang = (sl.deg > 1 ? Math.atan2(-sl.gy, -sl.gx) : 0) + st.rot * Math.PI / 2, ux = Math.cos(ang), uy = Math.sin(ang);
+  var half = Math.min(60, Math.max(W, L) / 4), keys = Object.keys(H), n = Math.ceil(2 * half / (cell / 2)), lines = {}, lo = Infinity, hi = -Infinity;
+  keys.forEach(function (k) { var a = []; for (var i = 0; i <= n; i++) { var s = -half + i * 2 * half / n, v = hAt(k, x + ux * s, y + uy * s); a.push([s, v]); if (v < lo) lo = v; if (v > hi) hi = v; } lines[k] = a; });
+  var near = [], wd = Math.max(1.0, cell * 0.75);
+  for (var j = 0, m = pts.length / 3; j < m; j++) {
+    var dx = pts[3 * j] - x, dy = pts[3 * j + 1] - y, s = dx * ux + dy * uy; if (Math.abs(s) > half) continue;
+    if (Math.abs(-dx * uy + dy * ux) > wd) continue; near.push([s, pts[3 * j + 2]]);
+  }
+  near.forEach(function (p) { if (p[1] < lo) lo = p[1]; if (p[1] > hi) hi = p[1]; });
+  var cv = $('prof'), g = cv.getContext('2d'), Wc = cv.width, Hc = cv.height, pad = 40;
+  g.fillStyle = '#15181c'; g.fillRect(0, 0, Wc, Hc);
+  var span = Math.max(hi - lo, 4); lo -= span * 0.08; hi = lo + span * 1.16;
+  var X = function (s) { return pad + (s + half) / (2 * half) * (Wc - pad - 10); }, Y = function (v) { return Hc - 28 - (v - lo) / (hi - lo) * (Hc - 40); };
+  g.strokeStyle = '#333a42'; g.fillStyle = '#9aa4ad'; g.font = '20px system-ui'; g.lineWidth = 1;
+  var gs = [1, 2, 5, 10, 20, 50, 100].find(function (q) { return (hi - lo) / q <= 6; }) || 200;
+  for (var v = Math.ceil(lo / gs) * gs; v <= hi; v += gs) { g.beginPath(); g.moveTo(pad, Y(v)); g.lineTo(Wc - 10, Y(v)); g.stroke(); g.fillText((v - Math.round(lo / gs) * gs).toFixed(0), 2, Y(v) + 6); }
+  g.fillText('-' + half.toFixed(0) + ' m', pad, Hc - 4); g.fillText('+' + half.toFixed(0) + ' m', Wc - 80, Hc - 4);
+  g.strokeStyle = '#ff3366'; g.beginPath(); g.moveTo(X(0), 10); g.lineTo(X(0), Hc - 28); g.stroke();
+  g.fillStyle = '#c9d1d9'; near.forEach(function (p) { g.fillRect(X(p[0]) - 1.5, Y(p[1]) - 1.5, 3, 3); });
+  keys.forEach(function (k) {
+    g.strokeStyle = COLS[k]; g.lineWidth = k === st.a ? 3 : 2; g.setLineDash(k === 'truth' ? [8, 6] : []);
+    g.beginPath(); lines[k].forEach(function (p, i) { if (i) g.lineTo(X(p[0]), Y(p[1])); else g.moveTo(X(p[0]), Y(p[1])); }); g.stroke();
+  });
+  g.setLineDash([]);
+  var exag = ((hi - lo) / (Hc - 40)) / ((2 * half) / (Wc - pad - 10));
+  $('proftxt').textContent = 'Cross-section ' + (2 * half).toFixed(0) + ' m long, ' + (st.rot ? 'across the slope' : 'down the slope') + '; heights stretched x' + (1 / exag).toFixed(1);
+  $('proflg').innerHTML = keys.map(function (k) { return '<span class="sw" style="background:' + COLS[k] + '"></span>' + NAMES[k]; }).join(' &nbsp; ') + ' &nbsp; <span class="sw" style="background:#c9d1d9"></span>ground returns within ' + wd.toFixed(1) + ' m';
+}
+
+// UI
+DATA.datasets.forEach(function (d, i) { var o = document.createElement('option'); o.value = i; o.textContent = d.label; $('ds').appendChild(o); });
+if (DATA.datasets.length < 2) $('dsrow').style.display = 'none';
+$('ds').onchange = function () { loadDataset(+this.value); };
+$('ma').onchange = function () { st.a = this.value; refresh(); };
+$('mb').onchange = function () { st.b = this.value; refresh(); };
+function flip() { var t = st.a; st.a = st.b; st.b = t; $('ma').value = st.a; $('mb').value = st.b; refresh(); }
+$('flip').onclick = flip;
+addEventListener('keydown', function (e) { if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey) flip(); });
+document.querySelectorAll('input[name=col]').forEach(function (r) { r.onchange = function () { st.col = this.value; refresh(); }; });
+$('range').oninput = function () { st.range = +this.value; refresh(); };
+$('xg').oninput = function () { st.xg = +this.value; refresh(); };
+document.querySelectorAll('[data-ov]').forEach(function (b) { b.onclick = function () { st.ov = b.dataset.ov; document.querySelectorAll('[data-ov]').forEach(function (x) { x.classList.toggle('on', x === b); }); refresh(); }; });
+$('close').onclick = function () { $('info').style.display = 'none'; st.spot = null; marker.visible = false; draw(); };
+$('rot').onclick = function () { st.rot = 1 - st.rot; if (st.spot) showSpot(st.spot[0], st.spot[1]); };
+addEventListener('resize', function () { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); draw(); });
+window._gc = {state: st, jump: jump, showSpot: showSpot, flip: flip, refresh: refresh, load: loadDataset};
+
+// render only when something changed: a still view costs nothing
+(function loop() { requestAnimationFrame(loop); if (!needs) return; needs = false; renderer.render(scene, camera); })();
+loadDataset(0);
+})();
+</script>
+</body>
+</html>
