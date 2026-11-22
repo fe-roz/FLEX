@@ -693,8 +693,46 @@ def brush_mounds(V, bg, tot_b, lab, cg, trees_low_base, min_h, brush_top,
 
 
 # --------------------------------------------------------------------------
-# Shell: occupancy voxels -> surface nets
+# Shell: occupancy voxels -> fine surface nets -> simplified (veg_mesh.py)
 # --------------------------------------------------------------------------
+#
+# The shell is extracted at a FINE voxel (SHELL_VOXEL by detail: crowns,
+# gaps and understory are a few voxels across) and then simplified to the
+# triangle budget by quadric edge collapse (veg_mesh.simplify), which keeps
+# triangles where the surface bends and spends few where it is flat:
+#
+#   occupancy  share of 'full' per voxel (vh across, vz = vh / 2 tall, in
+#              HAG), Gaussian smoothed (SHELL_SIGMA voxels) with zero
+#              outside the area, so the canopy is rounded off at the
+#              area's edge instead of cut by a vertical wall;
+#   manifold   veg_mesh.well_composed raises the few samples needed so the
+#              inside set has no diagonal-only contacts: surface nets then
+#              gives every edge exactly two triangles (no non-manifold
+#              junk for the simplifier to work around);
+#   surface    surface nets, Taubin smoothed (removes the voxel steps, keeps
+#              the blobs' size), pieces under SHELL_MIN_PIECE triangles
+#              dropped;
+#   simplify   to the budget (the smaller of max_triangles and the detail's
+#              triangles per km2), in x, y, HAG metres so HAG is simply the
+#              vertex's height; then veg_mesh.clean (duplicates, spikes);
+#   error      the typical distance between the fine and the simplified
+#              surface (sampled both ways), reported as error_m.
+#
+# The extraction voxel is the detail's, made coarser only when the cloud is
+# too sparse for it, when the fine mesh would pass SHELL_FINE_MAX triangles
+# (memory) or SHELL_FINE_RATIO times the budget (finer adds nothing after
+# simplification), or when the field would pass SHELL_CELLS_MAX voxels. If
+# the simplified mesh still does not fit (many tiny pieces), the voxel grows
+# and it runs again.
+
+SHELL_VOXEL = {"low": 3.0, "medium": 2.0, "high": 1.5}
+SHELL_SIGMA = 1.0          # Gaussian smoothing of the occupancy, in voxels
+SHELL_ISO = 0.18           # surface where the smoothed occupancy crosses this
+SHELL_MIN_PIECE = 32       # pieces with fewer triangles are dropped
+SHELL_FINE_MAX = 8000000   # most triangles extracted before simplifying
+SHELL_FINE_RATIO = 20      # ... and at most this many times the budget
+SHELL_CELLS_MAX = 150e6    # most voxels in the field
+
 
 def occupancy(V, sg, vh, vz, hmax, density):
     """Share of 'full' per voxel (vh across, vz tall, in HAG), 0..1."""
@@ -710,173 +748,102 @@ def occupancy(V, sg, vh, vz, hmax, density):
 
 
 def surface_nets(F, iso):
-    """Vertices (in sample-index units) and CCW-outside triangles of the
-    iso-surface of F (inside = F > iso). F must be padded with outside."""
-    inside = F > iso
-    nx, ny, nz = F.shape
-    c = inside[:-1, :-1, :-1].astype(np.uint8)
-    any_in = np.zeros(c.shape, bool)
-    all_in = np.ones(c.shape, bool)
-    corners = [(i, j, k) for i in (0, 1) for j in (0, 1) for k in (0, 1)]
-    for (i, j, k) in corners:
-        s = inside[i:nx - 1 + i, j:ny - 1 + j, k:nz - 1 + k]
-        any_in |= s
-        all_in &= s
-    active = any_in & ~all_in
-    del any_in, all_in, c
-    ai, aj, ak = np.nonzero(active)
-    del active
-    cube_lin = (ai * (ny - 1) + aj) * (nz - 1) + ak
-    # Vertex = mean of the edge crossings of the cube.
-    acc = np.zeros((len(ai), 3), np.float64)
-    num = np.zeros(len(ai), np.float64)
-    edges = []
-    for (i, j, k) in corners:
-        for d in range(3):
-            o = [i, j, k]
-            if o[d] == 1:
-                continue
-            o2 = list(o); o2[d] = 1
-            edges.append((tuple(o), tuple(o2)))
-    for a, b in edges:
-        fa = F[ai + a[0], aj + a[1], ak + a[2]]
-        fb = F[ai + b[0], aj + b[1], ak + b[2]]
-        cr = (fa > iso) != (fb > iso)
-        t = np.where(cr, (iso - fa) / np.where(cr, fb - fa, 1.0), 0.0)
-        for d in range(3):
-            acc[:, d] += np.where(cr, a[d] + (b[d] - a[d]) * t, 0.0)
-        num += cr
-    verts = acc / np.maximum(num, 1)[:, None]
-    verts[:, 0] += ai; verts[:, 1] += aj; verts[:, 2] += ak
-    verts += 0.5          # sample i sits at the centre of voxel i
-    del acc, num
-
-    def vid(i, j, k):
-        lin = (i * (ny - 1) + j) * (nz - 1) + k
-        p = np.searchsorted(cube_lin, lin)
-        return p
-
-    tris = []
-    # Edges along axis a between samples s and s + e_a; the quad joins the
-    # four cubes around it, ordered CCW about +a in the (b, c) plane.
-    for a in range(3):
-        b, cax = (a + 1) % 3, (a + 2) % 3
-        sl0 = [slice(None)] * 3
-        sl1 = [slice(None)] * 3
-        sl0[a] = slice(0, F.shape[a] - 1)
-        sl1[a] = slice(1, F.shape[a])
-        i0 = inside[tuple(sl0)]
-        i1 = inside[tuple(sl1)]
-        cross = i0 != i1
-        out_pos = i0 & ~i1                # outward normal along +a
-        idx = np.nonzero(cross)
-        flip = ~out_pos[idx]
-        del cross, out_pos, i0, i1
-        p = [idx[0], idx[1], idx[2]]
-        ok = (p[b] >= 1) & (p[cax] >= 1)
-        p = [q[ok] for q in p]
-        flip = flip[ok]
-        quad = []
-        for db, dc in ((-1, -1), (0, -1), (0, 0), (-1, 0)):
-            q = list(p)
-            q[b] = p[b] + db
-            q[cax] = p[cax] + dc
-            quad.append(vid(q[0], q[1], q[2]))
-        q0, q1, q2, q3 = quad
-        t1 = np.stack([q0, q1, q2], 1)
-        t2 = np.stack([q0, q2, q3], 1)
-        t1f = np.stack([q0, q2, q1], 1)
-        t2f = np.stack([q0, q3, q2], 1)
-        t1 = np.where(flip[:, None], t1f, t1)
-        t2 = np.where(flip[:, None], t2f, t2)
-        tris.append(np.concatenate([t1, t2]))
-    tris = np.concatenate(tris) if tris else np.zeros((0, 3), np.int64)
-    return verts, tris
+    import veg_mesh as vm
+    return vm.surface_nets(F, iso)
 
 
 def laplacian(verts, tris, iters=2, lam=0.5):
-    if len(tris) == 0:
-        return verts
-    e = np.concatenate([tris[:, [0, 1]], tris[:, [1, 2]], tris[:, [2, 0]]])
-    n = len(verts)
-    deg = np.bincount(e[:, 0], minlength=n) + np.bincount(e[:, 1], minlength=n)
-    v = verts.copy()
-    for it in range(iters):
-        s = np.zeros_like(v)
-        for d in range(3):
-            s[:, d] = np.bincount(e[:, 0], v[e[:, 1], d], minlength=n) + \
-                np.bincount(e[:, 1], v[e[:, 0], d], minlength=n)
-        avg = s / np.maximum(deg, 1)[:, None]
-        # Taubin: shrink then inflate a little, so blobs keep their size.
-        k = lam if it % 2 == 0 else -0.53
-        v = v + k * (avg - v)
-    return v
+    import veg_mesh as vm
+    return vm.taubin(verts, tris, iters=iters, lam=lam)
 
 
-SHELL_SIGMA = 0.75       # Gaussian smoothing of the occupancy, in voxels
-SHELL_ISO = 0.18         # surface where the smoothed occupancy crosses this
+def shell_vz(vh):
+    return max(1.0, 0.5 * vh)
 
 
 def shell_at(V, need, vh, density, hmax):
+    """The smoothed occupancy field at vh, padded with one layer of outside
+    and made well-composed (see the notes above)."""
     from scipy import ndimage
-    vz = max(1.0, 0.5 * vh)
+    import veg_mesh as vm
+    vz = shell_vz(vh)
     sg = ld.Grid(need[0], need[1], need[2], need[3], vh)
     F = occupancy(V, sg, vh, vz, hmax, density)
-    F = ndimage.gaussian_filter(F, SHELL_SIGMA)
-    verts, tris = surface_nets(np.pad(F, 1), SHELL_ISO)
-    return verts, tris, vz
+    F = ndimage.gaussian_filter(F, SHELL_SIGMA, mode="constant")
+    F, _ = vm.well_composed(np.pad(F, 1), SHELL_ISO)
+    return F, vz
 
 
 def build_shell(V, need, voxel, max_tri, density, say):
-    """Surface nets at `voxel` across (half that tall, at least 1 m), made
-    coarser until it fits max_tri. The size is searched in log-log (the
-    count falls roughly as a power of the voxel size) toward 90 % of the
-    budget; the finest result that fits is kept."""
+    """The shell at the fine voxel `voxel` (coarser only if needed, see the
+    notes above), simplified to max_tri. Returns x, y (UTM), hag, triangles,
+    the extraction voxel, its height and info {simplified_from, error_m,
+    error_p90_m, seconds_simplify}."""
+    import veg_mesh as vm
     hmax = float(V.h.max()) + voxel
-    target = 0.9 * max_tri
-    samples = []                 # (v, triangles)
-    best = None
-    v = voxel
-    for attempt in range(7):
-        verts, tris, vz = shell_at(V, need, v, density, hmax)
-        T = len(tris)
+    w, h = need[2] - need[0], need[3] - need[1]
+    v = max(voxel, round(2.5 / math.sqrt(max(density, 0.01)) * 4) / 4)
+    v = max(v, (2.0 * w * h * hmax / SHELL_CELLS_MAX) ** (1 / 3.0))
+    limit = min(SHELL_FINE_MAX, max(SHELL_FINE_RATIO * max_tri, 200000))
+    for attempt in range(8):
+        F, vz = shell_at(V, need, v, density, hmax)
+        est = 2 * vm.count_active(F, SHELL_ISO)
+        if est > limit and attempt < 4:
+            v_new = v * math.sqrt(est / limit) * 1.03
+            say(f"  shell at {v:.2f} m would be ~{est:,} triangles: "
+                f"{v_new:.2f} m")
+            v = v_new
+            continue
+        verts, tris = vm.surface_nets(F, SHELL_ISO)
+        del F
+        verts = vm.taubin(verts, tris, iters=4)
+        # Index units -> metres from the area's corner (x, y) and HAG (z);
+        # the pad shifts by one.
+        verts[:, 0] = (verts[:, 0] - 1) * v
+        verts[:, 1] = (verts[:, 1] - 1) * v
+        verts[:, 2] = (verts[:, 2] - 1) * vz
+        verts, tris, _ = vm.clean(verts, tris, min_tris=SHELL_MIN_PIECE,
+                                  spike=0)
+        T0 = len(tris)
         say(f"  shell at {v:.2f} x {vz:.2f} m voxels: {len(verts):,} "
-            f"vertices, {T:,} triangles")
-        samples.append((v, max(T, 1)))
-        if T <= max_tri and (best is None or v < best[2]):
-            best = (verts, tris, v, vz)
-        if best is not None and (best[2] <= voxel + 1e-9 or
-                                 len(best[1]) >= 0.75 * max_tri):
-            break
-        over = [s_ for s_ in samples if s_[1] > max_tri]
-        under = [s_ for s_ in samples if s_[1] <= max_tri]
-        if over and under:
-            (v0, t0) = max(over)              # coarsest that did not fit
-            (v1, t1) = min(under)             # finest that fits
-            p = math.log(t0 / t1) / max(1e-6, math.log(v1 / v0))
-            v_new = v0 * (t0 / target) ** (1.0 / max(p, 0.5))
-            v_new = min(max(v_new, v0 * 1.02), v1 * 0.98)
-            if v_new >= v1 * 0.97 or v_new <= v0 * 1.01:
-                break
+            f"vertices, {T0:,} triangles")
+        t0 = time.time()
+        st = {}
+        if T0 > max_tri:
+            sv, st_, _ = vm.simplify(verts, tris, max_tri, stats=st,
+                                     say=say)
         else:
-            p = 2.6
-            if len(samples) >= 2:
-                (va, ta), (vb, tb) = samples[-2], samples[-1]
-                if vb != va and ta != tb:
-                    p = max(0.5, math.log(ta / tb) / math.log(vb / va))
-            v_new = v * (T / target) ** (1.0 / p)
-            v_new = max(v_new, v * 1.05)
+            sv, st_ = verts, tris
+        sv, st_, _ = vm.clean(sv, st_, min_tris=4, spike=0.35)
+        t_simp = time.time() - t0
+        if len(st_) <= max_tri:
+            break
+        v_new = v * 1.4
+        say(f"  {len(st_):,} triangles after simplifying, over the budget: "
+            f"{v_new:.2f} m")
         v = v_new
-    if best is None:
-        raise RuntimeError("the shell does not fit max_triangles")
-    verts, tris, v, vz = best
-    verts = laplacian(verts, tris, iters=4)
-    # Index units -> metres (x, y in UTM, z = HAG); the pad shifts by one.
-    xs = need[0] + (verts[:, 0] - 1) * v
-    ys = need[1] + (verts[:, 1] - 1) * v
-    hag = np.maximum(0.0, (verts[:, 2] - 1) * vz)
-    return xs, ys, hag, tris.astype(np.uint32), v, vz
-
+    if len(st_) > max_tri:
+        # Last resort: keep the largest pieces that fit.
+        lab, n = vm.components(len(sv), st_)
+        tl = lab[st_[:, 0]]
+        cnt = np.bincount(tl, minlength=n)
+        order = np.argsort(-cnt)
+        keep = np.zeros(n, bool)
+        keep[order[np.cumsum(cnt[order]) <= max_tri]] = True
+        sv, st_, _ = vm.compact(sv, st_[keep[tl]])
+    err = {"mean": 0.0, "p90": 0.0}
+    if len(st_) and len(st_) < T0:
+        err = vm.mesh_error(verts, tris, sv, st_,
+                            n=min(100000, max(1000, T0 // 4)))
+    say(f"  simplified {T0:,} -> {len(st_):,} triangles in {t_simp:.1f} s, "
+        f"typical error {err['mean']:.2f} m (90 % under {err['p90']:.2f} m)")
+    xs = need[0] + sv[:, 0]
+    ys = need[1] + sv[:, 1]
+    hag = np.maximum(0.0, sv[:, 2])
+    info = {"simplified_from": int(T0), "error_m": round(err["mean"], 3),
+            "error_p90_m": round(err["p90"], 3),
+            "simplify_s": round(t_simp, 2), "passes": st.get("passes", 0)}
+    return xs, ys, hag, st_.astype(np.uint32), v, vz, info
 
 # --------------------------------------------------------------------------
 # Preview
@@ -1139,14 +1106,16 @@ def run(params, out_dir, say=say_default):
         t0 = time.time()
         max_tri = min(prm["max_triangles"],
                       max(20000, int(D["tri_km2"] * area_m2 / 1e6)))
+        voxel = SHELL_VOXEL.get(prm["detail"], D["voxel"])
         if n_veg:
-            sx, sy, shag, tris, vox, voxz = build_shell(V, need, D["voxel"],
-                                                        max_tri, density, say)
+            sx, sy, shag, tris, vox, voxz, sinfo = build_shell(
+                V, need, voxel, max_tri, density, say)
         else:
             sx = sy = shag = np.zeros(0)
             tris = np.zeros((0, 3), np.uint32)
-            vox, voxz = D["voxel"], max(1.0, D["voxel"] / 2)
-        shell = (sx, sy, shag, tris, vox, voxz, max_tri)
+            vox, voxz = voxel, shell_vz(voxel)
+            sinfo = {"simplified_from": 0, "error_m": 0.0}
+        shell = (sx, sy, shag, tris, vox, voxz, max_tri, sinfo)
         timings["shell_s"] = round(time.time() - t0, 2)
 
     # Outputs in the local frame.
@@ -1171,7 +1140,7 @@ def run(params, out_dir, say=say_default):
         veg["shapes"] = {"file": "shapes.bin", "count": int(len(recs)),
                          **counts, "record": RECORD * 4}
     if shell is not None:
-        sx, sy, shag, tris, vox, voxz, max_tri = shell
+        sx, sy, shag, tris, vox, voxz, max_tri, sinfo = shell
         V4 = np.zeros((len(sx), 4), np.float32)
         if len(sx):
             zg = ld.sample_bilinear(dem, ggrid, sx, sy)
@@ -1184,7 +1153,8 @@ def run(params, out_dir, say=say_default):
             f.write(np.ascontiguousarray(tris, "<u4").tobytes())
         veg["shell"] = {"file": "shell.bin", "vertices": int(len(V4)),
                         "triangles": int(len(tris)), "voxel_m": round(vox, 3),
-                        "voxel_z_m": round(voxz, 3), "budget": int(max_tri)}
+                        "voxel_z_m": round(voxz, 3), "budget": int(max_tri),
+                        **sinfo}
     # Ground in the local frame, row 0 south; x0, y0 = the south-west sample.
     gc_ = D["gcell"]
     gx0 = math.floor(bbox[0] / gc_) * gc_ - gc_
