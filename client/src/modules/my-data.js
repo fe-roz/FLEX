@@ -211,7 +211,7 @@
       out.push(id);
       if (cur && !cur.removed) continue;
       const style = Object.assign({}, it.style || {}, it.color ? { color: it.color } : {});
-      await rec('feature.set', { hsrc: it.hsrc || undefined, feature: id, kind: it.kind, coords: it.coords, name: String(it.name || '').slice(0, 120) || (it.kind === 'point' ? 'Point' : it.kind === 'area' ? 'Area' : 'Line'), desc: String(it.desc || '').slice(0, 4000), group: gid[g], style, removed: false });
+      await rec('feature.set', Object.assign({ hsrc: it.hsrc || undefined, feature: id, kind: it.kind, coords: it.coords, name: String(it.name || '').slice(0, 120) || (it.kind === 'point' ? 'Point' : it.kind === 'area' ? 'Area' : 'Line'), desc: String(it.desc || '').slice(0, 4000), group: gid[g], style, removed: false }, it.orig ? { orig: it.orig } : {}));      // orig: the import's untouched fields (waypoint-sessions.js), kept in the log
     }
     S = await state(true);
     out.forEach(id => { const f = S.features[id]; if (!f || f.removed) return; if (f.kind === 'point') drawPoint(f); else drawShape(f, S); });
