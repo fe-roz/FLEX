@@ -432,10 +432,14 @@ class Points:
                 m = select(c, z)
                 if not m.any():
                     continue
-                yield (self.xl[i:j][m] + self.ox, self.yl[i:j][m] + self.oy,
+                # float64 before adding the origin: numpy 2 keeps float32 +
+                # Python float in float32 (0.5 m steps at a northing of 5e6)
+                yield (self.xl[i:j][m].astype(np.float64) + self.ox,
+                       self.yl[i:j][m].astype(np.float64) + self.oy,
                        z[m], None if c is None else c[m])
             else:
-                yield (self.xl[i:j] + self.ox, self.yl[i:j] + self.oy, z, c)
+                yield (self.xl[i:j].astype(np.float64) + self.ox,
+                       self.yl[i:j].astype(np.float64) + self.oy, z, c)
 
 
 def points_from_arrays(x, y, z, cls):
