@@ -457,8 +457,10 @@ def run(params, area_dir, say=say_default):
 
     pd = os.path.join(area_dir, "points")
     nbytes = 13 * len(P)
-    cap_mb = float(params.get("points_cap_mb") or
-                   os.environ.get("FLEX_AREA_POINTS_CAP_MB") or DEFAULT_CAP_MB)
+    cap_mb = params.get("points_cap_mb")
+    if cap_mb is None:
+        cap_mb = os.environ.get("FLEX_AREA_POINTS_CAP_MB") or DEFAULT_CAP_MB
+    cap_mb = float(cap_mb)
     kept_points = False
     if params.get("keep_points", True) and nbytes <= cap_mb * 1e6:
         save_points(P, pd, {"ox": P.ox, "oy": P.oy, "n": len(P),
