@@ -15,7 +15,7 @@
 // One run = ordered steps, each a child process (terrain: the Terrain panel's generation, called in-process): ground (skipped when
 // DIR/ground exists for the same lidar, ring and cell), then veg, bush, terrain. Each success is written into area.json (replacing
 // the old result); a failed step stops the run and keeps the earlier results. A line "NOTE: text" from any script goes to the run's
-// notes and to that result's notes. LIMITS below is the one table of limits and offers (check and run both read it).
+// notes and to that result's notes. Prospects (prospect.py, FLEX_PROSPECT_SCRIPT) runs right after ground and needs only the area's ground and points: a run of only prospect on an area that has ground needs no LiDAR; options.prospect.known = known points for "nearest known". LIMITS below is the one table of limits and offers (check and run both read it).
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -25,15 +25,16 @@ const { spawn } = require('child_process');
 const { Readable } = require('stream');
 
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
-const RESULTS = ['ground', 'terrain', 'veg', 'bush'];
-const TOOLS = ['terrain', 'veg', 'bush'];
-const LABEL = { ground: 'Ground', terrain: 'Terrain', veg: 'Vegetation shapes', bush: 'Bushwhack layers' };
+const RESULTS = ['ground', 'terrain', 'veg', 'bush', 'prospect'];
+const TOOLS = ['terrain', 'veg', 'bush', 'prospect'];
+const LABEL = { ground: 'Ground', terrain: 'Terrain', veg: 'Vegetation shapes', bush: 'Bushwhack layers', prospect: 'Prospects' };
 const MIN_RING = 3, MAX_RING = 3000;
 // The one table. km2 = area; a tool "fits" up to `max` at its default, and offers a coarser setting that reaches `coarseMax`.
 const LIMITS = {
   ground:  { max: 100 },
   veg:     { max: 25, coarseMax: 60, offer: { key: 'detail-low', label: 'Lower detail (coarser shapes)', options: { detail: 'low' } }, option: { detail: 'low' } },
   terrain: { postsMax: 32e6, defaultCell: 1, coarseCell: 2, offer: { key: 'cell-2', label: '2 m cells (about a quarter of the size)', options: { cell: 2 } } },
+  prospect: { max: 100 },   // follows ground: it only reads the area's ground and points
   bush:    { max: 32, coarseMax: 80, defaultCell: 1, coarseCell: 2, offer: { key: 'cell-2', label: 'Coarser cells (2 m)', options: { cell: 2 } } },
 };
 const FILES = {
@@ -41,10 +42,11 @@ const FILES = {
   veg: /^(veg\.json|shapes\.bin|shell\.bin|ground\.bin|preview\.png)$/,
   bush: /^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,80}\.(png|json|tif)$/,
   terrain: /^ref\.json$/,
+  prospect: /^(candidates|candidates_areas|candidates_isolated)\.geojson$|^candidates\.(kml|csv)$|^(depth|below|steep)\.png$|^(layers|summary)\.json$/,
 };
-const MIME = { '.png': 'image/png', '.json': 'application/json', '.geojson': 'application/json', '.tif': 'image/tiff' };
+const MIME = { '.png': 'image/png', '.json': 'application/json', '.geojson': 'application/json', '.tif': 'image/tiff', '.kml': 'application/vnd.google-earth.kml+xml', '.csv': 'text/csv; charset=utf-8' };
 
-module.exports = function areasApi({ python, groundScript, vegScript, lidarScript, root, terrainGen, pollMs, fetchTimeoutMs }) {
+module.exports = function areasApi({ python, groundScript, vegScript, lidarScript, prospectScript, root, terrainGen, pollMs, fetchTimeoutMs }) {
   const jobs = {};
   const eptCache = new Map();
   const json = (res, d, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(d)); };
@@ -173,7 +175,7 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
 
   // ── check: limits, offers, plain words ──────────────────────────────────────
   const round1 = v => Math.max(1, Math.round(v));
-  const minutesOf = (tool, km2) => round1({ ground: 0.6 * km2 + 1, veg: 1.0 * km2 + 1, bush: 0.5 * km2 + 1, terrain: 1.2 * km2 + 2 }[tool]);
+  const minutesOf = (tool, km2) => round1({ ground: 0.6 * km2 + 1, veg: 1.0 * km2 + 1, bush: 0.5 * km2 + 1, prospect: 0.2 * km2 + 1, terrain: 1.2 * km2 + 2 }[tool]);
   /** Settings the tool would run with: { coarse, cell, detail } from the options and its defaults. */
   function settingsOf(tool, options) {
     const o = (options && options[tool]) || {};
@@ -198,6 +200,7 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
     return { status: 'toobig', why: `${sq} km² is more than this can do at once (${s.coarse ? max : L.max} km²)` + (canOffer ? ': a coarser setting will do it.' : ': choose a smaller area.'),
       offers: canOffer ? [L.offer] : [], minutes, coarse: s.coarse };
   }
+  const hasGround = id => ID_RE.test(String(id || '')) && fs.existsSync(path.join(areaDir(id), 'ground', 'grid.json'));
   async function check(o) {
     const r = cleanRing(o.ring);
     if (r.error) return { error: r.error };
@@ -212,9 +215,11 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
       : km2 > LIMITS.ground.max ? { status: 'toobig', why: `${km2.toFixed(1)} km² is more than ${LIMITS.ground.max} km²: choose a smaller area.`, offers: [], minutes: 0 }
       : { status: cov != null && cov < 0.98 ? 'partly' : 'fits', why: cov != null && cov < 0.98 ? covWords : '', offers: [], minutes: minutesOf('ground', km2) };
     if (cov != null) ground.coverage = Math.round(cov * 1000) / 1000;
+    const groundMade = hasGround(o.id);
     for (const t of tools) {
+      if (t === 'prospect' && groundMade) { out[t] = { status: 'fits', why: 'Uses the ground already made for this area: no LiDAR is read.', offers: [], minutes: minutesOf('prospect', km2) }; continue; }
       if (needs) { out[t] = { status: 'needslidar', why: needsWhy, offers: [], minutes: 0 }; continue; }
-      const j = judge(t, km2, options);
+      const j = t === 'prospect' ? { status: 'fits', why: '', offers: [], minutes: minutesOf('prospect', km2), coarse: false } : judge(t, km2, options);
       if (j.status === 'fits' && cov != null && cov < 0.98) { j.status = 'partly'; j.why = (covWords + ' ' + j.why).trim(); }
       if (ground.status === 'toobig' && j.status !== 'toobig') { j.status = 'toobig'; j.why = ground.why; j.offers = []; }
       out[t] = j;
@@ -308,6 +313,24 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
     const lines = errLines.filter(l => !/^\s*File "|^\s+\S/.test(l));
     return ((lines.length ? lines : errLines).slice(-3).map(l => l.replace(/^!\s*/, '')).join(' | ') || 'it wrote nothing') + ` (exit ${code})`;
   };
+  /** options.prospect.known → { points: [{ lon, lat, name }] } (up to MAX_KNOWN) or { error }. Accepts [{lon,lat,name}], [[lon,lat,name?]] or a GeoJSON FeatureCollection of points. */
+  const MAX_KNOWN = 5000;
+  function cleanKnown(k) {
+    if (k == null) return { points: [] };
+    let list = k && k.type === 'FeatureCollection' ? k.features : k;
+    if (!Array.isArray(list)) return { error: 'Prospects: the known points must be a list.' };
+    if (list.length > MAX_KNOWN) return { error: `Prospects: at most ${MAX_KNOWN} known points (got ${list.length}).` };
+    const pts = [];
+    for (const f of list) {
+      let lon, lat, name;
+      if (Array.isArray(f)) { lon = f[0]; lat = f[1]; name = f[2]; }
+      else if (f && f.geometry && f.geometry.type === 'Point' && Array.isArray(f.geometry.coordinates)) { lon = f.geometry.coordinates[0]; lat = f.geometry.coordinates[1]; name = f.properties && (f.properties.name || f.properties.title); }
+      else if (f && typeof f === 'object') { lon = f.lon; lat = f.lat; name = f.name; }
+      if (!lonlat([lon, lat])) return { error: 'Prospects: a known point has no valid longitude and latitude.' };
+      pts.push({ lon: +lon, lat: +lat, name: cleanName(name, '').slice(0, 60) });
+    }
+    return { points: pts };
+  }
   const sources = lidar => ({ ept: lidar[0], ept_also: lidar.slice(1) });
 
   /** The terrain step: the Terrain panel's generation, called in-process; waits for its job. */
@@ -377,6 +400,24 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
         if (pits == null) { const pg = readJson(path.join(DIR, 'ground', 'pits.geojson')); pits = pg && Array.isArray(pg.features) ? pg.features.length : 0; }
         res = { cell: num(sm.cell) ? sm.cell : (num(gr.cell) ? gr.cell : null), cellReq, ringKey: ringKey(area.ring), coverage: num(sm.coverage) ? sm.coverage : null, pits, coarse: false };
         fs.rmSync(pf, { force: true });
+      } else if (key === 'prospect') {
+        if (!fs.existsSync(path.join(DIR, 'ground', 'grid.json'))) throw new Error('the ground of this area is not made');
+        const kn = cleanKnown(options.prospect && options.prospect.known).points;
+        fs.rmSync(path.join(DIR, 'prospect'), { recursive: true, force: true });
+        fs.mkdirSync(path.join(DIR, 'prospect'), { recursive: true });
+        const pf = path.join(DIR, 'prospect-params.json'), kf = path.join(DIR, 'prospect-known.json');
+        const params = {};
+        if (kn.length) {
+          fs.writeFileSync(kf, JSON.stringify({ type: 'FeatureCollection', features: kn.map(p => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [p.lon, p.lat] }, properties: { name: p.name } })) }));
+          params.known = kf;
+        }
+        fs.writeFileSync(pf, JSON.stringify(params));
+        const r = await runScript(job, step, [prospectScript, '--area-dir', DIR, '--out', path.join(DIR, 'prospect'), '--params', pf], notes);
+        const sm = readJson(path.join(DIR, 'prospect', 'summary.json'));
+        fs.rmSync(pf, { force: true }); fs.rmSync(kf, { force: true });
+        if (r.code !== 0 || !sm) throw new Error(whyFailed(r.errLines, r.code));
+        const c = sm.counts || {}, iso = sm.isolated || {};
+        res = { coarse: false, known: kn.length, counts: { A: c.A || 0, B: c.B || 0, C: c.C || 0, isolated: (iso.B || 0) + (iso.C || 0) } };
       } else if (key === 'veg') {
         const o = (options.veg || {}), s = settingsOf('veg', options);
         const looks = (Array.isArray(o.looks) ? o.looks : ['shapes', 'shell']).filter((x, i, a) => ['shapes', 'shell'].includes(x) && a.indexOf(x) === i);
@@ -419,7 +460,8 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
 
   async function run(o) {
     const lidar = cleanUrls(o.lidar);
-    if (!lidar.length) return { code: 400, error: 'Choose the LiDAR to use (a point cloud loaded or in the project).' };
+    const onlyProspect = Array.isArray(o.tools) && o.tools.length > 0 && o.tools.every(t => t === 'prospect');
+    if (!lidar.length && !(onlyProspect && hasGround(o.id))) return { code: 400, error: 'Choose the LiDAR to use (a point cloud loaded or in the project).' };
     const tools = (Array.isArray(o.tools) ? o.tools : []).filter((t, i, a) => TOOLS.includes(t) && a.indexOf(t) === i);
     if (!tools.length) return { code: 400, error: 'Tick at least one tool to run.' };
     const options = o.options && typeof o.options === 'object' ? o.options : {};
@@ -435,13 +477,15 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
       area = s.area;
     }
     if (running(area.id)) return { code: 409, error: 'This area is already being processed' };
-    const c = await check({ ring: area.ring, lidar, tools, options });
+    if (tools.includes('prospect')) { const kc = cleanKnown(options.prospect && options.prospect.known); if (kc.error) return { code: 400, error: kc.error }; }
+    const c = await check({ ring: area.ring, lidar, tools, options, id: area.id });
     if (!c.ok) return { code: 400, error: c.error };
     const bad = tools.filter(t => c.tools[t].status === 'toobig' || c.tools[t].status === 'needslidar');
     if (bad.length) return { code: 400, error: bad.map(t => `${LABEL[t]}: ${c.tools[t].why}`).join(' ') };
-    if (c.ground.status === 'toobig') return { code: 400, error: c.ground.why };
+    const skipGround = onlyProspect && hasGround(area.id);
+    if (c.ground.status === 'toobig' && !skipGround) return { code: 400, error: c.ground.why };
     const runId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    const steps = ['ground'].concat(['veg', 'bush', 'terrain'].filter(t => tools.includes(t))).map(k => ({ key: k, label: LABEL[k], status: 'pending', frac: 0 }));
+    const steps = (skipGround ? [] : ['ground']).concat(['prospect', 'veg', 'bush', 'terrain'].filter(t => tools.includes(t))).map(k => ({ key: k, label: LABEL[k], status: 'pending', frac: 0 }));
     const job = jobs[runId] = { status: 'running', progress: [], notes: [], steps, areaId: area.id, name: 'Analyze: ' + area.name, label: 'Analyze: ' + area.name,
       error: null, started: Date.now(), ended: null, cancelled: false, proc: null };
     if (c.ground.status === 'partly' && c.ground.why) job.notes.push(c.ground.why);
@@ -455,7 +499,7 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
         job.progress.push('! ' + job.error);
       } finally {
         job.ended = Date.now(); job.proc = null;
-        const a = readArea(area.id); if (a) { a.lidar = lidar; writeArea(a); }
+        const a = readArea(area.id); if (a && lidar.length) { a.lidar = lidar; writeArea(a); }
         try { fs.writeFileSync(path.join(areaDir(area.id), 'log.txt'), job.progress.join('\n') + '\n'); } catch (_) {}
       }
     })();

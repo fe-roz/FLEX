@@ -15,7 +15,7 @@ const check = { ok: true, km2: 30.9, ground: { coverage: 0.78, minutes: 3 },
 // rows
 let rows = M.toolRows(check, { ticks: { terrain: true, veg: true, bush: true } });
 const by = k => rows.find(r => r.id === k);
-ok('three tool rows in order', rows.map(r => r.id).join() === 'terrain,veg,bush');
+ok('three tool rows in order', rows.map(r => r.id).join() === 'terrain,veg,bush,prospect');
 ok('partly → warn chip "Partly covered" with the reason', by('terrain').st === 'warn' && by('terrain').chip === 'Partly covered' && /78 %/.test(by('terrain').why));
 ok('toobig → bad chip "Too big", offers listed, not ticked, still clickable', by('veg').chip === 'Too big' && by('veg').offers.length === 1 && !by('veg').ticked && !by('veg').disabled);
 ok('needslidar → "Needs LiDAR", no offers, disabled', by('bush').chip === 'Needs LiDAR' && !by('bush').offers && by('bush').disabled && !by('bush').ticked);
@@ -67,7 +67,7 @@ ok('the reducer does not change the old state', M.eyeOf(s, 'a') === '');
 ok('forget removes an area', !M.reduce(s, { type: 'forget', id: 'b' }).areas.b);
 const areas = [{ id: 'a', results: { ground: {}, terrain: {}, bush: {} } }, { id: 'b', results: { ground: {}, veg: {} } }];
 ok('drawnOf: what is drawn, only existing results', JSON.stringify(M.drawnOf(s2, areas)) === JSON.stringify([{ id: 'a', result: 'bush' }]) && JSON.stringify(M.drawnOf(M.reduce(s2, { type: 'showResult', id: 'b', result: 'veg', on: true }), areas)) === JSON.stringify([{ id: 'a', result: 'bush' }, { id: 'b', result: 'veg' }]), M.drawnOf(s2, areas));
-ok('missing: tools an area has not got', M.missing(areas[1]).join() === 'terrain,bush');
+ok('missing: tools an area has not got', M.missing(areas[1]).join() === 'terrain,bush,prospect');
 
 // words
 ok('sizeKm', (() => { const [w, h] = M.sizeKm([[-100.5678, 45.1234], [-100.5378, 45.1234], [-100.5378, 45.1434]]); return Math.abs(w - 2.36) < 0.05 && Math.abs(h - 2.21) < 0.05; })());
