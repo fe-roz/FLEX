@@ -23,6 +23,16 @@ if 'failveg' in P['source']['ept']: print('! veg broke'); sys.exit(1)
 open(a.out + '/shapes.bin', 'wb').write(b'12345678'); json.dump({'shapes': {'trees': 5, 'brush': 2}, 'shell': {'triangles': 10}, 'detail': P['detail'], 'ad': a.area_dir}, open(a.out + '/veg.json', 'w'))
 print('NOTE: veg note')
 `);
+const prospectPy = W('prospect.py', `
+import argparse, json, os, sys
+ap = argparse.ArgumentParser(); ap.add_argument('--area-dir'); ap.add_argument('--out'); ap.add_argument('--params'); a = ap.parse_args(); P = json.load(open(a.params))
+if not os.path.exists(a.area_dir + '/ground/grid.json'): print('! no ground'); sys.exit(1)
+kn = len(json.load(open(P['known']))['features']) if P.get('known') else 0
+json.dump({'type': 'FeatureCollection', 'features': []}, open(a.out + '/candidates.geojson', 'w'))
+open(a.out + '/candidates.kml', 'w').write('<kml/>'); open(a.out + '/candidates.csv', 'w').write('id\\n'); open(a.out + '/depth.png', 'wb').write(b'png')
+json.dump({'counts': {'A': 2, 'B': 3, 'C': 1}, 'isolated': {'B': 4, 'C': 1}, 'known': kn}, open(a.out + '/summary.json', 'w'))
+print('NOTE: 6 candidates (2 sinks)')
+`);
 const lidarPy = W('lidar.py', `
 import argparse, json, os
 ap = argparse.ArgumentParser(); ap.add_argument('--ept'); ap.add_argument('--bbox', nargs=4); ap.add_argument('--out-dir'); ap.add_argument('--area-dir'); ap.add_argument('--cell'); a = ap.parse_args()
@@ -34,7 +44,7 @@ const fakeTerrain = { jobs: {}, handle(req, res, rest) {
     if (/failterrain/.test(o.ept[0])) { fakeTerrain.jobs.t1 = { status: 'error', error: 'terrain broke', progress: [] }; } else fakeTerrain.jobs.t1 = { status: 'done', progress: ['[1/4] x'], result: { layers: ['a'] } };
     res.end(JSON.stringify({ ok: true, jobId: 't1' })); }); } };
 const root = path.join(tmp, 'areas');
-const api = require('../areas_api')({ python: 'python3', groundScript: groundPy, vegScript: vegPy, lidarScript: lidarPy, root, terrainGen: fakeTerrain, pollMs: 20, fetchTimeoutMs: 2000 });
+const api = require('../areas_api')({ python: 'python3', groundScript: groundPy, vegScript: vegPy, prospectScript: prospectPy, lidarScript: lidarPy, root, terrainGen: fakeTerrain, pollMs: 20, fetchTimeoutMs: 2000 });
 
 function call(method, url, data) {
   return new Promise(resolve => {
@@ -153,11 +163,38 @@ const srv = http.createServer((q, s) => {
   r = await post('run', { id: 'nope', lidar: L, tools: ['veg'] }); ok('run unknown area → 404', r.code === 404);
   r = await get('/status/zzzz'); ok('status unknown → 404', r.code === 404);
 
+  // ── prospect: after ground, no lidar needed once ground exists
+  r = await post('check', { id: AR, ring: RING, lidar: [], tools: ['prospect', 'veg'] });
+  ok('check: prospect fits on an area with ground, even with no LiDAR; veg still needs it', r.j.tools.prospect.status === 'fits' && r.j.tools.prospect.minutes >= 1 && r.j.tools.veg.status === 'needslidar', r.j);
+  r = await post('check', { ring: RING, lidar: [], tools: ['prospect'] }); ok('check: prospect with no ground and no LiDAR → needslidar', r.j.tools.prospect.status === 'needslidar');
+  r = await post('check', { ring: bigRing(150), lidar: [U('all')], tools: ['prospect'] }); ok('check 150 km²: prospect too big', r.j.tools.prospect.status === 'toobig');
+  const known = [{ lon: -100.57, lat: 45.12, name: 'Cave Ridge T6' }, [-100.5, 45.1], { lon: -100.5, lat: 45.1, name: 'x'.repeat(200) }];
+  r = await post('run', { id: AR, lidar: [], tools: ['prospect'], options: { prospect: { known } } }); ok('run prospect only, no LiDAR, area has ground → started', r.j.ok, r.j);
+  s = await waitRun(r.j.runId);
+  ok('prospect-only run: one step, done, ground not re-run', s.status === 'done' && s.steps.map(x => x.key).join() === 'prospect', s);
+  a = (await get('?project=p1')).j.areas.find(x => x.id === AR);
+  ok('prospect result: counts, notes, bytes, known', a.results.prospect.counts.A === 2 && a.results.prospect.counts.B === 3 && a.results.prospect.counts.C === 1 && a.results.prospect.counts.isolated === 5 && a.results.prospect.notes[0] === '6 candidates (2 sinks)' && a.results.prospect.bytes > 0 && a.results.prospect.known === 3, a.results.prospect);
+  ok('area lidar list not emptied by the prospect-only run', a.lidar.length > 0);
+  ok('known file and params are cleaned up', !fs.existsSync(path.join(root, AR, 'prospect-known.json')) && !fs.existsSync(path.join(root, AR, 'prospect-params.json')));
+  r = await post('run', { id: AR, lidar: L, tools: ['veg', 'prospect'] }); s = await waitRun(r.j.runId);
+  ok('order: ground, prospect, veg', s.status === 'done' && s.steps.map(x => x.key).join() === 'ground,prospect,veg', s.steps);
+  for (const bad of [{ prospect: { known: 'nope' } }, { prospect: { known: [{ lon: 500, lat: 1 }] } }, { prospect: { known: [{ lon: 1 }] } }, { prospect: { known: new Array(5001).fill([1, 1]) } }]) {
+    r = await post('run', { id: AR, lidar: L, tools: ['prospect'], options: bad }); ok('run refuses bad known points', r.code === 400 && /known/.test(r.j.error), r.j);
+  }
+  r = await post('save', { name: 'Empty', ring: RING }); r = await post('run', { id: r.j.area.id, lidar: [], tools: ['prospect'] }); ok('prospect only, no LiDAR and no ground → 400', r.code === 400);
+  r = await post('run', { id: AR, lidar: L, tools: ['prospect'], options: { prospect: { known: Array.from({ length: 5000 }, (_, i) => [-100 + i * 1e-4, 45]) } } }); s = await waitRun(r.j.runId); ok('5000 known points accepted', s.status === 'done');
+
   // ── files
   r = await get(`/file/${AR}/veg/shapes.bin`); ok('file: .bin as octet-stream', r.code === 200 && r.h['Content-Type'] === 'application/octet-stream' && r.buf.length === 8, r.h);
   r = await get(`/file/${AR}/veg/veg.json`); ok('file: json', r.code === 200 && r.h['Content-Type'] === 'application/json');
   r = await get(`/file/${AR}/ground/ground.npy`); ok('file: ground.npy', r.code === 200 && r.buf.length === 4);
   r = await get(`/file/${AR}/bush/x.png`); ok('file: bush png', r.code === 200 && r.h['Content-Type'] === 'image/png');
+  r = await get(`/file/${AR}/prospect/candidates.kml`); ok('file: prospect kml', r.code === 200 && /kml/.test(r.h['Content-Type']) && r.buf.length === 6, r.h);
+  r = await get(`/file/${AR}/prospect/candidates.csv`); ok('file: prospect csv', r.code === 200 && /csv/.test(r.h['Content-Type']));
+  r = await get(`/file/${AR}/prospect/depth.png`); ok('file: prospect png', r.code === 200 && r.h['Content-Type'] === 'image/png');
+  r = await get(`/file/${AR}/prospect/summary.json`); ok('file: prospect summary', r.code === 200);
+  for (const u of [`/file/${AR}/prospect/candidates.txt`, `/file/${AR}/prospect/log.txt`, `/file/${AR}/prospect/depth.pgw`, `/file/${AR}/prospect/candidates.geojson.bak`, `/file/${AR}/prospect/..%2Farea.json`, `/file/${AR}/prospect-known.json`])
+    { r = await get(u); ok('prospect file refused: ' + u.replace(AR, '<id>'), r.code === 404 || r.code === 400, r.code); }
   for (const u of [`/file/${AR}/veg/params.json`, `/file/${AR}/veg/..%2Farea.json`, `/file/${AR}/veg/../area.json`, `/file/${AR}/../veg.json`, `/file/${AR}/nothing/veg.json`, `/file/${AR}/ground/ground-params.json`, `/file/${AR}/veg/`, '/file/../../etc/passwd', `/file/${AR}/bush/.hidden.png`, `/file/${AR}/area.json`, `/file/${AR}/veg/shell.bin`])
     { r = await get(u); ok('file refused: ' + u.replace(AR, '<id>'), r.code === 404 || r.code === 400, r.code); }
 
@@ -165,6 +202,7 @@ const srv = http.createServer((q, s) => {
   ok('jobs: every run has name Analyze: …, progress lines, ended', Object.values(api.jobs).every(j => /^Analyze: /.test(j.name) && j.progress.length && j.ended));
 
   // ── delete-result / delete
+  r = await post('delete-result', { id: AR, result: 'prospect' }); ok('delete-result prospect', r.j.ok && !r.j.area.results.prospect && !fs.existsSync(path.join(root, AR, 'prospect')) && !!r.j.area.results.ground);
   r = await post('delete-result', { id: AR, result: 'veg' }); ok('delete-result removes folder and record', r.j.ok && !r.j.area.results.veg && !fs.existsSync(path.join(root, AR, 'veg')) && !!r.j.area.results.bush);
   r = await post('delete-result', { id: AR, result: 'ground' }); ok('delete-result ground', r.j.ok && !fs.existsSync(path.join(root, AR, 'ground')));
   r = await post('delete-result', { id: AR, result: '../x' }); ok('delete-result bad name → 400', r.code === 400);
