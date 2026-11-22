@@ -69,6 +69,22 @@ def _pct(s, p, d):
     return float(np.percentile(s, p)) if s.size else d
 
 
+def _block_p98(a, k=8):
+    """98th percentile of the k x k block means (NaN ignored), strip by strip; 0.5 when nothing."""
+    ny, nx = a.shape
+    w = (nx // k) * k
+    out = []
+    for r0 in range(0, (ny // k) * k, STRIP - STRIP % k):
+        r1 = min((ny // k) * k, r0 + STRIP - STRIP % k)
+        v = np.asarray(a[r0:r1, :w], np.float32)
+        ok = np.isfinite(v)
+        sm = np.where(ok, v, 0).reshape((r1 - r0) // k, k, w // k, k).sum(axis=(1, 3))
+        n = ok.reshape((r1 - r0) // k, k, w // k, k).sum(axis=(1, 3))
+        out.append((sm[n > 0] / n[n > 0]).ravel())
+    m = np.concatenate(out) if out else np.zeros(0)
+    return float(np.percentile(m, 98)) if m.size else 0.5
+
+
 def _write_json(out_dir, grid, maps):
     p = os.path.join(out_dir, "maps.json")
     with open(p + ".tmp", "w") as f:
@@ -82,7 +98,7 @@ def bush_maps(veg, depth, grid_src, out_dir):
     ny, nx = veg.shape
     g = _grid_meta(dict(grid_src, nx=nx, ny=ny), "north")
     s = _write_strips(os.path.join(out_dir, "brush.u8"), lambda a, b: veg[a:b], ny, 0.0, 1.0)
-    hi = max(0.05, round(_pct(s, 98, 0.5), 2))
+    hi = max(0.05, round(_block_p98(veg), 2))      # thick brush at walking scale (8 x 8 cells), not one cell's spike
     maps = [{"id": "brush", "file": "brush.u8", "units": "share of returns 0.3-1.5 m", "min": 0.0, "max": 1.0,
              "suggest": [0.0, hi]}]
     s = _write_strips(os.path.join(out_dir, "voids.u8"), lambda a, b: -np.asarray(depth[a:b], np.float32), ny, 0.0, 20.0,
@@ -93,9 +109,24 @@ def bush_maps(veg, depth, grid_src, out_dir):
     return maps
 
 
+def _box3(z):
+    """3 x 3 mean ignoring NaN (a NaN cell stays NaN)."""
+    p = np.pad(z, 1, mode="edge")
+    ok = np.isfinite(p)
+    v = np.where(ok, p, 0.0).astype(np.float32)
+    h, w = z.shape
+    acc = np.zeros((h, w), np.float32); cnt = np.zeros((h, w), np.float32)
+    for dy in (0, 1, 2):
+        for dx in (0, 1, 2):
+            acc += v[dy:dy + h, dx:dx + w]; cnt += ok[dy:dy + h, dx:dx + w]
+    out = acc / np.maximum(cnt, 1)
+    out[~np.isfinite(z)] = np.nan
+    return out
+
+
 def slope_shade(z, cell, az_deg=315.0, alt_deg=45.0):
     """Slope (deg) and shade (0..1) of a south-up height strip (row r+1 is north of row r). NaN stays NaN."""
-    z = np.asarray(z, dtype=np.float32)
+    z = _box3(np.asarray(z, dtype=np.float32))     # 3 x 3 mean first: at sub-metre cells the ground's own noise reads as slope
     dzdy, dzdx = np.gradient(z, cell)          # axis 0 = north (south-up), axis 1 = east
     k = np.sqrt(dzdx * dzdx + dzdy * dzdy)
     slope = np.degrees(np.arctan(k)).astype(np.float32)
@@ -116,7 +147,7 @@ def ground_maps(ground, grid_src, out_dir):
     def strip(a, b):
         if (a, b) not in cache:
             cache.clear()
-            lo, hi = max(0, a - 1), min(ny, b + 1)          # one row of overlap each side: the gradient is right at the seams
+            lo, hi = max(0, a - 2), min(ny, b + 2)          # two rows of overlap each side (mean + gradient): right at the seams
             sl, sh = slope_shade(np.asarray(ground[lo:hi], np.float32), cell)
             cache[(a, b)] = (sl[a - lo: a - lo + (b - a)], sh[a - lo: a - lo + (b - a)])
         return cache[(a, b)]

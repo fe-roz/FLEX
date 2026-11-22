@@ -2,14 +2,15 @@
 //
 //   GET /api/areas/maps/<areaId>                                   { ok, maps: [{ id, folder, units, min, max, suggest }],
 //                                                                    bounds: [w, s, e, n], minZoom, maxZoom, legacy: [...] }
-//   GET /api/areas/tiles/<areaId>/<map>/<z>/<x>/<y>.png?ramp=<stops>&lo=<v>&hi=<v>
+//   GET /api/areas/tiles/<areaId>/<map>/<z>/<x>/<y>.png?ramp=<stops>&lo=<v>&hi=<v>[&v=<ver>]   (v: the file's time, so a
+//                                                                  refreshed map is a new URL; not read here)
 //
 // The maps are the area's saved value rasters (area_maps.py): bush/brush.u8, bush/voids.u8, ground/slope.u8,
 // ground/hillshade.u8, each listed in its folder's maps.json. One byte per cell: 0 = no data, 1..255 = min..max.
 // Only the colours are made here, per request: `ramp` is up to MAX_STOPS stops "<pos>:<RRGGBBAA>" joined by "_"
 // (pos 0..1, increasing), linear between stops; lo / hi = the values put at 0 and 1 (default: the map's suggest).
 // Each tile pixel's centre is taken to UTM (WGS84 transverse Mercator, zone from maps.json) and the nearest cell is
-// read; the file is read by offset, only the rows the tile touches. Outside the grid or no data = transparent.
+// read (zoomed out: the mean of up to 4 x 4 cells per pixel); the file is read by offset, only the rows the tile touches. Outside the grid or no data = transparent.
 // A new ramp is a new URL, so the browser may keep each tile for a day.
 'use strict';
 const fs = require('fs');
@@ -139,35 +140,46 @@ module.exports = function areaTiles({ root, cacheTiles = 400, openFiles = 12 }) 
     return e;
   }
 
-  /** The tile as RGBA pixels (Buffer T*T*4) or null when nothing in it has data. */
+  /** The tile as RGBA pixels (Buffer T*T*4) or null when nothing in it has data. Where a pixel is wider than a cell
+   *  (zoomed out), it is the mean of k x k cells spread over the pixel (k up to 4), so patchy maps read as a density. */
   function render(info, L, z, x, y) {
     const { G } = info, nx = G.nx, ny = G.ny;
     const e = openFd(info.file);
     if (e.size < nx * ny) throw new Error('the map file is shorter than its grid');
-    const col = new Int32Array(T * T).fill(-1), row = new Int32Array(T * T);
-    let rmin = Infinity, rmax = -1;
-    for (let py = 0; py < T; py++) {
-      const lat = tileLat(y + (py + 0.5) / T, z);
-      for (let px = 0; px < T; px++) {
-        const c = cellOf(G, tileLon(x + (px + 0.5) / T, z), lat); if (!c) continue;
-        const k = py * T + px, r = Math.min(ny - 1, Math.floor(c[1]));
-        col[k] = Math.min(nx - 1, Math.floor(c[0])); row[k] = r;
-        if (r < rmin) rmin = r; if (r > rmax) rmax = r;
-      }
+    // UTM at the pixel corners (T+1)^2, exact; inside a pixel the sub-samples are interpolated between them
+    const N1 = T + 1, cu = new Float64Array(N1 * N1), cv = new Float64Array(N1 * N1);
+    for (let py = 0; py <= T; py++) {
+      const lat = tileLat(y + py / T, z);
+      for (let px = 0; px <= T; px++) { const p = utm(tileLon(x + px / T, z), lat, G.zone, G.south); cu[py * N1 + px] = (p[0] - G.x0) / G.cell; cv[py * N1 + px] = (p[1] - G.y0) / G.cell; }
+    }
+    const span = Math.hypot(cu[1] - cu[0], cv[1] - cv[0]), k = Math.max(1, Math.min(4, Math.round(span)));
+    const S = T * T * k * k, col = new Int32Array(S).fill(-1), row = new Int32Array(S);
+    let rmin = Infinity, rmax = -1, n = 0;
+    for (let py = 0; py < T; py++) for (let px = 0; px < T; px++) {
+      const a = py * N1 + px, b = a + 1, c = a + N1, d = c + 1;
+      for (let sy = 0; sy < k; sy++) { const ty = (sy + 0.5) / k; for (let sx = 0; sx < k; sx++, n++) {
+        const tx = (sx + 0.5) / k;
+        const u = (cu[a] * (1 - tx) + cu[b] * tx) * (1 - ty) + (cu[c] * (1 - tx) + cu[d] * tx) * ty;
+        const v = (cv[a] * (1 - tx) + cv[b] * tx) * (1 - ty) + (cv[c] * (1 - tx) + cv[d] * tx) * ty;
+        if (u < 0 || v < 0 || u >= nx || v >= ny) continue;
+        const r = G.row0 === 'south' ? Math.floor(v) : Math.min(ny - 1, Math.floor(ny - v));
+        col[n] = Math.floor(u); row[n] = r; if (r < rmin) rmin = r; if (r > rmax) rmax = r;
+      } }
     }
     if (rmax < 0) return null;
     // the rows hit, each read once over the columns it needs
-    const n = rmax - rmin + 1, lo = new Int32Array(n).fill(nx), hi = new Int32Array(n).fill(-1);
-    for (let k = 0; k < T * T; k++) if (col[k] >= 0) { const i = row[k] - rmin; if (col[k] < lo[i]) lo[i] = col[k]; if (col[k] > hi[i]) hi[i] = col[k]; }
-    const bufs = new Array(n);
-    for (let i = 0; i < n; i++) if (hi[i] >= 0) { const len = hi[i] - lo[i] + 1, b = Buffer.alloc(len); fs.readSync(e.fd, b, 0, len, (rmin + i) * nx + lo[i]); bufs[i] = b; }
-    const out = Buffer.alloc(T * T * 4); let any = false;
-    for (let k = 0; k < T * T; k++) {
-      if (col[k] < 0) continue;
-      const i = row[k] - rmin, v = bufs[i][col[k] - lo[i]];
-      if (!v) continue;
-      const o = k * 4, q = v * 4; out[o] = L[q]; out[o + 1] = L[q + 1]; out[o + 2] = L[q + 2]; out[o + 3] = L[q + 3];
-      if (L[q + 3]) any = true;
+    const nr = rmax - rmin + 1, lo = new Int32Array(nr).fill(nx), hi = new Int32Array(nr).fill(-1);
+    for (let q = 0; q < S; q++) if (col[q] >= 0) { const i = row[q] - rmin; if (col[q] < lo[i]) lo[i] = col[q]; if (col[q] > hi[i]) hi[i] = col[q]; }
+    const bufs = new Array(nr);
+    for (let i = 0; i < nr; i++) if (hi[i] >= 0) { const len = hi[i] - lo[i] + 1, bb = Buffer.alloc(len); fs.readSync(e.fd, bb, 0, len, (rmin + i) * nx + lo[i]); bufs[i] = bb; }
+    const out = Buffer.alloc(T * T * 4), kk = k * k; let any = false;
+    for (let p = 0; p < T * T; p++) {
+      let sum = 0, cnt = 0;
+      for (let q = p * kk, qe = q + kk; q < qe; q++) { if (col[q] < 0) continue; const i = row[q] - rmin, v = bufs[i][col[q] - lo[i]]; if (v) { sum += v; cnt++; } }
+      if (!cnt) continue;
+      const o = p * 4, idx = Math.max(1, Math.min(255, Math.round(sum / cnt))) * 4;
+      out[o] = L[idx]; out[o + 1] = L[idx + 1]; out[o + 2] = L[idx + 2]; out[o + 3] = L[idx + 3];
+      if (L[idx + 3]) any = true;
     }
     return any ? out : null;
   }
@@ -209,7 +221,8 @@ module.exports = function areaTiles({ root, cacheTiles = 400, openFiles = 12 }) 
       const info = mapInfo(id, map); if (!info) continue;
       try { if (fs.statSync(info.file).size < info.G.nx * info.G.ny) continue; } catch (_) { continue; }
       G = G || info.G;
-      out.push({ id: map, folder: MAPS[map], units: String(info.m.units || ''), min: info.m.min, max: info.m.max, suggest: Array.isArray(info.m.suggest) ? info.m.suggest : [info.m.min, info.m.max] });
+      let ver = 0; try { ver = Math.round(fs.statSync(info.file).mtimeMs / 1000); } catch (_) {}
+      out.push({ id: map, ver, folder: MAPS[map], units: String(info.m.units || ''), min: info.m.min, max: info.m.max, suggest: Array.isArray(info.m.suggest) ? info.m.suggest : [info.m.min, info.m.max] });
     }
     const r = { ok: true, maps: out, legacy: [] };
     if (G) {

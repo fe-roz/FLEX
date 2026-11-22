@@ -5,6 +5,7 @@
 // behind. The terrain itself travels in the project's sync file (its .bin is a project blob); terrain/ref.json only
 // says where it went.
 //
+//   (the value rasters bush/*.u8, ground/slope.u8, ground/hillshade.u8 and their maps.json always go: the map layers need them)
 //   node tools/area_pack.js pack   <area dir> <out.zip> [--no-tif]  → size report (per folder); --no-tif leaves the GeoTIFFs
 //                                                                    (bush/*.tif: for GIS, FLEX draws the pngs) behind
 //   node tools/area_pack.js list   <zip>                            → what is inside, and what an import would refuse

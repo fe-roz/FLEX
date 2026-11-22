@@ -58,10 +58,10 @@
     return { preset: (PRESETS[map] || [{}])[0].id, lo: +r[0], hi: +r[1] };
   }
   /** Tile URL template for an area's map with colours c. */
-  function urlOf(areaId, map, c) {
+  function urlOf(areaId, map, c, ver) {
     const p = presetOf(map, c.preset);
     const num = v => String(+(+v).toFixed(4));
-    return '/api/areas/tiles/' + encodeURIComponent(areaId) + '/' + map + '/{z}/{x}/{y}.png?ramp=' + rampOf(p.stops) + '&lo=' + num(c.lo) + '&hi=' + num(c.hi);
+    return '/api/areas/tiles/' + encodeURIComponent(areaId) + '/' + map + '/{z}/{x}/{y}.png?ramp=' + rampOf(p.stops) + '&lo=' + num(c.lo) + '&hi=' + num(c.hi) + (ver ? '&v=' + ver : '');
   }
   const layerId = (areaId, map) => 'am-' + areaId + '-' + map;
   const pure = { MAPS, PRESETS, rampOf, presetOf, defaults, urlOf, layerId };
@@ -100,7 +100,7 @@
         const base = { id, name: M.name + ': ' + a.name, map: M.id, result: M.result, areaId: a.id, defShow: M.show, defAlpha: M.alpha };
         if (mi && I.bounds) {
           const c = Object.assign(defaults(M.id, mi), allColours()[id] || {});
-          out.push(Object.assign(base, { kind: 'tiles', url: urlOf(a.id, M.id, c), bounds: I.bounds, minZoom: I.minZoom, maxZoom: I.maxZoom, colours: true, info: mi }));
+          out.push(Object.assign(base, { kind: 'tiles', url: urlOf(a.id, M.id, c, mi.ver), bounds: I.bounds, minZoom: I.minZoom, maxZoom: I.maxZoom, colours: true, info: mi }));
         } else {
           const lg = (I.legacy || []).find(x => x.id === M.id);
           if (lg) out.push(Object.assign(base, { kind: 'imagery', src: '/api/areas/file/' + encodeURIComponent(a.id) + '/bush/' + lg.file, bounds: lg.bounds, note: 're-import the area to change colours', defAlpha: 0.75 }));
