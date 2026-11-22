@@ -88,6 +88,9 @@ DEFAULTS = {
     "b_local_margin": ag.PIT_LOCAL_MARGIN,
     "b_floor": -100.0,       # deeper is ignored (m)
     "b_max_gap": 3.0,        # m: continuity step from the surface down
+    "b_min_points": 4,       # fewer returns = isolated (area_ground's pit rule)
+    "c_min_points": 8,       # C: fewer returns behind a face = isolated
+    "wide_span": ag.PIT_MAX_SPAN,  # m: wider clusters flagged `wide`
     "above_min": 0.5,        # m: a return over a candidate counts above this
     "c_slope": 55.0,         # deg
     "c_reach": 3.0,          # m from a steep cell
@@ -102,7 +105,8 @@ def clean_params(params):
         p[k] = v
     for k in ("min_depth", "a_edge", "a_min_area", "a_max_area", "a_flat_area",
               "b_depth", "b_local_margin", "b_floor", "b_max_gap",
-              "above_min", "c_slope", "c_reach"):
+              "above_min", "c_slope", "c_reach", "b_min_points", "c_min_points",
+              "wide_span"):
         try:
             p[k] = float(p[k])
         except (TypeError, ValueError):
@@ -474,7 +478,7 @@ def run(params, out_dir, area_dir, say=say_default):
                               if len(gaps) else False)
             # the first step (surface to shallowest) may be b_depth larger:
             # nothing shallower than b_depth can be selected.
-            isolated = bool(m < 3 or not continuous)
+            isolated = bool(m < prm["b_min_points"] or not continuous)
             span = float(max(xs.max() - xs.min(), ys.max() - ys.min()) + cell)
             j = int(np.argmax(deep))
             is_c = bool(near_steep[rr, cc].mean() >= 0.5)
@@ -486,7 +490,9 @@ def run(params, out_dir, area_dir, say=say_default):
             share = {int(a): float(b) / m for a, b in zip(u, uc)}
             d.update({
                 "depth_m": rnd(deep[j]),
+                "depth_median_m": rnd(np.median(deep)),
                 "depth_spread_m": rnd(deep.max() - deep.min()),
+                "wide": bool(span > prm["wide_span"]),
                 "shallowest_m": rnd(deep.min()),
                 "span_m": rnd(span, 1),
                 "cells": int(len(cells_u)),
@@ -530,8 +536,8 @@ def run(params, out_dir, area_dir, say=say_default):
                           "aspect_deg": rnd(aspect, 0),
                           "depth_into_face_m": rnd(into, 1)})
                 # behind a face the returns sit far below the (top) surface
-                # by nature: continuity is not asked, only >= 3 returns
-                d["isolated"] = isolated = bool(m < 3)
+                # by nature: continuity is not asked, only b_min_points
+                d["isolated"] = isolated = bool(m < prm["c_min_points"])
             d["_cells"] = (rr, cc)
             d["_sort"] = (1 if isolated else 0, -float(deep[j]) - 0.01 * m)
             cands.append(d)
@@ -555,6 +561,8 @@ def run(params, out_dir, area_dir, say=say_default):
     say(f"  B {counts['B']:,} clusters ({nB_iso:,} isolated), "
         f"C {counts['C']:,} ({nC_iso:,} isolated) ({time.time() - t0:.1f} s)")
 
+    listed = {"A": counts["A"], "B": counts["B"] - nB_iso,
+              "C": counts["C"] - nC_iso}
     # ------------------------------------------------------------ outputs
     say("[5/6] Rasters")
     t0 = time.time()
@@ -570,14 +578,10 @@ def run(params, out_dir, area_dir, say=say_default):
     summary = {
         "version": VERSION, "area_km2": round(area_km2, 4), "cell": cell,
         "grid": [grid.nx, grid.ny], "points": int(len(P)),
-        "counts": counts,
+        "counts": listed, "counts_with_isolated": counts,
         "isolated": {"B": nB_iso, "C": nC_iso},
         "per_km2": {k: round(v / max(area_km2, 1e-9), 1)
-                    for k, v in counts.items()},
-        "per_km2_not_isolated": {
-            "A": round(counts["A"] / max(area_km2, 1e-9), 1),
-            "B": round((counts["B"] - nB_iso) / max(area_km2, 1e-9), 1),
-            "C": round((counts["C"] - nC_iso) / max(area_km2, 1e-9), 1)},
+                    for k, v in listed.items()},
         "a_regions": int(n), "a_dropped": dropped,
         "below_returns": int(len(B["h"])),
         "area_pits": len(pits),
@@ -589,8 +593,9 @@ def run(params, out_dir, area_dir, say=say_default):
     }
     with open(os.path.join(out_dir, "summary.json"), "w") as f:
         json.dump(summary, f, indent=1)
-    say(f"NOTE: {len(out)} candidates ({counts['A']} sinks, {counts['B']} "
-        f"below-ground clusters, {counts['C']} cliff openings)")
+    say(f"NOTE: {sum(listed.values())} candidates ({listed['A']} sinks, "
+        f"{listed['B']} below-ground clusters, {listed['C']} cliff openings; "
+        f"{nB_iso + nC_iso} isolated returns more in candidates_isolated.geojson)")
     say(f"  done in {T['total_s']:.1f} s")
     return summary, out
 
@@ -617,7 +622,8 @@ def describe(d):
     else:
         what = "below-ground returns" if k == "B" else "returns behind a steep face"
         t = (f"{d['id']} {'low returns' if k == 'B' else 'cliff opening'} "
-             f"{d['depth_m']:.1f} m" + (" (isolated)" if d["isolated"] else ""))
+             f"{d['depth_m']:.1f} m" + (" (isolated)" if d["isolated"] else "")
+             + (" (wide)" if d.get("wide") else ""))
         s = (f"{d['points']} {what}, deepest {d['depth_m']} m, from "
              f"{d['shallowest_m']} m, over {d['span_m']} m; class 7 "
              f"{int(round(d['share_c7'] * 100))} %, class 1 "
@@ -625,6 +631,8 @@ def describe(d):
              f"{int(round(d['share_c2'] * 100))} %; "
              + ("isolated: likely multipath noise; " if d["isolated"] else
                 ("reaches up to the surface; " if k == "B" else ""))
+             + ("wide: wider than a pit, often a strip of offset returns "
+                "(swath / multipath); " if d.get("wide") else "")
              + (f"area pit {d['pit_id']}; " if d.get("pit_id") else ""))
         if k == "C":
             s += (f"face {d['face_slope_deg']} deg, {d['face_height_m']} m "
@@ -663,8 +671,11 @@ def write_vectors(out_dir, cands, grid, zone, south):
             "properties": {"id": d["id"], "kind": d["kind"],
                            "title": d["title"]}})
         d["_ring"] = coords
-    for name, feats in (("candidates.geojson", pts),
-                        ("candidates_areas.geojson", polys)):
+    iso = [f["properties"].get("isolated") is True for f in pts]
+    keep = lambda L, want: [f for f, i in zip(L, iso) if i == want]
+    for name, feats in (("candidates.geojson", keep(pts, False)),
+                        ("candidates_areas.geojson", keep(polys, False)),
+                        ("candidates_isolated.geojson", keep(pts, True))):
         with open(os.path.join(out_dir, name), "w") as f:
             json.dump({"type": "FeatureCollection", "features": feats}, f)
     # CSV
@@ -721,13 +732,15 @@ def write_kml(path, cands):
             groups.append(("isolated (likely multipath)", iso))
         for gname, ds in groups:
             if gname:
-                L.append(f"<Folder><name>{_x(gname)}</name>")
+                L.append(f"<Folder><name>{_x(gname)}</name>"
+                         "<visibility>0</visibility>")
             for d in ds:
                 st = f"#s{kind}{1 if d.get('isolated') else 0}"
                 ext = "".join(f'<Data name="{_x(k)}"><value>{_x("" if v is None else v)}'
                               f'</value></Data>' for k, v in public(d).items())
                 ring = " ".join(f"{a},{b}" for a, b in d["_ring"])
-                L.append(f"<Placemark><name>{_x(d['title'])}</name>"
+                vis = "<visibility>0</visibility>" if d.get("isolated") else ""
+                L.append(f"<Placemark><name>{_x(d['title'])}</name>{vis}"
                          f"<description>{_x(d['description'])}</description>"
                          f"<styleUrl>{st}</styleUrl>"
                          f"<ExtendedData>{ext}</ExtendedData><MultiGeometry>"
