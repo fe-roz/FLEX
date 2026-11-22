@@ -120,6 +120,9 @@ const server = http.createServer((req, res) => {
     // ── Vegetation shapes (veg_api.js) ───────────────────────────────────────
     } else if (sanitizedPath.startsWith('/api/veg/')) {
         vegGen.handle(req, res, sanitizedPath.slice('/api/veg/'.length), parsedUrl.query);
+    // ── Processed areas (areas_api.js) ───────────────────────────────────────
+    } else if (sanitizedPath === '/api/areas' || sanitizedPath.startsWith('/api/areas/')) {
+        areaGen.handle(req, res, sanitizedPath.slice('/api/areas'.length).replace(/^\//, ''), parsedUrl.query);
     // ── LiDAR derivations (vegetation density, voids) ────────────────────────
     } else if (sanitizedPath === '/api/lidar/derive' && req.method === 'POST') {
         handleLidarDerive(req, res);
@@ -958,6 +961,10 @@ function handleExportDownload(req, res, jobId) {
 const _lidarJobs = {};   // jobId -> { status, progress, outDir, error }
 const LIDAR_SCRIPT  = path.join(__dirname, 'lidar_derive.py');
 const LIDAR_OUT_DIR = path.join(__dirname, 'user_files', 'lidar');
+// Processed areas (areas_api.js): FLEX_AREA_GROUND_SCRIPT / FLEX_VEG_SCRIPT / FLEX_LIDAR_SCRIPT / FLEX_AREA_PYTHON / FLEX_AREAS_DIR for the tests' stand-ins
+const areaGen = require('./areas_api')({ python: process.env.FLEX_AREA_PYTHON || CONDA_PYTHON, groundScript: process.env.FLEX_AREA_GROUND_SCRIPT || path.join(__dirname, 'area_ground.py'),
+    vegScript: process.env.FLEX_VEG_SCRIPT || path.join(__dirname, 'veg_shapes.py'), lidarScript: process.env.FLEX_LIDAR_SCRIPT || LIDAR_SCRIPT,
+    root: process.env.FLEX_AREAS_DIR || path.join(__dirname, 'user_files', 'areas'), terrainGen });
 // Running and recent jobs of the three kinds, for the Jobs panel (jobs_api.js)
 const jobsApi = require('./jobs_api')({ sources: {
     export:  { jobs: _exportJobs, pct: exportPct, download: id => '/api/export/download/' + id },
@@ -965,6 +972,7 @@ const jobsApi = require('./jobs_api')({ sources: {
     analyze: { jobs: _lidarJobs, pct: lidarPct },
     route:   { jobs: routeGen.jobs, pct: routeGen.pctOf },
     veg:     { jobs: vegGen.jobs, pct: vegGen.pctOf },
+    area:    { jobs: areaGen.jobs, pct: areaGen.pctOf },
 } });
 
 function handleLidarDerive(req, res) {

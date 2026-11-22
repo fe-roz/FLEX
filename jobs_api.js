@@ -12,7 +12,7 @@
 // <id> is "<kind>.<jobId>" (export.k3x9a1, terrain.…, analyze.…, route.…): the kind and a short [A-Za-z0-9_-] id,
 // nothing else is looked up.
 'use strict';
-const ID_RE = /^(export|terrain|analyze|route|veg)\.([A-Za-z0-9_-]{1,40})$/;
+const ID_RE = /^(export|terrain|analyze|route|veg|area)\.([A-Za-z0-9_-]{1,40})$/;
 const KEEP_MS = 3600 * 1000;
 
 module.exports = function jobsApi({ sources }) {
