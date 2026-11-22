@@ -121,6 +121,9 @@ with tempfile.TemporaryDirectory() as tmp:
     def no_points(*a, **k): raise AssertionError('no point cloud may be read')
     et.fetch_ept_points = no_points
     et.get_viewer_libs = lambda progress=print: {}
+    # no real imagery fetch (Bing/ESRI) in any run: it needs the network, and a firewall that drops
+    # packets would make every tile wait out its timeout
+    et.fetch_satellite_texture = lambda grid, tex_size=8192, source='esri', progress=print: Image.new('RGB', grid.tex_dims(tex_size), (90, 110, 80))
     seen = {}
     def fake_glb(vertices, faces, uvs, out_path, progress=print):
         seen['v'] = np.asarray(vertices); Path(out_path).write_bytes(b'glb')

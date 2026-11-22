@@ -891,8 +891,11 @@ def _stitch_tiles(ll_box, zoom, tile_px, url_for, headers, progress, label,
     progress(f"  {label} zoom={zoom}, {ntx}x{nty}={ntx * nty} tiles...")
     canvas = Image.new('RGB', (ntx * tile_px, nty * tile_px), (120, 120, 120))
     fetched = 0
+    dead = 0    # connection failures in a row with nothing fetched yet
     for ty in range(ty0, ty1 + 1):
         for tx in range(tx0, tx1 + 1):
+            if dead >= 4 and fetched == 0:
+                break   # host unreachable (each try can cost the full timeout): stop, not tiles x timeout
             url = url_for(tx, ty, zoom)
             try:
                 r = requests.get(url, timeout=timeout, headers=headers)
@@ -902,7 +905,10 @@ def _stitch_tiles(ll_box, zoom, tile_px, url_for, headers, progress, label,
                     tile = tile.resize((tile_px, tile_px), Image.LANCZOS)
                 canvas.paste(tile, ((tx - tx0) * tile_px, (ty - ty0) * tile_px))
                 fetched += 1
+                dead = 0
             except Exception as e:
+                if isinstance(e, (requests.ConnectionError, requests.Timeout)):
+                    dead += 1
                 progress(f"  WARNING: {label} tile {zoom}/{tx}/{ty} failed: {e}")
     progress(f"  Fetched {fetched}/{ntx * nty} tiles")
     if fetched == 0:
