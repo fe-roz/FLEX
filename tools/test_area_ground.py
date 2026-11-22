@@ -255,6 +255,101 @@ try:
 except Exception as ex:
     check('reading the bush rasters', False, repr(ex))
 
+# --- 7. tiled reading: child processes, retries, resume, same result ------
+os.environ['FLEX_AREA_RETRY_S'] = '0,0,0'
+x, y, z, c = ag.demo_scene()
+td = os.path.join(TMP, 'tiles')
+os.makedirs(td)
+tnpz = rc.write_npz(os.path.join(td, 'pts.npz'), x, y, z, c)
+tring = ag.local_ring(0, 0, 160, 160)
+quiet = lambda m: None
+ref = ag.run({'source': {'npz': tnpz}, 'area': tring, 'cell': 1.0}, os.path.join(td, 'single'), say=quiet)
+
+
+def tiled_cli(name, env=None, extra=None):
+    d = os.path.join(td, name)
+    os.makedirs(d, exist_ok=True)
+    prm = dict({'source': {'npz': tnpz}, 'area': tring, 'cell': 1.0, 'tiled': True,
+                'tile_m': 50}, **(extra or {}))
+    json.dump(prm, open(os.path.join(d, 'p.json'), 'w'))
+    e = dict(os.environ, **(env or {}))
+    p = subprocess.run([sys.executable, os.path.join(HERE, 'area_ground.py'), '--params',
+                        os.path.join(d, 'p.json'), '--area-dir', d],
+                       capture_output=True, text=True, timeout=600, env=e)
+    return d, p.returncode, p.stdout + p.stderr
+
+
+g_ref = np.load(os.path.join(td, 'single', 'ground', 'ground.npy'))
+pits_ref = json.load(open(os.path.join(td, 'single', 'ground', 'pits.geojson')))
+d, code, txt = tiled_cli('plain')
+check('tiled run exits 0', code == 0, txt[-400:])
+check('tiled: progress "[1/4] reading tile i/n"', '[1/4] reading tile 16/16' in txt, txt[:600])
+check('tiled: ground identical to the single pass',
+      np.array_equal(np.load(os.path.join(d, 'ground', 'ground.npy')), g_ref))
+check('tiled: pits identical to the single pass',
+      json.load(open(os.path.join(d, 'ground', 'pits.geojson'))) == pits_ref)
+st = json.load(open(os.path.join(d, 'ground', 'summary.json')))
+check('tiled: summary tiles and chunk store', st['tiles']['tiles'] == 16 and st['tiles']['failed'] == 0
+      and st['points_store'] == 'chunks', st.get('tiles'))
+Pc = ag.load_points(d)
+check('chunk store reads back (lazy, all points)', Pc is not None and len(Pc) == len(z))
+sub = ag.load_points(d, (E0 + 10, N0 + 10, E0 + 50, N0 + 50))
+nsub = sum(len(a[0]) for a in sub.chunks())
+check('chunk store crops to a box', 0 < nsub < len(z) / 5 and len(sub.z) == nsub, nsub)
+
+# a tile whose child aborts twice, then succeeds
+d, code, txt = tiled_cli('flaky', {'FLEX_AREA_TEST_ABORT': '5:2'})
+check('aborting child retried: exit 0', code == 0, txt[-400:])
+check('aborting child: two failed tries reported', txt.count('tile 6: try') == 2, txt[-600:])
+check('aborting child: same ground in the end',
+      np.array_equal(np.load(os.path.join(d, 'ground', 'ground.npy')), g_ref))
+check('aborting child: no NOTE about unread tiles', 'could not be read' not in txt)
+
+# a tile that always fails: NOTE, gap in coverage, exit 0 (1 of 16 <= 25 %)
+d, code, txt = tiled_cli('dead', {'FLEX_AREA_TEST_ABORT': '5:99'})
+st = json.load(open(os.path.join(d, 'ground', 'summary.json'))) if code == 0 else {}
+check('one dead tile: exit 0', code == 0, txt[-400:])
+check('one dead tile: NOTE', any(l.startswith('NOTE: LiDAR could not be read for 1 of 16 tiles')
+                                 for l in txt.splitlines()), txt[-600:])
+check('one dead tile: coverage gap', 0.85 < st.get('coverage', 0) < 0.97, st.get('coverage'))
+check('one dead tile: coverage NOTE too', 'NOTE: LiDAR covers' in txt)
+# too many dead tiles: exit 1 with "! ", chunks kept for a later run
+d, code, txt = tiled_cli('dead5', {'FLEX_AREA_TEST_ABORT': '1:99,2:99,5:99,6:99,9:99'})
+check('5 of 16 dead (> 25 %): exit 1 with "! "', code == 1 and any(l.startswith('! ') and 'could not be read for 5 of 16' in l for l in txt.splitlines()),
+      txt[-400:])
+check('5 dead: no ground written', not os.path.exists(os.path.join(d, 'ground', 'ground.npy')))
+# ... and a second run with the network back resumes: only those 5 are read
+d2, code, txt = tiled_cli('dead5')
+check('resume: exit 0', code == 0, txt[-400:])
+check('resume: 11 tiles already on disk', '11 of 16 tiles already on disk' in txt, txt[:400])
+check('resume: reads only the missing ones', '[1/4] reading tile 16/16' in txt and '[1/4] reading tile 11/16' not in txt,
+      txt[:800])
+check('resume: ground identical', np.array_equal(np.load(os.path.join(d2, 'ground', 'ground.npy')), g_ref))
+
+# interrupted run (stopped after 6 tiles) leaves a partial file: detected and redone
+d, code, txt = tiled_cli('stop', extra={'_stop_after': 6})
+check('interrupted run exits 1', code == 1, txt[-300:])
+cd_ = os.path.join(d, 'points', 'chunks')
+done6 = sorted(f for f in os.listdir(cd_) if f.endswith('.json') and f.startswith('t'))
+check('6 tiles on disk after the interruption', len(done6) == 6, done6)
+np.save(os.path.join(cd_, 't0006.xl.npy'), np.zeros(5, np.float32))      # a half-written tile
+os.remove(os.path.join(cd_, 't0002.z.npy'))                              # a damaged one
+d, code, txt = tiled_cli('stop', extra={'_stop_after': None})
+check('resume after interruption: exit 0', code == 0, txt[-300:])
+check('resume after interruption: the damaged tile is read again', '5 of 16 tiles already on disk' in txt, txt[:300])
+check('resume after interruption: ground identical',
+      np.array_equal(np.load(os.path.join(d, 'ground', 'ground.npy')), g_ref))
+# veg_shapes and lidar_derive read the chunk store through --area-dir
+d = os.path.join(td, 'plain')
+code, txt = cli('lidar_derive.py', ['--area-dir', d, '--out-dir', os.path.join(d, 'bush')])
+check('lidar_derive --area-dir on the chunk store', code == 0 and "area's cache" in txt, txt[-300:])
+vp = {'looks': ['shapes'], 'detail': 'medium'}
+json.dump(vp, open(os.path.join(d, 'vp.json'), 'w'))
+code, txt = cli('veg_shapes.py', ['--params', os.path.join(d, 'vp.json'), '--area-dir', d,
+                                  '--out', os.path.join(d, 'veg')])
+check('veg_shapes --area-dir on the chunk store', code == 0 and "area's cache" in txt, txt[-300:])
+
+
 shutil.rmtree(TMP, ignore_errors=True)
 print(f'test_area_ground: {passes} passed, {fails} failed ({time.time() - T0:.1f} s)')
 sys.exit(1 if fails else 0)
