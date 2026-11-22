@@ -324,7 +324,7 @@
         A.refresh('feature.set');
       } else {
         await root._myData.adopt(built.map(b => Object.assign({}, b, { group: top + ' / ' + b.path })));
-        if (root._surfCols && root._surfCols.render) try { root._surfCols.render(); } catch (_) {}
+        if (root._surfCols && root._surfCols.refresh) try { root._surfCols.refresh(); } catch (_) {}
       }
       msg.textContent = `Imported ${built.length} points in ${sess.length} session${sess.length === 1 ? '' : 's'} into “${top}”.`;
       toast(msg.textContent); root.dispatchEvent(new CustomEvent('flex-waypoints-imported', { detail: { count: built.length, sessions: sess.length, dest: D.dest } }));
