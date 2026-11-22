@@ -58,7 +58,7 @@ How, in plain words:
             the crown's highest cell; base = above the emptiest layer under
             its densest part (the trunk zone), else where its returns thin
             out going down; position = halfway between the top and the
-            centre of its returns above the base. Outline: in 10 slices
+            centre of its returns above the base. Outline: in 20 slices
             from base to top the 90th percentile of the returns' distance
             from that axis, capped by the canopy envelope at that height,
             slices with under 6 returns interpolated, lightly smoothed;
@@ -709,7 +709,7 @@ DEBUG = None        # a dict to receive the trees' intermediate arrays (diagnost
 BASE_THIN = 0.45                     # base: a trunk zone thinner than this share
 BASE_EDGE = 0.30                     # of the crown body's returns; else this
 PROFILE = (0.10, 0.35, 0.60, 0.85)   # where r1..r4 are measured (of base..top)
-NSLICE = 10                          # crown slices measured (centres 5..95 %)
+NSLICE = 20                          # crown slices measured, base to top
 NUB = 40                             # bins of a tree's own vertical profile
 NLEV = 16                            # levels of the provisional envelope
 NHIST = 64                           # distance bins per slice
@@ -742,6 +742,7 @@ def tree_records(V, f_c, chm, chm_s, lab, cg, tops_r, tops_c, tot_c,
     n = len(tops_r)
     empty = (np.zeros((0, RECORD), np.float32),
              {"weak": np.zeros(0, bool), "slices_known": np.zeros(0, int),
+              "slivers": 0,
               "stride": 1, "seconds": 0.0}, np.zeros(0, np.float32))
     if n == 0:
         return empty
@@ -962,6 +963,8 @@ def tree_records(V, f_c, chm, chm_s, lab, cg, tops_r, tops_c, tot_c,
         mm = weak & (kind == kd)
         fracs[mm] = PRIOR[kd]
     widest = np.where(weak | ~np.isfinite(widest), rad_area, widest)
+    # Never wider than the reach a crown may have from its top.
+    widest = np.minimum(widest, crown_reach(hgt))
     fracs = np.clip(np.nan_to_num(fracs, nan=0.5), 0.02, 1.0)
 
     # Density: share of all the column's returns caught at or above the base.
@@ -979,11 +982,15 @@ def tree_records(V, f_c, chm, chm_s, lab, cg, tops_r, tops_c, tot_c,
     rec[:, 6] = kind[1:]
     rec[:, 7] = dens[1:]
     rec[:, 8:12] = fracs[1:]
+    # A small crown whose returns nearly all fit its neighbours better is
+    # a sliver of them, not a tree (it would draw as a thin spike).
+    sliver = weak[1:] & (rad_area[1:] < 1.5)
     ok = (ncell[1:] * c * c >= max(1.0, math.pi * 0.6 ** 2)) & \
-        (height[1:] >= brush_top) & (cntc[1:] >= 3)
+        (height[1:] >= brush_top) & (cntc[1:] >= 3) & ~sliver
     if DEBUG is not None:
         DEBUG.update(rec_all=rec.copy(), ok=ok)
     diag = {"weak": weak[1:][ok], "slices_known": nknown[1:][ok],
+            "slivers": int((sliver & (height[1:] >= brush_top)).sum()),
             "stride": stride, "seconds": time.time() - t0}
     rec = rec[ok]
     rec = rec[np.argsort(-rec[:, 3], kind="stable")]
@@ -1505,6 +1512,7 @@ def run(params, out_dir, say=say_default):
         diag = {"measured": int(len(trees) - diag["weak"].sum()),
                 "prior": int(diag["weak"].sum()),
                 "bumps_joined": int(n_merged), "lower_layer": int(n_lower),
+                "slivers_dropped": int(diag.get("slivers", 0)),
                 "thinning": int(diag["stride"]),
                 "median_profile": [round(float(v), 2) for v in
                                    np.median(trees[:, 8:12], axis=0)]
