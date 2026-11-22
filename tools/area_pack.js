@@ -5,7 +5,8 @@
 // behind. The terrain itself travels in the project's sync file (its .bin is a project blob); terrain/ref.json only
 // says where it went.
 //
-//   node tools/area_pack.js pack   <area dir> <out.zip>             → size report (per folder)
+//   node tools/area_pack.js pack   <area dir> <out.zip> [--no-tif]  → size report (per folder); --no-tif leaves the GeoTIFFs
+//                                                                    (bush/*.tif: for GIS, FLEX draws the pngs) behind
 //   node tools/area_pack.js list   <zip>                            → what is inside, and what an import would refuse
 //   node tools/area_pack.js unpack <zip> <areas root> [--overwrite] → user_files/areas/<id>/ (refuses an existing id)
 //
@@ -55,7 +56,7 @@ async function pack(dir, files, opts) {
     if (!Object.prototype.hasOwnProperty.call(files, e.name)) { left.push(e.name + '/'); continue; }      // points/ and anything else
     for (const f of fs.readdirSync(path.join(dir, e.name), { withFileTypes: true })) {
       const rel = e.name + '/' + f.name, c = classify(rel, files);
-      if (!f.isFile() || c.kind !== 'file') { left.push(rel); continue; }
+      if (!f.isFile() || c.kind !== 'file' || (opts.skip && opts.skip.test(rel))) { left.push(rel); continue; }
       const buf = fs.readFileSync(path.join(dir, rel));
       z.file(rel, buf, { compression: /\.(png|jpg|zip)$/i.test(f.name) ? 'STORE' : 'DEFLATE' });
       list.push({ path: rel, bytes: buf.length }); folders[e.name] = (folders[e.name] || 0) + buf.length; total += buf.length;
@@ -156,7 +157,7 @@ if (require.main === module) {
   const [cmd, a, b] = process.argv.slice(2), over = process.argv.includes('--overwrite');
   (async () => {
     if (cmd === 'pack' && a && b) {
-      const r = await pack(a, null, { from: process.env.FLEX_PACK_FROM || 'FLEX' });
+      const r = await pack(a, null, { from: process.env.FLEX_PACK_FROM || 'FLEX', skip: process.argv.includes('--no-tif') ? /\.tif$/i : null });
       fs.writeFileSync(b, r.buffer);
       console.log(`area ${r.area.id} "${r.area.name}" project ${r.area.project || '(My data)'}: ${r.report.files.length} files, ${kb(r.report.bytes)} -> zip ${kb(r.report.zipBytes)}`);
       Object.entries(r.report.folders).forEach(([k, v]) => console.log(`  ${k}/  ${kb(v)}`));

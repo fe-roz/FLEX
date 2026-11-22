@@ -35,6 +35,10 @@ function makeArea(root, id) {
   ok('pack: project id kept', P.area.project === 'cr1' && P.area.id === 'acr1');
   ok('pack: size report', P.report.bytes > 0 && P.report.zipBytes === P.buffer.length && P.report.folders.veg === 10);
 
+  fs.writeFileSync(path.join(d, 'bush', 'v.tif'), 'tif');
+  const Pn = await AP.pack(d, null, { skip: /\.tif$/i });
+  ok('pack skip: the GeoTIFF left behind', !Pn.report.files.some(f => /\.tif$/.test(f.path)) && Pn.report.left.includes('bush/v.tif'));
+  fs.unlinkSync(path.join(d, 'bush', 'v.tif'));
   const U = await AP.unpack(P.buffer, dst);
   ok('unpack: written into <root>/<id>', U.ok && fs.existsSync(path.join(dst, 'acr1', 'veg', 'shapes.bin')) && fs.readFileSync(path.join(dst, 'acr1', 'veg', 'shapes.bin'), 'utf8') === '12345678');
   const A = JSON.parse(fs.readFileSync(path.join(dst, 'acr1', 'area.json'), 'utf8'));
