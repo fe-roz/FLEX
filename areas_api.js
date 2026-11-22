@@ -32,9 +32,9 @@ const MIN_RING = 3, MAX_RING = 3000;
 // The one table. km2 = area; a tool "fits" up to `max` at its default, and offers a coarser setting that reaches `coarseMax`.
 const LIMITS = {
   ground:  { max: 100 },
-  veg:     { max: 25, coarseMax: 60, offer: { key: 'detail-low', label: 'Lower detail (coarser shapes)' }, option: { detail: 'low' } },
-  terrain: { postsMax: 25e6, defaultCell: 1, coarseCell: 2, offer: { key: 'cell-2', label: '2 m cells (about a quarter of the size)' } },
-  bush:    { max: 20, coarseMax: 80, defaultCell: 1, coarseCell: 2, offer: { key: 'cell-2', label: 'Coarser cells (2 m)' } },
+  veg:     { max: 25, coarseMax: 60, offer: { key: 'detail-low', label: 'Lower detail (coarser shapes)', options: { detail: 'low' } }, option: { detail: 'low' } },
+  terrain: { postsMax: 25e6, defaultCell: 1, coarseCell: 2, offer: { key: 'cell-2', label: '2 m cells (about a quarter of the size)', options: { cell: 2 } } },
+  bush:    { max: 20, coarseMax: 80, defaultCell: 1, coarseCell: 2, offer: { key: 'cell-2', label: 'Coarser cells (2 m)', options: { cell: 2 } } },
 };
 const FILES = {
   ground: /^(grid\.json|summary\.json|coverage\.png|pits\.geojson|ground\.npy)$/,

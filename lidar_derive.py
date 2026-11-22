@@ -594,7 +594,11 @@ def read_ept_all_classes(ept_path, utm_bbox, bbox_latlon=None, progress=print,
 
     progress("  Reading EPT (all classes)...")
     p = pdal.Pipeline(_json.dumps({"pipeline": pipeline}))
-    p.execute()
+    try:
+        p.execute()
+    except UnicodeDecodeError:
+        # python-pdal fails to decode some of PDAL's own error texts (a bad link, a reader it has no driver for)
+        raise SystemExit("ERROR: the point cloud could not be read: check that the link ends in ept.json and can be reached")
     if not p.arrays or len(p.arrays[0]) == 0:
         raise SystemExit("ERROR: no points returned from EPT for this bbox")
     arr = p.arrays[0]
