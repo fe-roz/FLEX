@@ -340,7 +340,9 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
     const dir = path.join(areaDir(area.id), 'terrain');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'ref.json'), JSON.stringify({ ref: tj.result || null, project: area.project || 'mine', cell: s.cell }));
-    return { coarse: s.coarse, cell: s.cell };
+    const R = tj.result || {}, T = R.terrain || {};
+    // what the browser needs to register the layers exactly as the Terrain panel does (ter-/hs- records)
+    return { coarse: s.coarse, cell: s.cell, blob: T.blob || '', bounds: T.bounds || null, dest: area.project || 'mine', job: { name: R.name, folder: R.folder, terrain: R.terrain, terrains: R.terrains, tiles: R.tiles } };
   }
 
   function sameGround(a, lidar, cellReq) {
@@ -404,7 +406,7 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
         res = { coarse: s.coarse, cell: s.cell };
       } else if (key === 'terrain') {
         const r = await terrainStep(job, step, area, lidar, options, notes);
-        res = { coarse: r.coarse, cell: r.cell };
+        res = r;
       }
       res.date = new Date().toISOString();
       res.seconds = Math.round((Date.now() - t0) / 100) / 10;

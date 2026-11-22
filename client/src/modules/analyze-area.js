@@ -227,6 +227,10 @@
         S.fix = {}; S.check = null; paint(); scheduleCheck(); fire('current');
       },
     });
+    // The picker's drawing banner shares the Surface route banner's class; hidden, it must not look like a live "picking" banner
+    // to other tools (they ask "is any .pjf-banner in the page?").
+    const bn = $('ar-picker') && $('ar-picker').querySelector('[id$="pick-banner"]');
+    if (bn) { const sync = () => bn.classList.toggle('pjf-banner', !bn.hidden); sync(); new MutationObserver(sync).observe(bn, { attributes: true, attributeFilter: ['hidden'] }); }
     return picker;
   }
 
@@ -362,10 +366,28 @@
       const ids = terrainIds(t), want1 = on(a.id, 'terrain');
       if (!ids.length || drawn.terrain[a.id] === want1) continue;
       if (drawn.terrain[a.id] === undefined && !want1) { drawn.terrain[a.id] = false; continue; }
+      if (want1 && !(await ensureTerrain(a, t))) { drawn.terrain[a.id] = undefined; dispatch({ type: 'showResult', id: a.id, result: 'terrain', on: false }); continue; }
       drawn.terrain[a.id] = want1;
       try { ids.forEach(id => CL().api.setView(id, { show: want1 })); await CL().sync(); if (w._terrainPanel && w._terrainPanel.render) w._terrainPanel.render(true); } catch (e) { console.warn('[areas] terrain', e); }
     }
     if (v && v.scene && v.scene.requestRender) v.scene.requestRender();
+  }
+  // The Terrain panel's keep(): the job's patch(es) and hillshade become layer records (project or My data), once.
+  async function ensureTerrain(a, t) {
+    const J = t.job; if (!J || !J.terrain || !CL() || !CL().api) return true;   // older record: the layers are expected to exist
+    const parts = Array.isArray(J.terrains) && J.terrains.length ? J.terrains : [J.terrain];
+    const all = await CL().entries(), has = id => all.some(x => x.id === id);
+    const tid = 'ter-' + String(J.terrain.blob).slice(0, 12), hid = 'hs-' + String(J.terrain.blob).slice(0, 12);
+    if (has(tid) && (!J.tiles || has(hid))) return true;
+    const toMine = !a.project || PJ().pid !== a.project;
+    if (a.project && PJ().pid !== a.project) { toast('Open the project of this area to show its terrain.'); return false; }
+    const rec = (e, v) => CL().api.record(e, Object.assign({ show: false }, v || {}), toMine ? 'mine' : undefined), nm = J.name || a.name;
+    const r4 = b => b.map(n => +(+n).toFixed(8));
+    try {
+      for (const [k, P] of parts.entries()) if (!has('ter-' + P.blob.slice(0, 12))) await rec({ layer: 'ter-' + P.blob.slice(0, 12), kind: 'terrain', blob: P.blob, bounds: r4(P.bounds), name: parts.length > 1 ? nm + ' (part ' + (k + 1) + ')' : nm });
+      if (J.tiles && !has(hid)) await rec({ layer: hid, kind: 'tiles', url: J.tiles.url, bounds: r4(J.tiles.bounds), minZoom: J.tiles.minzoom, maxZoom: J.tiles.maxzoom, name: nm + ' hillshade' }, { alpha: 0.75 });
+    } catch (e) { toast('The terrain could not be added: ' + e.message); return false; }
+    return true;
   }
   function terrainIds(t) {
     if (Array.isArray(t.layers)) return t.layers.slice();
