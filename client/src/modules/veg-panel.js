@@ -335,7 +335,9 @@
   #vegshapes-host .vg-sv-t { flex: 1; min-width: 0; } #vegshapes-host .vg-sv-d { color: rgba(255,255,255,.45); font-size: 10px; } #vegshapes-host .vg-sv-c { color: rgba(255,255,255,.6); font-size: 10.5px; }`;
   doc.head.appendChild(css);
 
-  w._vegPanel = { refresh, build, show, state: () => S, datasets, keep, saved: () => S.saved.slice(), remove, settings, pure };
+  /** analyze-area.js drew a set itself (_vegDraw.load): show its counts and the look controls for it (null = none). */
+  function adopt(r) { S.result = r ? { id: r.id, veg: r.veg || {}, sizes: r.sizes || {}, base: r.base, kept: true } : null; paintResult(); }
+  w._vegPanel = { refresh, build, show, adopt, state: () => S, datasets, keep, saved: () => S.saved.slice(), remove, settings, pure };
   w.addEventListener('flex-veg-changed', () => { paintControls(); });
   const start = () => {
     mk();
