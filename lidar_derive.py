@@ -664,9 +664,21 @@ def main(argv=None):
     import argparse, os, json as _json
     ap = argparse.ArgumentParser(
         description="Derive vegetation-density and void rasters from LiDAR.")
-    ap.add_argument("--ept", required=True)
-    ap.add_argument("--bbox", required=True, nargs=4, type=float,
-                    metavar=("minLon", "minLat", "maxLon", "maxLat"))
+    ap.add_argument("--ept", default=None,
+                    help="the EPT (required unless --area-dir has points "
+                         "or --points-npz is given)")
+    ap.add_argument("--bbox", default=None, nargs=4, type=float,
+                    metavar=("minLon", "minLat", "maxLon", "maxLat"),
+                    help="required unless --area-dir / --area give the area")
+    ap.add_argument("--area-dir", default=None,
+                    help="an analysed area (area_ground.py): use its ground "
+                         "(and points cache) and blank the cells outside its ring")
+    ap.add_argument("--area", default=None,
+                    help="the area ring: JSON [[lon,lat],...] or a file with it "
+                         "(default: the area folder's ring)")
+    ap.add_argument("--points-npz", default=None,
+                    help="points from an npz (x, y, z, classification, epsg) "
+                         "instead of --ept")
     ap.add_argument("--out-dir", default="lidar_derived")
     ap.add_argument("--cell", type=float, default=None,
                     help="ground cell size in metres (default: from data density)")
@@ -681,6 +693,11 @@ def main(argv=None):
     ap.add_argument("--high-cut", type=float, default=120.0)
     ap.add_argument("--stat", choices=["median", "mean"], default="median")
     a = ap.parse_args(argv)
+    if not a.area_dir:
+        if a.bbox is None:
+            ap.error("--bbox is required (or --area-dir)")
+        if not (a.ept or a.points_npz):
+            ap.error("--ept is required (or --points-npz / --area-dir)")
 
     os.makedirs(a.out_dir, exist_ok=True)
     log = open(os.path.join(a.out_dir, "log.txt"), "w", buffering=1)
@@ -690,7 +707,10 @@ def main(argv=None):
         log.write(msg + "\n")
 
     try:
-        _run(a, say)
+        if a.area_dir:
+            _run_area(a, say)
+        else:
+            _run(a, say)
     except SystemExit as e:
         # read_ept_all_classes raises SystemExit("ERROR: ...") with the reason.
         if e.code not in (None, 0):
@@ -736,9 +756,13 @@ def _run(a, say):
     cover = et.latlon_box_covering(utm_bbox, zone, south)
     say(f"[1/4] UTM zone {zone}{'S' if south else 'N'} bbox: {utm_bbox}")
 
-    x, y, z, cls, epsg = read_ept_all_classes(
-        a.ept, utm_bbox, cover, zone=zone, south=south,
-        progress=lambda m: say(f"[2/4] {m}"))
+    if getattr(a, "points_npz", None):
+        x, y, z, cls, epsg = _read_npz(a.points_npz, utm_bbox)
+        say(f"[2/4] {len(x):,} points from the npz")
+    else:
+        x, y, z, cls, epsg = read_ept_all_classes(
+            a.ept, utm_bbox, cover, zone=zone, south=south,
+            progress=lambda m: say(f"[2/4] {m}"))
 
     r = derive(x, y, z, cls, cell=a.cell, veg_band=tuple(a.veg_band),
                void_depth=a.void_depth, void_min_points=a.void_min_points,
@@ -782,6 +806,160 @@ def _run(a, say):
     say(f"[4/4] Wrote {a.out_dir}/ "
           f"(vegetation, voids, ground + derived.json)")
 
+
+
+def _read_npz(path, utm_bbox):
+    d = np.load(path)
+    x, y = d["x"], d["y"]
+    e0, n0, e1, n1 = utm_bbox
+    k = (x >= e0) & (x <= e1) & (y >= n0) & (y <= n1)
+    cls = d["classification"][k] if "classification" in d.files else None
+    epsg = int(d["epsg"]) if "epsg" in d.files else None
+    if not k.any():
+        raise SystemExit("ERROR: no points in the area")
+    return x[k], y[k], d["z"][k].astype(np.float64), cls, epsg
+
+
+def _ring_arg(a):
+    import os, json as _json
+    if a.area:
+        t = a.area
+        if os.path.exists(t):
+            with open(t) as f:
+                t = f.read()
+        r = _json.loads(t)
+        if isinstance(r, dict):
+            r = r.get("ring") or r.get("area")
+        return r
+    import area_ground as ag
+    r = ag.area_ring(a.area_dir)
+    if r is None and a.bbox:
+        x0, y0, x1, y1 = a.bbox
+        r = [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]
+    return r
+
+
+def _run_area(a, say):
+    """The job on an analysed area: its ground (area_ground.py), its points
+    cache when present, cells outside the ring blank. One chunked pass."""
+    import os, json as _json, time
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import area_ground as ag
+    import route_cost as rc
+    import veg_shapes as vs
+    t0 = time.time()
+    G = ag.load_ground(a.area_dir)
+    if G is None:
+        raise SystemExit("ERROR: the area folder has no ground (run area_ground.py)")
+    _g, agrid, gm = G
+    zone, south, epsg = int(gm["zone"]), bool(gm["south"]), int(gm["epsg"])
+    ring = _ring_arg(a)
+    if not ring or len(ring) < 3:
+        raise SystemExit("ERROR: no area ring (give --area or an area folder with one)")
+    ring_xy = [rc.lonlat_to_xy(p[0], p[1], zone) for p in ring]
+    bb = (min(p[0] for p in ring_xy), min(p[1] for p in ring_xy),
+          max(p[0] for p in ring_xy), max(p[1] for p in ring_xy))
+    crop = ag.ground_crop(a.area_dir, bb, pad_cells=0)
+    if crop is None:
+        raise SystemExit("ERROR: the area ground does not cover this area")
+    ground, grid = crop
+    if a.cell and abs(a.cell - grid.cell) > 1e-9:
+        grid = Grid(grid.minx, grid.miny, grid.maxx, grid.maxy, a.cell)
+        ground = ag.ground_on(a.area_dir, grid)
+    cell = grid.cell
+    say(f"[1/4] UTM zone {zone}{'S' if south else 'N'}, the area's ground "
+        f"{grid.nx}x{grid.ny} @ {cell} m")
+
+    P = ag.load_points(a.area_dir, bb)
+    if P is not None:
+        say(f"[2/4] {len(P):,} points from the area's cache")
+    else:
+        if a.points_npz:
+            x, y, z, cls, _e = _read_npz(a.points_npz, bb)
+        else:
+            if not a.ept:
+                raise SystemExit("ERROR: the area folder has no points: give --ept")
+            cover = rc.et().latlon_box_covering(bb, zone, south)
+            x, y, z, cls, _e = read_ept_all_classes(
+                a.ept, bb, cover, zone=zone, south=south,
+                progress=lambda m: say(f"[2/4] {m}"))
+        P = rc.points_from_arrays(x, y, z, cls)
+        del x, y, z, cls
+        say(f"[2/4] {len(P):,} points read")
+
+    lo, hi = a.veg_band
+    ncell = grid.nx * grid.ny
+    total = np.zeros(ncell); inband = np.zeros(ncell)
+    vcount = np.zeros(ncell); depth = np.full(ncell, np.inf)
+    kept = 0; n = 0; hs = []
+    step = max(1, len(P) // 1_000_000)
+    for x, y, z, _c in P.chunks():
+        k = (x >= grid.minx) & (x < grid.maxx) & (y >= grid.miny) & (y < grid.maxy)
+        x, y, z = x[k], y[k], z[k]
+        hag = z - sample_bilinear(ground, grid, x, y)
+        keep = filter_by_hag(hag, a.low_cut, a.high_cut)
+        kept += int(keep.sum()); n += len(hag)
+        hs.append(hag[::step])
+        f = grid.flat(x, y)
+        total += np.bincount(f, minlength=ncell)
+        inband += np.bincount(f[(hag >= lo) & (hag <= hi)], minlength=ncell)
+        b = hag <= a.void_depth
+        if b.any():
+            vcount += np.bincount(f[b], minlength=ncell)
+            np.minimum.at(depth, f[b], hag[b])
+    del P
+    veg = np.where(total >= 4, inband / np.maximum(total, 1), np.nan)
+    depth[~np.isfinite(depth)] = np.nan
+    depth[vcount < a.void_min_points] = np.nan
+    inside = vs.polygon_mask(ring_xy, grid)
+    veg = veg.reshape(grid.shape).astype(np.float32)
+    depth = depth.reshape(grid.shape).astype(np.float32)
+    vcount = vcount.reshape(grid.shape)
+    ground_out = ground.astype(np.float32).copy()
+    veg[~inside] = np.nan; depth[~inside] = np.nan; ground_out[~inside] = np.nan
+    hcat = np.concatenate(hs) if hs else np.zeros(1)
+    say(f"[3/4] HAG: p1 {np.nanpercentile(hcat, 1):.1f} m, "
+        f"p99 {np.nanpercentile(hcat, 99):.1f} m; filter keeps {kept:,} of {n:,}")
+    nv = int(np.isfinite(depth).sum())
+    say(f"[3/4] Void cells (>= {a.void_min_points} returns below "
+        f"{a.void_depth} m): {nv:,}")
+
+    os.makedirs(a.out_dir, exist_ok=True)
+    vv = veg[np.isfinite(veg)]
+    veg_rgba, vlo, vhi = colorize(veg, VEG_RAMP, 0.0,
+                                  max(0.05, float(np.percentile(vv, 98)) if len(vv) else 0.05))
+    write_png(veg_rgba, os.path.join(a.out_dir, "vegetation.png"))
+    write_geotiff(veg, grid, os.path.join(a.out_dir, "vegetation.tif"), epsg)
+    void_rgba, dlo, dhi = colorize(-depth, VOID_RAMP)
+    write_png(void_rgba, os.path.join(a.out_dir, "voids.png"))
+    write_geotiff(depth, grid, os.path.join(a.out_dir, "voids.tif"), epsg)
+    write_geotiff(ground_out, grid, os.path.join(a.out_dir, "ground.tif"), epsg)
+
+    cx = [grid.minx, grid.maxx, grid.maxx, grid.minx]
+    cy = [grid.miny, grid.miny, grid.maxy, grid.maxy]
+    clons, clats = rc.xy_to_lonlat(np.array(cx), np.array(cy), zone, south)
+    raster_bounds = [float(clons.min()), float(clats.min()),
+                     float(clons.max()), float(clats.max())]
+    dmask = np.load(os.path.join(a.area_dir, "ground", "direct.npy"))[::-1] \
+        if os.path.exists(os.path.join(a.area_dir, "ground", "direct.npy")) else None
+    meta = dict(
+        raster_bounds_lonlat=raster_bounds,
+        bbox_lonlat=[min(p[0] for p in ring), min(p[1] for p in ring),
+                     max(p[0] for p in ring), max(p[1] for p in ring)],
+        ring_lonlat=ring, area_dir=True,
+        utm_bbox=[grid.minx, grid.miny, grid.maxx, grid.maxy], epsg=epsg,
+        cell=cell, grid=[grid.nx, grid.ny], geotransform=list(grid.geotransform()),
+        veg_band=list(a.veg_band), veg_range=[vlo, vhi],
+        void_depth_threshold=a.void_depth, void_range=[dlo, dhi],
+        cells_direct_fraction=(float(dmask.mean()) if dmask is not None else None),
+        points_total=int(n), points_kept=int(kept), void_cells=nv,
+        cells_inside=int(inside.sum()), seconds=round(time.time() - t0, 2),
+    )
+    with open(os.path.join(a.out_dir, "derived.json"), "w") as f:
+        _json.dump(meta, f, indent=2)
+    say(f"[4/4] Wrote {a.out_dir}/ (vegetation, voids, ground + derived.json)")
 
 
 if __name__ == "__main__":
