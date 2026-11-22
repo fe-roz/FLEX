@@ -13,7 +13,9 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:13px/1.
 .panel{position:fixed;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;box-shadow:0 4px 16px rgba(0,0,0,.4)}
 #ctl{top:10px;left:10px;width:270px;max-height:calc(100% - 20px);overflow:auto}
 #info{top:10px;right:10px;width:380px;display:none}
-#sum{bottom:10px;left:10px;width:270px;max-height:38%;overflow:auto}
+#sum{margin-top:10px;border-top:1px solid var(--line);padding-top:4px}
+#info{max-height:calc(100% - 20px);overflow:auto} th{white-space:nowrap}
+#ds{max-width:100%}
 h1{font-size:15px;margin:0 0 6px} h2{font-size:12px;margin:10px 0 4px;color:var(--mute);text-transform:uppercase;letter-spacing:.04em}
 label{display:block;margin:3px 0} select,button{background:#2b3138;color:var(--fg);border:1px solid var(--line);border-radius:5px;padding:3px 6px;font:inherit}
 button{cursor:pointer} button:hover{border-color:var(--acc)} button.on{background:#2f5a49;border-color:var(--acc)}
@@ -54,13 +56,13 @@ kbd{background:#2b3138;border:1px solid var(--line);border-radius:3px;padding:0 
   <h2>Jump to</h2>
   <div class="row" id="jumps"></div>
   <div class="mute" style="margin-top:8px">Drag to turn, right-drag to pan, wheel to zoom. Click the ground for the heights there and a cross-section.</div>
+<div id="sum"><h2>In short</h2><div id="sumtxt"></div></div>
 </div>
 <div id="info" class="panel"><button id="close">Close</button><div id="infotxt"></div>
   <div class="row" style="margin-top:4px"><span class="mute" id="proftxt"></span><button id="rot">Turn section 90&deg;</button></div>
   <canvas id="prof" width="760" height="400"></canvas>
   <div class="mute" id="proflg"></div>
 </div>
-<div id="sum" class="panel"><h2 style="margin-top:0">In short</h2><div id="sumtxt"></div></div>
 <script>/*THREE_JS*/</script>
 <script>/*ORBIT_JS*/</script>
 <script>
@@ -234,7 +236,7 @@ function showSpot(x, y) {
   var keys = Object.keys(H), hs = {}; keys.forEach(function (k) { hs[k] = hAt(k, x, y); });
   var sl = slopeAt(st.a, x, y);
   var t = '<b>Spot ' + x.toFixed(0) + ' m east, ' + y.toFixed(0) + ' m north of the corner</b><br><span class="mute">slope ' + sl.deg.toFixed(0) + '&deg; (' + NAMES[st.a] + ')</span>';
-  t += '<table><tr><th></th><th>height</th>' + keys.map(function (k) { return '<th>&minus; ' + (NAMES[k] || k).split(' ')[0] + '</th>'; }).join('') + '</tr>';
+  t += '<table><tr><th></th><th>height</th>' + keys.map(function (k) { return '<th>vs ' + (NAMES[k] || k).split(' ')[0] + '</th>'; }).join('') + '</tr>';
   keys.forEach(function (k) {
     t += '<tr><td><span class="sw" style="background:' + COLS[k] + '"></span>' + NAMES[k] + '</td><td>' + (hs[k] - hs[keys[0]] >= 0 ? '' : '') + hs[k].toFixed(2) + '</td>' +
       keys.map(function (j) { var v = hs[k] - hs[j]; return '<td>' + (j === k ? '' : (v >= 0 ? '+' : '') + v.toFixed(2)) + '</td>'; }).join('') + '</tr>';

@@ -579,11 +579,10 @@ def text_summary(rep):
         pk = "   n/a" if R["peak_mb"] is None else f"{R['peak_mb']:7.0f}"
         L.append(f"{LABELS[m]:<18} {R['seconds']:6.2f}  {pk}")
     L.append("")
-    for key, title in ((("vs_truth", "Against the TRUE ground")) if has_truth else (),
-                       ("vs_ground_returns", "Against the class-2 ground returns"),
-                       ("vs_lowest_return", "Against the lowest return per cell")):
-        if not key:
-            continue
+    blocks = [("vs_truth", "Against the TRUE ground")] if has_truth else []
+    blocks += [("vs_ground_returns", "Against the class-2 ground returns"),
+               ("vs_lowest_return", "Against the lowest return per cell")]
+    for key, title in blocks:
         L.append(title + ":   mean  median     rms     p5     p95")
         for m in MODELS:
             s = rep["models"][m][key]
