@@ -440,6 +440,7 @@
     const km2 = w._areaPicker ? w._areaPicker.ringKm2(S.cur.ring) : 0, d = sizeKm(S.cur.ring);
     let h = `<div class="ar-dim">Current area</div><b class="ar-cn">${esc(S.cur.id ? S.cur.name : ((S.draftName || '').trim() || S.cur.name))}</b> <span class="ar-dim">· ${esc(S.cur.src || '')}</span>
       <div class="ar-facts"><span><b>${km2.toFixed(1)}</b> km²</span><span><b>${d[0].toFixed(1)} × ${d[1].toFixed(1)}</b> km (width × height)</span></div>`;
+    if (w._weather) h += '<button type="button" class="ar-btn" data-act="wx" data-id="' + esc(S.cur.id || '') + '">Weather</button>';
     if (S.cur.crossing) h += '<div class="ar-bad">Its edges cross: draw it again so they don’t.</div>';
     if (!S.cur.id) h += `<input type="text" id="ar-name" class="ar-in" maxlength="60" placeholder="Name it (optional)" value="${esc(S.draftName || '')}" aria-label="Area name"><div class="ar-dim">Saved automatically as a processed area when a tool finishes.</div>`;
     else h += `<div class="ar-dim">${curArea() && Object.keys(curArea().results || {}).length ? 'Processed area: its results are listed below.' : 'Saved area. Not a map feature, never sent to CalTopo.'}</div>`;
@@ -504,6 +505,7 @@
         <span class="ar-chips">${ks.map(k => `<span class="ar-mini">${RNAME[k]}${a.results[k].coarse ? ' <i title="coarse">◦</i>' : ''}</span>`).join('')}</span></button></div>`;
       if (open) {
         h += `<div class="ar-pb">${resultRows(a)}<div class="ar-btns"><button type="button" class="ar-btn" data-act="more" data-id="${esc(a.id)}">Run more tools here</button>`
+          + (w._weather ? `<button type="button" class="ar-btn" data-act="wx" data-id="${esc(a.id)}">Weather</button>` : '')
           + (S.delAsk === a.id ? `<span class="ar-dim">Delete all results?</span><button type="button" class="ar-btn ar-danger" data-act="delyes" data-id="${esc(a.id)}">Yes, delete</button><button type="button" class="ar-btn" data-act="delno">No</button>`
             : `<button type="button" class="ar-btn" data-act="del" data-id="${esc(a.id)}">Delete</button>`) + '</div></div>';
       }
@@ -568,6 +570,7 @@
     else if (act === 'ressw') { const r = b.dataset.res; showResult(id, r, eyeOf(SHOW, id, r) !== 'on'); }
     else if (act === 'procopen') { S.open = S.open === id ? null : id; paintProcs(); }
     else if (act === 'more') runMore(id);
+    else if (act === 'wx') { const a = (id && areaById(id)) || S.cur; if (a && w._weather) w._weather.open({ name: a.name, ring: a.ring }); }
     else if (act === 'del') { S.delAsk = id; paintProcs(); }
     else if (act === 'delno') { S.delAsk = null; paintProcs(); }
     else if (act === 'delyes') remove(id);
