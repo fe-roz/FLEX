@@ -46,6 +46,7 @@ const NEVER_HOST = [
   /(^|\.)ion\.cesium\.com$/i, /^api\.cesium\.com$/i, // Cesium ion: world terrain, imagery
   /^assets\.cesium\.com$/i,
   /^tile\.googleapis\.com$/i, /^mt\d?\.google\.com$/i,
+  /(^|\.)open-meteo\.com$/i, /(^|\.)weather\.gov$/i,    // forecasts: always live, never kept (weather-panel.js)
 ];
 const LIB_HOST = [
   /^cdn\.jsdelivr\.net$/i, /^cdnjs\.cloudflare\.com$/i, /^unpkg\.com$/i, /^code\.jquery\.com$/i,
