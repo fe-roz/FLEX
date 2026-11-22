@@ -1,6 +1,7 @@
 // analyze-area.js — 🔬 Analyze by AREA: choose an area and the LiDAR once, tick the tools to run in it, one "Run ticked".
 // A finished run keeps the area as a PROCESSED AREA with its results (server: areas_api.js, /api/areas/*), listed here
-// with one switch per area and per result; the same switches appear in 🗺 Layers (vegetation, bushwhack) and ⛰ Terrain.
+// with one switch per area and per result; the same switches appear in ⛰ Terrain; bushwhack and ground
+// maps are normal layers in 🗺 Layers (area-maps.js), vegetation shapes stay here.
 //
 //   1 Area     processed / saved areas (a pick list, "processed" tag), the area picker's ways to choose a new one
 //              (window._areaPicker: drawn polygon, project footprint + margin, a polygon on the map, the Export box),
@@ -25,11 +26,12 @@
     { id: 'terrain', name: 'Terrain + hillshade', icon: '⛰' },
     { id: 'veg', name: 'Vegetation shapes', icon: '🌲' },
     { id: 'bush', name: 'Bushwhack / voids', icon: '∴' },
-    { id: 'prospect', name: 'Prospects', icon: '◎', desc: 'Possible entrances: hollows, points below the ground, cliff openings. A list to look at, not a ranking.' },
+    { id: 'prospect', name: 'Prospects (beta)', icon: '◎', desc: 'Possible entrances: hollows, points below the ground, cliff openings. A list to look at, not a ranking.' },
   ];
-  const RNAME = { ground: 'Ground', terrain: 'Terrain', veg: 'Vegetation', bush: 'Bushwhack', prospect: 'Prospects' };
+  const RNAME = { ground: 'Ground', terrain: 'Terrain', veg: 'Vegetation', bush: 'Bushwhack', prospect: 'Prospects (beta)' };
   const RKEYS = ['ground', 'terrain', 'veg', 'bush', 'prospect'];
   const SHOWABLE = ['terrain', 'veg', 'bush', 'prospect'];
+  const MAPRES = ['bush', 'ground'];      // results drawn as map layers in 🗺 Layers (area-maps.js), not here
   const CHIP = { fits: ['ok', 'Fits'], partly: ['warn', 'Partly covered'], toobig: ['bad', 'Too big'], needslidar: ['bad', 'Needs LiDAR'] };
 
   /** An offer → the options patch for its tool. { options } wins; else "name=value" / "name:value"; else { [key]: true }. */
@@ -328,7 +330,7 @@
   function showResult(id, result, on) { dispatch({ type: 'showResult', id, result, on: on !== false }); }
 
   // Drawing what the state says (only what changed).
-  const drawn = { veg: null, bush: {}, terrain: {} };
+  const drawn = { veg: null, terrain: {} };
   const fileBase = (id, r) => '/api/areas/file/' + encodeURIComponent(id) + '/' + r + '/';
   async function apply() {
     if (!S.avail) return;
@@ -344,24 +346,8 @@
       drawn.veg = null; try { if (D.clear) D.clear(); } catch (_) {}
       try { if (w._vegPanel && w._vegPanel.adopt) w._vegPanel.adopt(null); } catch (_) {}
     }
-    // bushwhack: images on the globe (the lidar-derive path: SingleTileImageryProvider on the raster's own footprint)
     const v = V();
-    for (const a of S.areas) {
-      const want1 = on(a.id, 'bush'), d = drawn.bush[a.id];
-      if (want1 && !d && v && w.Cesium) {
-        drawn.bush[a.id] = { layers: [], loading: true };
-        try {
-          const base = fileBase(a.id, 'bush'), meta = await (await fetch(base + 'derived.json')).json(), b = meta.raster_bounds_lonlat;
-          if (b) for (const f of ['vegetation.png', 'voids.png']) {
-            const rect = Cesium.Rectangle.fromDegrees(b[0], b[1], b[2], b[3]);
-            const prov = Cesium.SingleTileImageryProvider.fromUrl ? await Cesium.SingleTileImageryProvider.fromUrl(base + f, { rectangle: rect }) : new Cesium.SingleTileImageryProvider({ url: base + f, rectangle: rect });
-            const L = v.imageryLayers.addImageryProvider(prov); L.alpha = 0.75; drawn.bush[a.id].layers.push(L);
-          }
-        } catch (e) { console.warn('[areas] bush', e); }
-        drawn.bush[a.id].loading = false;
-        if (!on(a.id, 'bush')) drawn.bush[a.id].layers.forEach(L => { L.show = false; });
-      } else if (d && !d.loading) d.layers.forEach(L => { L.show = want1; });
-    }
+    // bushwhack and ground: map layers in 🗺 Layers (area-maps.js lists them while the area is on)
     // terrain: the Terrain panel's layers (custom-layers.js views), ids recorded by the server in results.terrain
     for (const a of S.areas) {
       const t = a.results && a.results.terrain; if (!t || !CL() || !CL().api) continue;
@@ -418,7 +404,6 @@
     SHOW = reduce(SHOW, { type: 'forgetResult', id, result }); lset(SKEY, JSON.stringify(SHOW));
     if (result === 'terrain') delete drawn.terrain[id];
     if (result === 'prospect' && w._areaProspects) w._areaProspects.forget(id);
-    if (result === 'bush' && drawn.bush[id]) { const v = V(); drawn.bush[id].layers.forEach(L => { try { v.imageryLayers.remove(L, true); } catch (_) {} }); delete drawn.bush[id]; }
     S.delRes = null; await refresh(); return j;
   }
   function runMore(id) {
@@ -430,6 +415,8 @@
 
   // ── Painting ──
   const tagOf = a => a.project ? (((PJ().projects || []).find(p => p.id === a.project) || {}).name || 'Project') : 'My data';
+  /** An area's bushwhack / ground switch: on when any of its maps is shown in 🗺 Layers. */
+  function mapEye(id, r) { return eyeOf(SHOW, id) === 'on' && w._areaMaps ? (w._areaMaps.resultState(id, r) || 'half') : ''; }
   function eyeBtn(state, act, id, res, label, small) {
     return `<button type="button" class="ui-eye${small ? ' ui-eye-sm' : ''}${state ? ' ' + state : ''}" data-act="${act}" data-id="${esc(id)}"${res ? ` data-res="${res}"` : ''} title="${esc(label)}" aria-label="${esc(label)}"></button>`;
   }
@@ -489,7 +476,7 @@
   }
   function resultRows(a) {
     return RKEYS.filter(k => a.results && a.results[k]).map(k => {
-      const r = a.results[k], showable = SHOWABLE.includes(k), st = eyeOf(SHOW, a.id, k);
+      const r = a.results[k], maps = MAPRES.includes(k) && w._areaMaps && (w._areaMaps.hasMaps(a.id, k) || eyeOf(SHOW, a.id) !== 'on'), showable = SHOWABLE.includes(k) || maps, st = maps ? mapEye(a.id, k) : eyeOf(SHOW, a.id, k);
       const extra = k === 'ground' ? ' · used by the others' + (r.pits ? ' · ' + r.pits + ' possible pits' : '') : '';
       const vegNote = k === 'veg' ? '<div class="ar-dim ar-small">One vegetation set is drawn at a time: showing this one hides another area’s.</div>' : '';
       const notes = (r.notes || []).map(n => `<div class="ar-note">${esc(n)}</div>`).join('');
@@ -525,12 +512,6 @@
   function paintGroups() {
     const row = (a, k, label) => `<div class="ar-grow-row" data-id="${esc(a.id)}" data-res="${k}">${eyeBtn(eyeOf(SHOW, a.id, k), 'ressw', a.id, k, 'Show ' + label + ' of ' + a.name, true)}<span class="ar-grow"><span class="ar-nm">${esc(label)}</span><br><span class="ar-dim">${esc(a.name)} · ${fmtMB(a.results[k].bytes)} · ${shortDate(a.results[k].date)}</span></span></div>`;
     const loaded = S.areas.filter(a => eyeOf(SHOW, a.id) === 'on');
-    const L = $('areas-layers-host');
-    if (L) {
-      const rows = []; loaded.forEach(a => { if (a.results.veg) rows.push(row(a, 'veg', 'Vegetation shapes')); if (a.results.bush) rows.push(row(a, 'bush', 'Bushwhack / voids')); });
-      L.hidden = !S.avail;
-      L.innerHTML = `<div class="lp-section"><div class="lp-section-header"><span class="lp-section-arrow">▾</span> Vegetation shapes / Bushwhack of loaded areas</div><div class="lp-section-body open ar-box">${rows.join('') || '<div class="ar-none">No loaded area has vegetation or bushwhack results. Switch one on in 🔬 Analyze → Processed areas.</div>'}</div></div>`;
-    }
     const T = $('areas-terrain-host');
     if (T) {
       const rows = loaded.filter(a => a.results.terrain).map(a => row(a, 'terrain', 'Terrain + hillshade'));
@@ -568,7 +549,7 @@
       else if (t.dataset.act === 'tick') { S.ticks[t.dataset.id] = t.checked; paintRun(); }
     });
     host.addEventListener('input', e => { if (e.target.id === 'ar-name') { S.draftName = e.target.value; paintRun(); } });
-    ['areas-layers-host', 'areas-terrain-host'].forEach(id => { const e = $(id); if (e) e.addEventListener('click', onClick); });
+    ['areas-terrain-host'].forEach(id => { const e = $(id); if (e) e.addEventListener('click', onClick); });
   }
   async function onClick(e) {
     const b = e.target.closest('[data-act]'); if (!b || b.tagName === 'INPUT') return;
@@ -577,6 +558,11 @@
     else if (act === 'fix') { const c = S.check && S.check.tools && S.check.tools[id], o = c && c.offers && c.offers[+b.dataset.i]; if (o) { S.fix[id] = o; S.ticks[id] = true; paint(); await check(); } }
     else if (act === 'unfix') { delete S.fix[id]; paint(); await check(); }
     else if (act === 'procsw') show(id, eyeOf(SHOW, id) !== 'on');
+    else if (act === 'ressw' && MAPRES.includes(b.dataset.res) && w._areaMaps) {      // bushwhack / ground: their map layers in 🗺 Layers (area-maps.js)
+      const r = b.dataset.res, on = mapEye(id, r) !== 'on';
+      if (on && eyeOf(SHOW, id) !== 'on') { show(id, true); await w._areaMaps.refresh(); }
+      await w._areaMaps.setResult(id, r, on);
+    }
     else if (act === 'ressw') { const r = b.dataset.res; showResult(id, r, eyeOf(SHOW, id, r) !== 'on'); }
     else if (act === 'procopen') { S.open = S.open === id ? null : id; paintProcs(); }
     else if (act === 'more') runMore(id);
@@ -612,7 +598,7 @@
   const css = doc.createElement('style');
   css.textContent = `
   #lidarDeriveCollapsible.areas-on .areas-old { display: none !important; }
-  #areas-host[hidden], #areas-layers-host[hidden], #areas-terrain-host[hidden] { display: none; }
+  #areas-host[hidden], #areas-terrain-host[hidden] { display: none; }
   .ar-box { color: #e8ece9; font-size: 12px; padding: 2px 2px 6px; }
   .ar-h { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: rgba(255,255,255,.72); margin: 12px 0 5px; }
   .ar-h small { text-transform: none; letter-spacing: 0; font-weight: 400; color: rgba(255,255,255,.5); margin-left: 4px; }
@@ -676,6 +662,7 @@
     watch('lidarDeriveCollapsible', opened);
     watch('mapLayersCollapsible', () => restore());
     watch('terrainCollapsible', () => restore());
+    ['flex-layer-view', 'flex-area-maps'].forEach(ev => w.addEventListener(ev, () => { if (S.avail) paint(); }));
     w.addEventListener('flex-project-changed', () => { if (S.avail != null) { refresh().then(apply); if (picker) picker.refresh(); } });
   };
   if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', start); else start();

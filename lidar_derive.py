@@ -940,6 +940,10 @@ def _run_area(a, say):
     write_png(void_rgba, os.path.join(a.out_dir, "voids.png"))
     write_geotiff(depth, grid, os.path.join(a.out_dir, "voids.tif"), epsg)
     write_geotiff(ground_out, grid, os.path.join(a.out_dir, "ground.tif"), epsg)
+    # the value rasters the coloured map layers are drawn from (area_maps.py: brush.u8, voids.u8, maps.json)
+    import area_maps
+    area_maps.bush_maps(veg, depth, {"x0": grid.minx, "y0": grid.miny, "cell": grid.cell, "zone": int(zone),
+                                     "south": bool(south), "epsg": int(epsg)}, a.out_dir)
 
     cx = [grid.minx, grid.maxx, grid.maxx, grid.minx]
     cy = [grid.miny, grid.miny, grid.maxy, grid.maxy]

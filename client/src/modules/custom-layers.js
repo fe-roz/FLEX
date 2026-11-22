@@ -39,7 +39,7 @@
   const views = () => { try { return JSON.parse(localStorage.getItem(VK) || '{}'); } catch (_) { return {}; } };
   const defs = new Map();                        // a first look other than shown / opaque (CalTopo map layers: caltopo-layers.js)
   const viewOf = id => Object.assign({ show: true, alpha: 1 }, defs.get(id) || {}, views()[id] || {});
-  function setView(id, v) { const all = views(); all[id] = Object.assign(viewOf(id), v); try { localStorage.setItem(VK, JSON.stringify(all)); } catch (_) {} }
+  function setView(id, v) { const all = views(); all[id] = Object.assign(viewOf(id), v); try { localStorage.setItem(VK, JSON.stringify(all)); } catch (_) {} window.dispatchEvent(new CustomEvent('flex-layer-view', { detail: { id } })); }
 
   // ── What there is ────────────────────────────────────────────────────────
   let mine = null;
@@ -54,9 +54,11 @@
     (await myLayers(force)).forEach(l => out.push(Object.assign({ owner: 'm' }, l)));
     // The loaded CalTopo map's own custom layers (read-only; they come and go with the map).
     if (window._ctLayers) window._ctLayers.list().forEach(l => { defs.set(l.id, { show: !!l.defShow, alpha: l.defAlpha }); out.push(Object.assign({ owner: 'c' }, l)); });
+    // A processed area's maps (area-maps.js: listed while the area is switched on; on this computer only, never in a log).
+    if (window._areaMaps) window._areaMaps.list().forEach(l => { defs.set(l.id, { show: !!l.defShow, alpha: l.defAlpha }); out.push(Object.assign({ owner: 'a' }, l)); });
     return out;
   }
-  const srcUrl = l => (l.kind === 'imagery' || l.kind === 'terrain' ? '/api/lib/blob/' + l.blob : l.url);
+  const srcUrl = l => (l.src ? l.src : l.kind === 'imagery' || l.kind === 'terrain' ? '/api/lib/blob/' + l.blob : l.url);
   const sigOf = l => [l.kind, srcUrl(l), (l.bounds || []).join(','), l.maxZoom, l.minZoom].join('|');
 
   // ── On the globe ─────────────────────────────────────────────────────────
@@ -96,7 +98,7 @@
         if (!drawn.has(keyOf(l))) {
           let prov = null;
           try {
-            if (l.kind === 'imagery' && l.blob && l.bounds) prov = await Cesium.SingleTileImageryProvider.fromUrl(srcUrl(l), { rectangle: Cesium.Rectangle.fromDegrees(...l.bounds) });
+            if (l.kind === 'imagery' && (l.blob || l.src) && l.bounds) prov = await Cesium.SingleTileImageryProvider.fromUrl(srcUrl(l), { rectangle: Cesium.Rectangle.fromDegrees(...l.bounds) });
             else if (l.kind === 'tiles' && l.url) prov = new Cesium.UrlTemplateImageryProvider({ url: l.url, maximumLevel: l.maxZoom != null ? l.maxZoom : 20, minimumLevel: l.minZoom || 0,
               rectangle: l.bounds ? Cesium.Rectangle.fromDegrees(...l.bounds) : undefined });     // a project's own tiles: only where and at the levels they exist
           } catch (e) { console.warn('[layers] could not show', l.name, e); }
@@ -105,7 +107,7 @@
           const z0 = views()[l.id] && views()[l.id].z, vw0 = viewOf(l.id);
           const layer = v.imageryLayers.addImageryProvider(prov, z0 != null ? Math.min(Math.max(0, z0), v.imageryLayers.length) : undefined);
           layer.show = !!vw0.show; layer.alpha = Math.max(0, Math.min(1, +vw0.alpha));
-          layer.name = l.name || 'Layer'; layer._custom = { id: l.id, owner: l.owner, warn: '' };       // shows in the one list (flex.js renderLayerList)
+          layer.name = l.name || 'Layer'; layer._custom = { id: l.id, owner: l.owner, warn: '', colours: !!l.colours, note: l.note || '' };       // shows in the one list (flex.js renderLayerList)
           Cesium.knockout.track(layer, ['alpha', 'show', 'name']);
           const kid = l.id;
           Cesium.knockout.getObservable(layer, 'show').subscribe(s => setView(kid, { show: !!s }));
@@ -391,7 +393,7 @@
   // made from it (no internet); a tile link (project tiles, CalTopo layer, any XYZ / TMS link) is downloaded while the
   // export runs (it needs the internet, unless the tiles are on this computer), cut to the area and baked in; if that fails
   // the export takes Bing imagery (hillshade: shades the terrain) and says so in its log. WMS links are not exported.
-  const exportable = l => (l.kind === 'imagery' && l.blob && l.bounds) || (l.kind === 'tiles' && l.url && /\{z\}/.test(l.url) && /\{x\}/.test(l.url) && /\{(y|-y|reverseY)\}/.test(l.url));
+  const exportable = l => l.owner !== 'a' && (l.kind === 'imagery' && l.blob && l.bounds) || (l.kind === 'tiles' && l.url && /\{z\}/.test(l.url) && /\{x\}/.test(l.url) && /\{(y|-y|reverseY)\}/.test(l.url));
   function fillExport(all) {
     const sat = document.getElementById('export_satellite_source'), hs = document.getElementById('export_hillshade_mode');
     if (!sat || !hs) return;
@@ -425,6 +427,7 @@
   }
   async function removeById(id) {
     const l = (await entries()).find(x => x.id === id); if (!l) return;
+    if (l.owner === 'a') { setView(l.id, { show: false }); await sync(); if (window._renderLayerList) window._renderLayerList(); return; }   // an area's map: hidden (it comes with the area)
     if (l.owner === 'c') {                       // CalTopo's: FLEX doesn't change the map; hidden here instead
       setView(l.id, { show: false }); await sync(); if (window._renderLayerList) window._renderLayerList();
       toast(`“${l.name}” is part of the CalTopo map: hidden here. Remove it in CalTopo to drop it.`);

@@ -39,6 +39,12 @@ function makeArea(root, id) {
   const Pn = await AP.pack(d, null, { skip: /\.tif$/i });
   ok('pack skip: the GeoTIFF left behind', !Pn.report.files.some(f => /\.tif$/.test(f.path)) && Pn.report.left.includes('bush/v.tif'));
   fs.unlinkSync(path.join(d, 'bush', 'v.tif'));
+  // the value rasters for the coloured map layers travel, with --no-tif too
+  fs.writeFileSync(path.join(d, 'bush', 'brush.u8'), Buffer.alloc(4)); fs.writeFileSync(path.join(d, 'bush', 'maps.json'), '{}');
+  fs.writeFileSync(path.join(d, 'ground', 'slope.u8'), Buffer.alloc(4)); fs.writeFileSync(path.join(d, 'ground', 'maps.json'), '{}');
+  const Pr = await AP.pack(d, null, { skip: /\.tif$/i });
+  ok('pack: brush.u8, slope.u8 and both maps.json go', ['bush/brush.u8', 'bush/maps.json', 'ground/slope.u8', 'ground/maps.json'].every(f => Pr.report.files.some(x => x.path === f)), Pr.report.files.map(f => f.path));
+  ['bush/brush.u8', 'bush/maps.json', 'ground/slope.u8', 'ground/maps.json'].forEach(f => fs.unlinkSync(path.join(d, f)));
   const U = await AP.unpack(P.buffer, dst);
   ok('unpack: written into <root>/<id>', U.ok && fs.existsSync(path.join(dst, 'acr1', 'veg', 'shapes.bin')) && fs.readFileSync(path.join(dst, 'acr1', 'veg', 'shapes.bin'), 'utf8') === '12345678');
   const A = JSON.parse(fs.readFileSync(path.join(dst, 'acr1', 'area.json'), 'utf8'));
