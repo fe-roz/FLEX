@@ -94,7 +94,7 @@ function hillshadeTile(P, z, x, y) {
   return any ? pngLA(T, T, out) : null;
 }
 
-module.exports = function terrainGenerate({ python, script, library, ensureMine }) {
+module.exports = function terrainGenerate({ python, script, library, ensureMine, areasRoot }) {
   // My data's folder, made on first use (mine.js): where a terrain made with no project open is kept.
   const mineEnsure = ensureMine || (() => require('./mine').ensure());
   const MINE = 'mine';
@@ -231,6 +231,11 @@ module.exports = function terrainGenerate({ python, script, library, ensureMine 
     const args = [script, '--ept', ept[0], ...ept.slice(1).flatMap(u => ['--also-ept', u]),
       '--bbox', ...bbox.map(String), '--resolution', String(resolution), '--project-terrain', outDir];
     if (name) args.push('--name', name);
+    // An analysed area (areas_api.js): its shared ground is the terrain's ground, so no point cloud is read and no cloth is run.
+    if (areasRoot && typeof o.area === 'string' && ID_RE.test(o.area)) {
+      const areaDir = path.join(areasRoot, o.area);
+      if (fs.existsSync(path.join(areaDir, 'ground', 'ground.npy'))) args.push('--area-dir', areaDir);
+    }
     if (num(o.z_offset) && Math.abs(o.z_offset) < 200) args.push('--z-offset', String(o.z_offset));
     if (poly) { const f = path.join(outDir, 'area.json'); fs.writeFileSync(f, JSON.stringify(poly)); args.push('--polygon', f); }
     json(res, { ok: true, jobId });

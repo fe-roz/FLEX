@@ -984,6 +984,8 @@
               </div>
             </div>
 
+            <div id="areas-layers-host" hidden></div>  <!-- analyze-area.js: vegetation / bushwhack of loaded areas -->
+
             <!-- Google Maps 3D model toggle -->
             <div class="lp-section" style="border-bottom:none;">
               <div class="lp-row" style="padding:5px 4px;">
@@ -1501,6 +1503,7 @@
         <!-- ⛰ Terrain: patches (project / My data), Add DEM, Generate from LiDAR for an area (terrain-panel.js, area-picker.js) -->
         <div class="collapse" id="terrainCollapsible">
           <div class="lp-panel-wrap" id="terrain-panel"></div>
+          <div class="lp-panel-wrap" id="areas-terrain-host" hidden></div>
         </div>
 
         <div class="collapse" id="exportCollapsible">
@@ -1729,12 +1732,14 @@
         <div class="collapse" id="lidarDeriveCollapsible">
           <div class="lp-panel-wrap">
 
+            <!-- Analyze by area: area, LiDAR, tools, Run ticked, processed areas (analyze-area.js; hidden when /api/areas is missing) -->
+            <div id="areas-host" hidden></div>
             <!-- Surface route: filled by surface-route.js -->
             <div id="surfroute-host"></div>
             <!-- Vegetation shapes: filled by veg-panel.js -->
             <div id="vegshapes-host"></div>
 
-            <div class="lp-section">
+            <div class="lp-section" data-areas-old>
               <div class="lp-section-header" onclick="window._lpToggle(this)">
                 <span class="lp-section-arrow">▾</span> Area
               </div>
@@ -1748,7 +1753,7 @@
               </div>
             </div>
 
-            <div class="lp-section">
+            <div class="lp-section" data-areas-old>
               <div class="lp-section-header" onclick="window._lpToggle(this)">
                 <span class="lp-section-arrow">▾</span> Point Cloud
               </div>
@@ -1844,7 +1849,7 @@
 
             <div class="lp-section">
               <div class="lp-section-body open">
-                <button id="lidar_run_btn" class="btn btn-primary" style="width:100%;"
+                <button id="lidar_run_btn" data-areas-old class="btn btn-primary" style="width:100%;"
                   onclick="window._lidarRun()"><svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-leaf"/></svg>Analyze Area</button>
                 <div id="lidar_progress_wrap" style="display:none; margin-top:8px;">
                   <div style="height:4px; background:rgba(255,255,255,.12); border-radius:2px;">
@@ -2138,6 +2143,7 @@
 <script src="client/src/modules/surface-route.js"></script>  <!-- 🔬 Analyze → Surface route: picks, weights, Find routes (route_cost.py on the server), cards, graph, save as line, overlays (window._surfRoute) -->
 <script src="client/src/modules/veg-draw.js"></script>  <!-- vegetation shapes on the globe: crowns / shell, see-through, lit rims, follows the terrain shown (window._vegDraw) -->
 <script src="client/src/modules/veg-panel.js"></script>  <!-- 🔬 Analyze → Vegetation shapes: area, LiDAR, Build (veg_shapes.py on the server), look / sliders / switches for window._vegDraw, Keep and Saved (window._vegPanel) -->
+<script src="client/src/modules/analyze-area.js"></script>  <!-- 🔬 Analyze by area: one area + LiDAR, tools ticked, Run ticked (/api/areas/*), processed areas and their switches, also in Layers and Terrain (window._areas) -->
 <script src="client/src/modules/offline-cache.js"></script>  <!-- saves tiles and point-cloud data as they load; registers client/src/sw.js (window._offline) -->
 <script src="client/src/modules/folder-style.js"></script>  <!-- a folder's display settings for everything in it (window._folderStyle) -->
 <script src="client/src/modules/surface-merge.js"></script>  <!-- 📍 Surface: CalTopo as the master — the project folders and items merged into its tree; drag and drop (window._surfMerge) -->

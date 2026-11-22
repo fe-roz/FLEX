@@ -120,6 +120,9 @@ const server = http.createServer((req, res) => {
     // ── Vegetation shapes (veg_api.js) ───────────────────────────────────────
     } else if (sanitizedPath.startsWith('/api/veg/')) {
         vegGen.handle(req, res, sanitizedPath.slice('/api/veg/'.length), parsedUrl.query);
+    // ── Processed areas (areas_api.js) ───────────────────────────────────────
+    } else if (sanitizedPath === '/api/areas' || sanitizedPath.startsWith('/api/areas/')) {
+        areaGen.handle(req, res, sanitizedPath.slice('/api/areas'.length).replace(/^\//, ''), parsedUrl.query);
     // ── LiDAR derivations (vegetation density, voids) ────────────────────────
     } else if (sanitizedPath === '/api/lidar/derive' && req.method === 'POST') {
         handleLidarDerive(req, res);
@@ -732,7 +735,8 @@ const CONDA_PYTHON = process.env.FLEX_PYTHON || (process.platform === 'win32'
 const EXPORT_SCRIPT = path.join(__dirname, 'export_terrain.py');
 const EXPORT_OUT_DIR = path.join(__dirname, 'user_files', 'exports');
 // The same pipeline run for a project: its DEM as a terrain patch, its hillshade as map tiles.
-const terrainGen = require('./terrain_generate')({ python: CONDA_PYTHON, script: EXPORT_SCRIPT, library });
+const AREAS_ROOT = process.env.FLEX_AREAS_DIR || path.join(__dirname, 'user_files', 'areas');
+const terrainGen = require('./terrain_generate')({ python: CONDA_PYTHON, script: EXPORT_SCRIPT, library, areasRoot: AREAS_ROOT });
 // Surface routes (route_api.js → route_cost.py); FLEX_ROUTE_SCRIPT / FLEX_ROUTE_PYTHON point at another script / interpreter (the tests' stub)
 const routeGen = require('./route_api')({ python: process.env.FLEX_ROUTE_PYTHON || CONDA_PYTHON, script: process.env.FLEX_ROUTE_SCRIPT || path.join(__dirname, 'route_cost.py'),
     outRoot: path.join(__dirname, 'user_files', 'jobs', 'route'),
@@ -958,6 +962,10 @@ function handleExportDownload(req, res, jobId) {
 const _lidarJobs = {};   // jobId -> { status, progress, outDir, error }
 const LIDAR_SCRIPT  = path.join(__dirname, 'lidar_derive.py');
 const LIDAR_OUT_DIR = path.join(__dirname, 'user_files', 'lidar');
+// Processed areas (areas_api.js): FLEX_AREA_GROUND_SCRIPT / FLEX_VEG_SCRIPT / FLEX_LIDAR_SCRIPT / FLEX_AREA_PYTHON / FLEX_AREAS_DIR for the tests' stand-ins
+const areaGen = require('./areas_api')({ python: process.env.FLEX_AREA_PYTHON || CONDA_PYTHON, groundScript: process.env.FLEX_AREA_GROUND_SCRIPT || path.join(__dirname, 'area_ground.py'),
+    vegScript: process.env.FLEX_VEG_SCRIPT || path.join(__dirname, 'veg_shapes.py'), lidarScript: process.env.FLEX_LIDAR_SCRIPT || LIDAR_SCRIPT,
+    root: AREAS_ROOT, terrainGen });
 // Running and recent jobs of the three kinds, for the Jobs panel (jobs_api.js)
 const jobsApi = require('./jobs_api')({ sources: {
     export:  { jobs: _exportJobs, pct: exportPct, download: id => '/api/export/download/' + id },
@@ -965,6 +973,7 @@ const jobsApi = require('./jobs_api')({ sources: {
     analyze: { jobs: _lidarJobs, pct: lidarPct },
     route:   { jobs: routeGen.jobs, pct: routeGen.pctOf },
     veg:     { jobs: vegGen.jobs, pct: vegGen.pctOf },
+    area:    { jobs: areaGen.jobs, pct: areaGen.pctOf },
 } });
 
 function handleLidarDerive(req, res) {
