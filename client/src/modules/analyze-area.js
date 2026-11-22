@@ -559,7 +559,8 @@
       <div class="ar-runbar" id="ar-runbar"><span class="ar-dim" id="ar-runtxt"></span><button type="button" class="ar-btn ar-go" id="ar-run">Run ticked</button></div>
       <div class="ar-last" id="ar-last" hidden></div>
       <h3 class="ar-h">Processed areas <small>kept after a run, with or without a project</small></h3>
-      <div class="ar-list" id="ar-procs"></div></div>`;
+      <div class="ar-list" id="ar-procs"></div>
+      <div class="ar-runbar"><span class="ar-dim" id="ar-imptxt"></span><button type="button" class="ar-btn" data-act="import" id="ar-import" title="An area package (FLEX-area-….zip) made on another FLEX: its ground, vegetation, bushwhack and prospects">Import a processed area…</button></div></div>`;
     host.addEventListener('click', onClick);
     host.addEventListener('change', e => {
       const t = e.target;
@@ -586,6 +587,25 @@
     else if (act === 'delres') { S.delRes = id + ':' + b.dataset.res; paintProcs(); }
     else if (act === 'delresno') { S.delRes = null; paintProcs(); }
     else if (act === 'delresyes') removeResult(id, b.dataset.res);
+    else if (act === 'import') importArea();
+  }
+  /** An area package (tools/area_pack.js) from another FLEX → POST /api/areas/import; an id already here asks before replacing. */
+  function importArea() {
+    const inp = doc.createElement('input'); inp.type = 'file'; inp.accept = '.zip,application/zip';
+    inp.onchange = async () => {
+      const f = inp.files && inp.files[0]; if (!f) return;
+      const say = t => { const e = $('ar-imptxt'); if (e) e.textContent = t; };
+      const send = over => fetch('/api/areas/import' + (over ? '?overwrite=1' : ''), { method: 'POST', headers: { 'Content-Type': 'application/zip' }, body: f }).then(r => r.json().then(j => ({ st: r.status, j })));
+      say('Importing ' + f.name + '…');
+      try {
+        let r = await send(false);
+        if (r.st === 409 && w.confirm('This area is already here. Replace it with the one in ' + f.name + '? (The old one is kept in its folder, renamed.)')) r = await send(true);
+        if (!r.j.ok) { say(''); toast('Not imported: ' + (r.j.error || 'error')); return; }
+        say(''); toast('Imported “' + r.j.area.name + '” (' + r.j.written.length + ' files). Switch it on in Processed areas.');
+        await refresh();
+      } catch (err) { say(''); toast('Not imported: ' + (err.message || err)); }
+    };
+    inp.click();
   }
   doc.addEventListener('click', e => { if (e.target && e.target.id === 'ar-run') run(); });
 
