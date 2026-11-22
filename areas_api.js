@@ -446,9 +446,15 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
         const args = [lidarScript, '--ept', lidar[0], '--bbox', ...bboxOf(area.ring).map(String), '--out-dir', path.join(DIR, 'bush'), '--area-dir', DIR];
         const bo = options.bush || {};
         if (num(bo.cell) && bo.cell > 0) args.push('--cell', String(s.cell));
+        // The height band counted as brush (metres above ground) and the voids settings, when the screen sends them.
+        const vb = Array.isArray(bo.veg_band) && bo.veg_band.length === 2 && bo.veg_band.every(num) && bo.veg_band[0] >= 0 && bo.veg_band[1] > bo.veg_band[0] && bo.veg_band[1] <= 50 ? bo.veg_band : null;
+        if (vb) args.push('--veg-band', String(vb[0]), String(vb[1]));
+        if (num(bo.void_depth) && bo.void_depth < 0 && bo.void_depth >= -100) args.push('--void-depth', String(bo.void_depth));
+        if (num(bo.void_min_points) && bo.void_min_points >= 1 && bo.void_min_points <= 1000) args.push('--void-min-points', String(Math.round(bo.void_min_points)));
+        if (num(bo.low_cut) && bo.low_cut < 0 && bo.low_cut >= -500) args.push('--low-cut', String(bo.low_cut));
         const r = await runScript(job, step, args, notes);
         if (r.code !== 0 || !fs.existsSync(path.join(DIR, 'bush', 'derived.json'))) throw new Error(whyFailed(r.errLines, r.code));
-        res = { coarse: s.coarse, cell: s.cell };
+        res = { coarse: s.coarse, cell: s.cell, band: vb || [0.3, 1.5] };
       } else if (key === 'terrain') {
         const r = await terrainStep(job, step, area, lidar, options, notes);
         res = r;
