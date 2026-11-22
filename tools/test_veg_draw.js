@@ -75,14 +75,14 @@ const veg = F.veg;
 // ── the shapes mesh ──
 {
   const s = M.parseShapes(F.shapes, veg.shapes.count, 48);
-  ok('counts: a sapling 20-30 triangles, a big tree 56-80, far 12, brush 21 / 9',
+  ok('counts: a sapling 20-30 triangles, a big tree 56-80, far 12, brush 21 / 12',
     M.shapeCounts(0, 1.2, 3, 0).tris === 20 && M.shapeCounts(0, 1.5, 6, 0).tris === 30 && M.shapeCounts(1, 7, 30, 0).tris === 80 && M.shapeCounts(0, 5, 15, 0).tris === 56 &&
-    M.shapeCounts(1, 7, 30, 1).tris === 12 && M.shapeCounts(2, 2, 1.5, 0).tris === 21 && M.shapeCounts(2, 2, 1.5, 1).tris === 9);
+    M.shapeCounts(1, 7, 30, 1).tris === 12 && M.shapeCounts(2, 2, 1.5, 0).tris === 21 && M.shapeCounts(2, 2, 1.5, 1).tris === 12);
   const m = M.buildShapes(s.rec, s.n, { shift: () => 0, h0: 0, curvature: false, stride: 12 });
   let wantN = 0, wantF = 0;
   for (let i = 0; i < s.n; i++) {
     const o = i * 12, k = Math.round(s.rec[o + 6]), H = s.rec[o + 3], base = k === 2 ? 0 : Math.min(s.rec[o + 5], H * 0.8);
-    const Hb = k === 2 ? Math.min(H, M.brushCaps(s.rec, s.n, 12)[i]) : H;
+    const Hb = k === 2 ? Math.min(H, Math.max(M.brushCaps(s.rec, s.n, 12)[i], H * 0.65)) : H;
     wantN += M.shapeCounts(k, s.rec[o + 4], Hb - base, 0).tris; wantF += M.shapeCounts(k, s.rec[o + 4], Hb - base, 1).tris;
   }
   ok('shapes mesh: triangles = near + far per shape', m.trianglesNear === wantN && m.trianglesFar === wantF && m.triangles === wantN + wantF && m.idx.length === m.triangles * 3, [m.trianglesNear, wantN, m.trianglesFar, wantF]);
@@ -167,6 +167,19 @@ const veg = F.veg;
     const recs = new Float32Array([0, 0, 0, 20, 5, 3, 0, 1, 0.7, 1, 0.9, 0.5, 1, 1, 0, 1.9, 2, 0, 2, 1, 1, 0.9, 0.7, 0.4, 30, 30, 0, 1.9, 2, 0, 2, 1, 1, 0.9, 0.7, 0.4]);
     const caps = M.brushCaps(recs, 3, 12);
     ok('brush: held under a crown above it, free in the open', near(caps[1], 3 * 0.95, 1e-6) && caps[2] === Infinity && caps[0] === Infinity, Array.from(caps));
+  }
+  // a brush clump on a slope: its foot ring follows the ground (no gap on the downhill side)
+  {
+    const slope = (x, y) => 100 + 0.6 * x;
+    const one = new Float32Array([0, 0, 100, 1.8, 2, 0, 2, 1, 1, 0.9, 0.7, 0.4]);
+    const flat = M.buildShapes(one, 1, { curvature: false, stride: 12 }), sl = M.buildShapes(one, 1, { curvature: false, stride: 12, groundAt: slope });
+    let worst = 0, up = 0;
+    for (let k = 0; k < 7; k++) {
+      const v = 1 + k, gz = slope(sl.pos[v * 3], sl.pos[v * 3 + 1]) - 100;
+      if (gz < 0) worst = Math.max(worst, Math.abs(sl.pos[v * 3 + 2] - (gz - 0.1 + flat.pos[v * 3 + 2])));
+      else up = Math.max(up, Math.abs(sl.pos[v * 3 + 2] - (flat.pos[v * 3 + 2] - 0.1)));
+    }
+    ok('brush on a slope: the foot ring reaches down to the ground, never up (no inverted faces uphill)', worst < 1e-3 && up < 1e-3, [worst, up]);
   }
   // 60 000 shapes (a km² of dense forest) builds in reasonable time, and is lighter than round 1's 48 per tree
   const many = new Float32Array(60000 * 12);

@@ -7,7 +7,7 @@
 //           small round cap; a lobed clump per brush patch. All in ONE batched mesh built here with typed arrays, with a
 //           little per-shape variation (turn, slight oval, lumps) from a hash of the position, kept small enough that
 //           the measured outline shows. Two levels of detail in that mesh (see "Level of detail" below): near shapes
-//           20-80 triangles by size, far shapes 12 (brush 9), switched per shape by distance with a dissolve.
+//           20-80 triangles by size, far shapes 12, switched per shape by distance with a dissolve.
 //   shell   the job's blobby skin around the vegetation points (shell.bin), as it is.
 //
 // How it is drawn (custom DrawCommands through one primitive in scene.primitives):
@@ -48,7 +48,7 @@
   const EARTH_R = 6371000;
   const DEFAULTS = {
     look: 'shapes', opacity: 0.35, edge: 0.6, fill: 0.5, minHeight: 0, trees: true, brush: true,
-    tint: 'height', colourLow: '#1a5e28', colourHigh: '#a9d65e', brushColour: '#6b7a30', onTerrain: true, behind: 0.3, lod: 1,
+    tint: 'height', colourLow: '#1a5e28', colourHigh: '#a9d65e', brushColour: '#6f8530', onTerrain: true, behind: 0.3, lod: 1,
   };
   const LOOKS = ['shapes', 'shell', 'both', 'off'], TINTS = ['height', 'plain'];
   const HEX = /^#[0-9a-f]{6}$/i;
@@ -184,7 +184,7 @@
   // ── Level of detail ───────────────────────────────────────────────────────
   // Triangles go where they show. Near: segments by the crown's radius, rings by the crown's depth (3 to 5 rings, the top
   // ring the round cap); a 3 m sapling gets 30 triangles, a 40 m tree 80-100. Far: every shape again as 12 triangles (two
-  // staggered 3-gons, so it is a 6-sided crown from above; brush 9). Each shape switches between the two by its own
+  // staggered 3-gons, so it is a 6-sided crown from above; brush two 4-gons). Each shape switches between the two by its own
   // distance in the vertex shader, with a short screen-door cross-fade, so nothing pops; the CPU only picks which blocks
   // of the index buffer to draw (tiles x size classes, merged into a few ranges), and the shader collapses the rest.
   const SIZE_R = [1.8, 3.5, 6];                         // radius class limits (m): classes 0..3
@@ -199,7 +199,7 @@
   const ringsFor = (depth, c) => { c = c == null ? 3 : c; return RINGS[clamp(depth < 4 ? 0 : depth < 10 ? 1 : depth < 20 ? 2 : 3, MIN_RINGS[c], MAX_RINGS[c])]; };
   /** Vertices and triangles of one shape: lod 0 near, 1 far. */
   function shapeCounts(kind, r, depth, lod) {
-    if (kind === 2) return lod ? { verts: 7, tris: 9 } : { verts: 2 * BRUSH_SEG + 1, tris: 3 * BRUSH_SEG };
+    if (kind === 2) return lod ? { verts: 9, tris: 12 } : { verts: 2 * BRUSH_SEG + 1, tris: 3 * BRUSH_SEG };
     if (lod) return { verts: 8, tris: 12 };
     const c = sizeClass(r), seg = SEG[c], nr = ringsFor(depth, c).length;
     return { verts: seg * nr + 2, tris: 2 * seg * nr };
@@ -248,7 +248,8 @@
     return { x0, y0, size, nx, ny, of: (x, y) => Math.min(ny - 1, Math.max(0, Math.floor((y - y0) / size))) * nx + Math.min(nx - 1, Math.max(0, Math.floor((x - x0) / size))) };
   }
 
-  /** Brush heights held under the crowns above them (a mound never pokes up into a crown that starts higher). */
+  /** Brush heights held under the crowns above them (a clump does not poke up into a crown that starts higher; the
+   *  builder never takes more than a third off, so understory stays a clump, not a slab). */
   function brushCaps(rec, n, stride) {
     const caps = new Float32Array(n).fill(Infinity), cell = 8, grid = new Map();
     const key = (i, j) => i * 73856093 ^ j * 19349663;
@@ -277,7 +278,9 @@
   /**
    * The "shapes" look as one mesh, near and far shapes in it. rec: shapes.bin records (stride 8 or 12); opts.shift(x, y) =
    * metres to add to the file's heights there (terrain follow / datum), opts.h0 = the drawn height of the local frame's
-   * origin (local z = z + shift - h0 - drop). Returns { pos (local m, float32 x3), nrm (int8 x4), aux (u16 x2, cm: hag of
+   * origin (local z = z + shift - h0 - drop); opts.groundAt(x, y) = the job's ground there (ground.bin), so a brush
+   * clump's foot ring reaches down a slope instead of floating on its downhill side (seen from below, an open clump
+   * floating there showed only its far rim, a thin crescent). Returns { pos (local m, float32 x3), nrm (int8 x4), aux (u16 x2, cm: hag of
    * the vertex, the shape's top height), meta (u8 x4: kind*127, density, random, size class + 128 when far), ctr (int16
    * x4, cm: from the vertex to the shape's middle), idx, vertices, triangles, trianglesNear, trianglesFar, min, max, counts, blocks }.
    * idx is laid out by [lod][class][tile]; blocks = { tiles: [{ min, max }], start: [lod][class][tile] (first index),
@@ -286,7 +289,7 @@
   function buildShapes(rec, n, opts) {
     opts = opts || {};
     const stride = opts.stride || 8;
-    const shift = opts.shift || (() => 0), h0 = opts.h0 || 0, curv = opts.curvature !== false;
+    const shift = opts.shift || (() => 0), h0 = opts.h0 || 0, curv = opts.curvature !== false, gAt = opts.groundAt || null;
     const tg = tileGrid(rec, n, stride), NT = tg.nx * tg.ny;
     const caps = brushCaps(rec, n, stride);
     const kinds = new Uint8Array(n), cls = new Uint8Array(n), tile = new Uint32Array(n), Hs = new Float32Array(n), Rs = new Float32Array(n), Bs = new Float32Array(n);
@@ -298,7 +301,7 @@
       let k = Math.round(rec[o + 6]); if (k !== 0 && k !== 1 && k !== 2) k = 0;
       kinds[i] = k; counts[k === 0 ? 'dome' : k === 1 ? 'cone' : 'brush']++;
       let H = Math.max(0.2, num(rec[o + 3], 1)), r = Math.max(0.3, num(rec[o + 4], 1)), base = Math.max(0, num(rec[o + 5], 0));
-      if (k === 2) { base = 0; H = Math.min(H, caps[i]); } else if (base > H * 0.8) base = H * 0.8;      // a crown is never a sliver
+      if (k === 2) { base = 0; H = Math.min(H, Math.max(caps[i], H * 0.65)); }      // held under a crown, never squashed flat else if (base > H * 0.8) base = H * 0.8;      // a crown is never a sliver
       Hs[i] = H; Rs[i] = r; Bs[i] = base;
       cls[i] = sizeClass(r); tile[i] = tg.of(rec[o], rec[o + 1]);
       for (let lod = 0; lod < 2; lod++) {
@@ -328,6 +331,7 @@
       const dz = shift(x, y) - h0 - (curv ? (x * x + y * y) / (2 * EARTH_R) : 0);
       const zb = zg + base + dz;
       const cz = zb + depth * 0.5;
+      const g0 = k === 2 && gAt ? gAt(x, y) : NaN;          // brush feet follow the slope (the job's ground under each)
       const tb = tile[i], bmin = tmin[tb], bmax = tmax[tb];
       for (let lod = 0; lod < 2; lod++) {
         const v0 = v, c = cls[i];
@@ -347,20 +351,26 @@
         // rings: [t, radius share, segments, lobes]; a pole on top; one below when closed
         let seg, ts, closed = true, lobe = null, jit = 0.07, kR = 1;
         if (k === 2) {
-          seg = lod ? 3 : BRUSH_SEG; ts = lod ? [0, 0.55] : [0, 0.55]; closed = false; jit = lod ? 0 : 0.06;
-          const nl = 2 + Math.floor(h3 * 2.99), ph = h2 * 6.283;               // 2-4 lobes: a clump, not a disc
-          lobe = (a, q) => 1 + (q ? 0.3 : 0.2) * Math.cos(nl * a + ph) * (lod ? 0 : 1);
+          // a clump, not a disc: tucked in at the foot, widest a third of the way up, 2-3 lobes round it
+          seg = lod ? 4 : BRUSH_SEG; ts = [0.02, 0.42]; closed = false; jit = lod ? 0 : 0.08;
+          const nl = 2 + Math.floor(h3 * 1.99), ph = h2 * 6.283;
+          lobe = lod ? () => 1 : (a, q) => (q ? 1.08 : 0.8) * (1 + 0.3 * Math.cos(nl * a + ph));
           kR = lod ? 1.1 : 1;
         } else if (lod) { seg = 3; ts = [0.3, 0.72]; kR = 1.12; jit = 0; } else { seg = SEG[c]; ts = ringsFor(depth, c); }
-        kR *= polyK(lod ? 6 : seg);
-        const top = put(x + lx, y + ly, zb + depth * (k === 2 ? 0.92 + 0.08 * h4 : 1), k === 2 ? H * (0.92 + 0.08 * h4) : H);
+        kR *= polyK(lod ? 2 * seg : seg);
+        // brush: the top pole leans toward one lobe and sits a little lower, so the clump's top is uneven
+        const bx = k === 2 && !lod ? 0.22 * r * Math.cos(h2 * 6.283) : 0, by = k === 2 && !lod ? 0.22 * r * Math.sin(h2 * 6.283) : 0;
+        const top = put(x + lx + bx, y + ly + by, zb + depth * (k === 2 ? 0.88 + 0.12 * h4 : 1), k === 2 ? H * (0.88 + 0.12 * h4) : H);
         const ring0 = v;
         for (let q = 0; q < ts.length; q++) {
           const tt = ts[q], rr = R(tt) * r * kR, off = rot + q * Math.PI / seg;    // staggered rings: rounder for the same count
           for (let s = 0; s < seg; s++) {
             const a = off + (s / seg) * Math.PI * 2, j = 1 + jit * (hash01(x, y, 10 + q * 16 + s) - 0.5) * 2, L = lobe ? lobe(a - rot, q) : 1;
-            const zz = tt * depth * (k === 2 && q ? 0.9 + 0.2 * hash01(x, y, 90 + s) : 1);
-            put(x + Math.cos(a) * rr * j * L * sx + lx * tt, y + Math.sin(a) * rr * j * L * sy + ly * tt, zb + zz, base + zz);
+            const zz = tt * depth * (k === 2 && q && !lod ? 0.75 + 0.5 * hash01(x, y, 90 + s) : 1);
+            const px = x + Math.cos(a) * rr * j * L * sx + lx * tt, py = y + Math.sin(a) * rr * j * L * sy + ly * tt;
+            let foot = 0;
+            if (q === 0 && g0 === g0) { const d = gAt(px, py) - g0; if (Number.isFinite(d)) foot = Math.max(Math.min(d, 0), -depth * 3) - 0.1; }   // down only: uphill it is buried anyway
+            put(px, py, zb + zz + foot, base + zz);
           }
         }
         const bot = closed ? put(x, y, zb, base) : -1;
@@ -531,7 +541,9 @@ bool vegHidden() {
   if (d > 0.0 && d < 1.0) {
     vec4 e = czm_windowToEyeCoordinates(gl_FragCoord.xy, d);
     float gz = e.z / e.w;
-    if (v_pEC.z < gz - (0.3 + 0.002 * abs(gz))) return true;
+    // brush is low: the terrain shown is often a metre or two off the LiDAR ground on rough slopes, so it gets more slack
+    float slack = (v_meta.w < 0.9 && v_meta.x > 0.75) ? 1.5 : 0.3;
+    if (v_pEC.z < gz - (slack + 0.002 * abs(gz))) return true;
   }
   return false;
 }`;
@@ -588,12 +600,16 @@ void main() {
   float dens = 0.55 + 0.45 * v_meta.y;
   float a;
   if (brushy && !shell) {
-    // brush: lumps lit harder, a dark rim, more solid
-    col = base * (0.45 + 0.45 * max(dot(N, L), 0.0) + 0.3 * (0.5 + 0.5 * nup));
-    vec3 rimCol = base * 0.38;
-    float er = clamp(u_edge * rim * 1.8, 0.0, 1.0);
+    // brush: more solid than crowns, lumps lit harder with a lighter top, darker at the foot (it sits on the ground)
+    // and a darker rim: scrub reads as low solid clumps, crowns as light shells
+    float foot = 1.0 - smoothstep(0.0, 0.8, v_hag);
+    col = base * (0.5 + 0.55 * max(dot(N, L), 0.0) + 0.3 * (0.5 + 0.5 * nup));
+    col = mix(col, mix(base, vec3(0.82, 0.88, 0.5), 0.3) * 1.08, 0.5 * topF);
+    col *= 1.0 - 0.4 * foot;
+    vec3 rimCol = base * 0.5;
+    float er = clamp(u_edge * rim * 1.2, 0.0, 1.0);
     if (u_mode > 0.5) { a = u_behind * u_edge * rim * (0.45 + u_opacity) * 0.4 * (1.0 - far); col = rimCol; }
-    else { a = u_opacity * u_fill * dens * mix(2.3, 2.6, far) + u_edge * rim * (0.35 + u_opacity) * 0.8; col = mix(col, rimCol, er); }
+    else { a = u_opacity * u_fill * dens * mix(3.4, 3.0, far) + u_edge * rim * (0.35 + u_opacity) * 0.7; col = mix(col, rimCol, er); }
   } else {
     vec3 rimCol = mix(base, vec3(0.75, 1.0, 0.5), 0.4) * 1.12;
     vec3 topCol = mix(base, vec3(0.96, 1.0, 0.62), 0.38) * 1.08;
@@ -711,6 +727,7 @@ void main() {
       pending: null,              // { modelMatrix, shapes: mesh|null, shell: mesh|null } waiting for a context
       frames: 0,
       drawn: 0,                   // triangles handed to the GPU in the last frame (colour pass; collapsed shapes included)
+      passTris: 0,                // the same over all three passes
       ranges: 0,                  // index ranges drawn in the last frame (per pass)
       update(frameState) {
         if (destroyed || !this.show) return;
@@ -729,7 +746,7 @@ void main() {
         if ((S.look === 'shell' || S.look === 'both') && gpu.shell) on.push(gpu.shell);
         const cv = frameState.cullingVolume;
         const vis = on.filter(g => !cv || cv.computeVisibility(g.sphere) !== C.Intersect.OUTSIDE);
-        this.drawn = 0; this.ranges = 0;
+        this.drawn = 0; this.ranges = 0; this.passTris = 0;
         if (!vis.length) return;
         ensureTarget(context);
         clearCmd.execute(context);
@@ -755,8 +772,9 @@ void main() {
           add(near, true); add(far, false);
         }
         for (const c of pre) list.push(c);
-        for (const c of behind) list.push(c);
+        for (const c of behind) { list.push(c); this.passTris += c.count / 3; }
         for (const c of col) list.push(c);
+        this.passTris += 2 * this.drawn;
         this.frames++;
       },
       uploaded: k => !!gpu[k],
@@ -825,7 +843,7 @@ void main() {
     D.h0 = h0;
     const t0 = performance.now();
     const meshes = {
-      shapes: D.sh.n ? buildShapes(D.sh.rec, D.sh.n, { shift: shift.at, h0, stride: D.sh.stride }) : null,
+      shapes: D.sh.n ? buildShapes(D.sh.rec, D.sh.n, { shift: shift.at, h0, stride: D.sh.stride, groundAt: D.ground ? (x, y) => bilinear(D.ground, D.gspec.nx, D.gspec.ny, D.gspec.x0, D.gspec.y0, D.gspec.cell, D.gspec.cell, x, y) : null }) : null,
       shell: D.shell.T ? buildShell(D.shell, { shift: shift.at, h0 }) : null,
     };
     D.buildMs = performance.now() - t0;
@@ -928,7 +946,7 @@ void main() {
     if (prim) prim.show = true; const on = time();
     if (prim) prim.show = show;
     lastDrawMs = Math.max(0, on - off);
-    return { onMs: on, offMs: off, drawMs: lastDrawMs, triangles: stats().triangles };
+    return { onMs: on, offMs: off, drawMs: lastDrawMs, triangles: stats().triangles, drawn: prim ? Math.round(prim.drawn) : 0, allPasses: prim ? Math.round(prim.passTris) : 0, ranges: prim ? prim.ranges : 0 };
   }
 
   // The terrain shown changed: follow it (onTerrain only).
