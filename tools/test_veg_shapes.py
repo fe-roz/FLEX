@@ -267,6 +267,60 @@ check('low shell lighter', outs['low']['shell']['triangles'] <=
       veg['shell']['triangles'] <= outs['high']['shell']['triangles'] * 1.05)
 
 # --------------------------------------------------------------------------
+# 1b. Crown segmentation on made-up canopy models
+# --------------------------------------------------------------------------
+
+import lidar_derive as ld
+from scipy import ndimage
+cgs = ld.Grid(0.0, 0.0, 60.0, 60.0, 0.5)
+GX, GY = np.meshgrid(cgs.minx + (np.arange(cgs.nx) + 0.5) * cgs.cell,
+                     cgs.maxy - (np.arange(cgs.ny) + 0.5) * cgs.cell)
+
+
+def segment(chm):
+    chm = chm.astype(np.float32)
+    chm_s = ndimage.gaussian_filter(chm, 0.6 / cgs.cell).astype(np.float32)
+    tr, tc = vs.find_tops(chm_s, cgs, 2.0)
+    lab = vs.crowns(chm, chm_s, cgs, tr, tc, 2.0)
+    n0 = len(tr)
+    lab, tr, tc, nm = vs.merge_tops(chm, chm_s, lab, tr, tc, cgs)
+    lab2, tr2, tc2, nl = vs.lower_layer(chm, chm_s, lab, tr, tc, cgs, 2.0)
+    return n0, nm, nl, lab, lab2
+
+
+# A broad flat-topped crown with three bumps is one tree.
+dd = np.hypot(GX - 30, GY - 30)
+dome = np.where(dd < 8, 16 - 3 * (dd / 8) ** 2, 0)
+for bx, by in ((27.5, 30.5), (32.5, 29.5), (30, 33.5)):
+    dome += 0.5 * np.exp(-((GX - bx) ** 2 + (GY - by) ** 2) / (2 * 0.7 ** 2)) * (dd < 8)
+n0, nm, nl, lab, lab2 = segment(dome)
+check('bumps on one crown: several tops found', n0 >= 2, n0)
+check('bumps on one crown: joined into one', n0 - nm == 1, (n0, nm))
+# Two touching conifers stay two (sharp apexes, deep enough saddle).
+cones = np.maximum(np.maximum(0, 25 - 1.6 * np.hypot(GX - 26.5, GY - 30)),
+                   np.maximum(0, 23 - 1.6 * np.hypot(GX - 33.5, GY - 30)))
+n0, nm, nl, lab, lab2 = segment(cones)
+check('two touching conifers stay two', n0 == 2 and nm == 0 and nl == 0, (n0, nm, nl))
+# A tall narrow conifer over a lower canopy of small crowns: the watershed
+# gives it the patch around it; the lower layer gets crowns of its own and
+# the tall crown shrinks to about its own size.
+rng2 = np.random.default_rng(1)
+low = np.zeros_like(GX)
+for i in range(40):
+    a = rng2.uniform(0, 2 * math.pi); rr_ = rng2.uniform(5, 16)
+    cx_, cy_ = 30 + rr_ * math.cos(a), 30 + rr_ * math.sin(a)
+    low = np.maximum(low, np.maximum(0, 13 + rng2.uniform(-1, 1) - 0.7 * np.hypot(GX - cx_, GY - cy_)))
+low = np.where(dd < 18, np.maximum(low, 9.0), 0)
+tall = np.maximum(low, np.maximum(0, 36 - 5.0 * dd))
+n0, nm, nl, lab, lab2 = segment(tall)
+a0 = (lab == lab[60, 60]).sum() * 0.25
+a1 = (lab2 == lab2[60, 60]).sum() * 0.25
+check('lower canopy split from the tall crown', nl >= 3 and a1 < 0.7 * a0 and
+      a1 > math.pi * 3.0 ** 2, (nl, a0, a1))
+# The dome above is not split (its rim is steep, not a canopy of its own).
+check('a crown\'s rim is not a lower layer', segment(dome)[2] == 0)
+
+# --------------------------------------------------------------------------
 # 2. Bare ground and a cliff
 # --------------------------------------------------------------------------
 

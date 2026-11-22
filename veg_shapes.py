@@ -8,14 +8,16 @@ veg_shapes.py -- light 3D shapes of the vegetation for FLEX.
 From the LiDAR of an area and the ground under it, two "looks" that are much
 lighter to draw and to keep than the cloud:
 
-  shapes  one simple crown per tree (dome or cone) plus low mounds for brush
+  shapes  one crown per tree with its outline measured from its own
+          returns, plus low mounds for brush
   shell   a smoothed skin around the vegetation points (a "canopy cloud")
 
 The contract with FLEX (params, veg.json, the .bin layouts) is in the
 vegetation brief; outputs in OUTDIR:
 
     veg.json     the index: origin, frame, bbox, counts, stats, params
-    shapes.bin   N x 8 float32: x y zg height radius base kind density
+    shapes.bin   N x 12 float32: x y zg height radius base kind density
+                 r1 r2 r3 r4 (version 2; record 48 bytes)
     shell.bin    V x 4 float32 (x y z hag) then T x 3 uint32 (CCW outside)
     ground.bin   ny x nx float32, row 0 south, the job's ground (coarse)
     preview.png  top-down picture (ground shading, canopy, crowns, brush)
@@ -45,18 +47,37 @@ How, in plain words:
             tops = local maxima in a window that grows with height (octagon
             max filters); crowns by a marker watershed (flooding by levels from the tops),
             cut at a floor and a reach that grow with the tree's height.
-            Per crown: radius from its area, height from its highest
-            return, base where the crown's vertical profile of returns runs
-            out going down from its densest metre, density = share of the
-            column's returns caught by the crown, and the kind from how fast
-            the CHM falls away from the top (pointed apex = cone).
+            Bumps on one crown are joined (a blunt lower top behind a
+            shallow saddle); a tall tree's crown gives up the lower canopy
+            around it (cells off its own fitted surface, in a partly flat
+            patch), which gets crowns of its own.
+            Per crown: every return (thinned to ~16 per m2 at medium) goes
+            to the nearby crown whose envelope (from the canopy surface) it
+            fits best at its height, so a neighbour's branches do not widen
+            a crown and the watershed's cut does not narrow it. Height =
+            the crown's highest cell; base = above the emptiest layer under
+            its densest part (the trunk zone), else where its returns thin
+            out going down; position = halfway between the top and the
+            centre of its returns above the base. Outline: in 10 slices
+            from base to top the 90th percentile of the returns' distance
+            from that axis, capped by the canopy envelope at that height,
+            slices with under 6 returns interpolated, lightly smoothed;
+            radius = the widest, r1..r4 = the radius at 10/35/60/85 % of
+            the crown as fractions of it (a prior by kind only when under
+            3 slices could be measured). Kind (a label now) = cone when the
+            top is narrow (r4 <= 0.6) and the crown is at least twice as
+            long as it is wide, else dome. Density = share of the column's
+            returns caught by the crown above its base.
   brush     returns min_height..brush_top, as a share of all returns per
             cell; cells under trees whose crown starts low are the tree's
             own branches and are left out. Brushy cells are pooled in tiles
             a few metres across: one mound per tile at the brushy cells'
-            centre, radius from their area, height = 75th percentile of the
-            cells' tops, density = twice the band's share of all returns
-            (0.05..1). Tiles grow if the record budget is exceeded.
+            centre, radius from their area, height = 90th percentile of the
+            cells' tops, outline = at each profile height the share of the
+            mound's cells whose brush reaches it (as an area, so a flat
+            thicket is a drum and scattered shrubs a dome), density =
+            twice the band's share of all returns (0.05..1). Tiles grow if
+            the record budget is exceeded.
   shell     occupancy voxels (x, y, HAG; half as tall as wide) of the
             cleaned returns, Gaussian smoothed, surface nets (a vertex per
             crossing cube, a quad per crossing edge), Taubin smoothed;
@@ -607,13 +628,18 @@ def merge_tops(chm, chm_s, lab, tops_r, tops_c, cg):
         n - len(roots)
 
 
+LOWER_SLOPE = 1.0        # a lower canopy: cells flatter than this (rise / run) ...
+LOWER_FLAT_M2 = 4.0      # ... over at least this many m2 of the patch
+
+
 def lower_layer(chm, chm_s, lab, tops_r, tops_c, cg, tree_min):
     """A tall tree over a lower canopy: the watershed hands the lower
     canopy around it to the tall tree, whose crown then reads as wide as
     the whole patch. Per crown the surface near its top is fitted (drop =
-    k1 d + k2 d^2 from the top); cells far below that surface carried
-    outward (a shoulder: another layer) leave the crown, and the lower
-    layer gets its own tops and crowns. Returns labels, tops, count added."""
+    k1 d + k2 d^2 from the top); cells well off that surface carried
+    outward and much lower than the top, in a patch that is partly flat
+    (a canopy, not a crown's flank), leave the crown, and that lower layer
+    gets its own tops and crowns. Returns labels, tops, count added."""
     n = len(tops_r)
     if n == 0:
         return lab, tops_r, tops_c, 0
@@ -642,8 +668,12 @@ def lower_layer(chm, chm_s, lab, tops_r, tops_c, cg, tree_min):
     k1 = np.maximum(k1, 0.0)
     env = H[L - 1] - k1[L - 1] * d - k2[L - 1] * d * d
     h = H[L - 1]
-    cut = (d > 1.5) & (chm_s[rr, cc] < env - (0.2 * h + 1.0)) & \
-        (chm_s[rr, cc] < 0.7 * h)
+    z = chm_s[rr, cc]
+    # Far under that surface carried outward (a flat crown over a lower
+    # one), or above it where a steep crown's own surface would already
+    # have reached the lower canopy: either way not this crown's surface.
+    cut = (d > 1.5) & (z < 0.7 * h) & \
+        ((z < env - (0.2 * h + 1.0)) | (z > env + (0.1 * h + 1.0)))
     if not cut.any():
         return lab, tops_r, tops_c, 0
     # Only where that lower surface is a canopy of its own: a patch with a
@@ -652,12 +682,12 @@ def lower_layer(chm, chm_s, lab, tops_r, tops_c, cg, tree_min):
     low = np.zeros(lab.shape, bool)
     low[rr[cut], cc[cut]] = True
     gy, gx = np.gradient(chm_s.astype(np.float64), c)
-    flat = low & (np.hypot(gx, gy) < 0.6)
+    flat = low & (np.hypot(gx, gy) < LOWER_SLOPE)
     comp, ncomp = ndimage.label(low, structure=np.ones((3, 3)))
     if ncomp == 0:
         return lab, tops_r, tops_c, 0
     nflat = np.bincount(comp[flat], minlength=ncomp + 1) * c * c
-    low &= (nflat >= 6.0)[comp]
+    low &= (nflat >= LOWER_FLAT_M2)[comp]
     if not low.any():
         return lab, tops_r, tops_c, 0
     lab = lab.copy()
@@ -674,6 +704,7 @@ def lower_layer(chm, chm_s, lab, tops_r, tops_c, cg, tree_min):
     return lab, np.r_[tops_r, t2r], np.r_[tops_c, t2c], len(t2r)
 
 
+CHM_BOUND = True
 DEBUG = None        # a dict to receive the trees' intermediate arrays (diagnostics)
 BASE_THIN = 0.45                     # base: a trunk zone thinner than this share
 BASE_EDGE = 0.30                     # of the crown body's returns; else this
@@ -709,7 +740,9 @@ def tree_records(V, f_c, chm, chm_s, lab, cg, tops_r, tops_c, tot_c,
     diag, base of every label for the brush)."""
     from scipy import ndimage
     n = len(tops_r)
-    empty = (np.zeros((0, RECORD), np.float32), {}, np.zeros(0, np.float32))
+    empty = (np.zeros((0, RECORD), np.float32),
+             {"weak": np.zeros(0, bool), "slices_known": np.zeros(0, int),
+              "stride": 1, "seconds": 0.0}, np.zeros(0, np.float32))
     if n == 0:
         return empty
     t0 = time.time()
@@ -884,15 +917,12 @@ def tree_records(V, f_c, chm, chm_s, lab, cg, tops_r, tops_c, tot_c,
     rq = np.where(good, rq, np.nan)
     # The canopy surface bounds it from above: a branch at height z makes
     # its cell's canopy at least z high, so the crown at z lies within the
-    # cells of its crown whose canopy reaches z (area -> radius).
-    zfrac = (chm[rr, cc] - base[L]) / clen[L] * NSLICE - 0.5
-    smax = np.clip(np.floor(zfrac).astype(np.int64), -1, NSLICE - 1)
-    kk = smax >= 0
-    ncs = np.bincount(L[kk] * NSLICE + smax[kk],
-                      minlength=(n + 1) * NSLICE).reshape(n + 1, NSLICE)
-    ncs = np.cumsum(ncs[:, ::-1], axis=1)[:, ::-1]
-    Rchm = np.sqrt(ncs * c * c / math.pi) + 0.5 * c
-    rq = np.where(good, np.minimum(rq, Rchm), np.nan)
+    # farthest cell of its crown whose canopy reaches z (the envelope).
+    zs = base[:, None] + (np.arange(NSLICE) + 0.5)[None, :] / NSLICE * clen[:, None]
+    ks = np.clip((zs / np.maximum(topH, 0.1)[:, None] * NLEV).astype(np.int64), 0, NLEV)
+    Rchm = R0[np.arange(n + 1)[:, None], ks]
+    if CHM_BOUND:
+        rq = np.where(good, np.minimum(rq, Rchm), np.nan)
     good = good & (rq > 0)
     # Fill unknown slices along height (linear between known ones; above
     # the highest known slice taper to the top, below the lowest hold).
@@ -951,6 +981,8 @@ def tree_records(V, f_c, chm, chm_s, lab, cg, tops_r, tops_c, tot_c,
     rec[:, 8:12] = fracs[1:]
     ok = (ncell[1:] * c * c >= max(1.0, math.pi * 0.6 ** 2)) & \
         (height[1:] >= brush_top) & (cntc[1:] >= 3)
+    if DEBUG is not None:
+        DEBUG.update(rec_all=rec.copy(), ok=ok)
     diag = {"weak": weak[1:][ok], "slices_known": nknown[1:][ok],
             "stride": stride, "seconds": time.time() - t0}
     rec = rec[ok]
@@ -1470,6 +1502,14 @@ def run(params, out_dir, say=say_default):
                 f"{budget:,}): brush tiles {tile:.1f} m")
         recs = np.concatenate([trees, brush]) if len(brush) else trees
         timings["shapes_s"] = round(time.time() - t0, 2)
+        diag = {"measured": int(len(trees) - diag["weak"].sum()),
+                "prior": int(diag["weak"].sum()),
+                "bumps_joined": int(n_merged), "lower_layer": int(n_lower),
+                "thinning": int(diag["stride"]),
+                "median_profile": [round(float(v), 2) for v in
+                                   np.median(trees[:, 8:12], axis=0)]
+                if len(trees) else [],
+                "seconds": round(diag["seconds"], 2)}
         counts = {"trees": int(len(trees)),
                   "cones": int((trees[:, 6] == 1).sum()),
                   "domes": int((trees[:, 6] == 0).sum()),
@@ -1566,10 +1606,8 @@ def run(params, out_dir, say=say_default):
                     "cleaned": cleaned, "timings": timings,
                     "frame_inverse_err_m": round(inv_err, 4),
                     "utm_zone": zone, "south": bool(south)}
-    if diag and len(diag.get("apex", [])):
-        veg["stats"]["kind_metrics"] = {
-            k: [round(float(np.percentile(v, q)), 2) for q in (10, 50, 90)]
-            for k, v in diag.items()}
+    if diag:
+        veg["stats"]["outlines"] = diag
     used = dict(prm)
     used.pop("area_bbox_utm", None)
     veg["params"] = used
