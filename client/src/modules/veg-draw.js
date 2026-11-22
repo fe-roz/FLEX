@@ -182,21 +182,21 @@
   }
 
   // ── Level of detail ───────────────────────────────────────────────────────
-  // Triangles go where they show. Near: segments by the crown's radius, rings by the crown's depth (3 to 5 rings, the top
-  // ring the round cap); a 3 m sapling gets 30 triangles, a 40 m tree 80-100. Far: every shape again as 12 triangles (two
+  // Triangles go where they show. Near: segments by the crown's radius (5-7), rings by the crown's depth (2 to 5; with five
+  // the top ring is the round cap); a 3 m sapling gets 20 triangles, a 40 m tree 56-70 (round 1: 48 each). Far: every shape again as 12 triangles (two
   // staggered 3-gons, so it is a 6-sided crown from above; brush two 4-gons). Each shape switches between the two by its own
   // distance in the vertex shader, with a short screen-door cross-fade, so nothing pops; the CPU only picks which blocks
   // of the index buffer to draw (tiles x size classes, merged into a few ranges), and the shader collapses the rest.
   const SIZE_R = [1.8, 3.5, 6];                         // radius class limits (m): classes 0..3
-  const SEG = [5, 6, 7, 8];
+  const SEG = [5, 6, 6, 7];
   const SWITCH_M = [130, 240, 420, 700];                // where a class goes far at lod 1 (about 10 px of radius at 800 px high)
   const FADE = 0.2;                                     // cross-fade band, a share of the switch distance
   // ring heights (t) by crown depth; the five-ring one ends in the round cap ring, the others close on the top pole
   const RINGS = [[0.2, 0.7], [0.12, 0.45, 0.8], [0.1, 0.35, 0.6, 0.85], [0.1, 0.35, 0.6, 0.85, 0.956]];
-  const MIN_RINGS = [0, 0, 1, 2], MAX_RINGS = [1, 2, 3, 3];   // by size class (indices into RINGS)
+  const MIN_RINGS = [0, 0, 1, 1], MAX_RINGS = [1, 2, 3, 3];   // by size class (indices into RINGS)
   const BRUSH_SEG = 7;
   const sizeClass = r => (r < SIZE_R[0] ? 0 : r < SIZE_R[1] ? 1 : r < SIZE_R[2] ? 2 : 3);
-  const ringsFor = (depth, c) => { c = c == null ? 3 : c; return RINGS[clamp(depth < 4 ? 0 : depth < 10 ? 1 : depth < 20 ? 2 : 3, MIN_RINGS[c], MAX_RINGS[c])]; };
+  const ringsFor = (depth, c) => { c = c == null ? 3 : c; return RINGS[clamp(depth < 6 ? 0 : depth < 14 ? 1 : depth < 24 ? 2 : 3, MIN_RINGS[c], MAX_RINGS[c])]; };
   /** Vertices and triangles of one shape: lod 0 near, 1 far. */
   function shapeCounts(kind, r, depth, lod) {
     if (kind === 2) return lod ? { verts: 9, tris: 12 } : { verts: 2 * BRUSH_SEG + 1, tris: 3 * BRUSH_SEG };
@@ -301,7 +301,8 @@
       let k = Math.round(rec[o + 6]); if (k !== 0 && k !== 1 && k !== 2) k = 0;
       kinds[i] = k; counts[k === 0 ? 'dome' : k === 1 ? 'cone' : 'brush']++;
       let H = Math.max(0.2, num(rec[o + 3], 1)), r = Math.max(0.3, num(rec[o + 4], 1)), base = Math.max(0, num(rec[o + 5], 0));
-      if (k === 2) { base = 0; H = Math.min(H, Math.max(caps[i], H * 0.65)); }      // held under a crown, never squashed flat else if (base > H * 0.8) base = H * 0.8;      // a crown is never a sliver
+      if (k === 2) { base = 0; H = Math.min(H, Math.max(caps[i], H * 0.65)); }      // brush: held under a crown, never squashed flat
+      else if (base > H * 0.8) base = H * 0.8;                                         // a crown is never a sliver
       Hs[i] = H; Rs[i] = r; Bs[i] = base;
       cls[i] = sizeClass(r); tile[i] = tg.of(rec[o], rec[o + 1]);
       for (let lod = 0; lod < 2; lod++) {

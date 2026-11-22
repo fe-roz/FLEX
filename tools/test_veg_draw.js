@@ -75,8 +75,8 @@ const veg = F.veg;
 // ── the shapes mesh ──
 {
   const s = M.parseShapes(F.shapes, veg.shapes.count, 48);
-  ok('counts: a sapling 20-30 triangles, a big tree 56-80, far 12, brush 21 / 12',
-    M.shapeCounts(0, 1.2, 3, 0).tris === 20 && M.shapeCounts(0, 1.5, 6, 0).tris === 30 && M.shapeCounts(1, 7, 30, 0).tris === 80 && M.shapeCounts(0, 5, 15, 0).tris === 56 &&
+  ok('counts: a sapling 20-30 triangles, a big tree 48-70, far 12, brush 21 / 12',
+    M.shapeCounts(0, 1.2, 3, 0).tris === 20 && M.shapeCounts(0, 1.5, 6, 0).tris === 30 && M.shapeCounts(1, 7, 30, 0).tris === 70 && M.shapeCounts(0, 5, 15, 0).tris === 48 &&
     M.shapeCounts(1, 7, 30, 1).tris === 12 && M.shapeCounts(2, 2, 1.5, 0).tris === 21 && M.shapeCounts(2, 2, 1.5, 1).tris === 12);
   const m = M.buildShapes(s.rec, s.n, { shift: () => 0, h0: 0, curvature: false, stride: 12 });
   let wantN = 0, wantF = 0;
@@ -161,6 +161,11 @@ const veg = F.veg;
   const drop = (37 * 37 + 21 * 21) / (2 * M.EARTH_R);
   ok('shapes mesh: shift at the centre, h0 and the plane drop', near(ms.pos[s1v * 3 + 2] - m2.pos[s1v * 3 + 2], -1000 + 37 - 5 - drop, 1e-3));
   ok('shapes mesh: bad kind -> dome, base > height kept inside', (() => { const b = M.buildShapes(new Float32Array([0, 0, 0, 10, 3, 50, 9, 1]), 1, { curvature: false }); return b.counts.dome === 1 && b.pos.every(isFinite); })());
+  {
+    const sl = M.buildShapes(new Float32Array([0, 0, 0, 10, 3, 9.5, 1, 1]), 1, { curvature: false });
+    let zmin2 = Infinity; for (let q = 0; q < sl.vertices; q++) zmin2 = Math.min(zmin2, sl.pos[q * 3 + 2]);
+    ok('shapes mesh: a crown base above 80 % of the height is held at 80 % (never a sliver)', near(zmin2, 8, 1e-4), zmin2);
+  }
   ok('shapes mesh: box', m.min[2] < m.max[2] && m.min[0] >= -160 && m.max[0] <= 160);
   // brush under a crown that starts higher is held below it
   {
