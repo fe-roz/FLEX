@@ -108,35 +108,46 @@ def _test_abort(cdir, t):
                 os.abort()
 
 
-def read_tile(source, box, zone, south):
-    """x, y, z, cls (float64 x/y/z, uint8 cls) of the tile, half-open box."""
+def read_tile(source, box, zone, south, ox=0.0, oy=0.0):
+    """The tile's points as compact arrays (float32 x - ox, y - oy, float32 z,
+    uint8 cls), half-open box. PDAL is asked for sub-boxes of about
+    FLEX_AREA_SUBTILE_M (default 315 m, so 4 per 630 m tile) one after the
+    other, each turned compact at once: PDAL's arrays cost ~170 bytes a
+    point, the compact ones 13, so a 20 M point tile peaks near 1 GB."""
     import lidar_derive as ld
     xs, ys, zs, cs = [], [], [], []
+
+    def keep(x, y, z, c, b):
+        k = (x >= b[0]) & (x < b[2]) & (y >= b[1]) & (y < b[3])
+        xs.append((x[k] - ox).astype(np.float32)); ys.append((y[k] - oy).astype(np.float32))
+        zs.append(np.asarray(z)[k].astype(np.float32))
+        cs.append(np.clip(np.asarray(c)[k], 0, 255).astype(np.uint8) if c is not None
+                  else np.ones(int(k.sum()), np.uint8))
+
     if "npz" in source:
         d = np.load(source["npz"], mmap_mode="r")
         x, y = np.asarray(d["x"]), np.asarray(d["y"])
-        k = np.nonzero((x >= box[0]) & (x < box[2]) & (y >= box[1]) & (y < box[3]))[0]
-        xs.append(x[k]); ys.append(y[k]); zs.append(np.asarray(d["z"])[k])
-        cs.append(np.asarray(d["classification"])[k] if "classification" in d.files
-                  else np.ones(len(k), np.uint8))
+        c = np.asarray(d["classification"]) if "classification" in d.files else None
+        keep(x, y, np.asarray(d["z"]), c, box)
     else:
         import route_cost as rc
         epts = [source["ept"]] + [u for u in (source.get("ept_also") or []) if u]
-        cover = rc.et().latlon_box_covering(box, zone, south)
-        for url in epts:
-            try:
-                x, y, z, c, _ = ld.read_ept_all_classes(url, box, cover, zone=zone, south=south,
-                                                        progress=lambda m: None)
-            except SystemExit as e:
-                if "no points" in str(e.code):
-                    continue
-                raise
-            k = (x >= box[0]) & (x < box[2]) & (y >= box[1]) & (y < box[3])
-            xs.append(x[k]); ys.append(y[k]); zs.append(z[k])
-            cs.append(c[k] if c is not None else np.ones(int(k.sum()), np.uint8))
+        sub = float(os.environ.get("FLEX_AREA_SUBTILE_M", "315"))
+        for b in plan(box, sub):
+            b = b[1]
+            cover = rc.et().latlon_box_covering(b, zone, south)
+            for url in epts:
+                try:
+                    x, y, z, c, _ = ld.read_ept_all_classes(url, b, cover, zone=zone, south=south,
+                                                            progress=lambda m: None)
+                except SystemExit as e:
+                    if "no points" in str(e.code):
+                        continue
+                    raise
+                keep(x, y, z, c, b)
+                del x, y, z, c
     cat = lambda L, dt: np.concatenate(L) if L else np.zeros(0, dt)
-    return (cat(xs, float), cat(ys, float), cat(zs, float),
-            np.clip(cat(cs, np.int16), 0, 255).astype(np.uint8))
+    return (cat(xs, np.float32), cat(ys, np.float32), cat(zs, np.float32), cat(cs, np.uint8))
 
 
 def write_tile(cdir, t, box, ox, oy, x, y, z, c):
@@ -145,15 +156,14 @@ def write_tile(cdir, t, box, ox, oy, x, y, z, c):
             p = os.path.join(cdir, f"t{t:04d}.{k}{suf}")
             if os.path.exists(p):
                 os.remove(p)
-    arrs = {"xl": (x - ox).astype(np.float32), "yl": (y - oy).astype(np.float32),
-            "z": z.astype(np.float32), "cls": c.astype(np.uint8)}
+    arrs = {"xl": x, "yl": y, "z": z, "cls": c}          # compact already
     if len(z):
         for k, a in arrs.items():
             tmp = os.path.join(cdir, f"t{t:04d}.{k}.tmp.npy")
             np.save(tmp, a)
             os.replace(tmp, os.path.join(cdir, f"t{t:04d}.{k}.npy"))
     g = c == 2
-    zg = z[g]
+    zg = z[g].astype(np.float64)
     m = {"tile": t, "box": list(box), "n": int(len(z)), "n_ground": int(g.sum()),
          "zg_lo": float(np.percentile(zg, 0.5)) if len(zg) else None,
          "zg_hi": float(np.percentile(zg, 99.5)) if len(zg) else None,
@@ -178,7 +188,7 @@ def child_main(argv):
     t = a.tile
     box = job["tiles"][str(t)]
     _test_abort(cdir, t)
-    x, y, z, c = read_tile(job["source"], box, job["zone"], job["south"])
+    x, y, z, c = read_tile(job["source"], box, job["zone"], job["south"], job["ox"], job["oy"])
     m = write_tile(cdir, t, box, job["ox"], job["oy"], x, y, z, c)
     print(json.dumps({"n": m["n"]}))
     return 0
@@ -187,6 +197,24 @@ def child_main(argv):
 # --------------------------------------------------------------------------
 # The parent: every tile, in children, with retries; resumes
 # --------------------------------------------------------------------------
+
+def default_workers():
+    """FLEX_AREA_WORKERS, else 4, fewer when the machine has little memory
+    free (a reading child peaks near 1.2 GB; 2 GB kept for the rest)."""
+    if os.environ.get("FLEX_AREA_WORKERS"):
+        return max(1, int(os.environ["FLEX_AREA_WORKERS"]))
+    try:
+        with open("/proc/meminfo") as f:
+            kb = {l.split(":")[0]: int(l.split()[1]) for l in f}
+        avail = kb.get("MemAvailable", kb["MemTotal"]) / 1e6
+    except Exception:
+        try:
+            import psutil
+            avail = psutil.virtual_memory().available / 1e9
+        except Exception:
+            return 2
+    return int(max(1, min(4, (avail - 2.0) // 1.5)))
+
 
 def fetch_all(area_dir, source, bbox, tile_m, zone, south, say, stop_after=None):
     """Read every tile not yet on disk. Returns (done {t: meta}, failed [t], tiles)."""
@@ -225,7 +253,7 @@ def fetch_all(area_dir, source, bbox, tile_m, zone, south, say, stop_after=None)
     if done:
         say(f"[1/4] {len(done)} of {n} tiles already on disk (resuming)")
     delays = [float(v) for v in os.environ.get("FLEX_AREA_RETRY_S", "5,20,60").split(",") if v.strip()]
-    workers = max(1, int(os.environ.get("FLEX_AREA_WORKERS", "4")))
+    workers = default_workers()
     timeout = float(os.environ.get("FLEX_AREA_TILE_TIMEOUT_S", "1200"))
     if stop_after is not None:
         todo = todo[:stop_after]
