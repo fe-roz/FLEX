@@ -5,8 +5,12 @@ veg_shapes.py on made-up clouds (numpy only, no PDAL, no network).
     python tools/test_veg_shapes.py
 
 Scenes sit around the documentation example (45.1234, -100.5678). Pins down:
-  * known trees (8 cones, 5 domes) are found once each, near their true
-    position, with their height, crown radius, base and kind;
+  * known trees (8 conifers, 5 broadleaf, four outline types) are found
+    once each, near their true position, with their height, widest radius,
+    base, kind and measured outline (r1..r4 within tolerance of the truth);
+  * shapes.bin version 2: 48-byte records, profile fractions in 0..1;
+  * a crown with bumps is one tree; a tall tree over a lower canopy keeps
+    its own crown and the lower canopy gets crowns of its own;
   * a brush patch gives mounds inside it, open ground gives nothing, a bare
     scene gives no shapes and no shell, a cliff face is not vegetation, and
     noise (class 7, a bird) makes no shape;
@@ -60,7 +64,8 @@ def load(out):
     veg = json.load(open(os.path.join(out, 'veg.json')))
     shapes = None
     if 'shapes' in veg:
-        shapes = np.fromfile(os.path.join(out, 'shapes.bin'), '<f4').reshape(-1, 8)
+        shapes = np.fromfile(os.path.join(out, 'shapes.bin'), '<f4').reshape(
+            -1, veg['shapes']['record'] // 4)
     shell = None
     if 'shell' in veg:
         buf = open(os.path.join(out, 'shell.bin'), 'rb').read()
@@ -110,7 +115,8 @@ check('trees first, tallest first',
 
 matched = set()
 kind_ok = 0
-for (tx, ty, h, r, b, k) in truth['trees']:
+prof_err = []
+for (tx, ty, h, r, b, k, prof) in truth['trees']:
     xe, yn = fr.to_enu(np.array([E0 + tx]), np.array([N0 + ty]))
     d = np.hypot(trees[:, 0] - xe[0], trees[:, 1] - yn[0])
     i = int(np.argmin(d))
@@ -119,15 +125,32 @@ for (tx, ty, h, r, b, k) in truth['trees']:
     check(f'tree at {tx},{ty} found', d[i] < 1.5, f'{d[i]:.2f} m off')
     check(f'tree at {tx},{ty} height', abs(t[3] - h) < 0.15 * h + 0.5,
           f'{t[3]:.1f} vs {h}')
-    check(f'tree at {tx},{ty} radius', abs(t[4] - r) < 0.35 * r + 0.3,
+    check(f'tree at {tx},{ty} height within 5 %', abs(t[3] - h) < 0.05 * h,
+          f'{t[3]:.1f} vs {h}')
+    check(f'tree at {tx},{ty} radius', abs(t[4] - r) < 0.12 * r + 0.2,
           f'{t[4]:.2f} vs {r}')
-    check(f'tree at {tx},{ty} base', abs(t[5] - b) < 0.2 * h + 1.0,
+    check(f'tree at {tx},{ty} base', abs(t[5] - b) < 0.1 * h + 1.5,
           f'{t[5]:.1f} vs {b}')
+    fe = np.abs(t[8:12] - np.array(prof))
+    prof_err.append(fe)
+    check(f'tree at {tx},{ty} outline', fe.max() < 0.22,
+          f'{np.round(t[8:12], 2)} vs {prof}')
     zg = truth['zf'](tx, ty)
     check(f'tree at {tx},{ty} ground', abs(t[2] - zg) < 0.3, f'{t[2]:.2f} vs {zg:.2f}')
     check(f'tree at {tx},{ty} density in 0..1', 0 < t[7] <= 1)
     kind_ok += int(t[6] == k)
 check('one shape per tree', len(matched) == len(truth['trees']))
+check('outlines match on average', np.mean(prof_err) < 0.08, np.mean(prof_err))
+for name, want in vs.SYNTH_PROFILES.items():
+    errs = [e for e, tt in zip(prof_err, truth['trees']) if tuple(tt[6]) == tuple(want)]
+    check(f'outline type {name} measured', len(errs) > 0 and np.mean(errs) < 0.1,
+          np.mean(errs) if errs else 'none')
+check('profile fractions in 0..1', np.all((S[:, 8:12] >= 0) & (S[:, 8:12] <= 1)),
+      S[:, 8:12].min())
+check('widest radius is the outline\'s widest', np.all(S[:len(trees), 8:12].max(1) > 0.9),
+      S[:len(trees), 8:12].max(1).min())
+check('brush outline a mound (wide low, narrower high)',
+      np.all(brush[:, 8] >= brush[:, 11] - 1e-6) and np.all(brush[:, 8:12] >= 0.15))
 check('cone / dome guessed', kind_ok >= len(truth['trees']) - 1,
       f'{kind_ok}/{len(truth["trees"])}')
 
@@ -164,9 +187,11 @@ check('progress lines', '[1/6]' in log and '[6/6]' in log and
 for k in ('version', 'origin', 'frame', 'bbox', 'area_m2', 'shapes', 'shell',
           'ground', 'stats', 'params'):
     check(f'veg.json has {k}', k in veg)
-check('frame enu', veg['frame'] == 'enu' and veg['version'] == 1)
-check('record 32', veg['shapes']['record'] == 32 and
-      os.path.getsize(os.path.join(out, 'shapes.bin')) == 32 * len(S))
+check('frame enu', veg['frame'] == 'enu' and veg['version'] == 2)
+check('record 48', veg['shapes']['record'] == 48 and S.shape[1] == 12 and
+      os.path.getsize(os.path.join(out, 'shapes.bin')) == 48 * len(S))
+check('shapes.profile', veg['shapes'].get('profile') == [0.1, 0.35, 0.6, 0.85],
+      veg['shapes'].get('profile'))
 G = veg['ground']
 check('ground.bin size', ground.size == G['nx'] * G['ny'] and
       os.path.getsize(os.path.join(out, 'ground.bin')) == 4 * G['nx'] * G['ny'])
@@ -233,7 +258,7 @@ check('only the asked look', 'shapes' not in veg_b and
 # Area ring clips: the western half only (the conifers).
 out_c = os.path.join(TMP, 'clip')
 veg_c, _ = quiet_run(dict(params, area=ring_ll(0, 0, 90, H), looks=['shapes']), out_c)
-Sc = np.fromfile(os.path.join(out_c, 'shapes.bin'), '<f4').reshape(-1, 8)
+Sc = np.fromfile(os.path.join(out_c, 'shapes.bin'), '<f4').reshape(-1, 12)
 tc = Sc[Sc[:, 6] != 2]
 check('area ring clips', len(tc) == 8 and np.all(tc[:, 6] == 1), (len(tc), tc[:, 6]))
 
@@ -245,6 +270,60 @@ check('low and high run', outs['low']['shapes']['trees'] >= 10 and
       outs['high']['shapes']['trees'] >= 10)
 check('low shell lighter', outs['low']['shell']['triangles'] <=
       veg['shell']['triangles'] <= outs['high']['shell']['triangles'] * 1.05)
+
+# --------------------------------------------------------------------------
+# 1b. Crown segmentation on made-up canopy models
+# --------------------------------------------------------------------------
+
+import lidar_derive as ld
+from scipy import ndimage
+cgs = ld.Grid(0.0, 0.0, 60.0, 60.0, 0.5)
+GX, GY = np.meshgrid(cgs.minx + (np.arange(cgs.nx) + 0.5) * cgs.cell,
+                     cgs.maxy - (np.arange(cgs.ny) + 0.5) * cgs.cell)
+
+
+def segment(chm):
+    chm = chm.astype(np.float32)
+    chm_s = ndimage.gaussian_filter(chm, 0.6 / cgs.cell).astype(np.float32)
+    tr, tc = vs.find_tops(chm_s, cgs, 2.0)
+    lab = vs.crowns(chm, chm_s, cgs, tr, tc, 2.0)
+    n0 = len(tr)
+    lab, tr, tc, nm = vs.merge_tops(chm, chm_s, lab, tr, tc, cgs)
+    lab2, tr2, tc2, nl = vs.lower_layer(chm, chm_s, lab, tr, tc, cgs, 2.0)
+    return n0, nm, nl, lab, lab2
+
+
+# A broad flat-topped crown with three bumps is one tree.
+dd = np.hypot(GX - 30, GY - 30)
+dome = np.where(dd < 8, 16 - 3 * (dd / 8) ** 2, 0)
+for bx, by in ((27.5, 30.5), (32.5, 29.5), (30, 33.5)):
+    dome += 0.5 * np.exp(-((GX - bx) ** 2 + (GY - by) ** 2) / (2 * 0.7 ** 2)) * (dd < 8)
+n0, nm, nl, lab, lab2 = segment(dome)
+check('bumps on one crown: several tops found', n0 >= 2, n0)
+check('bumps on one crown: joined into one', n0 - nm == 1, (n0, nm))
+# Two touching conifers stay two (sharp apexes, deep enough saddle).
+cones = np.maximum(np.maximum(0, 25 - 1.6 * np.hypot(GX - 26.5, GY - 30)),
+                   np.maximum(0, 23 - 1.6 * np.hypot(GX - 33.5, GY - 30)))
+n0, nm, nl, lab, lab2 = segment(cones)
+check('two touching conifers stay two', n0 == 2 and nm == 0 and nl == 0, (n0, nm, nl))
+# A tall narrow conifer over a lower canopy of small crowns: the watershed
+# gives it the patch around it; the lower layer gets crowns of its own and
+# the tall crown shrinks to about its own size.
+rng2 = np.random.default_rng(1)
+low = np.zeros_like(GX)
+for i in range(40):
+    a = rng2.uniform(0, 2 * math.pi); rr_ = rng2.uniform(5, 16)
+    cx_, cy_ = 30 + rr_ * math.cos(a), 30 + rr_ * math.sin(a)
+    low = np.maximum(low, np.maximum(0, 13 + rng2.uniform(-1, 1) - 0.7 * np.hypot(GX - cx_, GY - cy_)))
+low = np.where(dd < 18, np.maximum(low, 9.0), 0)
+tall = np.maximum(low, np.maximum(0, 36 - 5.0 * dd))
+n0, nm, nl, lab, lab2 = segment(tall)
+a0 = (lab == lab[60, 60]).sum() * 0.25
+a1 = (lab2 == lab2[60, 60]).sum() * 0.25
+check('lower canopy split from the tall crown', nl >= 3 and a1 < 0.7 * a0 and
+      a1 > math.pi * 3.0 ** 2, (nl, a0, a1))
+# The dome above is not split (its rim is steep, not a canopy of its own).
+check('a crown\'s rim is not a lower layer', segment(dome)[2] == 0)
 
 # --------------------------------------------------------------------------
 # 2. Bare ground and a cliff
@@ -266,7 +345,7 @@ npz2 = os.path.join(TMP, 'cliff.npz')
 np.savez(npz2, x=X + E0, y=Y + N0, z=Z, classification=C, epsg=np.int64(32600 + ZONE))
 out2 = os.path.join(TMP, 'cliff')
 veg2, _ = quiet_run({'source': {'npz': npz2}}, out2)
-S2 = np.fromfile(os.path.join(out2, 'shapes.bin'), '<f4').reshape(-1, 8)
+S2 = np.fromfile(os.path.join(out2, 'shapes.bin'), '<f4').reshape(-1, 12)
 check('cliff face is not vegetation', len(S2) == 0, S2[:5])
 check('cliff: area from the npz', abs(veg2['area_m2'] - 120 * 100) < 300, veg2['area_m2'])
 

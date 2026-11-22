@@ -8,14 +8,16 @@ veg_shapes.py -- light 3D shapes of the vegetation for FLEX.
 From the LiDAR of an area and the ground under it, two "looks" that are much
 lighter to draw and to keep than the cloud:
 
-  shapes  one simple crown per tree (dome or cone) plus low mounds for brush
+  shapes  one crown per tree with its outline measured from its own
+          returns, plus low mounds for brush
   shell   a smoothed skin around the vegetation points (a "canopy cloud")
 
 The contract with FLEX (params, veg.json, the .bin layouts) is in the
 vegetation brief; outputs in OUTDIR:
 
     veg.json     the index: origin, frame, bbox, counts, stats, params
-    shapes.bin   N x 8 float32: x y zg height radius base kind density
+    shapes.bin   N x 12 float32: x y zg height radius base kind density
+                 r1 r2 r3 r4 (version 2; record 48 bytes)
     shell.bin    V x 4 float32 (x y z hag) then T x 3 uint32 (CCW outside)
     ground.bin   ny x nx float32, row 0 south, the job's ground (coarse)
     preview.png  top-down picture (ground shading, canopy, crowns, brush)
@@ -45,18 +47,37 @@ How, in plain words:
             tops = local maxima in a window that grows with height (octagon
             max filters); crowns by a marker watershed (flooding by levels from the tops),
             cut at a floor and a reach that grow with the tree's height.
-            Per crown: radius from its area, height from its highest
-            return, base where the crown's vertical profile of returns runs
-            out going down from its densest metre, density = share of the
-            column's returns caught by the crown, and the kind from how fast
-            the CHM falls away from the top (pointed apex = cone).
+            Bumps on one crown are joined (a blunt lower top behind a
+            shallow saddle); a tall tree's crown gives up the lower canopy
+            around it (cells off its own fitted surface, in a partly flat
+            patch), which gets crowns of its own.
+            Per crown: every return (thinned to ~16 per m2 at medium) goes
+            to the nearby crown whose envelope (from the canopy surface) it
+            fits best at its height, so a neighbour's branches do not widen
+            a crown and the watershed's cut does not narrow it. Height =
+            the crown's highest cell; base = above the emptiest layer under
+            its densest part (the trunk zone), else where its returns thin
+            out going down; position = halfway between the top and the
+            centre of its returns above the base. Outline: in 20 slices
+            from base to top the 90th percentile of the returns' distance
+            from that axis, capped by the canopy envelope at that height,
+            slices with under 6 returns interpolated, lightly smoothed;
+            radius = the widest, r1..r4 = the radius at 10/35/60/85 % of
+            the crown as fractions of it (a prior by kind only when under
+            3 slices could be measured). Kind (a label now) = cone when the
+            top is narrow (r4 <= 0.6) and the crown is at least twice as
+            long as it is wide, else dome. Density = share of the column's
+            returns caught by the crown above its base.
   brush     returns min_height..brush_top, as a share of all returns per
             cell; cells under trees whose crown starts low are the tree's
             own branches and are left out. Brushy cells are pooled in tiles
             a few metres across: one mound per tile at the brushy cells'
-            centre, radius from their area, height = 75th percentile of the
-            cells' tops, density = twice the band's share of all returns
-            (0.05..1). Tiles grow if the record budget is exceeded.
+            centre, radius from their area, height = 90th percentile of the
+            cells' tops, outline = at each profile height the share of the
+            mound's cells whose brush reaches it (as an area, so a flat
+            thicket is a drum and scattered shrubs a dome), density =
+            twice the band's share of all returns (0.05..1). Tiles grow if
+            the record budget is exceeded.
   shell     occupancy voxels (x, y, HAG; half as tall as wide) of the
             cleaned returns, Gaussian smoothed, surface nets (a vertex per
             crossing cube, a quad per crossing edge), Taubin smoothed;
@@ -90,13 +111,13 @@ if HERE not in sys.path:
 import lidar_derive as ld          # Grid, sample_bilinear, write_png
 import route_cost as rc            # read_points, Points, cloth_below, ...
 
-VERSION = 1
+VERSION = 2
 GROUND_CLASS = 2
 VEG_CLASSES = (0, 1, 3, 4, 5)      # never classified, unclassified, veg
 NOISE_CLASSES = (7, 18)
 MAX_HAG = 100.0                    # taller "vegetation" is an error
 ROCK_MAX_H = 4.0                   # bare-rock "vegetation" is lower than this
-RECORD = 8                         # float32 per shapes.bin record
+RECORD = 12                        # float32 per shapes.bin record
 
 DETAIL = {
     #        CHM cell, CHM smoothing sigma (m), finest shell voxel, brush
@@ -104,11 +125,11 @@ DETAIL = {
     #        per km2 (the job's budget is the smaller of this and
     #        max_triangles)
     "low":    dict(chm=1.0, smooth=0.9, voxel=3.0, tile=6.0, gcell=10.0,
-                   budget=30000, tri_km2=100000),
+                   budget=30000, tri_km2=100000, keep=10.0),
     "medium": dict(chm=0.5, smooth=0.6, voxel=2.0, tile=4.0, gcell=5.0,
-                   budget=60000, tri_km2=300000),
+                   budget=60000, tri_km2=300000, keep=16.0),
     "high":   dict(chm=0.5, smooth=0.5, voxel=1.25, tile=3.0, gcell=5.0,
-                   budget=120000, tri_km2=1000000),
+                   budget=120000, tri_km2=1000000, keep=32.0),
 }
 
 say_default = rc.ascii_say
@@ -525,108 +546,455 @@ def crowns(chm, chm_s, cg, tops_r, tops_c, tree_min):
     return lab
 
 
-def tree_records(V, f_c, chm, chm_s, lab, cg, tops_r, tops_c, tot_c,
-                 min_h, brush_top, kinds_mode="auto"):
-    """Per crown: position, height, radius, base, kind, density."""
+def top_sharpness(chm, tops_r, tops_c, cell):
+    """How pointed each top is: the highest cell within 0.5 m of it minus
+    the mean of the cells 1.0..1.5 m away (m). Conifer apexes drop 1-3 m
+    there; a bump on a broad crown a few decimetres."""
+    reach = int(math.ceil(1.5 / cell))
+    P = np.pad(chm, reach, mode="edge")
+    core, ring = [], []
+    for i in range(-reach, reach + 1):
+        for j in range(-reach, reach + 1):
+            d = math.hypot(i, j) * cell
+            v = P[tops_r + reach + i, tops_c + reach + j]
+            if d <= 0.5:
+                core.append(v)
+            elif 1.0 <= d <= 1.5:
+                ring.append(v)
+    if not ring:
+        return np.zeros(len(tops_r), np.float32)
+    return np.max(core, axis=0) - np.mean(ring, axis=0)
+
+
+def merge_tops(chm, chm_s, lab, tops_r, tops_c, cg):
+    """Join crowns that are one crown with several bumps on it: a lower top
+    whose saddle with a higher neighbour is shallow, which is itself blunt
+    (a conifer apex is sharp) and which sits within half a crown's reach.
+    Broad flat-topped crowns were cut into slivers in round 1. Returns the
+    new labels and tops (the higher top of each group)."""
+    n = len(tops_r)
+    if n < 2:
+        return lab, tops_r, tops_c, 0
+    th = chm_s[tops_r, tops_c]
+    sharp = top_sharpness(chm, tops_r, tops_c, cg.cell)
+    A = np.concatenate([lab[:, :-1].ravel(), lab[:-1].ravel()])
+    B = np.concatenate([lab[:, 1:].ravel(), lab[1:].ravel()])
+    S = np.concatenate([np.minimum(chm_s[:, :-1], chm_s[:, 1:]).ravel(),
+                        np.minimum(chm_s[:-1], chm_s[1:]).ravel()])
+    k = (A > 0) & (B > 0) & (A != B)
+    A, B, S = A[k], B[k], S[k]
+    if not len(A):
+        return lab, tops_r, tops_c, 0
+    # Higher top = a (ties by label), lower = b; saddle = the highest
+    # boundary cell between them.
+    hiA = (th[A - 1] > th[B - 1]) | ((th[A - 1] == th[B - 1]) & (A < B))
+    a = np.where(hiA, A, B).astype(np.int64)
+    b = np.where(hiA, B, A).astype(np.int64)
+    key = b * (n + 1) + a
+    o = np.lexsort((-S, key))
+    key, S, a, b = key[o], S[o], a[o], b[o]
+    first = np.r_[0, np.nonzero(np.diff(key))[0] + 1]
+    sad, a, b = S[first], a[first], b[first]
+    tb = th[b - 1]
+    dep = tb - sad
+    dab = np.hypot(tops_r[a - 1] - tops_r[b - 1],
+                   tops_c[a - 1] - tops_c[b - 1]) * cg.cell
+    ok = (dep < 0.25 + 0.015 * tb) & (sharp[b - 1] < 0.3 + 0.02 * tb) & \
+        (dab < 0.5 * crown_reach(tb) + 1.0)
+    a, b, sad = a[ok], b[ok], sad[ok]
+    if not len(a):
+        return lab, tops_r, tops_c, 0
+    # Each b joins the neighbour it shares the highest saddle with.
+    o = np.lexsort((-sad, b))
+    a, b = a[o], b[o]
+    f = np.r_[True, b[1:] != b[:-1]]
+    parent = np.arange(n + 1)
+    parent[b[f]] = a[f]
+    for _ in range(64):
+        nxt = parent[parent]
+        if np.array_equal(nxt, parent):
+            break
+        parent = nxt
+    # A chain may not carry a top further than the root's reach.
+    root = parent[1:]
+    far = np.hypot(tops_r - tops_r[root - 1], tops_c - tops_c[root - 1]) * \
+        cg.cell > crown_reach(th[root - 1])
+    parent[1:][far] = np.arange(1, n + 1)[far]
+    roots = np.nonzero(parent[1:] == np.arange(1, n + 1))[0] + 1
+    new = np.zeros(n + 1, np.int32)
+    new[roots] = np.arange(1, len(roots) + 1, dtype=np.int32)
+    lab = new[parent[lab]] * (lab > 0)
+    return lab.astype(np.int32), tops_r[roots - 1], tops_c[roots - 1], \
+        n - len(roots)
+
+
+LOWER_SLOPE = 1.0        # a lower canopy: cells flatter than this (rise / run) ...
+LOWER_FLAT_M2 = 4.0      # ... over at least this many m2 of the patch
+
+
+def lower_layer(chm, chm_s, lab, tops_r, tops_c, cg, tree_min):
+    """A tall tree over a lower canopy: the watershed hands the lower
+    canopy around it to the tall tree, whose crown then reads as wide as
+    the whole patch. Per crown the surface near its top is fitted (drop =
+    k1 d + k2 d^2 from the top); cells well off that surface carried
+    outward and much lower than the top, in a patch that is partly flat
+    (a canopy, not a crown's flank), leave the crown, and that lower layer
+    gets its own tops and crowns. Returns labels, tops, count added."""
     n = len(tops_r)
     if n == 0:
-        return np.zeros((0, RECORD), np.float32), {}
-    flat = lab.ravel()
-    ncell = np.bincount(flat, minlength=n + 1)[1:]
-    area = ncell * cg.cell ** 2
-    radius = np.sqrt(area / math.pi)
-    # Centroid of the crown cells.
+        return lab, tops_r, tops_c, 0
+    c = cg.cell
     rr, cc = np.nonzero(lab)
     L = lab[rr, cc]
-    sr = np.bincount(L, rr, minlength=n + 1)[1:]
-    sc = np.bincount(L, cc, minlength=n + 1)[1:]
-    with np.errstate(invalid="ignore", divide="ignore"):
-        cr = np.where(ncell > 0, sr / np.maximum(ncell, 1), tops_r)
-        ccol = np.where(ncell > 0, sc / np.maximum(ncell, 1), tops_c)
-    # Position: halfway between the top and the crown's centroid.
-    pr = 0.5 * (tops_r + cr)
-    pc = 0.5 * (tops_c + ccol)
-    x = cg.minx + (pc + 0.5) * cg.cell
-    y = cg.maxy - (pr + 0.5) * cg.cell
+    H = chm_s[tops_r, tops_c]
+    d = np.hypot(rr - tops_r[L - 1], cc - tops_c[L - 1]) * c
+    drop = np.maximum(0.0, H[L - 1] - chm_s[rr, cc])
+    dmax = np.zeros(n + 1)
+    np.maximum.at(dmax, L, d)
+    inner = (d > 0.3) & (d <= np.maximum(1.5, 0.45 * dmax[L]))
 
-    # Height: the crown's highest cleaned return.
-    pl = flat[f_c]
-    inn = pl > 0
+    def S(w):
+        return np.bincount(L[inner], w[inner], minlength=n + 1)[1:]
+    di, dr = d, drop
+    s2, s3, s4 = S(di ** 2), S(di ** 3), S(di ** 4)
+    b1, b2 = S(dr * di), S(dr * di ** 2)
+    det = s2 * s4 - s3 ** 2
+    ok = det > 1e-9
+    k1 = np.where(ok, (b1 * s4 - b2 * s3) / np.where(ok, det, 1), 0.0)
+    k2 = np.where(ok, (s2 * b2 - s3 * b1) / np.where(ok, det, 1), 0.0)
+    lin = b1 / np.maximum(s2, 1e-9)                 # k2 < 0: a cone
+    k1 = np.where(k2 < 0, lin, k1)
+    k2 = np.maximum(k2, 0.0)
+    k1 = np.maximum(k1, 0.0)
+    env = H[L - 1] - k1[L - 1] * d - k2[L - 1] * d * d
+    h = H[L - 1]
+    z = chm_s[rr, cc]
+    # Far under that surface carried outward (a flat crown over a lower
+    # one), or above it where a steep crown's own surface would already
+    # have reached the lower canopy: either way not this crown's surface.
+    cut = (d > 1.5) & (z < 0.7 * h) & \
+        ((z < env - (0.2 * h + 1.0)) | (z > env + (0.1 * h + 1.0)))
+    if not cut.any():
+        return lab, tops_r, tops_c, 0
+    # Only where that lower surface is a canopy of its own: a patch with a
+    # good part flat (a crown's steep flank or rim is not one).
+    from scipy import ndimage
+    low = np.zeros(lab.shape, bool)
+    low[rr[cut], cc[cut]] = True
+    gy, gx = np.gradient(chm_s.astype(np.float64), c)
+    flat = low & (np.hypot(gx, gy) < LOWER_SLOPE)
+    comp, ncomp = ndimage.label(low, structure=np.ones((3, 3)))
+    if ncomp == 0:
+        return lab, tops_r, tops_c, 0
+    nflat = np.bincount(comp[flat], minlength=ncomp + 1) * c * c
+    low &= (nflat >= LOWER_FLAT_M2)[comp]
+    if not low.any():
+        return lab, tops_r, tops_c, 0
+    lab = lab.copy()
+    lab[low] = 0
+    # The lower layer: its own tops and crowns, only on the cut cells.
+    cs = np.where(low, chm_s, 0.0).astype(np.float32)
+    t2r, t2c = find_tops(cs, cg, tree_min)
+    if not len(t2r):
+        return lab, tops_r, tops_c, 0
+    lab2 = crowns(np.where(low, chm, 0.0), cs, cg, t2r, t2c, tree_min)
+    lab2 = np.where(low, lab2, 0)
+    add = lab2 > 0
+    lab[add] = lab2[add] + n
+    return lab, np.r_[tops_r, t2r], np.r_[tops_c, t2c], len(t2r)
+
+
+CHM_BOUND = True
+DEBUG = None        # a dict to receive the trees' intermediate arrays (diagnostics)
+BASE_THIN = 0.45                     # base: a trunk zone thinner than this share
+BASE_EDGE = 0.30                     # of the crown body's returns; else this
+PROFILE = (0.10, 0.35, 0.60, 0.85)   # where r1..r4 are measured (of base..top)
+NSLICE = 20                          # crown slices measured, base to top
+NUB = 40                             # bins of a tree's own vertical profile
+NLEV = 16                            # levels of the provisional envelope
+NHIST = 64                           # distance bins per slice
+SLICE_Q = 0.90                       # radius of a slice = this quantile
+SLICE_MIN = 6                        # fewer returns than this: slice unknown
+BRUSH_PROFILE = (1.0, 0.9, 0.7, 0.4)  # a low dome, unless measured
+PRIOR = {0: (0.70, 1.0, 0.90, 0.50), 1: (1.0, 0.80, 0.50, 0.20)}
+
+
+def _group_quantile(hist, q):
+    """Per row of a (rows, bins) histogram, the q quantile in bin units
+    (linear inside the bin); NaN for empty rows."""
+    cs = np.cumsum(hist, axis=1)
+    tot = cs[:, -1]
+    want = q * tot
+    j = np.argmax(cs >= want[:, None], axis=1)
+    prev = np.where(j > 0, cs[np.arange(len(j)), np.maximum(j - 1, 0)], 0)
+    inb = hist[np.arange(len(j)), j]
+    frac = np.where(inb > 0, (want - prev) / np.maximum(inb, 1), 0.5)
+    out = j + np.clip(frac, 0, 1)
+    return np.where(tot > 0, out, np.nan)
+
+
+def tree_records(V, f_c, chm, chm_s, lab, cg, tops_r, tops_c, tot_c,
+                 min_h, brush_top, kinds_mode="auto", keep_m2=16.0):
+    """Per crown: position, height, base, the measured outline (radius at
+    PROFILE heights and the widest), kind, density. Returns (records,
+    diag, base of every label for the brush)."""
+    from scipy import ndimage
+    n = len(tops_r)
+    empty = (np.zeros((0, RECORD), np.float32),
+             {"weak": np.zeros(0, bool), "slices_known": np.zeros(0, int),
+              "slivers": 0,
+              "stride": 1, "seconds": 0.0}, np.zeros(0, np.float32))
+    if n == 0:
+        return empty
+    t0 = time.time()
+    c = cg.cell
+    # Local (V frame) coordinates of cell centres.
+    cx0 = cg.minx - V.ox + 0.5 * c
+    cy0 = cg.maxy - V.oy - 0.5 * c
+    rr, cc = np.nonzero(lab)
+    L = lab[rr, cc]
+    ncell = np.bincount(L, minlength=n + 1)
+    topx = cx0 + tops_c * c
+    topy = cy0 - tops_r * c
+    with np.errstate(invalid="ignore"):
+        gx = np.bincount(L, cx0 + cc * c, minlength=n + 1)[1:] / np.maximum(ncell[1:], 1)
+        gy = np.bincount(L, cy0 - rr * c, minlength=n + 1)[1:] / np.maximum(ncell[1:], 1)
+    ax = np.r_[0.0, 0.5 * (topx + gx)]
+    ay = np.r_[0.0, 0.5 * (topy + gy)]
+    topH = np.r_[-1.0, chm[tops_r, tops_c]]
+
+    # Provisional envelope from the canopy surface: at level k (height
+    # k/NLEV of the top) the farthest crown cell whose canopy is that high.
+    dcell = np.hypot(cx0 + cc * c - ax[L], cy0 - rr * c - ay[L])
+    kc = np.clip((chm[rr, cc] / topH[L] * NLEV).astype(np.int64), 0, NLEV)
+    R0 = np.zeros((n + 1) * (NLEV + 1))
+    np.maximum.at(R0, L * (NLEV + 1) + kc, dcell + 0.5 * c)
+    R0 = R0.reshape(n + 1, NLEV + 1)
+    R0 = np.maximum.accumulate(R0[:, ::-1], axis=1)[:, ::-1]
+    R0 = np.maximum(R0, 0.5)
+    Rlab = R0[:, 0]
+
+    # Candidates for each return: its crown and the crowns around it.
+    # Cells just outside every crown (the floor / reach cut its skirt)
+    # take the nearest crown within 2.5 m.
+    far = lab == 0
+    if far.any() and (~far).any():
+        dist, (ir, ic) = ndimage.distance_transform_edt(far, return_indices=True)
+        labx = np.where(dist * c <= 2.5, lab[ir, ic], 0).astype(np.int32)
+    else:
+        labx = lab
+    A = np.concatenate([labx[:, :-1].ravel(), labx[:-1].ravel(),
+                        labx[:-1, :-1].ravel(), labx[:-1, 1:].ravel()])
+    B = np.concatenate([labx[:, 1:].ravel(), labx[1:].ravel(),
+                        labx[1:, 1:].ravel(), labx[1:, :-1].ravel()])
+    k = (A > 0) & (B > 0) & (A != B)
+    pr = np.unique(np.concatenate([A[k] * (n + 1) + B[k],
+                                   B[k] * (n + 1) + A[k]]).astype(np.int64))
+    pa, pb = pr // (n + 1), pr % (n + 1)
+    dd = np.hypot(ax[pa] - ax[pb], ay[pa] - ay[pb])
+    o = np.lexsort((dd, pa))
+    pa, pb = pa[o], pb[o]
+    first = np.r_[0, np.nonzero(np.diff(pa))[0] + 1] if len(pa) else np.zeros(0, int)
+    rank = np.arange(len(pa)) - np.repeat(first, np.diff(np.r_[first, len(pa)]))
+    K = 8
+    C = np.zeros((n + 1, K + 1), np.int64)
+    C[:, 0] = np.arange(n + 1)
+    sel = rank < K
+    C[pa[sel], 1 + rank[sel]] = pb[sel]
+
+    # Returns used: a regular thinning to about `keep_m2` per m2 (a
+    # quantile per slice does not need every return).
+    N = len(V.h)
+    stride = max(1, int(round(N / (keep_m2 * cg.nx * cg.ny * c * c))))
+    idx = np.arange(0, N, stride)
+    pl = labx.ravel()[f_c[idx]]
+    m_ = pl > 0
+    idx, pl = idx[m_], pl[m_]
+    px, py, ph = V.x[idx], V.y[idx], V.h[idx]
+    del m_
+
+    # Pass A: each return goes to the crown it fits best: distance over
+    # that crown's envelope at the return's height (a neighbour's branches
+    # under a lower crown's top go to the neighbour, not to it). Returns
+    # well inside their own crown's envelope stay there without the test.
+    axf, ayf = ax.astype(np.float32), ay.astype(np.float32)
+    tHf = topH.astype(np.float32)
+    R0f = (np.maximum(R0, 0.3) ** 2).astype(np.float32)
+    lev = np.float32(NLEV)
+
+    def q2(cand, x, y, h):
+        tH = tHf[cand]
+        kk = np.clip((h / np.maximum(tH, 0.1) * lev).astype(np.int32), 0, NLEV)
+        d2 = (x - axf[cand]) ** 2 + (y - ayf[cand]) ** 2
+        q = d2 / R0f[cand, kk]
+        q[(cand == 0) | (h > tH + 0.5)] = np.inf
+        return q
+
+    own = np.zeros(len(idx), np.int32)
+    qo = q2(pl, px, py, ph)
+    easy = qo <= 0.5 ** 2
+    own[easy] = pl[easy]
+    hard = np.nonzero(~easy)[0]
+    CH = 1 << 20
+    for s in range(0, len(hard), CH):
+        hi = hard[s:s + CH]
+        cand = C[pl[hi]]
+        q = q2(cand, px[hi, None], py[hi, None], ph[hi, None])
+        j = np.argmin(q, axis=1)
+        qm = q[np.arange(len(hi)), j]
+        own[hi] = np.where(qm <= 1.5 ** 2, cand[np.arange(len(hi)), j], 0)
+    del pl, qo, easy, hard
+
+    # Height, crown centre, base from the returns each crown kept.
+    a_ = own > 0
+    o_ = own[a_]
+    # Height: the highest cell of the crown's canopy (every return, not
+    # only the thinned ones).
     height = np.zeros(n + 1, np.float32)
-    np.maximum.at(height, pl[inn], V.h[inn])
-    height = height[1:]
+    np.maximum.at(height, L, chm[rr, cc])
+    hgt = np.maximum(height, 0.1)
+    ub = np.clip((ph[a_] / hgt[o_] * NUB).astype(np.int64), 0, NUB - 1)
+    kb = o_.astype(np.int64) * NUB + ub
+    prof = np.bincount(kb, minlength=(n + 1) * NUB).reshape(n + 1, NUB).astype(np.float64)
+    sm = prof.copy()
+    sm[:, 1:-1] = (prof[:, :-2] + prof[:, 1:-1] + prof[:, 2:]) / 3.0
+    iu = np.arange(NUB)
+    body = (iu >= 0.4 * NUB) & (iu < 0.9 * NUB)
+    Bm = np.median(sm[:, body], axis=1)
+    # The crown starts above the emptiest layer under its densest part
+    # (the trunk zone between understory and crown), on the rising edge
+    # out of it. If that layer is not thin (under BASE_THIN of the body),
+    # going down from the densest part the crown ends where its returns
+    # stay under BASE_EDGE of the body's for two bins; if they never do,
+    # it reaches down to min_height.
+    upper = iu >= 0.5 * NUB          # a lower layer can be denser than it
+    pk = np.argmax(np.where(upper[None, :], sm, -1), axis=1)
+    below = (iu[None, :] < pk[:, None]) & (iu[None, :] >= 1)
+    vmin = np.where(below, sm, np.inf).min(axis=1)
+    near = below & (sm <= (vmin + 0.15 * Bm)[:, None])
+    jmin = np.where(near, iu[None, :], 0).max(axis=1)     # the highest such
+    gap = np.isfinite(vmin) & (vmin < BASE_THIN * Bm)
+    rise = vmin + 0.35 * (Bm - vmin)
+    above_gap = (iu[None, :] > jmin[:, None]) & (sm >= rise[:, None])
+    e1 = np.minimum(np.where(above_gap, iu[None, :], NUB).min(axis=1), pk)
+    thin = sm < BASE_EDGE * Bm[:, None]
+    two = thin & np.concatenate([thin[:, :1], thin[:, :-1]], axis=1)
+    cand_b = two & (iu[None, :] < pk[:, None])
+    low2 = np.where(cand_b, iu[None, :], -1).max(axis=1)
+    edge = np.where(gap, e1, np.where(low2 >= 0, low2 + 1, -1))
+    base = np.where(edge >= 0, edge / NUB * hgt, min_h)
+    base = np.clip(base, 0.0, 0.85 * hgt).astype(np.float32)
+    if DEBUG is not None:
+        DEBUG.update(prof=prof, sm=sm, body=Bm, base=base, hgt=hgt, pk=pk)
+    # Crown centre: the kept returns above the base.
+    inb = ph[a_] >= base[o_]
+    cntc = np.bincount(o_[inb], minlength=n + 1).astype(np.float64)
+    with np.errstate(invalid="ignore"):
+        mx = np.bincount(o_[inb], px[a_][inb], minlength=n + 1) / np.maximum(cntc, 1)
+        my = np.bincount(o_[inb], py[a_][inb], minlength=n + 1) / np.maximum(cntc, 1)
+    mx = np.where(cntc > 0, mx, ax); my = np.where(cntc > 0, my, ay)
+    ax = np.r_[0.0, 0.5 * (topx + mx[1:])]
+    ay = np.r_[0.0, 0.5 * (topy + my[1:])]
 
-    # Vertical profile in 1 m bins -> crown base.
-    nb = int(math.ceil(MAX_HAG)) + 1
-    hb = np.minimum(V.h[inn].astype(np.int64), nb - 1)
-    prof = np.bincount(pl[inn].astype(np.int64) * nb + hb,
-                       minlength=(n + 1) * nb).reshape(n + 1, nb)[1:]
-    pts_in = prof.sum(1)
-    top_bin = np.maximum(0, np.floor(height).astype(int))
-    idx = np.arange(nb)[None, :]
-    # The densest metre in the upper 80 % of the tree.
-    upper = idx >= (0.2 * height)[:, None]
-    pk = np.argmax(np.where(upper & (idx <= top_bin[:, None]), prof, -1), axis=1)
-    peak = prof[np.arange(n), pk]
-    thin = prof < np.maximum(1, 0.12 * peak)[:, None]
-    gap = thin & np.roll(thin, 1, axis=1)          # two thin metres in a row
-    gap[:, 0] = thin[:, 0]
-    cand = gap & (idx < pk[:, None]) & (idx >= int(min_h))
-    lowgap = np.where(cand, idx, -1).max(axis=1)
-    base = np.where(lowgap >= 0, lowgap + 1.0, min_h).astype(np.float32)
-    base = np.minimum(base, 0.85 * height)
-    base = np.maximum(base, 0.0)
+    if DEBUG is not None:
+        DEBUG.update(own=own, idx=idx, ax=ax, ay=ay)
+    # Pass B: per slice of the crown the SLICE_Q quantile of the kept
+    # returns' distance from the axis.
+    o2 = o_[inb]
+    h2 = ph[a_][inb]
+    d2 = np.hypot(px[a_][inb] - ax[o2], py[a_][inb] - ay[o2])
+    clen = np.maximum(hgt - base, 0.1)
+    sl = np.clip(((h2 - base[o2]) / clen[o2] * NSLICE).astype(np.int64), 0, NSLICE - 1)
+    Rref = 2.0 * np.maximum(Rlab, 1.0)
+    hb = np.clip((d2 / Rref[o2] * NHIST).astype(np.int64), 0, NHIST - 1)
+    hist = np.bincount((o2 * NSLICE + sl) * NHIST + hb,
+                       minlength=(n + 1) * NSLICE * NHIST)
+    hist = hist.reshape((n + 1) * NSLICE, NHIST)
+    cnt = hist.sum(1).reshape(n + 1, NSLICE)
+    rq = _group_quantile(hist, SLICE_Q).reshape(n + 1, NSLICE)
+    rq = rq / NHIST * Rref[:, None]
+    del hist
+    good = cnt >= SLICE_MIN
+    rq = np.where(good, rq, np.nan)
+    # The canopy surface bounds it from above: a branch at height z makes
+    # its cell's canopy at least z high, so the crown at z lies within the
+    # farthest cell of its crown whose canopy reaches z (the envelope).
+    zs = base[:, None] + (np.arange(NSLICE) + 0.5)[None, :] / NSLICE * clen[:, None]
+    ks = np.clip((zs / np.maximum(topH, 0.1)[:, None] * NLEV).astype(np.int64), 0, NLEV)
+    Rchm = R0[np.arange(n + 1)[:, None], ks]
+    if CHM_BOUND:
+        rq = np.where(good, np.minimum(rq, Rchm), np.nan)
+    good = good & (rq > 0)
+    # Fill unknown slices along height (linear between known ones; above
+    # the highest known slice taper to the top, below the lowest hold).
+    zc = (np.arange(NSLICE) + 0.5) / NSLICE
+    prof_r = np.zeros_like(rq)
+    nknown = good.sum(1)
+    for t in np.nonzero(nknown >= 1)[0]:
+        g = good[t]
+        zz = np.r_[zc[g], 1.0]
+        vv = np.r_[rq[t, g], 0.0]
+        prof_r[t] = np.interp(zc, zz, vv)
+    # Smooth along height (light, 0.15-0.7-0.15), ends kept.
+    sm_r = prof_r.copy()
+    sm_r[:, 1:-1] = 0.15 * prof_r[:, :-2] + 0.7 * prof_r[:, 1:-1] + 0.15 * prof_r[:, 2:]
+    widest = sm_r.max(axis=1)
+    # The four PROFILE heights, linear between slice centres.
+    pos = np.array(PROFILE) * NSLICE - 0.5
+    i0 = np.clip(np.floor(pos).astype(int), 0, NSLICE - 1)
+    i1 = np.clip(i0 + 1, 0, NSLICE - 1)
+    w = np.clip(pos - i0, 0, 1)
+    rP = sm_r[:, i0] * (1 - w) + sm_r[:, i1] * w
+    weak = nknown < 3
+    with np.errstate(invalid="ignore", divide="ignore"):
+        fracs = rP / widest[:, None]
 
-    # Density: share of all the column's returns caught at or above the base.
-    above = np.zeros(n + 1)
-    sel = inn.copy()
-    sel[inn] = V.h[inn] >= base[pl[inn] - 1]
-    above = np.bincount(pl[sel], minlength=n + 1)[1:]
-    tot = np.bincount(flat, tot_c.ravel(), minlength=n + 1)[1:]
-    density = np.clip(above / np.maximum(tot, 1), 0, 1)
-
-    # Kind: how steeply the CHM falls away from the top. Mean drop per metre
-    # over the inner 0.6 of the crown; a cone keeps ~ (h-base)/r all the way,
-    # a dome is nearly flat near its top.
-    d = np.hypot(rr - tops_r[L - 1], cc - tops_c[L - 1]) * cg.cell
-    R = radius[L - 1]
-    drop = np.maximum(0.0, height[L - 1] - chm[rr, cc])
-    near = (d > 0.6) & (d <= np.maximum(1.0, 0.6 * R))
-    s_cnt = np.bincount(L[near], minlength=n + 1)[1:]
-    s_sum = np.bincount(L[near], (drop / np.maximum(d, 0.1))[near],
-                        minlength=n + 1)[1:]
-    apex = s_sum / np.maximum(s_cnt, 1)
-    # Shape: drop at half the radius over drop at the rim (cone ~0.5,
-    # paraboloid ~0.25, hemisphere ~0.13).
-    mid = (d > 0.35 * R) & (d <= 0.65 * R)
-    rim = (d > 0.8 * R)
-    dm = np.bincount(L[mid], drop[mid], minlength=n + 1)[1:] / \
-        np.maximum(np.bincount(L[mid], minlength=n + 1)[1:], 1)
-    dr = np.bincount(L[rim], drop[rim], minlength=n + 1)[1:] / \
-        np.maximum(np.bincount(L[rim], minlength=n + 1)[1:], 1)
-    shape_q = dm / np.maximum(dr, 0.1)
-    slender = (height - base) / np.maximum(radius, 0.5)
-    # Pointed and steep, or simply much longer than wide (a narrow crown
-    # whose smoothed top reads rounded is still a conifer's).
-    cone = ((apex >= 0.9) & (shape_q >= 0.33) & (slender >= 1.6)) | \
-        (slender >= 2.8)
+    # Kind, now a label from the measured outline: widest low and a narrow
+    # top = cone; else dome.
+    with np.errstate(invalid="ignore"):
+        cone = (fracs[:, 3] <= 0.6) & ((hgt - base) >= 2.0 * widest)
     if kinds_mode == "dome":
         cone[:] = False
     kind = np.where(cone, 1.0, 0.0)
+    # Too few returns to measure: the prior for its kind, at the label's
+    # radius from the canopy surface.
+    rad_area = np.sqrt(ncell * c * c / math.pi)
+    for kd in (0, 1):
+        mm = weak & (kind == kd)
+        fracs[mm] = PRIOR[kd]
+    widest = np.where(weak | ~np.isfinite(widest), rad_area, widest)
+    # Never wider than the reach a crown may have from its top.
+    widest = np.minimum(widest, crown_reach(hgt))
+    fracs = np.clip(np.nan_to_num(fracs, nan=0.5), 0.02, 1.0)
 
-    ok = (ncell * cg.cell ** 2 >= max(1.0, math.pi * 0.6 ** 2)) & \
-        (height >= brush_top) & (pts_in >= 3)
+    # Density: share of all the column's returns caught at or above the base.
+    above = cntc * stride
+    tot = np.bincount(lab.ravel(), tot_c.ravel(), minlength=n + 1)
+    dens = np.clip(above / np.maximum(tot, 1), 0, 1)
+
+    xs = ax[1:] + V.ox
+    ys = ay[1:] + V.oy
     rec = np.zeros((n, RECORD), np.float32)
-    rec[:, 0], rec[:, 1] = x, y
-    rec[:, 3] = height
-    rec[:, 4] = np.maximum(radius, 0.5)
-    rec[:, 5] = base
-    rec[:, 6] = kind
-    rec[:, 7] = density
-    diag = {"apex": apex[ok], "shape_q": shape_q[ok], "slender": slender[ok]}
+    rec[:, 0], rec[:, 1] = xs, ys
+    rec[:, 3] = height[1:]
+    rec[:, 4] = np.maximum(widest[1:], 0.5)
+    rec[:, 5] = base[1:]
+    rec[:, 6] = kind[1:]
+    rec[:, 7] = dens[1:]
+    rec[:, 8:12] = fracs[1:]
+    # A small crown whose returns nearly all fit its neighbours better is
+    # a sliver of them, not a tree (it would draw as a thin spike).
+    sliver = weak[1:] & (rad_area[1:] < 1.5)
+    ok = (ncell[1:] * c * c >= max(1.0, math.pi * 0.6 ** 2)) & \
+        (height[1:] >= brush_top) & (cntc[1:] >= 3) & ~sliver
+    if DEBUG is not None:
+        DEBUG.update(rec_all=rec.copy(), ok=ok)
+    diag = {"weak": weak[1:][ok], "slices_known": nknown[1:][ok],
+            "slivers": int((sliver & (height[1:] >= brush_top)).sum()),
+            "stride": stride, "seconds": time.time() - t0}
     rec = rec[ok]
     rec = rec[np.argsort(-rec[:, 3], kind="stable")]
-    return rec, diag
+    return rec, diag, base[1:]
 
 
 # --------------------------------------------------------------------------
@@ -674,21 +1042,34 @@ def brush_mounds(V, bg, tot_b, lab, cg, trees_low_base, min_h, brush_top,
     xs = bg.minx + (np.add.reduceat(bc, first) / cnt + 0.5) * bg.cell
     ys = bg.maxy - (np.add.reduceat(br, first) / cnt + 0.5) * bg.cell
     fr = np.add.reduceat(frac[cells], first) / cnt
-    # Height: 75th percentile of the cells' tops in the tile.
+    # Height: 90th percentile of the cells' tops in the tile (its top, not
+    # its typical height: the outline below says how it tapers).
     tops = top[cells]
     o2 = np.lexsort((tops, tid))
     tops_sorted = tops[o2]
-    pick = first + np.minimum(cnt - 1, (0.75 * (cnt - 1)).round().astype(int))
-    h = tops_sorted[pick]
+    pick = first + np.minimum(cnt - 1, (0.9 * (cnt - 1)).round().astype(int))
+    h = np.maximum(tops_sorted[pick], min_h)
     rad = np.minimum(np.sqrt(cnt * bg.cell ** 2 / math.pi) * 1.25,
                      0.8 * k * bg.cell)
+    # Outline measured like a crown seen from above: at each PROFILE height
+    # the share of the mound's cells whose brush reaches it, as an area.
+    tile_of = np.repeat(np.arange(len(first)), cnt)
+    prof = np.empty((len(first), 4), np.float32)
+    for j, f in enumerate(PROFILE):
+        z = f * h
+        share = np.add.reduceat((tops_sorted >= z[tile_of]).astype(np.float64),
+                                first) / cnt
+        prof[:, j] = np.sqrt(share)
+    prof /= np.maximum(prof.max(axis=1, keepdims=True), 1e-6)
+    prof = np.clip(prof, 0.15, 1.0)
     rec = np.zeros((int(keep.sum()), RECORD), np.float32)
     rec[:, 0], rec[:, 1] = xs[keep], ys[keep]
-    rec[:, 3] = np.maximum(h[keep], min_h)
+    rec[:, 3] = h[keep]
     rec[:, 4] = np.maximum(rad[keep], 0.5)
     rec[:, 5] = 0.0
     rec[:, 6] = 2.0
     rec[:, 7] = np.clip(fr[keep] * 2.0, 0.05, 1.0)
+    rec[:, 8:12] = prof[keep]
     return rec
 
 
@@ -1072,13 +1453,17 @@ def run(params, out_dir, say=say_default):
         tree_min = max(brush_top, 2.0)
         tr, tc = find_tops(chm_s, cg, tree_min) if n_veg else (np.zeros(0, int),) * 2
         lab = crowns(chm, chm_s, cg, tr, tc, tree_min)
-        trees, diag = tree_records(V, f_c, chm, chm_s, lab, cg, tr, tc, tot_c,
-                                   min_h, brush_top,
-                                   kinds_mode=prm.get("kinds", "auto"))
+        lab, tr, tc, n_merged = merge_tops(chm, chm_s, lab, tr, tc, cg)
+        lab, tr, tc, n_lower = lower_layer(chm, chm_s, lab, tr, tc, cg, tree_min)
+        trees, diag, bases = tree_records(V, f_c, chm, chm_s, lab, cg, tr, tc,
+                                          tot_c, min_h, brush_top,
+                                          kinds_mode=prm.get("kinds", "auto"),
+                                          keep_m2=D["keep"])
+        say(f"  {len(tr):,} crowns ({n_merged:,} bumps joined to their crown, "
+            f"{n_lower:,} in a lower layer under taller trees), "
+            f"outlines measured ({diag.get('seconds', 0):.1f} s)")
         # Which crowns start low enough to own the brush band under them.
-        low_base = np.zeros(len(tr), bool)
-        if len(tr):
-            low_base = _label_bases(V, f_c, lab, len(tr), min_h) < brush_top + 0.5
+        low_base = bases < brush_top + 0.5
         budget = int(D["budget"] * area_m2 / 1e6) + 50
         tile = D["tile"]
         while True:
@@ -1091,6 +1476,15 @@ def run(params, out_dir, say=say_default):
                 f"{budget:,}): brush tiles {tile:.1f} m")
         recs = np.concatenate([trees, brush]) if len(brush) else trees
         timings["shapes_s"] = round(time.time() - t0, 2)
+        diag = {"measured": int(len(trees) - diag["weak"].sum()),
+                "prior": int(diag["weak"].sum()),
+                "bumps_joined": int(n_merged), "lower_layer": int(n_lower),
+                "slivers_dropped": int(diag.get("slivers", 0)),
+                "thinning": int(diag["stride"]),
+                "median_profile": [round(float(v), 2) for v in
+                                   np.median(trees[:, 8:12], axis=0)]
+                if len(trees) else [],
+                "seconds": round(diag["seconds"], 2)}
         counts = {"trees": int(len(trees)),
                   "cones": int((trees[:, 6] == 1).sum()),
                   "domes": int((trees[:, 6] == 0).sum()),
@@ -1138,7 +1532,8 @@ def run(params, out_dir, say=say_default):
             recs[:, 0], recs[:, 1] = xe, yn
         recs.astype("<f4").tofile(os.path.join(out_dir, "shapes.bin"))
         veg["shapes"] = {"file": "shapes.bin", "count": int(len(recs)),
-                         **counts, "record": RECORD * 4}
+                         **counts, "record": RECORD * 4,
+                         "profile": list(PROFILE)}
     if shell is not None:
         sx, sy, shag, tris, vox, voxz, max_tri, sinfo = shell
         V4 = np.zeros((len(sx), 4), np.float32)
@@ -1189,10 +1584,8 @@ def run(params, out_dir, say=say_default):
                     "cleaned": cleaned, "timings": timings,
                     "frame_inverse_err_m": round(inv_err, 4),
                     "utm_zone": zone, "south": bool(south)}
-    if diag and len(diag.get("apex", [])):
-        veg["stats"]["kind_metrics"] = {
-            k: [round(float(np.percentile(v, q)), 2) for q in (10, 50, 90)]
-            for k, v in diag.items()}
+    if diag:
+        veg["stats"]["outlines"] = diag
     used = dict(prm)
     used.pop("area_bbox_utm", None)
     veg["params"] = used
@@ -1206,33 +1599,25 @@ def run(params, out_dir, say=say_default):
     return veg
 
 
-def _label_bases(V, f_c, lab, n, min_h):
-    """Crown base per label (same rule as tree_records), unfiltered."""
-    pl = lab.ravel()[f_c]
-    inn = pl > 0
-    nb = int(math.ceil(MAX_HAG)) + 1
-    hb = np.minimum(V.h[inn].astype(np.int64), nb - 1)
-    prof = np.bincount(pl[inn].astype(np.int64) * nb + hb,
-                       minlength=(n + 1) * nb).reshape(n + 1, nb)[1:]
-    height = np.zeros(n + 1, np.float32)
-    np.maximum.at(height, pl[inn], V.h[inn])
-    height = height[1:]
-    idx = np.arange(nb)[None, :]
-    upper = idx >= (0.2 * height)[:, None]
-    top_bin = np.floor(height).astype(int)
-    pk = np.argmax(np.where(upper & (idx <= top_bin[:, None]), prof, -1), axis=1)
-    peak = prof[np.arange(n), pk]
-    thin = prof < np.maximum(1, 0.12 * peak)[:, None]
-    gap = thin & np.roll(thin, 1, axis=1)
-    gap[:, 0] = thin[:, 0]
-    cand = gap & (idx < pk[:, None]) & (idx >= int(min_h))
-    lowgap = np.where(cand, idx, -1).max(axis=1)
-    return np.where(lowgap >= 0, lowgap + 1.0, min_h)
-
-
 # --------------------------------------------------------------------------
 # The made-up scene (tests and --demo)
 # --------------------------------------------------------------------------
+
+SYNTH_PROFILES = {                 # r1..r4 of the made-up crowns
+    "spruce": (1.0, 0.80, 0.50, 0.20),
+    "column": (0.85, 1.0, 0.85, 0.45),
+    "broadleaf": (0.70, 1.0, 0.90, 0.50),
+    "umbrella": (0.30, 0.60, 1.0, 0.70),
+}
+
+
+def outline_at(prof, u):
+    """The contract's outline as a fraction of the widest radius at u
+    (0 = base, 1 = top): linear through (0, 0.6 r1), r1..r4 at PROFILE,
+    (1, 0)."""
+    return np.interp(u, (0.0,) + tuple(PROFILE) + (1.0,),
+                     (0.6 * prof[0],) + tuple(prof) + (0.0,))
+
 
 def synth_scene(seed=3, density=20.0):
     """Points (local x, y, z, class) and the truth over a 200 x 160 m area
@@ -1244,48 +1629,71 @@ def synth_scene(seed=3, density=20.0):
     def zf(x, y):
         return 300.0 + 0.08 * x + 0.03 * y + 1.5 * np.sin(x * 0.025)
 
-    trees = []      # x, y, height, radius, base, kind
-    # Conifers in the west, spaced 9-11 m.
+    trees = []      # x, y, height, radius, base, kind, profile (r1..r4)
+    # Conifers in the west, spaced 9-11 m: spruce-like (widest low, pointed)
+    # and a narrower column with a rounder top.
     for i, (x, y) in enumerate([(20, 30), (31, 32), (22, 43), (34, 45),
                                 (25, 57), (40, 60), (18, 70), (33, 74)]):
         h = 18 + (i * 7) % 12
-        trees.append((x, y, float(h), 2.2 + 0.05 * h, 1.0 + (i % 3), 1))
-    # Broadleaf in the east, wider and flatter.
+        prof = SYNTH_PROFILES["spruce"] if i % 2 == 0 else SYNTH_PROFILES["column"]
+        trees.append((x, y, float(h), 2.6 + 0.06 * h, 2.0 + 2 * (i % 4), 1, prof))
+    # Broadleaf in the east, wider and flatter; two umbrella-like crowns
+    # (widest near the top).
     for i, (x, y) in enumerate([(130, 30), (146, 36), (132, 50), (150, 55),
                                 (138, 70)]):
         h = 11 + (i * 5) % 7
-        trees.append((x, y, float(h), 5.0 + 0.2 * (i % 3), 0.35 * h, 0))
+        prof = SYNTH_PROFILES["umbrella" if i in (1, 4) else "broadleaf"]
+        trees.append((x, y, float(h), 5.0 + 0.2 * (i % 3), 0.35 * h, 0, prof))
     brush = (70.0, 100.0, 110.0, 140.0)     # x0, y0, x1, y1
     X, Y, Z, C = [], [], [], []
     n = int(W * H * density)
     gx = rng.uniform(0, W, n); gy = rng.uniform(0, H, n)
     under = np.zeros(n, bool)
-    for (tx, ty, h, r, b, k) in trees:
+    for (tx, ty, h, r, b, k, prof) in trees:
         under |= (gx - tx) ** 2 + (gy - ty) ** 2 < r * r
     keep = ~under | (rng.random(n) < 0.35)
     gx, gy = gx[keep], gy[keep]
     X.append(gx); Y.append(gy); Z.append(zf(gx, gy) + rng.normal(0, 0.03, len(gx)))
     C.append(np.full(len(gx), 2, np.uint8))
-    for (tx, ty, h, r, b, k) in trees:
+    uu = np.linspace(0, 1, 201)
+    for ti, (tx, ty, h, r, b, k, prof) in enumerate(trees):
+        Ru = r * outline_at(prof, uu)
         m = int(math.pi * r * r * density * 1.6)
-        rr = r * np.sqrt(rng.random(m))
-        a = rng.uniform(0, 2 * math.pi, m)
-        px, py = tx + rr * np.cos(a), ty + rr * np.sin(a)
-        u = rr / r
-        if k == 1:
-            surf = h - (h - b) * u
-        else:
-            surf = b + (h - b) * np.sqrt(np.maximum(0, 1 - u * u)) * 0.85 + \
-                (h - b) * 0.15 * (1 - u)
-        depth = rng.exponential(0.12 * (h - b), m)
-        pz = np.maximum(b, surf - depth)
-        X.append(px); Y.append(py); Z.append(zf(px, py) + pz)
-        C.append(np.full(m, 1, np.uint8))
+        # First returns: from above, on the crown's upper surface.
+        m1 = int(0.5 * m)
+        rho = r * np.sqrt(rng.random(m1))
+        # Upper surface at rho: the highest u whose radius still reaches it.
+        reach = Ru[None, :] >= rho[:, None]
+        ui = np.where(reach.any(1), 200 - np.argmax(reach[:, ::-1], axis=1), 0)
+        pz = b + (h - b) * uu[ui] - rng.exponential(0.04 * (h - b), m1)
+        a = rng.uniform(0, 2 * math.pi, m1)
+        px, py = tx + rho * np.cos(a), ty + rho * np.sin(a)
+        # Returns through the crown: along its length (more where it is
+        # wide), near the outline, fewer inside.
+        m2 = m - m1
+        wgt = Ru / Ru.sum()
+        u2 = rng.choice(uu, m2, p=wgt) + rng.uniform(-0.0025, 0.0025, m2)
+        r2 = r * outline_at(prof, np.clip(u2, 0, 1)) * \
+            (1 - np.minimum(1, rng.exponential(0.12, m2)))
+        a2 = rng.uniform(0, 2 * math.pi, m2)
+        px = np.r_[px, tx + r2 * np.cos(a2)]
+        py = np.r_[py, ty + r2 * np.sin(a2)]
+        pz = np.r_[pz, b + (h - b) * np.clip(u2, 0, 1)]
+        X.append(px); Y.append(py); Z.append(zf(px, py) + np.maximum(pz, b))
+        C.append(np.full(len(px), 1, np.uint8))
         # A few trunk returns.
         mt = int(3 * b) + 2
         X.append(tx + rng.normal(0, 0.15, mt)); Y.append(ty + rng.normal(0, 0.15, mt))
         Z.append(zf(tx, ty) + rng.uniform(0.2, max(0.5, b), mt))
         C.append(np.full(mt, 1, np.uint8))
+        # Low shrubs under every third conifer (not part of its crown).
+        if k == 1 and ti % 3 == 0:
+            mu = int(math.pi * r * r * density * 0.3)
+            ru = r * np.sqrt(rng.random(mu)); au = rng.uniform(0, 2 * math.pi, mu)
+            ux, uy = tx + ru * np.cos(au), ty + ru * np.sin(au)
+            X.append(ux); Y.append(uy)
+            Z.append(zf(ux, uy) + rng.uniform(0.5, 1.4, mu))
+            C.append(np.full(mu, 1, np.uint8))
     bx0, by0, bx1, by1 = brush
     m = int((bx1 - bx0) * (by1 - by0) * density * 0.6)
     px = rng.uniform(bx0, bx1, m); py = rng.uniform(by0, by1, m)
