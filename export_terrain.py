@@ -1363,6 +1363,59 @@ def load_map_dem(dem_grid_path, rect, cell, zone, south=False, progress=print):
     return dem, x_bins, y_bins, x_min, y_min, valid
 
 
+def load_area_dem(area_dir, rect, cell, zone, south=False, progress=print):
+    """The analysed area's shared ground (area_ground.py: DIR/ground/ground.npy
+    + grid.json, row 0 south, heights as the point cloud stores them -- the
+    same frame build_dem works in, so z_offset applies the same way),
+    resampled bilinearly onto the export's UTM cells. `valid` = cells whose
+    nearest ground cell had class-2 returns (direct.npy; without it, every
+    cell inside the ground grid), so border_nodata_mask() treats missing data
+    as it does for build_dem on classified returns. Outside the ground grid
+    the cells are filled from the nearest (and are not valid).
+    Returns (dem [x, y], x_bins, y_bins, x0, y0, valid)."""
+    d = Path(area_dir) / 'ground'
+    try:
+        m = json.loads((d / 'grid.json').read_text())
+        G = np.load(d / 'ground.npy').astype(np.float64)        # [row south->north, col]
+    except Exception as e:
+        sys.exit(f"ERROR: the area folder has no ground ({e})")
+    direct = np.load(d / 'direct.npy').astype(bool) if (d / 'direct.npy').exists() else np.ones(G.shape, bool)
+    gx0, gy0, gc = float(m['x0']), float(m['y0']), float(m['cell'])
+    gny, gnx = G.shape
+    x_min, y_min, x_max, y_max = rect
+    nxc = max(1, int(round((x_max - x_min) / cell)))
+    nyc = max(1, int(round((y_max - y_min) / cell)))
+    x_bins = x_min + np.arange(nxc + 1) * cell
+    y_bins = y_min + np.arange(nyc + 1) * cell
+    E, N = np.meshgrid(x_bins[:-1] + cell / 2, y_bins[:-1] + cell / 2, indexing='ij')
+    if (int(m['zone']), bool(m['south'])) != (int(zone), bool(south)):
+        lat, lon = utm_to_latlon(E, N, zone, south)
+        E, N = latlon_to_utm_np(lat, lon, int(m['zone']), bool(m['south']))
+    progress(f"  Area ground: {gnx}x{gny} cells of {gc:g} m -> {nxc}x{nyc} cells of {cell:g} m (no point cloud read)")
+    fx = (E - gx0) / gc - 0.5
+    fy = (N - gy0) / gc - 0.5
+    inside = (fx >= -0.5) & (fy >= -0.5) & (fx <= gnx - 0.5) & (fy <= gny - 0.5)
+    i0 = np.clip(np.floor(fx).astype(np.int64), 0, max(0, gnx - 2))
+    j0 = np.clip(np.floor(fy).astype(np.int64), 0, max(0, gny - 2))
+    u = np.clip(fx - i0, 0, 1); v = np.clip(fy - j0, 0, 1)
+    i1 = np.minimum(i0 + 1, gnx - 1); j1 = np.minimum(j0 + 1, gny - 1)
+    dem = (G[j0, i0] * (1 - u) * (1 - v) + G[j0, i1] * u * (1 - v)
+           + G[j1, i0] * (1 - u) * v + G[j1, i1] * u * v)
+    ni = np.clip(np.rint(fx).astype(np.int64), 0, gnx - 1)
+    nj = np.clip(np.rint(fy).astype(np.int64), 0, gny - 1)
+    valid = inside & direct[nj, ni] & np.isfinite(dem)
+    dem[~inside] = np.nan
+    if not valid.any():
+        sys.exit("ERROR: the area ground does not cover the export rectangle")
+    bad = ~np.isfinite(dem)
+    if bad.any():
+        rows, cols = dem.shape
+        xi, yi = np.meshgrid(np.arange(rows), np.arange(cols), indexing='ij')
+        ok_ = ~bad
+        dem[bad] = NearestNDInterpolator(list(zip(xi[ok_], yi[ok_])), dem[ok_])(xi[bad], yi[bad])
+    return dem, x_bins, y_bins, x_min, y_min, valid
+
+
 RAMP_M = 60.0   # metres inside a patch's edge over which it hands over to the terrain beneath (as terrain-patch.js)
 
 
@@ -2056,14 +2109,17 @@ def area_alpha(size, grid, poly_utm, drop=None):
 
 def project_terrain(x, y, z, ground_mode, out_dir, bbox, poly_ll=None, resolution=0.5,
                     z_offset=-32 * 0.766, spike_threshold=1.5, name='', max_px=16384,
-                    source='', progress=print):
+                    source='', progress=print, area_dir=None):
     """Ground points (UTM, in the zone of the area's centre) -> the project's
     terrain patch and hillshade tiles in out_dir:
         terrain.bin      the DEM as a terrain patch (ellipsoid heights = DEM + z_offset)
         tiles/z/x/y.png  the "From LiDAR" hillshade
         result.json      what was made (bounds, sizes, zooms)
     The steps are the export's: build_dem (lowest return per cell, cloth),
-    border_nodata_mask, filter_spikes, z_offset; build_lidar_hillshade."""
+    border_nodata_mask, filter_spikes, z_offset; build_lidar_hillshade.
+    With `area_dir` (x, y, z unused, may be None): the DEM is the area's
+    shared ground (load_area_dem), no spike filter unless spike_threshold > 0
+    is asked for by the caller, and the hillshade is shaded from that DEM."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     say = lambda step: (lambda m: progress(f"[{step}/4] {m}"))
@@ -2080,9 +2136,13 @@ def project_terrain(x, y, z, ground_mode, out_dir, bbox, poly_ll=None, resolutio
     rect = (rect[0] - c, rect[1] - c, rect[2] + c, rect[3] + c)
     poly_utm = polygon_to_utm(poly_ll, zone)
 
-    # DEM, exactly as the export builds it
-    dem, x_bins, y_bins, x0, y0, valid = build_dem(x, y, z, resolution, progress=say(2),
-                                                   extent=rect, return_valid=True)
+    if area_dir:
+        dem, x_bins, y_bins, x0, y0, valid = load_area_dem(area_dir, rect, resolution, zone, south,
+                                                           progress=say(2))
+    else:
+        # DEM, exactly as the export builds it
+        dem, x_bins, y_bins, x0, y0, valid = build_dem(x, y, z, resolution, progress=say(2),
+                                                       extent=rect, return_valid=True)
     drop = border_nodata_mask(valid, resolution, progress=say(2))
     del valid
     if spike_threshold > 0:
@@ -2118,9 +2178,14 @@ def project_terrain(x, y, z, ground_mode, out_dir, bbox, poly_ll=None, resolutio
 
     # The "From LiDAR" hillshade, transparent outside the area
     grid = UtmGrid(x_bins[0], y_bins[0], x_bins[-1], y_bins[-1], zone, south)
-    say(3)("Building hillshade from LiDAR ground returns...")
-    hs, hs_cell = build_lidar_hillshade(x, y, z, grid, covered_m2, mode=ground_mode,
-                                        max_px=max_px, progress=say(3))
+    if area_dir:
+        say(3)("Building hillshade from the area's ground...")
+        hs, hs_cell = dem_hillshade(dem, resolution, grid, max_px=max_px, target_cell=resolution,
+                                    progress=say(3))
+    else:
+        say(3)("Building hillshade from LiDAR ground returns...")
+        hs, hs_cell = build_lidar_hillshade(x, y, z, grid, covered_m2, mode=ground_mode,
+                                            max_px=max_px, progress=say(3))
     alpha = area_alpha(hs.size, grid, poly_utm, drop)
     a = np.asarray(alpha)
     L = np.asarray(hs).copy()
@@ -2141,6 +2206,7 @@ def project_terrain(x, y, z, ground_mode, out_dir, bbox, poly_ll=None, resolutio
         'terrain_tiles': parts,              # every patch, in order (the first is 'terrain'); later ones lie over earlier ones
         'tiles': dict(tiles, dir='tiles'),
         'z_offset': float(z_offset), 'ground': ground_mode, 'name': meta['name'],
+        **({'ground_source': 'area'} if area_dir else {}),
         'utm_zone': zone, 'area_km2': round(polygon_area(poly_utm) / 1e6, 4),
     }
     (out_dir / 'result.json').write_text(json.dumps(result, indent=1))
@@ -2208,16 +2274,26 @@ def main():
              'LiDAR hillshade as XYZ map tiles (tiles/), for a FLEX project. Needs --ept.')
     ap.add_argument('--also-ept', action='append', default=[], metavar='EPT',
         help='With --project-terrain: more datasets, their ground returns used together.')
+    ap.add_argument('--area-dir', default=None, metavar='DIR',
+        help="An analysed area (area_ground.py): the DEM is DIR/ground, the shared ground, instead of "
+             "build_dem on the points (no point cloud is read for the terrain). Works with --project-terrain "
+             "and with the viewer export. The spike filter is off unless --area-spikes.")
+    ap.add_argument('--area-spikes', action='store_true',
+        help='With --area-dir: run the spike filter (--spike-threshold) on the area ground anyway.')
     args = ap.parse_args()
     map_terrain = bool(args.dem_grid)
-    if not map_terrain and not args.ept:
+    area_terrain = bool(args.area_dir) and not map_terrain
+    if args.area_dir and map_terrain:
+        sys.exit("ERROR: give --area-dir or --dem-grid, not both")
+    area_spike = args.spike_threshold if args.area_spikes else 0.0
+    if not map_terrain and not area_terrain and not args.ept:
         sys.exit("ERROR: give --ept (LiDAR terrain) or --dem-grid (map terrain)")
     hs_mode = args.hillshade or ('url' if args.hillshade_url else 'lidar')
     if hs_mode == 'url' and not args.hillshade_url:
         print("[export] --hillshade url without --hillshade-url; building it from the terrain instead")
         hs_mode = 'lidar'
-    if map_terrain and hs_mode == 'lidar':
-        hs_mode = 'dem'                    # no LiDAR read: shade the map's terrain
+    if (map_terrain or area_terrain) and hs_mode == 'lidar':
+        hs_mode = 'dem'                    # no LiDAR read: shade the map's / area's terrain
     if map_terrain:
         hdr = json.loads(Path(args.dem_grid).read_text())
         args.resolution = float(hdr.get('cell') or args.resolution)
@@ -2267,6 +2343,17 @@ def main():
         # terrain patch and map tiles instead of a viewer (project_terrain()).
         if map_terrain:
             sys.exit("ERROR: --project-terrain needs the LiDAR (--ept), not --dem-grid")
+        z_off = args.z_offset if args.z_offset is not None else -32 * 0.766
+        if area_terrain:
+            print("[1/4] Terrain from the area's shared ground: no point cloud to read")
+            project_terrain(None, None, None, 'classified', args.project_terrain, args.bbox, poly_ll=poly_ll,
+                            resolution=args.resolution, z_offset=z_off, spike_threshold=area_spike,
+                            name=map_name, max_px=args.hillshade_max_px,
+                            source=', '.join(Path(str(e).rstrip('/')).parent.name or str(e)
+                                             for e in [args.ept] + list(args.also_ept or []) if e)
+                            or 'LiDAR ground returns (area)',
+                            area_dir=args.area_dir)
+            return
         parts, modes = [], []
         for k, ept in enumerate([args.ept] + list(args.also_ept or [])):
             x, y, z, r, g, b, mode = fetch_ept_points(
@@ -2283,7 +2370,6 @@ def main():
         z = np.concatenate([p[2] for p in parts]); del parts
         # Ground found the least reliable way decides how the hillshade treats them all.
         mode = 'all' if 'all' in modes else ('smrf' if 'smrf' in modes else 'classified')
-        z_off = args.z_offset if args.z_offset is not None else -32 * 0.766
         project_terrain(x, y, z, mode, args.project_terrain, args.bbox, poly_ll=poly_ll,
                         resolution=args.resolution, z_offset=z_off,
                         spike_threshold=args.spike_threshold, name=map_name,
@@ -2317,6 +2403,24 @@ def main():
                                       progress=lambda m: print(f"[2/7] {m}"))
             covered_m2 = float((~drop).sum()) * args.resolution ** 2
             del valid
+        elif area_terrain:
+            # 1-2. The area's shared ground (area_ground.py): heights as the
+            # points store them, so the same z offset as build_dem's DEM.
+            print("[1/7] Terrain from the area's shared ground: no point cloud to read")
+            x = y = z = None
+            ground_mode = 'area'
+            dem, x_bins, y_bins, x0, y0, valid = load_area_dem(
+                args.area_dir, rect, args.resolution, zone, south,
+                progress=lambda m: print(f"[2/7] {m}"))
+            drop = border_nodata_mask(valid, args.resolution,
+                                      progress=lambda m: print(f"[2/7] {m}"))
+            covered_m2 = float((~drop).sum()) * args.resolution ** 2
+            del valid
+            if area_spike > 0:
+                dem = filter_spikes(dem, args.resolution, radius_m=10.0, threshold_m=area_spike,
+                                    progress=lambda m: print(f"[2/7] {m}"))
+            dem += FLEX_PC_Z_OFFSET
+            print(f"[2/7] Applied FLEX point-cloud Z offset: {FLEX_PC_Z_OFFSET:.3f} m")
         else:
             if args.terrain_patch:
                 print("[1/7] Project terrain patches are for the map-terrain export; the LiDAR is used as it is")
@@ -2577,6 +2681,7 @@ def main():
                 "hillshade":    (hs_mode if hs_bytes else None),
                 "hillshade_cell_m": (float(hs_cell) if hs_cell else None),
                 "terrain":      ('map' if map_terrain else 'lidar'),
+                **({"ground": "area"} if area_terrain else {}),
                 "terrain_cell_m": float(args.resolution),
                 "terrain_patches": len(args.terrain_patch) if map_terrain else 0,
                 "satellite":    sat_used,
