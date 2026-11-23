@@ -5,8 +5,13 @@ ridgewalk.py on its made-up scene (numpy + scipy only, no PDAL, no network, < 30
     python tools/test_ridgewalk.py
 
 The scene (ridgewalk.DEMO): a vertical pit on the line between two tiles, a slanted pit with a deeper group
-under a roof beside it, an opening at the foot of a cliff, a crack, two lone returns (one far from everything),
-one flight pass with stripes of returns far below the ground, a patch of brush. Pins down:
+under a roof beside it, a tall wall with returns all over its face and an opening at its foot, a crack, a pit
+0.8 m deep and one 1.5 m deep, two lone returns (one far from everything), one flight pass with stripes of
+returns far below the ground, a patch of brush. Pins down:
+  * the measure: a return is below ground when it lies more than 1 m behind the local face. The wall's face
+    returns are under the lid (candidates) but on the face: no feature, no hole. The opening at its foot is a
+    feature 1 to 3 m deep (not the wall's height). The 0.8 m pit is not found, the 1.5 m one is; with
+    --min-behind 0.5 the shallow one is found too;
   * the files: ridge.json, lid.npy, holes.npy, points.bin (RWP1), shapes.bin (RWS1), brush.npy / brush.json;
   * the lid closes every opening at ground level;
   * each feature is classified right: returns in a group, open at the pit's mouth, the deep group joined to
@@ -64,10 +69,11 @@ t_first = time.time() - T0
 check('progress lines are [ridge] NN% and ASCII', all(l.startswith('[ridge] ') and '%' in l[:13] for l in log.strip().splitlines()) and log.isascii(), log[:200])
 for k in ('version', 'epsg', 'zone', 'south', 'origin', 'bbox_utm', 'bbox_lonlat', 'cell', 'nx', 'ny', 'params', 'counts', 'passes', 'seconds', 'notes'):
     check('ridge.json has ' + k, k in R['J'])
-for k in ('returns', 'below', 'groups', 'lone', 'likely_noise', 'pattern_noise', 'features', 'true_cells', 'guessed_cells'):
+for k in ('returns', 'below', 'groups', 'lone', 'likely_noise', 'pattern_noise', 'features', 'true_cells', 'guessed_cells', 'candidates', 'on_face', 'no_face'):
     check('counts has ' + k, isinstance(R['J']['counts'].get(k), int), str(R['J']['counts'].get(k)))
 nx, ny = R['J']['nx'], R['J']['ny']
 check('version 1, cell 0.3', R['J']['version'] == 1 and abs(R['J']['cell'] - 0.3) < 1e-9)
+check('params say the measure', R['J']['params'].get('measure') == 'normal' and R['J']['params'].get('min_behind') == 1.0, str(R['J']['params'].get('min_behind')))
 check('grid covers the scene', abs(nx * cell - D['size'][0]) < 1.0 and abs(ny * cell - D['size'][1]) < 1.0, '%d %d' % (nx, ny))
 check('lid.npy float32 [ny, nx]', R['lid'].dtype == np.float32 and R['lid'].shape == (ny, nx), str(R['lid'].shape))
 check('holes.npy uint8 [ny, nx], values 0 1 2', R['holes'].dtype == np.uint8 and R['holes'].shape == (ny, nx) and set(np.unique(R['holes'])) <= {0, 1, 2})
@@ -122,13 +128,26 @@ fs = np.unique(dbg['feature'][ms]); fd = np.unique(dbg['feature'][md])
 check('deep group: joined to the slanted pit (one feature)', len(fd) == 1 and fd[0] >= 0 and fd[0] in fs, '%s %s' % (fs, fd))
 check('slanted pit: a true-entrance hole at its mouth', h1[at(sx + 1, sy, sr)].sum() >= 10, '%d' % h1[at(sx + 1, sy, sr)].sum())
 check('deep group: no hole cut above it', not h1[at(ex, ey, 1.5)].any())
-# ---- the opening at the foot of the cliff
-ox, oy, ol = D['cliff_open']
-mc = (np.abs(dx - ox) < 1.3) & (dy > oy) & (dy < oy + ol + 0.5) & (dbg['depth'] > 5)
-check('cliff opening: in a group, under the upper ground', mc.sum() >= 55 and (dbg['kind'][mc] == 0).mean() > 0.95, '%d' % mc.sum())
-check('cliff opening: the way out is sideways, and open', dbg['sideways'][mc].mean() > 0.9 and dbg['open'][mc].mean() > 0.8, '%.2f %.2f' % (dbg['sideways'][mc].mean(), dbg['open'][mc].mean()))
-check('cliff opening: its opening is on the cliff line, not on the ground above the passage', (h1 | h2)[(np.abs(gx - ox) < 2) & (np.abs(gy - oy) < 1.5)].any() and
-      not h1[(np.abs(gx - ox) < 2) & (gy > oy + 2.5) & (gy < oy + ol)].any())
+# ---- the wall: its face returns are under the lid but on the face; the opening at its foot is a feature
+ox, ol = D['cliff_open']; oy = D['cliff_y']; run_ = D['cliff_run']
+check('wall: thousands of its face returns are candidates (under the lid)', R['J']['counts']['on_face'] > 5000, str(R['J']['counts']['on_face']))
+band = (dy > oy - 1.5) & (dy < oy + run_ + 1.5) & (np.abs(dx - ox) > 3)
+check('wall: none of them is below ground', band.sum() == 0, '%d' % band.sum())
+gband = (gy > oy - 1.5) & (gy < oy + run_ + 1.5) & (np.abs(gx - ox) > 4)
+check('wall: no hole, no guessed opening on it', not (R['holes'] > 0)[gband].any(), '%d' % (R['holes'] > 0)[gband].sum())
+mc = (np.abs(dx - ox) < 1.3) & (dy > oy) & (dy < oy + run_ + ol + 0.5)
+check('opening at the foot of the wall: in a group, one feature', mc.sum() >= 50 and (dbg['kind'][mc] == 0).all() and len(np.unique(dbg['feature'][mc])) == 1, '%d' % mc.sum())
+check('opening: depths are how far behind the face (1 to 3 m), not the height of the wall', dbg['depth'][mc].min() >= 1.0 and 2.5 < dbg['depth'][mc].max() < 4.0,
+      '%.2f..%.2f' % (dbg['depth'][mc].min(), dbg['depth'][mc].max()))
+check('opening: the way out is sideways, and open where the face has its gap', dbg['sideways'][mc].mean() > 0.9 and dbg['open'][mc].mean() > 0.3, '%.2f %.2f' % (dbg['sideways'][mc].mean(), dbg['open'][mc].mean()))
+check('opening: its hole is on the wall line, not on the ground above the passage', (h1 | h2)[(np.abs(gx - ox) < 2) & (np.abs(gy - oy) < 2.0)].any() and
+      not h1[(np.abs(gx - ox) < 2) & (gy > oy + run_ + 1.5) & (gy < oy + run_ + ol)].any())
+# ---- the two small pits
+qx, qy, qr, qd = D['pit_shallow']
+check('pit 0.8 m deep: not found (no return, no hole)', near(qx, qy, qr + 1).sum() == 0 and not (R['holes'] > 0)[at(qx, qy, qr + 1)].any(), '%d' % near(qx, qy, qr + 1).sum())
+qx, qy, qr, qd = D['pit_low']; m = near(qx, qy, qr + 0.3)
+check('pit 1.5 m deep: found, in a group, its depth right', m.sum() >= 40 and (dbg['kind'][m] == 0).all() and abs(np.median(dbg['depth'][m]) - qd) < 0.15, '%d' % m.sum())
+check('pit 1.5 m deep: a true-entrance hole', h1[at(qx, qy, qr)].sum() >= 30, '%d' % h1[at(qx, qy, qr)].sum())
 # ---- the crack
 c0, c1, cy, cw, cd = D['crack']
 mk = (dx > c0) & (dx < c1) & (np.abs(dy - cy) < 0.5)
@@ -157,7 +176,7 @@ lab, nc = veg_mesh.components(nv, st.astype(np.int64))
 used = np.zeros(nv, bool); used[st.ravel()] = True
 top = np.full(nc, np.inf); np.minimum.at(top, lab[used], sd[used]); top = top[np.isfinite(top)]
 check('every shape reaches the surface', R['J']['counts']['not_reaching'] == 0 and len(top) > 0 and top.max() < 0.75, '%d pieces, highest vertex of the worst %.2f m down' % (len(top), top.max()))
-for name, (x, y, r) in dict(pit=(px, py, 3.5), slant=(sx + 4, sy, 5), deep=(ex, ey, 3), cliff=(ox, oy + 3, 4), crack=((c0 + c1) / 2, cy, 9)).items():
+for name, (x, y, r) in dict(pit=(px, py, 3.5), slant=(sx + 4, sy, 5), deep=(ex, ey, 3), cliff=(ox, oy + 2, 4), crack=((c0 + c1) / 2, cy, 9)).items():
     check('a shape at the ' + name, (np.hypot(sv[:, 0] - x, sv[:, 1] - y) < r).sum() > 10)
 flatg = np.abs(sv[:, 1] - D['cliff_y']) > 1.5          # (the lid between two cells of a cliff is not a height)
 check('shapes stay under the lid', (sd >= 0).all() and (sv[:, 2] <= rw.bilin(R['lid'].astype('f8'), sv[:, 0].astype('f8'), sv[:, 1].astype('f8'), cell) + 0.35)[flatg].all())
@@ -184,8 +203,8 @@ check('other tiles: the same holes', (R['holes'] != Rb['holes']).sum() <= 0.02 *
 check('the pit on the tile line is whole and single', abs(int(h1[at(px, py, pr + 1.5)].sum()) - int((Rb['holes'] == 1)[at(px, py, pr + 1.5)].sum())) <= 3)
 
 # ---- --npz, a polygon, --no-shapes
-x, y, z, c, ps = rw.demo_points()
-npz = os.path.join(tmp, 'pts.npz'); np.savez(npz, x=x + 5000.0, y=y + 7000.0, z=z, c=c, psid=ps)
+x, y, z, c, ps, last = rw.demo_points()
+npz = os.path.join(tmp, 'pts.npz'); np.savez(npz, x=x + 5000.0, y=y + 7000.0, z=z, c=c, psid=ps, rn=np.ones(len(x), 'u1'), nr=np.where(last, 1, 2).astype('u1'))
 ring = os.path.join(tmp, 'ring.json'); json.dump([[5000, 7000], [5120, 7000], [5120, 7090], [5000, 7090]], open(ring, 'w'))
 Cd = os.path.join(tmp, 'c')
 run(['--npz', npz, '--polygon', ring, '--out', Cd, '--no-shapes', '--workers', '2'])
@@ -196,6 +215,19 @@ ins = (gx < 120) & (gy < 90)
 check('polygon: the lid is blank outside it and whole inside', np.isnan(Rc['lid'][~ins & ((gx > 120.5) | (gy > 90.5))]).all() and np.isfinite(Rc['lid'][(gx < 119.5) & (gy < 89.5)]).all())
 check('polygon: no returns, no holes outside', (Rc['xyz'][:, 0] <= 120.01).all() and (Rc['xyz'][:, 1] <= 90.01).all() and not (Rc['holes'] > 0)[~ins].any())
 check('polygon: the pits inside are still found', (Rc['holes'] == 1)[at(px, py, pr)].sum() > 50 and Rc['J']['counts']['pattern_noise'] == 0 and 300 < Rc['J']['counts']['below'] < ca['below'])
+# ---- --min-behind, and a file without return numbers (every return counts as last)
+npz2 = os.path.join(tmp, 'pts2.npz'); np.savez(npz2, x=x, y=y, z=z, c=c, psid=ps)
+Dd = os.path.join(tmp, 'd')
+run(['--npz', npz, '--out', Dd, '--no-shapes', '--min-behind', '0.5', '--debug', '--workers', '4'])
+Rd = load(Dd); qx, qy, qr, qd = D['pit_shallow']
+md = np.hypot(Rd['dbg']['x'] - qx, Rd['dbg']['y'] - qy) < qr + 0.3
+check('--min-behind 0.5: the 0.8 m pit is found', md.sum() >= 40 and abs(np.median(Rd['dbg']['depth'][md]) - qd) < 0.15 and (Rd['holes'] == 1)[at(qx, qy, qr)].sum() >= 30
+      and Rd['J']['params']['min_behind'] == 0.5, '%d' % md.sum())
+check('--min-behind 0.5: more returns are below ground', Rd['J']['counts']['below'] > ca['below'], '%d' % Rd['J']['counts']['below'])
+Ee = os.path.join(tmp, 'e')
+run(['--npz', npz2, '--out', Ee, '--no-shapes', '--debug', '--workers', '4'])
+Re = load(Ee); wb = ((Re['dbg']['y'] > oy - 1.5) & (Re['dbg']['y'] < oy + run_ + 1.5) & (np.abs(Re['dbg']['x'] - ox) > 3)).sum()
+check('no return numbers: still runs, the wall still not a feature', wb == 0 and abs(Re['J']['counts']['below'] - ca['below']) <= 0.05 * ca['below'], '%d on the wall, %d below' % (wb, Re['J']['counts']['below']))
 check('work folder removed', not os.path.exists(os.path.join(A, '_work')))
 
 import shutil
