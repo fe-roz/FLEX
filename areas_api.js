@@ -27,9 +27,9 @@ const { spawn } = require('child_process');
 const { Readable } = require('stream');
 
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
-const RESULTS = ['ground', 'terrain', 'veg', 'bush', 'prospect'];
-const TOOLS = ['terrain', 'veg', 'bush', 'prospect'];
-const LABEL = { maps: 'Detailed maps (slope, hillshade, brush)', ground: 'Ground', terrain: 'Terrain', veg: 'Vegetation shapes', bush: 'Bushwhack layers', prospect: 'Prospects' };
+const RESULTS = ['ground', 'terrain', 'veg', 'bush', 'prospect', 'ridge'];
+const TOOLS = ['terrain', 'veg', 'bush', 'prospect', 'ridge'];
+const LABEL = { maps: 'Detailed maps (slope, hillshade, brush)', ground: 'Ground', terrain: 'Terrain', veg: 'Vegetation shapes', bush: 'Bushwhack layers', prospect: 'Prospects', ridge: 'Ridgewalking' };
 const MIN_RING = 3, MAX_RING = 3000;
 // The one table. km2 = area; a tool "fits" up to `max` at its default, and offers a coarser setting that reaches `coarseMax`.
 const LIMITS = {
@@ -37,6 +37,8 @@ const LIMITS = {
   veg:     { max: 25, coarseMax: 60, offer: { key: 'detail-low', label: 'Lower detail (coarser shapes)', options: { detail: 'low' } }, option: { detail: 'low' } },
   terrain: { postsMax: 32e6, defaultCell: 1, coarseCell: 2, offer: { key: 'cell-2', label: '2 m cells (about a quarter of the size)', options: { cell: 2 } } },
   prospect: { max: 100 },   // follows ground: it only reads the area's ground and points
+  // Ridgewalking (ridgewalk.py): about 95 s and under 2 GB a km² on the test server, worked in tiles; 15 km² is about 25 minutes.
+  ridge:   { max: 15 },
   bush:    { max: 32, coarseMax: 80, defaultCell: 1, coarseCell: 2, offer: { key: 'cell-2', label: 'Coarser cells (2 m)', options: { cell: 2 } } },
 };
 const FILES = {
@@ -44,12 +46,15 @@ const FILES = {
   veg: /^(veg\.json|shapes\.bin|shell\.bin|ground\.bin|preview\.png)$/,
   bush: /^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,80}\.(png|json|tif|u8)$/,
   terrain: /^ref\.json$/,
+  // what the map draws (ridge-draw.js) and what the phone export also carries; lid.npy / holes.npy / brush.npy (the whole area's
+  // grids, tens to hundreds of MB) stay on this computer: not served, not in an area package
+  ridge: /^(ridge\.json|features\.json|draw\.json|points\.bin|shapes\.bin|patches\.bin)$/,
   prospect: /^(candidates|candidates_areas|candidates_isolated)\.geojson$|^candidates\.(kml|csv)$|^(depth|below|steep)\.png$|^(layers|summary)\.json$/,
 };
 const IMPORT_MAX = 2048 * 1048576;    // an area package (zip) for POST /api/areas/import
 const MIME = { '.png': 'image/png', '.json': 'application/json', '.geojson': 'application/json', '.tif': 'image/tiff', '.kml': 'application/vnd.google-earth.kml+xml', '.csv': 'text/csv; charset=utf-8' };
 
-module.exports = function areasApi({ python, groundScript, vegScript, lidarScript, prospectScript, mapsScript, root, terrainGen, pollMs, fetchTimeoutMs }) {
+module.exports = function areasApi({ python, groundScript, vegScript, lidarScript, prospectScript, mapsScript, ridgeScript, ridgeAreaScript, root, terrainGen, pollMs, fetchTimeoutMs }) {
   const jobs = {};
   const tiles = require('./area_tiles.js')({ root });     // the area's maps as coloured tiles (GET tiles/…, maps/…)
   const eptCache = new Map();
@@ -179,7 +184,10 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
 
   // ── check: limits, offers, plain words ──────────────────────────────────────
   const round1 = v => Math.max(1, Math.round(v));
-  const minutesOf = (tool, km2) => round1({ ground: 0.6 * km2 + 1, veg: 1.0 * km2 + 1, bush: 0.5 * km2 + 1, prospect: 0.2 * km2 + 1, terrain: 1.2 * km2 + 2 }[tool]);
+  const minutesOf = (tool, km2) => round1({ ground: 0.6 * km2 + 1, veg: 1.0 * km2 + 1, bush: 0.5 * km2 + 1, prospect: 0.2 * km2 + 1, terrain: 1.2 * km2 + 2, ridge: 1.6 * km2 + 0.5 }[tool]);
+  // Ridgewalking does not use the area's ground or its stored points: it reads the LiDAR itself, with the flight-pass ids.
+  const RIDGE_WHY = 'Reads the LiDAR itself (it needs the flight-pass ids, which the area\'s stored points do not keep).';
+  const needsGround = tools => tools.some(t => t !== 'ridge');
   /** Settings the tool would run with: { coarse, cell, detail } from the options and its defaults. */
   function settingsOf(tool, options) {
     const o = (options && options[tool]) || {};
@@ -293,6 +301,7 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
       if (needs) { out[t] = { status: 'needslidar', why: needsWhy, offers: [], minutes: 0 }; continue; }
       const j = t === 'prospect' ? { status: 'fits', why: '', offers: [], minutes: minutesOf('prospect', km2), coarse: false } : judge(t, km2, options);
       if (j.status === 'fits' && cov != null && cov < 0.98) { j.status = 'partly'; j.why = (covWords + ' ' + j.why).trim(); }
+      if (t === 'ridge') { if (j.status !== 'toobig') j.why = (j.why + ' ' + RIDGE_WHY).trim(); out[t] = j; continue; }      // (its own read: the ground's limit is not its limit)
       if (ground.status === 'toobig' && j.status !== 'toobig') { j.status = 'toobig'; j.why = ground.why; j.offers = []; }
       out[t] = j;
     }
@@ -374,6 +383,7 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
         if (m) { notes.push(m[1]); job.notes.push(m[1]); }
         if (err) { job.progress.push('! ' + l.trim()); errLines.push(l); } else { job.progress.push(l.trim()); if (/^!\s/.test(l)) errLines.push(l.replace(/^!\s*/, '')); }
         const p = /\[(\d+)\/(\d+)\]/.exec(l); if (p && +p[2] > 0) step.frac = Math.min(0.95, +p[1] / +p[2]);
+        const rp = /^\[ridge\]\s+(\d+)%/.exec(l.trim()); if (rp) step.frac = Math.min(0.97, +rp[1] / 100);        // ridgewalk.py's own percent
       });
       proc.stdout.on('data', take(false));
       proc.stderr.on('data', take(true));
@@ -523,6 +533,26 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
         const r = await runScript(job, step, args, notes);
         if (r.code !== 0 || !fs.existsSync(path.join(DIR, 'bush', 'derived.json'))) throw new Error(whyFailed(r.errLines, r.code));
         res = { coarse: s.coarse, cell: s.cell, band: vb || [0.3, 1.5] };
+      } else if (key === 'ridge') {
+        // ridgewalk.py for the area's ring (its own read of the LiDAR, in tiles), then ridge_area.py: the small files the map draws.
+        const out = path.join(DIR, 'ridge');
+        fs.rmSync(out, { recursive: true, force: true });
+        fs.mkdirSync(out, { recursive: true });
+        const rf = path.join(DIR, 'ridge-ring.json');
+        fs.writeFileSync(rf, JSON.stringify(area.ring.slice(0, -1)));
+        const args = [ridgeScript, '--ept', lidar[0]];
+        lidar.slice(1).forEach(u => args.push('--also-ept', u));
+        args.push('--bbox', ...bboxOf(area.ring).map(String), '--polygon', rf, '--out', out);
+        const r = await runScript(job, step, args, notes);
+        fs.rmSync(rf, { force: true });
+        const rj = readJson(path.join(out, 'ridge.json'));
+        if (r.code !== 0 || !rj) throw new Error(whyFailed(r.errLines, r.code));
+        if (job.cancelled) throw new Error('Cancelled');
+        const r2 = await runScript(job, step, [ridgeAreaScript, out], notes);
+        if (r2.code !== 0 || !fs.existsSync(path.join(out, 'draw.json'))) throw new Error(whyFailed(r2.errLines, r2.code));
+        const c = rj.counts || {};
+        res = { coarse: false, cell: rj.cell, counts: { features: c.features || 0, below: c.below || 0, true_cells: c.true_cells || 0, guessed_cells: c.guessed_cells || 0, pattern_noise: c.pattern_noise || 0 } };
+        (Array.isArray(rj.notes) ? rj.notes : []).filter(n => /flight pass|pattern|no /i.test(String(n)) && String(n).length < 200).slice(0, 3).forEach(n => notes.push(String(n)));
       } else if (key === 'maps') {
         const mc = mapsCellOf(options), g = area.results && area.results.ground;
         const fresh = job.steps.some(x => (x.key === 'ground' || x.key === 'bush') && x.status === 'done');
@@ -570,11 +600,11 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
     if (!c.ok) return { code: 400, error: c.error };
     const bad = tools.filter(t => c.tools[t].status === 'toobig' || c.tools[t].status === 'needslidar');
     if (bad.length) return { code: 400, error: bad.map(t => `${LABEL[t]}: ${c.tools[t].why}`).join(' ') };
-    const skipGround = onlyProspect && hasGround(area.id);
+    const skipGround = (onlyProspect && hasGround(area.id)) || !needsGround(tools);      // Ridgewalking alone needs no ground
     if (c.ground.status === 'toobig' && !skipGround) return { code: 400, error: c.ground.why };
     const runId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const mc = mapsCellOf(options); if (mc && mc.error) return { code: 400, error: mc.error };
-    const steps = (skipGround ? [] : ['ground']).concat(['prospect', 'veg', 'bush'].filter(t => tools.includes(t)), mc && mc.cell && !onlyProspect ? ['maps'] : [], tools.includes('terrain') ? ['terrain'] : []).map(k => ({ key: k, label: LABEL[k], status: 'pending', frac: 0 }));
+    const steps = (skipGround ? [] : ['ground']).concat(['prospect', 'veg', 'bush'].filter(t => tools.includes(t)), mc && mc.cell && !onlyProspect && needsGround(tools) ? ['maps'] : [], tools.includes('ridge') ? ['ridge'] : [], tools.includes('terrain') ? ['terrain'] : []).map(k => ({ key: k, label: LABEL[k], status: 'pending', frac: 0 }));
     const job = jobs[runId] = { status: 'running', progress: [], notes: [], steps, areaId: area.id, name: 'Analyze: ' + area.name, label: 'Analyze: ' + area.name,
       error: null, started: Date.now(), ended: null, cancelled: false, proc: null };
     if (c.ground.status === 'partly' && c.ground.why) job.notes.push(c.ground.why);
