@@ -106,7 +106,7 @@ function makeViewer() {
   ok('drawn as ordinary solid surfaces: depth test and depth write on, no blending, lit, one shared material per kind', mtl.isMeshLambertMaterial && mtl.depthTest && mtl.depthWrite && mtl.transparent === false && o.meshes[1][0].material !== mtl);
   ok('the geometry is the cone’s 12 triangles with normals', mesh.geometry.attributes.position.count === 36 && !!mesh.geometry.attributes.normal && !mesh.geometry.index);
   const sph = mesh.geometry.boundingSphere, box = mesh.geometry.boundingBox;
-  ok('the tile carries its own bounds (both cones inside, top to under the foot), so trees out of view are skipped', sph && box && near(box.min.x, 10 - 3.2) && near(box.max.x, 40 + 4.1) && near(box.max.z, 503 + 25) && box.min.z < 500 && box.min.z > 498 && sph.radius > 15 && sph.radius < 40, box);
+  ok('the tile carries its own bounds (both cones inside, top to under the foot), so trees out of view are skipped', sph && box && near(box.min.x, 10 - 3.2) && near(box.max.x, 40 + 4.1) && near(box.max.z, 503 + 25) && box.min.z < 500 && box.min.z > 498 && sph.radius > 15 && sph.radius < 40 && mesh.frustumCulled === true, box);
   ok('taps go through: the trees answer no ray', (() => { const hits = []; mesh.raycast(new v.THREE.Raycaster(new v.THREE.Vector3(10, 20, 600), new v.THREE.Vector3(0, 0, -1)), hits); return hits.length === 0; })());
   ok('the screen-door patch finds its anchor in three’s own Lambert shader and adds its uniform', (() => {
     const sh = { uniforms: {}, fragmentShader: v.THREE.ShaderLib.lambert.fragmentShader, vertexShader: v.THREE.ShaderLib.lambert.vertexShader };

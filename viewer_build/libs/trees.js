@@ -117,6 +117,7 @@
         var mesh = new THREE.InstancedMesh(tg, mats[k], c);
         mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(c * 3), 3);
         mesh.name = 'trees-' + KINDS[k]; mesh.matrixAutoUpdate = false;
+        mesh.frustumCulled = true;                               // (three switches it off for instanced meshes; each tile has real bounds)
         mesh.userData = { kind: k, tile: t };
         mesh.visible = k === 2 ? S.st.brush : S.st.trees;
         slot[k][t] = { mesh: mesh, at: 0, box: [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity] };
