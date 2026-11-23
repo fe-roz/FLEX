@@ -183,7 +183,60 @@ def ridge_inline_json(side, read, names):
     for k in ('points', 'patches', 'shapes'):
         name = out.get(k)
         out[k] = base64.b64encode(read(name)).decode('ascii') if name and name in names else None
-    return json.dumps(out, separators=(',', ':'))
+    for k in ('features', 'marks'):                     # the two lists (marks in the field): the list itself, inline
+        name = out.pop(k, None)
+        try:
+            if isinstance(name, str) and name in names:
+                out[k] = json.loads(read(name)).get(k)
+        except Exception:
+            pass
+    return json.dumps(out, separators=(',', ':'), ensure_ascii=False).replace('</', '<\\/')
+
+
+RMARK_KINDS = ('cave', 'pit', 'nothing', 'unreached')
+
+
+def clean_ridge_marks(raw, limit=5000):
+    """Marks on ridgewalking features as an export carries them
+    (ridge_marks.json; the Export dialog gathers the open project's marks
+    inside the area: FlexLib.rmarksPayload): only the known fields, every
+    value checked. -> { version: 1, marks: [...] } or None when there are none."""
+    def num(v, lo, hi):
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return None
+        return v if v == v and lo <= v <= hi else None
+    marks = []
+    for m in ((raw or {}).get('marks') if isinstance(raw, dict) else raw) or []:
+        if not isinstance(m, dict) or m.get('kind') not in RMARK_KINDS:
+            continue
+        lon, lat = num(m.get('lon'), -180, 180), num(m.get('lat'), -90, 90)
+        mid = str(m.get('id') or '')[:64]
+        if lon is None or lat is None or not mid:
+            continue
+        o = {'id': mid, 'kind': m['kind'], 'note': str(m.get('note') or '')[:2000], 'lon': round(lon, 7), 'lat': round(lat, 7),
+             'who': str(m.get('who') or '')[:80], 't': str(m.get('t') or '')[:40]}
+        h = num(m.get('h'), -1000, 10000)
+        if h is not None:
+            o['h'] = round(h, 2)
+        f = m.get('feat')
+        if isinstance(f, dict):
+            g = {}
+            if f.get('id') not in (None, ''):
+                g['id'] = str(f['id'])[:40]
+            for k in ('depth', 'returns'):
+                v = num(f.get(k), 0, 1e7)
+                if v is not None:
+                    g[k] = int(round(v)) if k == 'returns' else round(v, 2)
+            if f.get('entrance') in ('true', 'guessed', 'none'):
+                g['entrance'] = f['entrance']
+            if g:
+                o['feat'] = g
+        marks.append(o)
+        if len(marks) >= limit:
+            break
+    return {'version': 1, 'marks': marks} if marks else None
 
 
 def build_inline_viewer(glb_path, tex_b64, caves_data, viewer_libs, progress=print,
