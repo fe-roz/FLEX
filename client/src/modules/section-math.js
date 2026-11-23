@@ -168,7 +168,7 @@
     const h = Math.abs(q.d - p.d), v = q.z - p.z;
     return { horizontal: h, vertical: v, straight: Math.hypot(h, v), slope: h > 0 ? Math.atan2(Math.abs(v), h) * 180 / Math.PI : 90 };
   }
-  /** A length in the units FLEX is set to, with the other in brackets: "12.4 m (40.7 ft)". */
+  /** A length in the units FLEX is set to, with the other in brackets: "3.0 m (9.8 ft)". */
   function both(m, imperial, digits) {
     const dg = digits == null ? 1 : digits, a = m.toFixed(dg) + ' m', b = (m * FT).toFixed(dg) + ' ft';
     return imperial ? b + ' (' + a + ')' : a + ' (' + b + ')';
