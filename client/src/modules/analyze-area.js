@@ -494,7 +494,7 @@
     const canRemake = area && area.results && area.results.ground && v && !Number.isNaN(v) && !(made && made.cell === v);
     const remake = canRemake ? (M.pointsStored === false ? '<div class="ar-why">The points of this area are not on this computer: the maps can only be remade with Ground (reads the LiDAR).</div>'
       : `<div class="ar-offers"><button type="button" class="ar-btn" data-act="remaps">Remake the maps at ${v} m (the ground and other results stay)</button></div>`) : '';
-    return `<div class="ar-item ar-detail" id="ar-detail"><div class="ar-hd"><span class="ar-nm">Map detail</span>
+    return `<div class="ar-detail" id="ar-detail"><div class="ar-hd"><span class="ar-nm">Map detail</span>
       <label class="ar-md"><input type="radio" name="ar-md" value="auto"${auto ? ' checked' : ''}> Auto${gc ? ' (' + gc + ' m)' : ''}</label>
       <label class="ar-md"><input type="radio" name="ar-md" value="m"${auto ? '' : ' checked'}> <input type="text" id="ar-mdv" inputmode="decimal" size="4" placeholder="0.3" value="${esc(auto ? '' : S.mapsCell)}" aria-label="Map detail in metres"> m</label></div>
       <div class="ar-why">${esc(line)}${made ? ' Now: ' + made.cell + ' m.' : ''}</div>${warn ? `<div class="ar-why ar-note">${esc(warn)}</div>` : ''}${remake}</div>`;
@@ -704,7 +704,7 @@
   .ar-grow-row { padding: 5px 4px; }
   .ar-desc { padding-left: 21px; }
   .ar-note { color: #f2c24e; font-size: 10.5px; }
-  .ar-detail .ar-hd { flex-wrap: wrap; gap: 8px; } .ar-md { display: inline-flex; gap: 4px; align-items: center; font-size: 11px; } #ar-mdv { width: 46px; background: rgba(255,255,255,.07); color: inherit; border: 1px solid rgba(255,255,255,.2); border-radius: 4px; padding: 1px 4px; }
+  .ar-detail { padding: 6px 9px; border-top: 1px solid rgba(255,255,255,.08); } .ar-detail .ar-hd { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; } .ar-md { display: inline-flex; gap: 4px; align-items: center; font-size: 11px; } #ar-mdv { width: 46px; background: rgba(255,255,255,.07); color: inherit; border: 1px solid rgba(255,255,255,.2); border-radius: 4px; padding: 1px 4px; }
   .ar-coarse { font-size: 9.5px; color: #f2c24e; border: 1px solid rgba(242,194,78,.5); border-radius: 8px; padding: 0 5px; }
   .ar-x { background: none; border: 0; color: rgba(255,255,255,.45); cursor: pointer; font-size: 11px; padding: 0 2px; } .ar-x:hover { color: #ef7b6e; }`;
   doc.head.appendChild(css);
