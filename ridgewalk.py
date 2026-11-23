@@ -603,6 +603,12 @@ def w_cluster(job):
     cnt = np.zeros(len(gp), int)
     if len(px):
         px = px - I0 * cell; py = py - J0 * cell
+        g0 = np.array([T[:, 0].min() - 1, T[:, 1].min() - 1]); gs = (int((T[:, 0].max() + 1 - g0[0]) // 1.0) + 1, int((T[:, 1].max() + 1 - g0[1]) // 1.0) + 1)
+        nearT = np.zeros(gs, bool); nearT[((T[:, 0] - g0[0]) // 1.0).astype(int), ((T[:, 1] - g0[1]) // 1.0).astype(int)] = True
+        nearT = ndimage.maximum_filter(nearT, 3)               # only the returns around a way out are looked at
+        m = nearT[np.clip(((px - g0[0]) // 1.0).astype(int), 0, gs[0] - 1), np.clip(((py - g0[1]) // 1.0).astype(int), 0, gs[1] - 1)]
+        px, py, pz = px[m], py[m], pz[m]
+    if len(px):
         if fit.any():
             cnt[fit] = cKDTree(np.c_[px, py, pz]).query_ball_point(T[fit], 0.6, return_length=True)
         if not fit.all():
@@ -727,11 +733,11 @@ def w_cluster(job):
     out = dict(idx=idx, flab=flab, openp=openp, side=horiz > vertd, nf=int(nf), wrapped=len(wrapped), shapes=int(nb), left=int(left), joined=nfix,
                true=((tj + gj0) * C['nx'] + ti + gi0).astype(np.int64), guess=((qj + gj0) * C['nx'] + qi + gi0).astype(np.int64), mesh=None)
     if C['shapes'] and Vx.any():
-        out['mesh'] = shape_mesh(C, Vx, L, zc, zlo, gp, gj0, gi0, I0, J0, stree)
+        out['mesh'] = shape_mesh(C, Vx, L, zc, zlo, gp, gj0, gi0, I0, J0, Lw, stree)
     return out
 
 
-def shape_mesh(C, Vx, L, zc, zlo, gp, gj0, gi0, I0, J0, stree):
+def shape_mesh(C, Vx, L, zc, zlo, gp, gj0, gi0, I0, J0, Lw, stree):
     """The walls of the shapes in a box: the surface of (rock = under the lid and outside every shape), its ground
     part dropped, simplified, then hugged half-way onto the returns with the mouth left alone. A vertex's depth is its
     distance from the lid surface (straight up on flat ground, sideways at a wall)."""
@@ -750,6 +756,10 @@ def shape_mesh(C, Vx, L, zc, zlo, gp, gj0, gi0, I0, J0, stree):
     vv = np.asarray(veg_mesh.taubin(vv, tt, iters=2), 'f8')
     # metres from the window's corner
     V = np.c_[(vv[:, 1] + gi0 - I0 + 0.5) * VOX, (vv[:, 0] + gj0 - J0 + 0.5) * VOX, zlo + (vv[:, 2] + 0.5) * VOX]
+    tt = tt[((bilin(Lw, V[:, 0], V[:, 1], cell) - V[:, 2])[tt] > 0.45).any(1)]      # (cheap first cut: straight down is never less)
+    if not len(tt):
+        return None
+    V, tt = veg_mesh.compact(V, tt)[:2]
     dep = stree.query(V)[0]
     tt = tt[(dep[tt] > 0.45).any(1)]                      # the shape part: the ground around it is the exporter's
     if not len(tt):
