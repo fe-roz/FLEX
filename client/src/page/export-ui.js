@@ -1120,6 +1120,32 @@
     }
   })();
 
+  // V2 - Ridgewalking's two options: shown while the box is ticked, remembered per computer
+  // (the tick box itself is off at every start).
+  function _ridgeOptions() {
+    const sh = document.getElementById('export_ridge_shapes'), br = document.getElementById('export_brush_strength');
+    const pct = br ? Math.max(0, Math.min(100, parseFloat(br.value))) : NaN;
+    return { ridge_shapes: sh && !sh.checked ? 'none' : 'all', ...(Number.isFinite(pct) ? { brush_opacity: +(pct / 100).toFixed(2) } : {}) };
+  }
+  (function _ridgeOptionsUi() {
+    const box = document.getElementById('export_ridgewalk'), wrap = document.getElementById('export_ridge_opts');
+    const sh = document.getElementById('export_ridge_shapes'), br = document.getElementById('export_brush_strength');
+    const val = document.getElementById('export_brush_strength_val');
+    if (!box || !wrap || !sh || !br) return;
+    const get = k => { try { return localStorage.getItem('flex.export.' + k); } catch (_) { return null; } };
+    const set = (k, v) => { try { localStorage.setItem('flex.export.' + k, v); } catch (_) {} };
+    if (get('export_ridge_shapes') === '0') sh.checked = false;
+    const saved = parseFloat(get('export_brush_strength'));
+    if (Number.isFinite(saved) && saved >= 0 && saved <= 100) br.value = String(saved);
+    const show = () => { wrap.style.display = box.checked ? 'block' : 'none'; };
+    const label = () => { if (val) val.textContent = Math.round(parseFloat(br.value)) + ' %'; };
+    box.addEventListener('change', show);
+    sh.addEventListener('change', () => set('export_ridge_shapes', sh.checked ? '1' : '0'));
+    br.addEventListener('input', label);
+    br.addEventListener('change', () => { label(); set('export_brush_strength', br.value); });
+    show(); label();
+  })();
+
   window._exportRun = function() {
     const nameEl  = document.getElementById('export_map_name');
     const mapName = nameEl.value.trim();
@@ -1175,7 +1201,7 @@
 
     const body = {
       ...docsBody,
-      ...(ridgewalk ? { ridgewalk: true } : {}),
+      ...(ridgewalk ? { ridgewalk: true, ..._ridgeOptions() } : {}),
       bbox: [w, s, e, n],
       polygon: poly,                 // null: the whole box
       eptPath,

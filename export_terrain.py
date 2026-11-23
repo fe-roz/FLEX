@@ -2305,11 +2305,18 @@ def main():
         help='With or without --ridgewalk: use this already computed ridge folder (ridgewalk.py --out DIR).')
     ap.add_argument('--ridge-shapes', default='all', choices=['all', 'none'],
         help='With --ridgewalk: carry the shapes of the features (ridge_shapes.bin, large for a big area) or leave them out.')
+    ap.add_argument('--brush-colours', default=None, metavar='LIGHT,MEDIUM,DENSE',
+        help='With --ridgewalk: the three brush colours as RRGGBB values, light,medium,dense '
+             '(default b7e4a0,5fae4f,1f5f1f).')
     ap.add_argument('--brush-opacity', type=float, default=None,
         help='With --ridgewalk: how strongly the brush classes lie over the hillshade in "hillshade with brush" '
              '(tex_hsb.jpg); default 0.7.')
     args = ap.parse_args()
     ridge_mode = bool(args.ridgewalk or args.ridgewalk_dir)
+    brush_cls = None
+    if ridge_mode:
+        import export_ridge
+        brush_cls = export_ridge.brush_classes(args.brush_colours)     # (a bad value stops here, before the long step)
     if ridge_mode and (args.dem_grid or args.area_dir or args.project_terrain):
         sys.exit("ERROR: --ridgewalk reads the LiDAR itself: not with --dem-grid, --area-dir or --project-terrain")
     if ridge_mode and not args.ridgewalk_dir and not args.ept:
@@ -2696,7 +2703,7 @@ def main():
         if ridge is not None and hs_bytes and ridge.has_brush():
             import export_ridge
             brush_opacity = export_ridge.BRUSH_OPACITY if args.brush_opacity is None else min(1.0, max(0.0, args.brush_opacity))
-            bake = lambda im, rect: ridge.bake_brush(im, rect, opacity=brush_opacity)
+            bake = lambda im, rect: ridge.bake_brush(im, rect, opacity=brush_opacity, classes=brush_cls)
             hsb_img = bake(Image.open(_hs_io.BytesIO(hs_bytes)), (grid.e0, grid.n0, grid.e1, grid.n1))
             if poly_utm is not None:
                 blank_outside(hsb_img, grid, poly_utm)
@@ -2806,7 +2813,9 @@ def main():
                 "terrain_patches": len(args.terrain_patch) if map_terrain else 0,
                 "satellite":    sat_used,
                 **({"ridgewalk": 1} if ridge is not None else {}),
-                **({"hillshade_brush": {"opacity": brush_opacity}} if hsb_bytes else {}),
+                **({"hillshade_brush": {"opacity": brush_opacity,
+                                        **({"colours": ['%02x%02x%02x' % c for _, c in sorted(brush_cls)]} if args.brush_colours else {})}}
+                   if hsb_bytes else {}),
             }
             if tile_files:
                 caves_out["meta"]["texture_tiles"] = meta_entry(tcols, trows, True, tile_hs, hsb=any(k.startswith('tex_hsb_') for k in tile_files))

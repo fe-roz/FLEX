@@ -1606,6 +1606,21 @@
                   <div style="font-size:10px; color:rgba(255,255,255,0.4);">
                     Pits, cracks and openings from the LiDAR, for FLEX Field. Needs a point cloud; reads it again with flight-pass ids, so it takes longer.
                   </div>
+                  <!-- its two options, shown while it is ticked; remembered per computer (export-ui.js) -->
+                  <div id="export_ridge_opts" style="display:none; margin:6px 0 0 4px; padding-left:8px; border-left:2px solid rgba(255,255,255,0.12);">
+                    <label style="display:block; margin:2px 0 3px;">
+                      <input type="checkbox" id="export_ridge_shapes" checked>
+                      Include shapes (walls of the features)
+                    </label>
+                    <div style="font-size:10px; color:rgba(255,255,255,0.4);">
+                      Off makes the file smaller: about 15 MB per km2.
+                    </div>
+                    <label style="display:block; margin:6px 0 2px; font-size:11px;">
+                      Brush strength:
+                      <input type="range" id="export_brush_strength" min="0" max="100" step="5" value="70" style="width:110px; vertical-align:middle;">
+                      <span id="export_brush_strength_val" style="color:rgba(255,255,255,0.7);">70 %</span>
+                    </label>
+                  </div>
                 </div>
               </div>
             </div>

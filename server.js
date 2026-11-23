@@ -772,6 +772,8 @@ function handleExportTerrain(req, res) {
             hillshade_layer   = null,        // a map layer as the hillshade texture (hillshade_mode 'layer')
             docs_project      = null,        // project id: carry its documents (export_docs.js), with docs_caves = the exported caves' ids
             docs_caves        = null,
+            ridge_shapes      = 'all',       // with ridgewalk: 'none' leaves the shapes of the features out
+            brush_opacity     = null,        // with ridgewalk: 0..1, how strongly the brush lies over the hillshade
             ridgewalk         = false,       // V2 - Ridgewalking: the ridge step on the LiDAR, its ground as the terrain (export_ridge.py)
         } = params;
         const hsMode  = ['lidar', 'dem', 'url', 'none', 'layer'].includes(hillshade_mode) ? hillshade_mode : 'lidar';
@@ -857,7 +859,12 @@ function handleExportTerrain(req, res) {
         if (mapName) args.push('--name', mapName);
         if (cavesFilePath) args.push('--caves', cavesFilePath);
         if (polyFile) args.push('--polygon', polyFile);
-        if (ridgewalk === true && !demGrid) args.push('--ridgewalk');
+        if (ridgewalk === true && !demGrid) {
+            args.push('--ridgewalk');
+            if (ridge_shapes === 'none') args.push('--ridge-shapes', 'none');
+            if (typeof brush_opacity === 'number' && Number.isFinite(brush_opacity))
+                args.push('--brush-opacity', String(Math.max(0, Math.min(1, brush_opacity))));
+        }
         // The project's documents that belong to these caves: entries + page images
         if (typeof docs_project === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(docs_project)) {
             try {
