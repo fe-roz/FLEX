@@ -1373,6 +1373,7 @@
         dl.href = '/api/export/download/' + _exportJobId;
         dl.download = data.filename || 'flex_export.zip';
         document.getElementById('export_download_wrap').style.display = 'block';
+        if (window._phone) window._phone.refresh(_exportJobId);          // Send to phone: this export first in its list
         document.getElementById('export_run_btn').disabled = false;
       } else if (data.status === 'error') {
         _setProgress(0, '✗ ' + (data.error || 'Export failed'));

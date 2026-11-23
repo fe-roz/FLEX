@@ -76,6 +76,9 @@ class MainActivity : AppCompatActivity() {
     /** A zip handed to us ("Open with", share) before the map list was ready. */
     private var pendingZip: Uri? = null
     private var homeReady = false
+    /** Maps sent from the PC over the USB cable ("Send to phone"): Inbox.kt. */
+    private val inbox by lazy { Inbox(applicationContext) }
+    private val stagedInbox = HashMap<String, String>()          // import token -> the inbox file it came from
 
     /** Imports waiting for the user to choose update / separate / cancel. */
     private val staged = HashMap<String, MapStore.Staged>()
@@ -270,6 +273,7 @@ class MainActivity : AppCompatActivity() {
 
         if (savedInstanceState == null) webView.loadUrl(home)
         takeZipIntent(intent)
+        inbox.startServer()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -305,7 +309,7 @@ class MainActivity : AppCompatActivity() {
     private var incoming: Uri? = null
 
     // ── Import ──────────────────────────────────────────────────────────────
-    private fun startImport(uri: Uri, targetId: String?, author: String) {
+    private fun startImport(uri: Uri, targetId: String?, author: String, fromInbox: String? = null) {
         js("window.ffImportProgress && ffImportProgress(${q("Opening the zip…")})")
         io.execute {
             try {
@@ -314,15 +318,17 @@ class MainActivity : AppCompatActivity() {
                 } ?: throw IllegalStateException("Could not read that file")
                 if (targetId != null) {
                     val id = store.commit(s.dir, s.name, s.formatVersion, targetId, author)
+                    if (fromInbox != null) inbox.remove(fromInbox, true)
                     done(id, true)
                     return@execute
                 }
                 val matches = store.matches(s.name)
                 if (matches.length() == 0) {
                     val id = store.commit(s.dir, s.name, s.formatVersion, null, author)
+                    if (fromInbox != null) inbox.remove(fromInbox, true)       // imported: the copy from the PC is no longer needed
                     done(id, false)
                 } else {
-                    synchronized(staged) { staged[s.token] = s }
+                    synchronized(staged) { staged[s.token] = s; if (fromInbox != null) stagedInbox[s.token] = fromInbox }
                     val ask = JSONObject().put("token", s.token).put("name", s.name).put("bytes", s.bytes).put("matches", matches)
                     js("window.ffImportAsk && ffImportAsk(${q(ask.toString())})")
                 }
@@ -389,14 +395,23 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface fun importIncoming(author: String) {
             runOnUiThread { val u = incoming; incoming = null; if (u != null) startImport(u, null, author) }
         }
+        /** Maps the PC sent over the cable, waiting to be imported: [{ name, bytes, readable }]. */
+        @JavascriptInterface fun inboxList(): String = try { inbox.list().toString() } catch (_: Exception) { "[]" }
+        /** Import one of them, through the same path as any other zip (name match, update). */
+        @JavascriptInterface fun inboxImport(name: String, author: String) {
+            val f = inbox.file(name) ?: return
+            runOnUiThread { startImport(Uri.fromFile(f), null, author, name) }
+        }
+        @JavascriptInterface fun inboxDiscard(name: String): Boolean = inbox.remove(name, false)
         /** The answer to ffImportAsk: "update" (into targetId), "new" or "cancel". */
         @JavascriptInterface fun resolveImport(token: String, action: String, targetId: String, author: String) {
             val s = synchronized(staged) { staged.remove(token) } ?: return
+            val sent = synchronized(staged) { stagedInbox.remove(token) }       // from the PC: its copy goes once the map is in; Cancel keeps it waiting
             io.execute {
                 try {
                     when (action) {
-                        "update" -> done(store.commit(s.dir, s.name, s.formatVersion, targetId, author), true)
-                        "new" -> done(store.commit(s.dir, s.name, s.formatVersion, null, author), false)
+                        "update" -> { val id = store.commit(s.dir, s.name, s.formatVersion, targetId, author); if (sent != null) inbox.remove(sent, true); done(id, true) }
+                        "new" -> { val id = store.commit(s.dir, s.name, s.formatVersion, null, author); if (sent != null) inbox.remove(sent, true); done(id, false) }
                         else -> { store.discard(token); js("window.ffImportCancelled && ffImportCancelled()") }
                     }
                 } catch (e: Exception) {
@@ -594,7 +609,11 @@ class MainActivity : AppCompatActivity() {
 
     // Stop the render loop, timers and GPS work while not visible.
     override fun onPause() { super.onPause(); webView.onPause(); webView.pauseTimers() }
-    override fun onResume() { super.onResume(); webView.onResume(); webView.resumeTimers() }
+    override fun onResume() {
+        super.onResume(); webView.onResume(); webView.resumeTimers()
+        Inbox.onArrived = { js("window.ffInboxChanged && ffInboxChanged()") }
+        js("window.ffInboxChanged && ffInboxChanged()")          // a map pushed into the inbox folder while the app was in the background
+    }
 
     override fun onDestroy() {
         io.shutdown()

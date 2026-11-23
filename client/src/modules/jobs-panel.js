@@ -238,6 +238,7 @@
     const top = el('div', 'jp-top'), state = el('span', 'jp-state'), name = el('span', 'jp-name'), time = el('span', 'jp-time');
     const btns = el('span', 'jp-btns');
     btns.append(btn('cancel', 'Cancel', 'Stop this job'), btn('send', 'Send now', 'Send the waiting edits to CalTopo now'), btn('retry', 'Retry', 'Run it again with the same settings'),
+                btn('phone', 'Send to phone', 'Copy this export to the phone plugged in by USB'),
                 btn('log', 'Log', 'The job’s full output'), btn('dismiss', '×', 'Dismiss'));
     const link = el('a', 'jp-btn jp-dl'); link.hidden = true;
     btns.insertBefore(link, btns.firstChild);
@@ -270,6 +271,7 @@
     r.btn('cancel').disabled = !!j.cancelling;
     show('send', j.kind === 'caltopo' && j.state === 'waiting');
     show('retry', j.state === 'failed' && !!j.retry);
+    show('phone', j.kind === 'export' && j.state === 'done' && !!j.server && !!(root._phone && root._phone.send));
     show('log', j.kind !== 'caltopo');
     show('dismiss', j.state === 'failed');
     if (j.link && j.state === 'done') { r.link.hidden = false; r.link.href = j.link.href; r.link.textContent = j.link.text; r.link.setAttribute('download', ''); } else r.link.hidden = true;
@@ -346,6 +348,7 @@
       case 'cancel': if (j && j.cancel) { try { const r = j.cancel(); if (r && r.catch) r.catch(() => {}); } catch (_) {} } break;
       case 'send': if (j && j.sendNow) { b.disabled = true; Promise.resolve(j.sendNow()).finally(() => { b.disabled = false; syncCalTopo(); }); } break;
       case 'retry': if (j && j.retry) { j.dismissed = true; render(); try { const r = j.retry(); if (r && r.catch) r.catch(() => {}); } catch (_) {} } break;
+      case 'phone': if (j && root._phone) { try { const r = root._phone.send(j.id.split('.')[1]); if (r && r.catch) r.catch(() => {}); } catch (_) {} } break;
       case 'dismiss': if (j) dismiss(j.id); break;
       case 'ask-yes': lset(LS.asked, '1'); askWanted = false; render(); try { const p = root.Notification.requestPermission(); if (p && p.catch) p.catch(() => {}); } catch (_) {} break;
       case 'ask-no': lset(LS.asked, '1'); askWanted = false; render(); break;
