@@ -878,6 +878,36 @@ def shape_mesh(C, Vx, L, zc, zlo, gp, gj0, gi0, I0, J0, Lw, stree):
 # ---------------------------------------------------------------------------------------------------------
 # The run
 # ---------------------------------------------------------------------------------------------------------
+def cluster_labels(xy, reach, cs=0.5):
+    """Which cluster each point is in: points within reach of each other (on the map) are one cluster. The same
+    answer as linking every pair of points, but worked on half-metre cells: a wide hollow full of returns has
+    billions of pairs within 6 m (45 GB on a real area). Cells whose centres are near enough are linked for sure;
+    cells that may or may not be are looked at point by point, and only when they are not joined already."""
+    from scipy import sparse
+    from scipy.sparse import csgraph
+    from scipy.spatial import cKDTree
+    ck = np.floor(xy / cs).astype(np.int64)
+    uc, inv = np.unique(ck, axis=0, return_inverse=True); inv = inv.ravel(); cen = (uc + 0.5) * cs; n = len(uc)
+    slack = cs * 1.4143; tr = cKDTree(cen)
+    pr = tr.query_pairs(max(reach - slack, 0.0), output_type='ndarray')
+    comp = lambda e: csgraph.connected_components(sparse.coo_matrix((np.ones(len(e), bool), (e[:, 0], e[:, 1])), shape=(n, n)), directed=False)[1]
+    lab = comp(pr)
+    am = tr.query_pairs(reach + slack, output_type='ndarray')
+    am = am[lab[am[:, 0]] != lab[am[:, 1]]]                       # only pairs of cells not joined already can matter
+    if len(am):
+        o = np.argsort(inv, kind='stable'); st = np.searchsorted(inv[o], np.arange(n + 1)); P_ = xy[o]
+        extra = []; done = set(); r2 = reach * reach
+        for a_, b_ in am:
+            k = (lab[a_], lab[b_]) if lab[a_] < lab[b_] else (lab[b_], lab[a_])
+            if k in done: continue
+            A = P_[st[a_]:st[a_ + 1]]; B = P_[st[b_]:st[b_ + 1]]
+            if (((A[:, None, :] - B[None, :, :]) ** 2).sum(2) <= r2).any():
+                extra.append((a_, b_)); done.add(k)
+        if extra:
+            lab = comp(np.r_[pr, np.array(extra)])
+    return lab[inv]
+
+
 def trace_pattern(fine, p, flagged, KB):
     """The path of a flagged pass's pattern, as a set of statistics cells (24 m). fine: {cell: {pass: [returns, deep
     ones]}}; flagged: the blocks (KB x KB cells) in which the pass was flagged. Seen on real data the pattern is a
@@ -937,6 +967,12 @@ def run(C, notes):
 
     def lap(name):
         stages[name] = round(time.time() - tt[0], 1); tt[0] = time.time()
+        try:                            # peak memory so far, MB: this process, the largest worker (not on Windows)
+            import resource
+            k = 1024.0 if sys.platform != 'darwin' else 1048576.0
+            C.setdefault('mem', {})[name] = [int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / k), int(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / k)]
+        except Exception:
+            pass
     if C.get('ring') is not None:               # tiles the polygon does not reach are not worked
         keep = []
         for t in tiles:
@@ -953,7 +989,7 @@ def run(C, notes):
     C['_pool'] = None
     try:
         # 1. read
-        if C.get('epts'):
+        if C.get('epts') and not C.get('have_tiles'):
             failed = []; npts = 0
             for t, n, err in pmap(C, w_read, work, 1, 40, 'reading tiles', lost=lambda t, why: (t, 0, 'the reader stopped: %s' % why), own=True):
                 npts += n
@@ -1058,7 +1094,7 @@ def run(C, notes):
         pts = np.c_[X[bi], Y[bi], Z[bi]]; ngroups = 0; kb = np.zeros(len(bi), 'u1')
         if len(bi):
             tr = cKDTree(pts); pr = tr.query_pairs(P['link'], output_type='ndarray')
-            ncomp, lab = csgraph.connected_components(sparse.coo_matrix((np.ones(len(pr)), (pr[:, 0], pr[:, 1])), shape=(len(bi), len(bi))), directed=False)
+            ncomp, lab = csgraph.connected_components(sparse.coo_matrix((np.ones(len(pr), bool), (pr[:, 0], pr[:, 1])), shape=(len(bi), len(bi))), directed=False); del pr
             size = np.bincount(lab, minlength=ncomp); lone = size[lab] == 1; kb[lone] = 1; ngroups = int((size >= 2).sum())
             if len(bi) > 1:
                 d2, _ = tr.query(pts, k=2); kb[lone & (d2[:, 1] > P['lone_far'])] = 2
@@ -1070,8 +1106,7 @@ def run(C, notes):
         # 6. clusters of grouped returns, each worked in its own box
         gi = np.flatnonzero(kb == 0); res = []; nsplit = 0
         if len(gi):
-            xy = pts[gi, :2]; pr = cKDTree(xy).query_pairs(P['cluster'], output_type='ndarray')
-            nc, cl = csgraph.connected_components(sparse.coo_matrix((np.ones(len(pr)), (pr[:, 0], pr[:, 1])), shape=(len(gi), len(gi))), directed=False)
+            xy = pts[gi, :2]; cl = cluster_labels(xy, P['cluster'])
             o = np.argsort(cl, kind='stable'); cuts = np.flatnonzero(np.diff(cl[o])) + 1; jobs = []
             for part in np.split(o, cuts):
                 ps_ = split_cluster(xy, part, P['cluster_max']); nsplit += len(ps_) > 1
@@ -1131,7 +1166,7 @@ def run(C, notes):
     if C.get('debug'):
         np.savez(os.path.join(out, 'debug.npz'), x=pts[:, 0] if len(bi) else np.zeros(0), y=pts[:, 1] if len(bi) else np.zeros(0),
                  z=pts[:, 2] if len(bi) else np.zeros(0), depth=DV[bi], kind=kb, feature=feat, open=openp, sideways=side,
-                 link=ltype, link_len=llen, way_out=wayout, psid=PS[bi], confirmed_by=confby[bi], corner=CRN[bi], tile=TK[bi],
+                 link=ltype, link_len=llen, way_out=wayout, psid=PS[bi], confirmed_by=confby[bi], corner=CRN[bi], fitted=FIT[bi], tile=TK[bi],
                  noise=np.c_[X, Y, Z, DV, PS][kind == 3], tile_pass=np.array(trows, np.int64).reshape(-1, 10))
     return counts, passes, (float(np.mean(cover)) if cover else 0.0)
 
@@ -1274,6 +1309,7 @@ def main(argv=None):
     ap.add_argument('--max-link', type=float, default=PARAMS['max_link'], help='m, the longest guessed link (tie or way out) a shape may rest on')
     ap.add_argument('--debug', action='store_true', help='also write debug.npz (per below return: feature, open, sideways)')
     ap.add_argument('--keep-work', action='store_true', help=argparse.SUPPRESS)
+    ap.add_argument('--work', help=argparse.SUPPRESS)        # the scratch folder; one that already holds the tiles' returns is used as it is (no reading)
     a = ap.parse_args(argv)
     t0 = time.time(); out = a.demo or a.out
     if not out or not (a.demo or a.npz or (a.ept and (a.bbox or a.polygon))):
@@ -1283,7 +1319,11 @@ def main(argv=None):
     C = dict(out=out, tmp=os.path.join(out, '_work'), cell=cell, coarse=K, tile_c=max(K, int(round(a.tile / cell / K)) * K),
              marg_c=max(4, int(round(a.margin / cell))), shapes=not a.no_shapes, debug=a.debug,
              workers=a.workers or max(1, min((os.cpu_count() or 2) - 1, 20)), ox=0.0, oy=0.0, read_timeout=120, min_behind=float(a.min_behind), max_link=float(a.max_link))
-    shutil.rmtree(C['tmp'], ignore_errors=True); os.makedirs(C['tmp'])
+    if a.work:
+        C['tmp'] = a.work; C['have_tiles'] = os.path.isdir(a.work) and any(f.startswith('p_') for f in os.listdir(a.work)); a.keep_work = True
+        os.makedirs(C['tmp'], exist_ok=True)
+    else:
+        shutil.rmtree(C['tmp'], ignore_errors=True); os.makedirs(C['tmp'])
     notes = []; ring = None
     if a.polygon:
         ring = json.load(open(a.polygon))
@@ -1342,7 +1382,7 @@ def main(argv=None):
     J = dict(version=1, epsg=meta['epsg'], zone=meta['zone'], south=meta['south'], origin=[ox, oy],
              bbox_utm=[ox, oy, ox + C['nx'] * cell, oy + C['ny'] * cell], bbox_lonlat=meta['bbox_lonlat'], cell=cell, nx=C['nx'], ny=C['ny'],
              params=dict(PARAMS, cell=cell, min_behind=C['min_behind'], max_link=C['max_link'], tile=C['tile_c'] * cell, margin=C['marg_c'] * cell, workers=C['workers'], shapes=C['shapes']),
-             counts=counts, passes=passes, ground_cover=round(cover, 3), stages=C.get('stages'), seconds=round(time.time() - t0, 1), notes=notes)
+             counts=counts, passes=passes, ground_cover=round(cover, 3), stages=C.get('stages'), peak_mb=C.get('mem'), seconds=round(time.time() - t0, 1), notes=notes)
     json.dump(J, open(os.path.join(out, 'ridge.json'), 'w'), indent=1)
     say(100, 'done in %.0f s: %d returns, %d below the ground in %d groups, %d lone, %d likely noise, %d patterned noise; %d features' % (
         J['seconds'], counts['returns'], counts['below'], counts['groups'], counts['lone'], counts['likely_noise'], counts['pattern_noise'], counts['features']))
