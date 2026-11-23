@@ -10,28 +10,33 @@
 //   patches  "RWT1", uint32 nv, float32 xyz[nv*3]     (triangle soup of the guessed openings)
 //   all little-endian and in the viewer's own frame (terrain.glb's).
 //
-// What it draws: the returns below ground as dots THROUGH the ground (no depth test), coloured by
-// depth; lone returns white, likely noise pink, patterned noise light blue (off); the guessed openings
-// as dark patches lying on the ground; the shapes (walls of the features, off, loaded on first use);
+// What it draws: the shapes (walls of the features, ON by default), coloured by depth below the lid (yellow at the
+// surface, orange 10 ft, red 20 ft, blue 30 ft and deeper); the guessed openings as dark patches lying on the ground;
+// the returns below ground as dots THROUGH the ground (no depth test; OFF by default: grouped by depth, lone white,
+// likely noise pink, patterned noise light blue);
 // (The brush map is baked into the export's third picture, "Hillshade + brush": viewer.html.) Nothing animates: every change asks the viewer for one
 // redraw. three.js r128.   Test: tools/test_viewer_ridge.js
 (function (root) {
   'use strict';
 
-  // Depth ramp over 0..cap metres below the lid; deeper = the last colour.
-  var RAMP = [[0xff, 0xe8, 0x5c], [0xff, 0x9a, 0x2e], [0xe8, 0x32, 0x2a], [0xb0, 0x1f, 0xd0], [0x4a, 0x2c, 0xff]];
+  // Depth colours at fixed depths below the lid, in feet (Felipe, 2026-11-22): yellow at the surface, orange at 10 ft,
+  // red at 20 ft, blue at 30 ft and deeper; blended between the stops.
+  var FT = 0.3048;
+  var STOPS_FT = [0, 10, 20, 30];
+  var RAMP = [[0xff, 0xe8, 0x5c], [0xff, 0x9a, 0x2e], [0xe8, 0x32, 0x2a], [0x4a, 0x2c, 0xff]];
   var KINDS = ['ret', 'lone', 'noise', 'pattern'];                    // by the file's kind number
   var KIND_COLOUR = [null, 0xffffff, 0xff4dd2, 0x7fd4ff];             // kind 0 is coloured by depth
   var PATCH_COLOUR = 0x141312, PATCH_OPACITY = 0.72;
-  var DEFAULTS = { ret: true, lone: true, noise: true, pattern: false, patches: true, shapes: false, size: 3 };
+  var DEFAULTS = { ret: false, lone: false, noise: false, pattern: false, patches: true, shapes: true, size: 3 };
+  var STATE_V = 2;          // choices saved by an older build (dots on, shapes off) are dropped once
   var SIZE_MIN = 1, SIZE_MAX = 12;
 
-  // [r, g, b] 0..1 of a depth in metres.
-  function rampColour(depth, cap) {
-    cap = cap > 0 ? cap : 20;
-    var t = depth > 0 ? (depth >= cap ? 1 : depth / cap) : 0;         // NaN -> 0
-    var f = t * (RAMP.length - 1), i = Math.min(RAMP.length - 2, Math.floor(f)), u = f - i;
-    var a = RAMP[i], b = RAMP[i + 1];
+  // [r, g, b] 0..1 of a depth in metres (the second argument, the export's depthCap, is no longer used).
+  function rampColour(depth) {
+    var ft = depth > 0 ? depth / FT : 0, last = STOPS_FT.length - 1;   // NaN -> 0
+    if (ft >= STOPS_FT[last]) { var e = RAMP[last]; return [e[0] / 255, e[1] / 255, e[2] / 255]; }
+    var i = 0; while (i < last - 1 && ft >= STOPS_FT[i + 1]) i++;
+    var u = (ft - STOPS_FT[i]) / (STOPS_FT[i + 1] - STOPS_FT[i]), a = RAMP[i], b = RAMP[i + 1];
     return [(a[0] + (b[0] - a[0]) * u) / 255, (a[1] + (b[1] - a[1]) * u) / 255, (a[2] + (b[2] - a[2]) * u) / 255];
   }
 
@@ -80,7 +85,7 @@
   function restore(saved) {
     var st = {}, k;
     for (k in DEFAULTS) st[k] = DEFAULTS[k];
-    if (saved && typeof saved === 'object') {
+    if (saved && typeof saved === 'object' && saved.v === STATE_V) {
       for (k in DEFAULTS) {
         if (k === 'size') { if (isFinite(saved.size) && saved.size >= SIZE_MIN && saved.size <= SIZE_MAX) st.size = +saved.size; }
         else if (typeof saved[k] === 'boolean') st[k] = saved[k];
@@ -153,7 +158,7 @@
     return S.shapesLoading;
   }
   var R = {
-    RAMP: RAMP, DEFAULTS: DEFAULTS, rampColour: rampColour, parsePoints: parsePoints, parseShapes: parseShapes, parsePatches: parsePatches,
+    RAMP: RAMP, STOPS_FT: STOPS_FT, STATE_V: STATE_V, DEFAULTS: DEFAULTS, rampColour: rampColour, parsePoints: parsePoints, parseShapes: parseShapes, parsePatches: parsePatches,
     splitKinds: splitKinds, restore: restore,
 
     // o: { THREE, scene, ridge, saved, isAssetRef, b64ToArrayBuffer, redraw }.
@@ -175,12 +180,12 @@
         var Q = parsePatches(buf);
         if (Q.nv) { S.patches = patchesOf(Q); S.scene.add(S.patches); }
       }).catch(function (e) { console.warn('Ridgewalk openings not loaded:', e); }));
-      if (S.st.shapes) jobs.push(loadShapes());            // shapes only when they were left on
+      if (S.st.shapes) jobs.push(loadShapes());            // shapes are on by default; not loaded when switched off
       return Promise.all(jobs).then(function () { redraw(); return true; });
     },
     active: function () { return !!S; },
     state: function () { return S ? Object.assign({}, S.st) : null; },
-    serialize: function () { return S ? Object.assign({}, S.st) : undefined; },
+    serialize: function () { return S ? Object.assign({ v: STATE_V }, S.st) : undefined; },
     objects: function () { return S ? { points: S.points.slice(), patches: S.patches, shapes: S.shapes } : null; },
     counts: function () { return S && S.ridge.counts || {}; },
 
