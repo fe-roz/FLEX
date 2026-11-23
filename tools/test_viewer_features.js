@@ -149,7 +149,7 @@ function fakeUi() {
   ok('a folder off hides it and the folders inside it; the rest stay', !O.groups.gB.visible && !O.groups.gC.visible && O.groups.gA.visible && O.groups.gD.visible && v.redraws > before);
   ok('…and their names', !rec('p0').label || !rec('p0').label.visible);
   ok('folders() says so', v.VF.folders().find(f => f.id === 'gC').shown === false && v.VF.folders().find(f => f.id === 'gC').on === true && v.VF.folders().find(f => f.id === 'gB').on === false);
-  ok('saved choices', JSON.stringify(v.VF.serialize()) === JSON.stringify({ all: true, labels: true, off: ['gB'] }));
+  ok('saved choices', JSON.stringify(v.VF.serialize()) === JSON.stringify({ all: true, labels: true, through: true, off: ['gB'] }));
   v.VF.setFolder('gB', true);
   ok('on again', O.groups.gB.visible && O.groups.gC.visible);
   v.VF.setLabels(false);
@@ -184,7 +184,7 @@ function fakeUi() {
 
   // ── 5. The Display rows ─────────────────────────────────────────────────────
   const u = fakeUi(); v.VF.sheet(u.ui); const box = u.box(); u.wipe(box);
-  ok('Display: a "Surface features" head, All (n) and Names chips', u.heads.join() === 'Surface features' && u.chips.length === 2 && u.chips[0][1] === 'All (14)' && u.chips[0][2] === true && u.chips[1][1] === 'Names');
+  ok('Display: a "Surface features" head, All (n) and Names chips', u.heads.join() === 'Surface features' && u.chips.length === 3 && u.chips[0][1] === 'All (14)' && u.chips[0][2] === true && u.chips[1][1] === 'Names' && u.chips[2][1] === 'Show through hills' && u.chips[2][2] === true);
   let rows = box.children;
   ok('one row per folder, indented by depth, with its count', rows.length === 6 && rows[0].dataset.folder === 'gA' && rows[2].style.paddingLeft === '42px' && rows[0].children[1].children[0].textContent === '10 items · 1 here', rows.map(r => r.dataset.folder));
   const sw = r => r.children[2];
@@ -203,6 +203,49 @@ function fakeUi() {
   u.chips[0][3](false);
   ok('the All chip turns everything off', v.VF.state().all === false && box.children[0].style.opacity === '0.45');
   u.chips[0][3](true);
+
+  // ── "Show through hills" ────────────────────────────────────────────────────
+  // A ridge 60 m high along x = 0; the camera low on the west side looks east: what is east of the ridge is behind it.
+  {
+    const ridge = (x, y) => (Math.abs(x) > 500 || Math.abs(y) > 500) ? null : 1000 + 60 * Math.exp(-(x * x) / (2 * 40 * 40));
+    const vh = makeViewer(), Th = vh.THREE;
+    vh.camera.position.set(-300, 0, 1012); vh.camera.lookAt(0, 0, 1030); vh.camera.updateMatrixWorld();
+    const P = (id, x, y, extra) => Object.assign({ id, kind: 'point', name: 'N ' + id, folder: '', colour: '#ff0000', symbol: 'dot', width: 2, opacity: 1, lonlat: [ll(x, y)] }, extra || {});
+    const Fh = { version: 1, folders: [], items: [P('near', -60, 0), P('crest', -2, 30), P('behind', 150, -20), P('farBehind', 300, 20),
+      { id: 'lineBehind', kind: 'line', name: 'Trail behind', folder: '', colour: '#00ff00', symbol: 'dot', width: 3, opacity: 1, lonlat: [ll(150, -60), ll(200, -60)] },
+      { id: 'lineNear', kind: 'line', name: 'Trail near', folder: '', colour: '#00ff00', symbol: 'dot', width: 3, opacity: 1, lonlat: [ll(-120, 40), ll(-60, 40)] },
+      { id: 'areaNear', kind: 'area', name: 'Area near', folder: '', colour: '#ffff00', symbol: 'dot', width: 2, opacity: 1, lonlat: [ll(-150, -60), ll(-100, -60), ll(-100, -30)] }] };
+    const o = vh.opts(Fh); o.groundZ = ridge;
+    await vh.VF.init(o);
+    const Oh = vh.VF.objects(), rc = id => Oh.recs.find(r => r.item.id === id), fill = Oh.groups[''].children.find(c => c.name === 'features-fill');
+    const rect = { width: 1200, height: 800 }, scr = p => { const q = p.clone().project(vh.camera); return [(q.x + 1) * 600, (1 - q.y) * 400]; };
+    ok('on by default: nothing is depth-tested, nothing counts as hidden', vh.VF.state().through === true && Oh.lineMat.depthTest === false && rc('near').sprite.material.depthTest === false && fill.material.depthTest === false && !vh.VF.hiddenByHill('behind'));
+    ok('on: an item behind the ridge has its name and answers a tap', rc('behind').label && rc('behind').label.visible && (vh.VF.pick(...scr(rc('behind').at), rect) || {}).id === 'behind');
+    const before = vh.redraws;
+    vh.VF.setThrough(false);
+    ok('off: points, lines and fills are depth-tested (and one redraw is asked for)', Oh.lineMat.depthTest === true && Oh.recs.filter(r => r.sprite).every(r => r.sprite.material.depthTest === true) && fill.material.depthTest === true && vh.redraws > before);
+    ok('off: still nothing writes depth, still drawn after the terrain', Oh.lineMat.depthWrite === false && rc('near').sprite.material.depthWrite === false && fill.material.depthWrite === false && rc('near').sprite.renderOrder > 1);
+    ok('off: names are never depth-tested (whole or not there)', Oh.recs.filter(r => r.label).every(r => r.label.material.depthTest === false));
+    ok('off: behind the ridge is hidden; on the near slope and on the crest is not', vh.VF.hiddenByHill('behind') && vh.VF.hiddenByHill('farBehind') && vh.VF.hiddenByHill('lineBehind') && !vh.VF.hiddenByHill('near') && !vh.VF.hiddenByHill('crest') && !vh.VF.hiddenByHill('lineNear') && !vh.VF.hiddenByHill('areaNear'),
+       ['near', 'crest', 'behind', 'farBehind', 'lineBehind', 'lineNear', 'areaNear'].map(i => i + ':' + vh.VF.hiddenByHill(i)));
+    ok('off: names only for what can be seen', rc('near').label.visible && !rc('behind').label.visible && !rc('farBehind').label.visible && !rc('lineBehind').label.visible && rc('lineNear').label.visible);
+    ok('off: a tap does not select what is behind the hill', vh.VF.pick(...scr(rc('behind').at), rect) === null && vh.VF.pick(...scr(new Th.Vector3(175, -60, ridge(175, -60) + 0.6)), rect) === null);
+    ok('off: a tap on the near slope still works, point and line', (vh.VF.pick(...scr(rc('near').at), rect) || {}).id === 'near' && (vh.VF.pick(...scr(new Th.Vector3(-90, 40, ridge(-90, 40) + 0.6)), rect) || {}).id === 'lineNear');
+    // the shaders: drawn a little nearer than they are, so the ground they lie on does not cut them
+    const sh = { vertexShader: Th.ShaderLib.sprite.vertexShader }; rc('near').sprite.material.onBeforeCompile(sh);
+    ok('a symbol is tested 1 m + 5 % of its distance nearer, with one depth all over (r128 sprite shader)', /vfP = min\(1\.000 \+ 0\.0500 \* vfD/.test(sh.vertexShader) && /gl_Position\.z = vfQ\.z/.test(sh.vertexShader) && sh.vertexShader !== Th.ShaderLib.sprite.vertexShader, sh.vertexShader.slice(-400));
+    const sf = { vertexShader: Th.ShaderLib.basic.vertexShader }; fill.material.onBeforeCompile(sf);
+    ok('fills and lines 1.5 m + 1 % nearer', /project_vertex>\n\{ float vfD/.test(sf.vertexShader) && /vfP = min\(1\.500 \+ 0\.0100 \* vfD/.test(sf.vertexShader) && /vfP = min\(1\.500 \+ 0\.0100 \* vfD/.test(Oh.lineMat.vertexShader));
+    ok('materials with the nearer test do not share a program with plain ones', typeof rc('near').sprite.material.customProgramCacheKey === 'function' && rc('near').sprite.material.customProgramCacheKey() !== fill.material.customProgramCacheKey());
+    ok('saved, and back', vh.VF.serialize().through === false);
+    const vk = makeViewer(); vk.camera.position.copy(vh.camera.position); vk.camera.lookAt(0, 0, 1030); vk.camera.updateMatrixWorld();
+    const ok2 = vk.opts(Fh, { through: false }); ok2.groundZ = ridge; await vk.VF.init(ok2);
+    ok('the choice comes back when the map is opened again', vk.VF.state().through === false && vk.VF.objects().lineMat.depthTest === true && vk.VF.hiddenByHill('behind'));
+    vh.VF.setThrough(true);
+    ok('on again: as before', Oh.lineMat.depthTest === false && rc('behind').label.visible && !vh.VF.hiddenByHill('behind'));
+    const uh = fakeUi(); vh.VF.sheet(uh.ui); uh.chips[2][3](false);
+    ok('the chip in Display switches it', vh.VF.state().through === false);
+  }
 
   // FEATURES as a file name (FLEX Field): read from beside the viewer
   const vf = makeViewer(); let asked = null;

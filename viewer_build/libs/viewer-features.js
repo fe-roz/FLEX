@@ -16,6 +16,11 @@
 //            segment is a thin quad widened in the vertex shader. One mesh per folder;
 //   areas    their outline the same way, and a light fill.
 // Each folder is one group, so a folder's switch is one flag. Nothing animates. three.js r128.
+// "Show through hills" (on by default): everything is drawn whatever is in front of it. Off: the depth test is on,
+// so terrain in front hides points, lines and fills; each is drawn a little nearer than it is (PULL: a metre or so
+// plus a share of its distance) so the ground it lies on never cuts it; a point's symbol has one depth all over. A
+// name is shown whole or not at all: its line of sight is checked against the terrain's heights when the view comes
+// to rest, with the same allowance, and so is a tap.
 // Never mixed into the user's own saved points; nothing here can be edited or deleted.
 // Test: tools/test_viewer_features.js
 (function (root) {
@@ -27,6 +32,11 @@
   var DRAPE_STEP = 4, DRAPE_MAX = 6000; // a ground height every 4 m of line, at most this many per item
   var FILL_ALPHA = 0.18, FILL_MAX_RING = 2000;
   var HIT_POINT_PX = 26, HIT_LINE_PX = 13;
+  // With "Show through hills" off, how much nearer than it is each thing is tested: [metres, share of its distance].
+  // A symbol's lower half hangs in front of ground that is nearer than its foot (more so at a low angle): 5 % clears
+  // it down to a view about 12 degrees above the ground. Lines are thin: they only have to clear the terrain mesh,
+  // which is coarser than the ground they were laid on.
+  var PULL_POINT = [1.0, 0.05], PULL_LINE = [1.5, 0.01];
   var FOLDERS_OPEN_MAX = 12;            // more folders than this: the list in Display starts folded
   var DEFAULT_COLOUR = '#ffb020';
   var S = null;
@@ -75,8 +85,9 @@
 
   // ── Saved choices ───────────────────────────────────────────────────────────
   function restore(saved) {
-    var st = { all: true, labels: true, off: {} };
+    var st = { all: true, labels: true, through: true, off: {} };
     if (saved && typeof saved === 'object') {
+      if (saved.through === false) st.through = false;
       if (saved.all === false) st.all = false;
       if (saved.labels === false) st.labels = false;
       (Array.isArray(saved.off) ? saved.off : []).forEach(function (id) { st.off[String(id)] = true; });
@@ -143,17 +154,33 @@
   }
 
   // ── Wide lines: every segment a quad, widened on screen in the vertex shader ─
+  // GLSL: the depth of a vertex as if it were `pull` nearer (mv = its position in view space); x, y stay.
+  function pullGlsl(mv, p) {
+    return '{ float vfD = -' + mv + '.z; float vfP = min(' + p[0].toFixed(3) + ' + ' + p[1].toFixed(4) + ' * vfD, vfD * 0.5);' +
+           ' vec4 vfQ = projectionMatrix * vec4(' + mv + '.xy, ' + mv + '.z + vfP, 1.0); gl_Position.z = vfQ.z / vfQ.w * gl_Position.w; }';
+  }
+  // For three's own materials (sprites, the fills): the same, added where they set gl_Position.
+  function pulled(mat, p) {
+    mat.onBeforeCompile = function (sh) {
+      sh.vertexShader = sh.vertexShader.replace('gl_Position = projectionMatrix * mvPosition;', 'gl_Position = projectionMatrix * mvPosition; ' + pullGlsl('mvPosition', p))
+        .replace('#include <project_vertex>', '#include <project_vertex>\n' + pullGlsl('mvPosition', p));
+    };
+    mat.customProgramCacheKey = function () { return 'vf-pull' + p.join(); };
+    return mat;
+  }
   var LINE_VS = [
     'uniform vec2 res;',
     'attribute vec3 other; attribute float side; attribute float wpx; attribute vec4 col;',
     'varying vec4 vCol;',
     'void main() {',
-    '  vec4 a = projectionMatrix * modelViewMatrix * vec4(position, 1.0);',
+    '  vec4 mvA = modelViewMatrix * vec4(position, 1.0);',
+    '  vec4 a = projectionMatrix * mvA;',
     '  vec4 b = projectionMatrix * modelViewMatrix * vec4(other, 1.0);',
     '  vec2 sa = a.xy / max(abs(a.w), 1e-4) * res, sb = b.xy / max(abs(b.w), 1e-4) * res;',
     '  vec2 d = sb - sa; float l = length(d); d = l > 1e-4 ? d / l : vec2(1.0, 0.0);',
     '  a.xy += vec2(-d.y, d.x) * side * wpx / res * a.w;',
     '  vCol = col; gl_Position = a;',
+    '  ' + pullGlsl('mvA', PULL_LINE),
     '}'].join('\n');
   var LINE_FS = 'varying vec4 vCol; void main() { gl_FragColor = vCol; }';
   function lineMaterial() {
@@ -193,7 +220,7 @@
     g.setAttribute('color', new T.Float32BufferAttribute(col, 4));
     g.setIndex(idx);
     g.computeBoundingSphere();
-    var m = new T.Mesh(g, new T.MeshBasicMaterial({ vertexColors: true, transparent: true, depthTest: false, depthWrite: false, side: T.DoubleSide, fog: false }));
+    var m = new T.Mesh(g, pulled(new T.MeshBasicMaterial({ vertexColors: true, transparent: true, depthTest: false, depthWrite: false, side: T.DoubleSide, fog: false }), PULL_LINE));
     m.renderOrder = 3.1; m.name = 'features-fill'; m.matrixAutoUpdate = false;
     return m;
   }
@@ -225,7 +252,8 @@
         if (it.kind === 'point') {
           rec.at = pointPos(it);
           var sp = new T.Sprite(new T.SpriteMaterial({ map: symbolTexture(SYMBOLS.indexOf(it.symbol) >= 0 ? it.symbol : 'dot', colour),
-            depthTest: false, transparent: true, sizeAttenuation: false, opacity: op, fog: false }));
+            depthTest: false, depthWrite: false, transparent: true, sizeAttenuation: false, opacity: op, fog: false }));
+          pulled(sp.material, PULL_POINT);
           sp.position.copy(rec.at); sp.renderOrder = 3.4; sp.userData.featureId = it.id;
           grp.add(sp); rec.sprite = sp;
         } else {
@@ -267,7 +295,28 @@
     while (g && seen++ < 64) { if (S.st.off[g.id]) return false; if (!g.parent) break; g = S.tree.byId[g.parent]; }
     return true;
   }
+  // Is the terrain in front of this place, seen from the camera? Only asked with "Show through hills" off. The
+  // heights of the ground along the line of sight (the viewer's height grid: no ray against the mesh), up to the
+  // place taken `pull` nearer, as it is drawn.
+  function behindHill(at, pull) {
+    if (!S || S.st.through) return false;
+    var c = S.camera.position, dx = at.x - c.x, dy = at.y - c.y, dz = at.z - c.z, d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (!(d > 1)) return false;
+    var reach = 1 - Math.min(pull[0] + pull[1] * d, d * 0.5) / d, n = Math.max(8, Math.min(96, Math.ceil(d * reach / 6)));
+    for (var i = 1; i < n; i++) {
+      var u = reach * i / n, g = S.groundZ(c.x + dx * u, c.y + dy * u);
+      if (g != null && isFinite(g) && g > c.z + dz * u + 0.3) return true;
+    }
+    return false;
+  }
+  function applyThrough() {
+    var test = !S.st.through;
+    S.lineMat.depthTest = test;
+    S.recs.forEach(function (r) { if (r.sprite) r.sprite.material.depthTest = test; });
+    Object.keys(S.groups).forEach(function (k) { S.groups[k].children.forEach(function (c) { if (c.name === 'features-fill') c.material.depthTest = test; }); });
+  }
   function apply() {
+    applyThrough();
     S.tree.list.forEach(function (f) { if (S.groups[f.id]) S.groups[f.id].visible = folderShown(f.id); });
     labels();
     redraw();
@@ -288,6 +337,7 @@
       if (!r.item.name || r.item.label === false || !folderShown(r.folder.id)) return;
       v.copy(r.at).project(cam);
       if (!(v.z > -1 && v.z < 1) || Math.abs(v.x) > 1.05 || Math.abs(v.y) > 1.05) return;
+      if (behindHill(r.at, r.item.kind === 'point' ? PULL_POINT : PULL_LINE)) return;      // a name is whole or not there
       cands.push({ r: r, x: (v.x + 1) * W / 2, y: (1 - v.y) * H / 2, z: v.z + (r.item.kind === 'point' ? 0 : 0.0005) });   // points before lines at the same distance
     });
     cands.sort(function (a, b) { return a.z - b.z; });
@@ -323,7 +373,7 @@
       if (!r.sprite || !folderShown(r.folder.id)) return;
       var s = scr(r.at.x, r.at.y, r.at.z); if (!s) return;
       var d = Math.hypot(s[0] - px, s[1] - py);
-      if (d < bd) { bd = d; best = r; }
+      if (d < bd && !behindHill(r.at, PULL_POINT)) { bd = d; best = r; }
     });
     if (best) return { id: best.item.id, d: bd, item: best.item };
     bd = HIT_LINE_PX;
@@ -335,7 +385,7 @@
         if (a && b) {
           var dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy, t = L2 ? Math.max(0, Math.min(1, ((px - a[0]) * dx + (py - a[1]) * dy) / L2)) : 0;
           var d = Math.hypot(a[0] + dx * t - px, a[1] + dy * t - py);
-          if (d < bd) { bd = d; best = r; }
+          if (d < bd && !behindHill({ x: r.xyz[i - 3], y: r.xyz[i - 2], z: r.xyz[i - 1] }, PULL_LINE)) { bd = d; best = r; }
         }
         a = b;
       }
@@ -391,8 +441,11 @@
     active: function () { return !!S; },
     count: function () { return S ? S.recs.length : 0; },
     folders: function () { return S ? S.tree.list.map(function (f) { return { id: f.id, name: f.name, parent: f.parent, depth: f.depth, path: f.path, items: f.items.length, total: f.total, on: !S.st.off[f.id], shown: folderShown(f.id) }; }) : []; },
-    state: function () { return S ? { all: S.st.all, labels: S.st.labels, off: Object.keys(S.st.off) } : null; },
-    serialize: function () { return S ? { all: S.st.all, labels: S.st.labels, off: Object.keys(S.st.off) } : undefined; },
+    state: function () { return S ? { all: S.st.all, labels: S.st.labels, through: S.st.through, off: Object.keys(S.st.off) } : null; },
+    serialize: function () { return S ? { all: S.st.all, labels: S.st.labels, through: S.st.through, off: Object.keys(S.st.off) } : undefined; },
+    // "Show through hills": on = drawn whatever is in front (as saved pins are); off = hidden where terrain is in front.
+    setThrough: function (on) { if (S) { S.st.through = !!on; apply(); } },
+    hiddenByHill: function (id) { var r = S && S.byId[id]; return !!r && behindHill(r.at, r.item.kind === 'point' ? PULL_POINT : PULL_LINE); },
     objects: function () { return S ? { groups: S.groups, labels: S.labelGroup, recs: S.recs, lineMat: S.lineMat, labelsShown: S.labelsShown, buildMs: S.buildMs } : null; },
     setAll: function (on) { if (S) { S.st.all = !!on; apply(); } },
     setLabels: function (on) { if (S) { S.st.labels = !!on; apply(); } },
@@ -407,7 +460,8 @@
       if (!S) return;
       ui.head('Surface features');
       ui.chips([['📌', 'All (' + S.recs.length + ')', S.st.all, function (on) { V.setAll(on); paint(); }],
-                ['🏷', 'Names', S.st.labels, function (on) { V.setLabels(on); }]]);
+                ['🏷', 'Names', S.st.labels, function (on) { V.setLabels(on); }],
+                ['\u26F0', 'Show through hills', S.st.through, function (on) { V.setThrough(on); }]]);
       var box = ui.el('div', 'vf-list'); box.id = 'vf-list';
       ui.sheet.appendChild(box);
       function paint() {
