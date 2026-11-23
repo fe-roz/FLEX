@@ -59,6 +59,18 @@ r = A.facts({ meta: { name: 'Old ridge', ridgewalk: 1, terrain: 'lidar', terrain
 ok('older ridgewalking export: counts from the ridge data, brush strength from the old meta, no settings', get(r, 'Terrain') === 'the ridgewalking ground (LiDAR), 0.3 m cells' && get(r, 'Features') === '7' && get(r, 'Hillshade + brush') === 'brush at 30 %'
    && get(r, 'Set aside') === '3 returns as patterned noise' && get(r, 'Settings') === undefined && r.some(x => x.v === '500') && get(r, 'Area') === '9.0 ha, 300 m × 300 m', r);
 // nothing at all
+// the LiDAR quality report's few numbers
+const aq = JSON.parse(JSON.stringify(about));
+aq.quality = { passes: 13, flagged: ['1207'], set_aside: 6021, single_pass: 0.0312, no_pass: 0, ground_not_seen: 0.0015, ground_not_seen_1m: 0.02, tiles: 121, tiles_blank: 2, dates: ['2019-10-22', '2019-10-26'] };
+r = A.facts({ meta: Object.assign({}, meta, { about: aq }), caves, ridge: { counts: about.ridge.counts }, has: { sat: true, hs: true } });
+ok('LiDAR block: passes and the flagged one, when flown, one pass only, ground not seen, tiles left blank', heads(r).includes('LiDAR') && get(r, 'Flight passes') === '13, 1 flagged for patterned noise (1207)' && get(r, 'Flown') === '2019-10-22 to 2019-10-26'
+  && get(r, 'Seen by one pass only') === '3.1 % of the area' && /^0\.2 % \(no ground return within 3 m/.test(get(r, 'Ground not seen')) && get(r, 'Tiles left blank') === '2 of 121', r.filter(x => x.k).map(x => x.k + '=' + x.v).slice(-14));
+ok('…it sits after Ridgewalking', heads(r).indexOf('LiDAR') === heads(r).indexOf('Ridgewalking') + 1, heads(r));
+aq.quality = { passes: 4, flagged: [], single_pass: 0.0002, no_pass: 0.01, ground_not_seen: 0, tiles: 9, tiles_blank: null };
+r = A.facts({ meta: Object.assign({}, meta, { about: aq }), caves, ridge: { counts: about.ridge.counts }, has: {} });
+ok('none flagged; a small share is not rounded to nothing; no date = no line; blank tiles not known is said', get(r, 'Flight passes') === '4, none flagged' && get(r, 'Flown') === undefined && get(r, 'Seen by one pass only') === 'under 0.1 % of the area; by none 1 %'
+  && /^0 %/.test(get(r, 'Ground not seen')) && get(r, 'Tiles left blank') === 'not known', r.filter(x => x.k).map(x => x.k + '=' + x.v).slice(-12));
+ok('no report (an export made before it): no LiDAR block', !heads(A.facts({ meta, caves, ridge: { counts: about.ridge.counts }, has: {} })).includes('LiDAR'));
 let threw = null; try { r = A.facts({}); A.facts(null); A.facts({ meta: { about: 'junk', extent_utm: 'x' }, caves: { surveys: [null, {}] }, ridge: 5, trees: 'x', features: 7 }); } catch (e) { threw = e; }
 ok('no data, or junk: no error', !threw && get(r, 'Map') === 'No name', threw && threw.stack);
 ok('helpers', A.areaText(0.005) === '5000 m²' && A.areaText(12.34) === '12.3 km²' && A.sizeText(12500, 300) === '12.5 km × 300 m' && A.when('nonsense') === '');

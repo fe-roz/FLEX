@@ -48,7 +48,8 @@ const FILES = {
   terrain: /^ref\.json$/,
   // what the map draws (ridge-draw.js) and what the phone export also carries; lid.npy / holes.npy / brush.npy (the whole area's
   // grids, tens to hundreds of MB) stay on this computer: not served, not in an area package
-  ridge: /^(ridge\.json|features\.json|draw\.json|points\.bin|shapes\.bin|patches\.bin)$/,
+  // quality.json + maps.json + the three .u8: the LiDAR quality report and its coarse rasters (ridgewalk.py write_quality; drawn by area_tiles.js)
+  ridge: /^(ridge\.json|features\.json|draw\.json|points\.bin|shapes\.bin|patches\.bin|quality\.json|maps\.json|passes\.u8|ground_seen\.u8|density\.u8)$/,
   prospect: /^(candidates|candidates_areas|candidates_isolated)\.geojson$|^candidates\.(kml|csv)$|^(depth|below|steep)\.png$|^(layers|summary)\.json$/,
 };
 const IMPORT_MAX = 2048 * 1048576;    // an area package (zip) for POST /api/areas/import
@@ -552,6 +553,9 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
         if (r2.code !== 0 || !fs.existsSync(path.join(out, 'draw.json'))) throw new Error(whyFailed(r2.errLines, r2.code));
         const c = rj.counts || {};
         res = { coarse: false, cell: rj.cell, counts: { features: c.features || 0, below: c.below || 0, true_cells: c.true_cells || 0, guessed_cells: c.guessed_cells || 0, pattern_noise: c.pattern_noise || 0 } };
+        const qj = readJson(path.join(out, 'quality.json'));          // the LiDAR quality report's headline numbers, for the row
+        if (qj && qj.coverage && Array.isArray(qj.passes)) res.quality = { passes: qj.passes.length, flagged: qj.passes.filter(p => p && p.flagged).length, single_pass: +qj.coverage.passes_1 || 0,
+          ground_not_seen: +qj.coverage.no_ground_within_3m || 0, tiles_blank: qj.reading && Number.isFinite(qj.reading.left_blank) && qj.reading.read_in_this_run ? qj.reading.left_blank : null };
         (Array.isArray(rj.notes) ? rj.notes : []).filter(n => /flight pass|pattern|no /i.test(String(n)) && String(n).length < 200).slice(0, 3).forEach(n => notes.push(String(n)));
       } else if (key === 'maps') {
         const mc = mapsCellOf(options), g = area.results && area.results.ground;

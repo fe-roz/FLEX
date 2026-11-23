@@ -38,6 +38,12 @@ print('[ridge] 73% features (12 clusters)', flush=True)
 for n, b in (('lid.npy', b'L' * 64), ('holes.npy', b'H' * 64), ('brush.npy', b'B' * 8), ('points.bin', b'RWP1' + bytes(4)), ('shapes.bin', b'RWS1' + bytes(8))):
     open(os.path.join(a.out, n), 'wb').write(b)
 json.dump({'version': 1, 'features': [{'id': 'r1-1', 'x': 10, 'y': 20, 'z': 500, 'n': 12, 'deepest': 4.2, 'box': [9, 19, 495, 11, 21, 500], 'entrance': 'true'}]}, open(os.path.join(a.out, 'features.json'), 'w'))
+if 'noquality' not in a.ept:
+    json.dump({'version': 1, 'cloud': {'returns': 1000}, 'passes': [{'id': 3, 'flagged': False}, {'id': 4, 'flagged': True, 'set_aside': 3}], 'coverage': {'passes_1': 0.125, 'no_ground_within_3m': 0.04},
+               'reading': {'tiles': 9, 'read_in_this_run': True, 'left_blank': 2}, 'verdicts': [{'key': 'passes', 'value': 2, 'text': '2 flight passes cover the area.'}]}, open(os.path.join(a.out, 'quality.json'), 'w'))
+    json.dump({'version': 2, 'grid': {'x0': 376000, 'y0': 4997000, 'cell': 7.2, 'nx': 4, 'ny': 4, 'zone': 14, 'south': False, 'row0': 'south'},
+               'maps': [{'id': m, 'file': f, 'units': '', 'levels': 16, 'values': list(range(16)), 'min': 0, 'max': 15, 'suggest': [0, 4]} for m, f in (('passes', 'passes.u8'), ('groundseen', 'ground_seen.u8'), ('density', 'density.u8'))]}, open(os.path.join(a.out, 'maps.json'), 'w'))
+    for f in ('passes.u8', 'ground_seen.u8', 'density.u8'): open(os.path.join(a.out, f), 'wb').write(bytes([3] * 16))
 json.dump({'version': 1, 'zone': 14, 'south': False, 'origin': [376000, 4997000], 'cell': 0.3, 'nx': 100, 'ny': 100,
            'counts': {'features': 1, 'below': 12, 'true_cells': 40, 'guessed_cells': 7, 'pattern_noise': 3, 'returns': 1000},
            'notes': ['the file has no flight pass ids: no patterned-noise check', 'Tile-independent: ' + 'x' * 300]}, open(os.path.join(a.out, 'ridge.json'), 'w'))
@@ -118,6 +124,10 @@ const srv = http.createServer((q, s) => {
     args.argv.slice(args.argv.indexOf('--bbox') + 1, args.argv.indexOf('--bbox') + 5).map(Number).join() === '-100.58,45.12,-100.57,45.13' && args.ring.length === 4 && args.ring[0].join() === '-100.58,45.12', args.argv);
   ok('the ring file is tidied away after the run', !fs.existsSync(path.join(dir(A), 'ridge-ring.json')));
   let a = (await get('?project=p1')).j.areas.find(x => x.id === A);
+  ok('the LiDAR quality report\'s headline is kept with the result: passes, flagged, one pass only, ground not seen, tiles blank', a && a.results.ridge && JSON.stringify(a.results.ridge.quality) === JSON.stringify({ passes: 2, flagged: 1, single_pass: 0.125, ground_not_seen: 0.04, tiles_blank: 2 }), a && a.results.ridge);
+  for (const n of ['quality.json', 'maps.json', 'passes.u8', 'ground_seen.u8', 'density.u8']) { const rq = await get(`/file/${A}/ridge/${n}`); ok('served: ridge/' + n, rq.code === 200, rq.code); }
+  { const rq = await get(`/maps/${A}`); ok('the three quality maps are listed for 🗺 Layers', rq.j && rq.j.ok && rq.j.maps.map(m => m.id).join() === 'passes,groundseen,density' && rq.j.maps.every(m => m.folder === 'ridge'), rq.j);
+    const rt = await get(`/tiles/${A}/passes/15/7230/11698.png`); ok('…and a tile of one comes as a PNG', rt.code === 200 && rt.h['Content-Type'] === 'image/png', [rt.code, rt.h]); }
   ok('the result is in area.json: counts, cell, date, seconds, bytes; the LiDAR used', a && a.results.ridge && a.results.ridge.counts.features === 1 && a.results.ridge.counts.true_cells === 40 && a.results.ridge.counts.guessed_cells === 7 && a.results.ridge.cell === 0.3 &&
     a.results.ridge.bytes > 100 && a.results.ridge.seconds >= 0 && !isNaN(Date.parse(a.results.ridge.date)) && !a.results.ground && a.lidar.length === 2, a && a.results);
   ok('a short note of the step is kept with the result (the long technical one is not)', a.results.ridge.notes.length === 1 && /no flight pass ids/.test(a.results.ridge.notes[0]), a.results.ridge.notes);
@@ -164,7 +174,7 @@ const srv = http.createServer((q, s) => {
   const pack = require('./area_pack.js');
   const P = await pack.pack(dir(A));
   const inside = P.report.files.map(f => f.path).filter(p => p.startsWith('ridge/')).sort();
-  ok('an area package carries the ridge folder without lid.npy, holes.npy and brush.npy', inside.join() === 'ridge/draw.json,ridge/features.json,ridge/patches.bin,ridge/points.bin,ridge/ridge.json,ridge/shapes.bin' && P.report.left.includes('ridge/lid.npy') && P.report.left.includes('ridge/holes.npy'), [inside, P.report.left]);
+  ok('an area package carries the ridge folder (with the quality report and its rasters) without lid.npy, holes.npy and brush.npy', inside.join() === 'ridge/density.u8,ridge/draw.json,ridge/features.json,ridge/ground_seen.u8,ridge/maps.json,ridge/passes.u8,ridge/patches.bin,ridge/points.bin,ridge/quality.json,ridge/ridge.json,ridge/shapes.bin' && P.report.left.includes('ridge/lid.npy') && P.report.left.includes('ridge/holes.npy'), [inside, P.report.left]);
   const root2 = path.join(tmp, 'areas2');
   const un = await pack.unpack(P.buffer, root2);
   ok('…and unpacks on another computer with the result and its files', un.ok && fs.existsSync(path.join(root2, A, 'ridge', 'draw.json')) && fs.existsSync(path.join(root2, A, 'ridge', 'shapes.bin')) && JSON.parse(fs.readFileSync(path.join(root2, A, 'area.json'), 'utf8')).results.ridge.counts.features === 1, un);

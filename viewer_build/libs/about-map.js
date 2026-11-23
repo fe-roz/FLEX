@@ -2,7 +2,7 @@
 //
 // The exporter writes the facts it has into caves.json meta `about` (export_about.py): when it was exported, the
 // area, the LiDAR it came from (the dataset's name, never its link), the maps, the ridgewalking step's counts and
-// settings, trees, surface features, marks, the FLEX commit. The viewer adds what it can count itself (caves,
+// settings, the LiDAR quality report's few numbers, trees, surface features, marks, the FLEX commit. The viewer adds what it can count itself (caves,
 // stations, leads) and what it actually loaded. An older export has no `about`: the card then shows what the rest
 // of its meta says and leaves the rest out. Nothing here changes anything.
 //
@@ -15,6 +15,7 @@
   var plural = function (c, one, many) { return n(c) + ' ' + (c === 1 ? one : (many || one + 's')); };
   var pct = function (x) { return Math.round(+x * 100) + ' %'; };
   var num = function (x) { return typeof x === 'number' && isFinite(x); };
+  var pct1 = function (x) { var p = +x * 100; return p > 0 && p < 0.05 ? 'under 0.1 %' : (Math.round(p * 10) / 10) + ' %'; };
 
   function when(iso) {
     var d = new Date(iso);
@@ -72,6 +73,17 @@
       if (num(P.max_link)) set.push('longest guessed link ' + (+P.max_link) + ' m');
       if (num(P.link)) set.push('returns within ' + (+P.link) + ' m are one group');
       if (set.length) row('Settings', set.join('; '));
+    }
+    // the LiDAR quality report's few numbers (ridgewalk.py; the full report and its maps are on the desktop)
+    var Q = (A && A.quality) || null;
+    if (Q && num(Q.passes)) {
+      head('LiDAR');
+      var fl = Q.flagged || [];
+      row('Flight passes', n(Q.passes) + (fl.length ? ', ' + n(fl.length) + ' flagged for patterned noise (' + fl.slice(0, 6).join(', ') + (fl.length > 6 ? ', …' : '') + ')' : ', none flagged'));
+      if (Q.dates && Q.dates.length === 2) row('Flown', Q.dates[0] === Q.dates[1] ? Q.dates[0] : Q.dates[0] + ' to ' + Q.dates[1]);
+      if (num(Q.single_pass)) row('Seen by one pass only', pct1(Q.single_pass) + ' of the area' + (num(Q.no_pass) && Q.no_pass > 0 ? '; by none ' + pct1(Q.no_pass) : ''));
+      if (num(Q.ground_not_seen)) row('Ground not seen', pct1(Q.ground_not_seen) + ' (no ground return within 3 m: filled in from around)');
+      row('Tiles left blank', num(Q.tiles_blank) ? n(Q.tiles_blank) + (num(Q.tiles) ? ' of ' + n(Q.tiles) : '') : 'not known');
     }
     // trees and brush
     var T = (A && A.trees) || (o && o.trees && num(o.trees.count) ? { count: o.trees.count } : null);

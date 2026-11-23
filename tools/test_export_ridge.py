@@ -70,6 +70,8 @@ COUNTS = {'returns': 1000, 'below': 4, 'groups': 1, 'lone': 1, 'likely_noise': 0
 
 def write_ridge(d, shapes=True, with_brush=True):
     d = Path(d); d.mkdir(parents=True, exist_ok=True)
+    (d / 'quality.json').write_text(json.dumps({'version': 1, 'passes': [{'id': 3, 'flagged': False}, {'id': 9, 'flagged': True, 'set_aside': 40}], 'coverage': {'passes_1': 0.25, 'passes_0': 0.0, 'no_ground_within_3m': 0.02, 'no_ground_within_1m': 0.1},
+                                             'reading': {'tiles': 4, 'read_in_this_run': True, 'left_blank': 0}, 'cloud': {}}))
     (d / 'ridge.json').write_text(json.dumps({
         'version': 1, 'epsg': 32600 + ZONE, 'zone': ZONE, 'south': False, 'origin': [OX, OY],
         'bbox_utm': [OX, OY, OX + NX * CELL, OY + NY * CELL], 'cell': CELL, 'nx': NX, 'ny': NY, 'params': {},
@@ -133,6 +135,9 @@ with tempfile.TemporaryDirectory() as tmp:
     check('zip: the usual files and the ridge files', want <= names, sorted(want - names))
     check('zip: no brush overlay picture, no tiles for a small area', 'tex_brush.png' not in names and not [n for n in names if n.startswith('tex_hsb_') or n.startswith('tex_hs_')], sorted(names))
     caves = json.loads(z.read('caves.json'))
+    aq = (caves['meta'].get('about') or {}).get('quality') or {}
+    check('About this map gets the LiDAR quality report\'s few numbers (no rasters in the zip)', aq.get('passes') == 2 and aq.get('flagged') == ['9'] and aq.get('set_aside') == 40 and aq.get('single_pass') == 0.25 and aq.get('ground_not_seen') == 0.02 and aq.get('tiles_blank') == 0 and aq.get('tiles') == 4
+          and not any(n.endswith('.u8') or n == 'quality.json' for n in z.namelist()), aq)
     meta = caves['meta']
     check('no caves: an empty survey list, ridgewalk marked in meta', caves['surveys'] == [] and meta.get('ridgewalk') == 1 and meta.get('hillshade') == 'lidar', meta)
     check('terrain cell is the ridge cell', abs(meta['terrain_cell_m'] - CELL) < 1e-9 and meta['utm_zone'] == ZONE)

@@ -1,5 +1,6 @@
 // area-maps.js — a processed area's maps as normal layers in 🗺 Layers (with the user's own map layers), coloured in
-// the browser's choice: Brush density, Slope, LiDAR hillshade, Below ground (voids) (beta).
+// the browser's choice: Brush density, Slope, LiDAR hillshade, Below ground (voids) (beta), and the LiDAR quality
+// report's three (LiDAR passes, Ground seen, Return density: a Ridgewalking result's, off until switched on).
 //
 // The maps are the area's saved value rasters (area_maps.py), drawn as tiles by the server (area_tiles.js:
 // GET /api/areas/maps/<id>, /api/areas/tiles/<id>/<map>/{z}/{x}/{y}.png?ramp=&lo=&hi=). Only colours change here.
@@ -13,7 +14,7 @@
 // its maps shown.
 // An area made before the value rasters: its bushwhack pngs as plain image layers (no Colours).
 //
-// window._areaMaps = { list, refresh, presets, colours, setColours, urlOf, dialog, resultState, setResult, pure }
+// window._areaMaps = { list, refresh, presets, colours, setColours, urlOf, dialog, resultState, setResult, hasMaps, setShown, isShown, layerId, pure }
 (function (root) {
   'use strict';
   const MAPS = [
@@ -21,6 +22,9 @@
     { id: 'slope', result: 'ground', name: 'Slope', show: false, alpha: 0.8, scale: 1, unit: '°', step: 1 },
     { id: 'hillshade', result: 'ground', name: 'LiDAR hillshade', show: false, alpha: 0.7, scale: 1, unit: '', step: 0.01 },
     { id: 'voids', result: 'bush', name: 'Below ground (voids) (beta)', show: false, alpha: 1, scale: 1, unit: 'm', step: 0.1 },
+    { id: 'passes', result: 'ridge', name: 'LiDAR passes', show: false, alpha: 0.8, scale: 1, unit: 'passes', step: 1 },
+    { id: 'groundseen', result: 'ridge', name: 'Ground seen', show: false, alpha: 0.8, scale: 100, unit: '%', step: 1 },
+    { id: 'density', result: 'ridge', name: 'Return density', show: false, alpha: 0.8, scale: 1, unit: '/m²', step: 1 },
   ];
   // Ramps: stops [pos 0..1 over the chosen range, 'RRGGBB', alpha 0..1]. Every ramp is offered for every map
   // ('classes' only where the map has cut-offs: brush). 'custom' = the two colour pickers.
@@ -38,6 +42,9 @@
     { id: 'blues', name: 'Blues', stops: [[0, 'deebf7', 0.6], [0.5, '3182bd', 0.9], [1, '08306b', 1]] },
     { id: 'greys', name: 'Greys', stops: [[0, 'ffffff', 0], [1, '111111', 1]] },
     { id: 'warm', name: 'Warm', stops: [[0, '2b1a0e', 1], [0.6, 'b88a5a', 1], [1, 'fff1d6', 1]] },
+    // the quality maps: few passes / little ground seen stand out, plenty is left clear
+    { id: 'passes', name: 'Passes: none, 1, 2, 3 or more', stops: [[0, 'c2185b', 0.9], [0.125, 'c2185b', 0.9], [0.125, 'e0402a', 0.8], [0.375, 'e0402a', 0.8], [0.375, 'f2e14c', 0.6], [0.625, 'f2e14c', 0.6], [0.625, '2e9b4a', 0.25], [1, '2e9b4a', 0.25]] },
+    { id: 'thin', name: 'Red where little, clear where plenty', stops: [[0, 'b3170f', 0.95], [0.35, 'f07c22', 0.8], [0.7, 'ffd23f', 0.5], [1, 'ffe45c', 0]] },
     { id: 'contrast', name: 'High contrast grey', stops: [[0, '000000', 1], [0.45, '3a3a3a', 1], [0.7, 'c8c8c8', 1], [1, 'ffffff', 1]] },
   ];
   const CLASS_COL = [['ffffff', 0], ['b7e4a0', 0.55], ['5fae4f', 0.8], ['1f5f1f', 1]];     // none (clear), light, medium, dense
@@ -46,6 +53,9 @@
     slope: { preset: 'caltopo', lo: 0, hi: 70 },
     hillshade: { preset: 'bw', lo: 0, hi: 1 },
     voids: { preset: 'blues', lo: 1, hi: 16 },
+    passes: { preset: 'passes', lo: 0, hi: 4 },             // steps at half counts: 0, 1, 2, 3 or more
+    groundseen: { preset: 'thin', lo: 0, hi: 0.3 },         // share of 0.3 m cells with a ground return
+    density: { preset: 'viridis', lo: 0, hi: 150 },
   };
   const PRESETS = {};     // per map, for the dialog and the tests
   MAPS.forEach(M => { PRESETS[M.id] = RAMPS.filter(r => !r.classes || M.id === 'brush'); });
@@ -117,7 +127,7 @@
 
   const loadedAreas = () => {
     const A = w._areas; if (!A || !A.available || !A.available()) return [];
-    return A.list().filter(a => A.eyeOf(a.id) === 'on' && a.results && (a.results.bush || a.results.ground));
+    return A.list().filter(a => A.eyeOf(a.id) === 'on' && a.results && (a.results.bush || a.results.ground || (a.results.ridge && a.results.ridge.quality)));
   };
   /** The descriptors for custom-layers.js (owner 'a'). */
   function build() {
@@ -169,11 +179,14 @@
     else ls.forEach(l => CL.api.setView(l.id, { show: false }));
     await push(); fire();
   }
+  /** One layer on or off (the LiDAR quality card's switches). */
+  async function setShown(id, on) { const CL = w._customLayers; if (!CL || !cur.some(l => l.id === id)) return false; CL.api.setView(id, { show: !!on }); await push(); fire(); return true; }
+  const isShown = id => { const CL = w._customLayers; return !!(CL && cur.some(l => l.id === id) && CL.api.viewOf(id).show); };
   const fire = () => w.dispatchEvent(new CustomEvent('flex-area-maps', {}));
 
   // ── Colours… ──
   let dlg = null;
-  const RANGE = { brush: [0, 1], slope: [0, 90], hillshade: [0, 1], voids: [0, 17] };
+  const RANGE = { brush: [0, 1], slope: [0, 90], hillshade: [0, 1], voids: [0, 17], passes: [0, 15], groundseen: [0, 1], density: [0, 400] };
   function dialog(id) {
     const L = cur.find(l => l.id === id); if (!L || !L.colours) return;
     close();
@@ -273,7 +286,7 @@
   .lp-am-col { background: none; border: 0; cursor: pointer; padding: 0 2px; font-size: 12px; flex-shrink: 0; }`;
   doc.head.appendChild(css);
 
-  w._areaMaps = { list, refresh, presets: PRESETS, colours, setColours, urlOf, dialog, close, resultState, setResult, hasMaps, pure };
+  w._areaMaps = { list, refresh, presets: PRESETS, colours, setColours, urlOf, dialog, close, resultState, setResult, hasMaps, setShown, isShown, layerId, pure };
   // the area switches changed (Analyze), or the list of areas: list again
   w.addEventListener('flex-areas-changed', e => { const why = e.detail && e.detail.why; if (why === 'list') Object.keys(info).forEach(k => delete info[k]); if (why === 'list' || why === 'shown' || why === 'run') refresh(); });
 })(typeof window !== 'undefined' ? window : null);
