@@ -1280,6 +1280,15 @@
               </div>
             </div>
 
+            <!-- Section (lidar-section.js): two clicks on the map, a side view through the loaded cloud in its own window.
+                 The button is built by the module into #lp-section-body. -->
+            <div class="lp-section" style="width:0; min-width:100%; box-sizing:border-box;">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▾</span> Section
+              </div>
+              <div class="lp-section-body open" id="lp-section-body"></div>
+            </div>
+
             <!-- Splat mode [beta] (splat-mode.js): the ground drawn as discs on the slope, coloured from a map layer.
                  The controls are built by the module into #lp-splat-body. -->
             <div class="lp-section" style="width:0; min-width:100%; box-sizing:border-box;">
@@ -2133,6 +2142,8 @@
 <script src="client/src/modules/flex-leads.js"></script>  <!-- leads at cave stations: project, My data, file; add / draw / export (window._flexLeads) -->
 <script src="viewer_build/libs/ridgewalk.js"></script>      <!-- the phone's ridgewalking module, for what both share: depth colours, file formats, boxes (window.FlexRidge; draws nothing here) -->
 <script src="viewer_build/libs/ridge-marks.js"></script>    <!-- the phone's marks module, for its rules: features, matching, the tap rule (window.RidgeMarks; draws nothing here) -->
+<script src="client/src/modules/section-math.js"></script>   <!-- the arithmetic of the LiDAR Section tool (window._sectionMath) -->
+<script src="client/src/modules/lidar-section.js"></script>  <!-- 📊 LiDAR → Section: a side view through the point cloud along a line (window._lidarSection) -->
 <script src="client/src/modules/ridge-draw.js"></script>     <!-- a processed area's ridgewalking result on the globe (window._ridgeDraw) -->
 <script src="client/src/modules/ridge-marks.js"></script>  <!-- marks on ridgewalking features, from the field: badges on the map, a list in Leads, into the next export (window._ridgeMarks) -->
 <script src="client/src/modules/inventory.js"></script>  <!-- inventories: a chest at a station or surface point with a dated log; project or My data (window._inventory) -->
