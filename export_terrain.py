@@ -630,7 +630,7 @@ def filter_spikes(dem, resolution, radius_m=10.0, threshold_m=1.5, progress=prin
 # ──────────────────────────────────────────────────────────────────────────────
 
 def build_mesh(dem, x_bins, y_bins, x_origin, y_origin, max_triangles=2_000_000, progress=print,
-               drop=None, clip=None):
+               drop=None, clip=None, extra=None, force=None, flat_div=4):
     """
     Build a curvature-adaptive TIN mesh from a DEM grid.
 
@@ -659,6 +659,12 @@ def build_mesh(dem, x_bins, y_bins, x_origin, y_origin, max_triangles=2_000_000,
     as vertices (heights from the DEM) no more than 0.8 cell apart, close
     enough that the triangulation keeps its edges; then triangles whose
     centre is outside go. The vertex budget is spent inside the polygon.
+
+    For the ridgewalking export only (export_ridge.py; the defaults leave the
+    mesh exactly as it was): `extra` is one more importance per cell, taken
+    where it is larger than the curvature's (steep ground); `force` marks
+    cells that are always kept (the rims of the holes); `flat_div` is the
+    share of the triangles the background grid gets (1 / flat_div).
     """
     from scipy.ndimage import laplace, uniform_filter, binary_dilation, binary_erosion
     from scipy.spatial import Delaunay
@@ -688,11 +694,13 @@ def build_mesh(dem, x_bins, y_bins, x_origin, y_origin, max_triangles=2_000_000,
     # Normalise against robust max (99th pct) to ignore extreme outliers
     curv_scale = float(np.percentile(curv, 99)) + 1e-9
     curv_norm = np.clip(curv / curv_scale, 0.0, 1.0)
+    if extra is not None:
+        curv_norm = np.maximum(curv_norm, np.asarray(extra, dtype=curv_norm.dtype).ravel())
 
     # ── 2. Background subgrid (flat areas) ───────────────────────────────────
     # flat_step: coarse spacing for genuinely flat cells.
     # Chosen so the subgrid alone produces roughly max_triangles/4 triangles.
-    flat_step = max(2, int(math.sqrt(n_cells / (max_triangles / 4))))
+    flat_step = max(2, int(math.sqrt(n_cells / (max_triangles / flat_div))))
     flat_step = min(flat_step, 32)   # never coarser than 32 cells
 
     sub_r = np.zeros(rows, dtype=bool); sub_r[::flat_step] = True
@@ -710,6 +718,8 @@ def build_mesh(dem, x_bins, y_bins, x_origin, y_origin, max_triangles=2_000_000,
         n_subgrid = int((subgrid_mask & region.ravel()).sum())
         n_border = int(sum(math.hypot(*(b - a)) for a, b in zip(clip, np.roll(clip, -1, axis=0))) / (0.8 * min(dx, dy)))
         n_curv_budget = max(0, max_triangles // 2 - n_subgrid - n_border)
+    if force is not None:
+        n_curv_budget = max(0, n_curv_budget - int(force.sum()))
     cand = curv_norm if region is None else curv_norm[region.ravel()]
     if n_curv_budget > 0 and n_curv_budget < len(cand):
         # Select top-N cells by curvature score
@@ -722,6 +732,8 @@ def build_mesh(dem, x_bins, y_bins, x_origin, y_origin, max_triangles=2_000_000,
 
     # ── 4. Union + border ─────────────────────────────────────────────────────
     keep = (subgrid_mask | curv_mask).reshape(rows, cols)
+    if force is not None:
+        keep |= force
     keep[0, :] = keep[-1, :] = keep[:, 0] = keep[:, -1] = True   # always keep border
     if drop is not None and drop.any():
         rim = binary_dilation(drop) & ~drop
@@ -2280,13 +2292,23 @@ def main():
              "and with the viewer export. The spike filter is off unless --area-spikes.")
     ap.add_argument('--area-spikes', action='store_true',
         help='With --area-dir: run the spike filter (--spike-threshold) on the area ground anyway.')
+    ap.add_argument('--ridgewalk', action='store_true',
+        help='V2 - Ridgewalking: run ridgewalk.py on the LiDAR and build the terrain from its ground, '
+             'with real holes at true entrances, plus the ridge files for FLEX Ridgewalk.')
+    ap.add_argument('--ridgewalk-dir', default=None, metavar='DIR',
+        help='With or without --ridgewalk: use this already computed ridge folder (ridgewalk.py --out DIR).')
     args = ap.parse_args()
+    ridge_mode = bool(args.ridgewalk or args.ridgewalk_dir)
+    if ridge_mode and (args.dem_grid or args.area_dir or args.project_terrain):
+        sys.exit("ERROR: --ridgewalk reads the LiDAR itself: not with --dem-grid, --area-dir or --project-terrain")
+    if ridge_mode and not args.ridgewalk_dir and not args.ept:
+        sys.exit("ERROR: --ridgewalk needs a point cloud (--ept)")
     map_terrain = bool(args.dem_grid)
     area_terrain = bool(args.area_dir) and not map_terrain
     if args.area_dir and map_terrain:
         sys.exit("ERROR: give --area-dir or --dem-grid, not both")
     area_spike = args.spike_threshold if args.area_spikes else 0.0
-    if not map_terrain and not area_terrain and not args.ept:
+    if not map_terrain and not area_terrain and not args.ept and not ridge_mode:
         sys.exit("ERROR: give --ept (LiDAR terrain) or --dem-grid (map terrain)")
     hs_mode = args.hillshade or ('url' if args.hillshade_url else 'lidar')
     if hs_mode == 'url' and not args.hillshade_url:
@@ -2294,6 +2316,8 @@ def main():
         hs_mode = 'lidar'
     if (map_terrain or area_terrain) and hs_mode == 'lidar':
         hs_mode = 'dem'                    # no LiDAR read: shade the map's / area's terrain
+    if ridge_mode and hs_mode in ('lidar', 'dem'):
+        hs_mode = 'ridge'                  # the multidirectional hillshade of the ridge ground
     if map_terrain:
         hdr = json.loads(Path(args.dem_grid).read_text())
         args.resolution = float(hdr.get('cell') or args.resolution)
@@ -2316,6 +2340,26 @@ def main():
     zone = utm_zone_for(bbox_center_lon)
     south = bbox_center_lat < 0
 
+    # V2 - Ridgewalking: the step runs first (its own read of the returns, with
+    # flight-pass ids); its grid, cell and zone are then the export's.
+    ridge = None
+    if ridge_mode:
+        import export_ridge
+        ridge_dir, ridge_tmp = args.ridgewalk_dir, None
+        if not ridge_dir:
+            ridge_tmp = tempfile.TemporaryDirectory(prefix='flex_ridge_')
+            ridge_dir = ridge_tmp.name
+            print("[1/7] Ridgewalking 0% starting (the returns are read again, with flight-pass ids)")
+            export_ridge.run_ridgewalk(ridge_dir, args.ept, args.bbox, polygon=args.polygon, also=args.also_ept,
+                                       progress=lambda m: print(f"[1/7] {m}", flush=True))
+        ridge = export_ridge.Ridge(ridge_dir)
+        zone, south = ridge.zone, ridge.south
+        args.resolution = ridge.cell
+        c = ridge.meta.get('counts') or {}
+        print(f"[1/7] Ridge ground: {ridge.nx} x {ridge.ny} cells of {ridge.cell:g} m; "
+              f"{c.get('true_cells', int((ridge.holes == 1).sum()))} true-entrance cells, "
+              f"{c.get('guessed_cells', int((ridge.holes == 2).sum()))} guessed")
+
     # The terrain is an upright UTM rectangle covering everything drawn. Points
     # are requested for a little more than that so every cell has real data
     # behind it, whatever CRS the dataset is stored in.
@@ -2332,6 +2376,8 @@ def main():
               f"({polygon_area(poly_utm) / rect_area * 100:.0f}% of its box); nothing outside it is exported")
         if self_intersecting(poly_utm):
             print("[export] WARNING: the polygon's edges cross; inside is taken by the even-odd rule")
+    if ridge is not None:
+        rect = ridge.rect                  # the ridge grid is the terrain's grid
     pad = max(5.0, 4 * args.resolution)
     q_rect = (rect[0] - pad, rect[1] - pad, rect[2] + pad, rect[3] + pad)
     q_ll = latlon_box_covering(q_rect, zone, south)
@@ -2386,7 +2432,19 @@ def main():
         viewer_libs = get_viewer_libs(progress=lambda m: print(f"[0/7] {m}"))
 
         FLEX_PC_Z_OFFSET = args.z_offset if args.z_offset is not None else -32 * 0.766  # metres
-        if map_terrain:
+        mesh_kw = {}
+        if ridge is not None:
+            # 1-2. The ridgewalking ground (the lid): heights as the points
+            # store them, so the same z offset as build_dem's DEM. True
+            # entrances are cut out; outside the polygon there is no ground.
+            x = y = z = None
+            ground_mode = 'ridge'
+            x0 = y0 = 0
+            dem, x_bins, y_bins, drop, mesh_kw = ridge.terrain(clipped=poly_utm is not None)
+            covered_m2 = float((~drop).sum()) * args.resolution ** 2
+            dem += FLEX_PC_Z_OFFSET
+            print(f"[2/7] Terrain from the ridgewalking ground; applied FLEX point-cloud Z offset: {FLEX_PC_Z_OFFSET:.3f} m")
+        elif map_terrain:
             # 1-2. The map's terrain, sampled by FLEX: already a bare-earth DEM in
             # the frame the caves are drawn in, so no cloth, spikes or shift.
             print("[1/7] Terrain from the map: no point cloud to read")
@@ -2488,8 +2546,22 @@ def main():
         vertices, faces = build_mesh(
             dem, x_bins, y_bins, x0, y0, args.max_triangles,
             progress=lambda m: print(f"[3/7] {m}"),
-            drop=drop, clip=clip,
+            drop=drop, clip=clip, **mesh_kw,
         )
+        if ridge is not None:
+            # Where the triangles went: steep ground against flat.
+            sl = ridge.slope().T
+            cen = vertices[faces].mean(axis=1)
+            ci = np.clip(np.rint((cen[:, 0] + (dem.shape[0] - 1) * args.resolution / 2) / args.resolution).astype(np.int64), 0, dem.shape[0] - 1)
+            cj = np.clip(np.rint((cen[:, 1] + (dem.shape[1] - 1) * args.resolution / 2) / args.resolution).astype(np.int64), 0, dem.shape[1] - 1)
+            steep_t = sl[ci, cj] >= 20.0
+            live = ~drop
+            steep_c = (sl >= 20.0) & live
+            n_s, n_f = int(steep_t.sum()), int((~steep_t).sum())
+            a_s = max(1e-9, float(steep_c.sum()) * args.resolution ** 2); a_f = max(1e-9, float((live & ~steep_c).sum()) * args.resolution ** 2)
+            ridge_mesh_stats = {'steep_tris': n_s, 'flat_tris': n_f, 'steep_m2': round(a_s, 1), 'flat_m2': round(a_f, 1)}
+            print(f"[3/7] Ridge mesh: {n_s:,} triangles on steep ground (20 deg or more; {n_s / a_s:.1f} per m2), "
+                  f"{n_f:,} on flatter ground ({n_f / a_f:.2f} per m2)")
 
         # 4. Satellite texture, warped onto the UTM grid
         print(f"[4/7] Fetching satellite texture ({args.satellite_source.upper()})...")
@@ -2531,6 +2603,19 @@ def main():
                 del hs_img
             except Exception as e:
                 print(f"[4b/7] WARNING: LiDAR hillshade failed ({e}) - skipping")
+        elif hs_mode == 'ridge':
+            print("[4b/7] Building hillshade from the ridgewalking ground...")
+            try:
+                hs_img, hs_cell = ridge.hillshade(max_px=args.hillshade_max_px, tone=_tone_map)
+                print(f"[4b/7] Hillshade: {hs_img.size[0]}x{hs_img.size[1]} px, {hs_cell:.2f} m")
+                if poly_utm is not None:
+                    blank_outside(hs_img, grid, poly_utm)
+                hs_buf = _hs_io.BytesIO()
+                hs_img.save(hs_buf, format='JPEG', quality=90)
+                hs_bytes = hs_buf.getvalue()
+                del hs_img
+            except Exception as e:
+                print(f"[4b/7] WARNING: ridge hillshade failed ({e}) - skipping")
         elif hs_mode == 'dem':
             print("[4b/7] Building hillshade from the terrain...")
             try:
@@ -2678,13 +2763,14 @@ def main():
                 "center_lon":   float(bbox_center_lon),
                 "center_lat":   float(bbox_center_lat),
                 "extent_utm":   [float(grid.e0), float(grid.n0), float(grid.e1), float(grid.n1)],
-                "hillshade":    (hs_mode if hs_bytes else None),
+                "hillshade":    (('lidar' if hs_mode == 'ridge' else hs_mode) if hs_bytes else None),
                 "hillshade_cell_m": (float(hs_cell) if hs_cell else None),
                 "terrain":      ('map' if map_terrain else 'lidar'),
                 **({"ground": "area"} if area_terrain else {}),
                 "terrain_cell_m": float(args.resolution),
                 "terrain_patches": len(args.terrain_patch) if map_terrain else 0,
                 "satellite":    sat_used,
+                **({"ridgewalk": 1} if ridge is not None else {}),
             }
             if tile_files:
                 caves_out["meta"]["texture_tiles"] = meta_entry(tcols, trows, True, tile_hs)
@@ -2725,11 +2811,32 @@ def main():
                     print(f"[6/7] Documents: {len(docs_side['entries'])} entries, {len(docs_files)} page images "
                           f"({sum(p['size'] for p in docs_side['pages']) // 1024} KB)")
 
+            # V2 - Ridgewalking: the ridge files in the viewer's frame (export_ridge.py)
+            ridge_json = None
+            if ridge is not None:
+                import export_ridge
+                shift = ridge.shift(utm_center_e, utm_center_n, FLEX_PC_Z_OFFSET)
+                rfiles = {'ridge_points.bin': ridge.points_bin(shift), 'ridge_patches.bin': ridge.patches_bin(shift)}
+                rshapes = ridge.shapes_bin(shift)
+                if rshapes:
+                    rfiles['ridge_shapes.bin'] = rshapes
+                rbrush = ridge.brush_png((grid.e0, grid.n0, grid.e1, grid.n1))
+                if rbrush:
+                    rfiles['tex_brush.png'] = rbrush
+                for rname, rbytes in rfiles.items():
+                    zf.writestr(zipfile.ZipInfo(rname), rbytes,
+                                compress_type=zipfile.ZIP_STORED if rname.endswith('.png') else zipfile.ZIP_DEFLATED)
+                rside = ridge.side_json(utm_center_e, utm_center_n, FLEX_PC_Z_OFFSET, rfiles)
+                rside['mesh'] = ridge_mesh_stats
+                zf.writestr('ridge.json', json.dumps(rside, separators=(',', ':')))
+                ridge_json = json.dumps(export_ridge.ridge_object(ridge.meta, rfiles, data=rfiles), separators=(',', ':'))
+                print(f"[6/7] Ridge files: " + ', '.join(f"{n} {len(b) // 1024} KB" for n, b in rfiles.items()))
+
             # Viewer HTML: fully self-contained (Three.js + GLB + textures + caves all inline)
             inline_html = build_inline_viewer(
                 glb_path, tex_b64, caves_out, viewer_libs,
                 progress=lambda m: print(f"[6/7] {m}"),
-                hs_b64=hs_b64, walls_bytes=walls_bytes, docs_json=docs_json)
+                hs_b64=hs_b64, walls_bytes=walls_bytes, docs_json=docs_json, ridge_json=ridge_json)
             zf.writestr('viewer.html', inline_html.encode('utf-8'))
 
             # serve.bat (Windows) — double-click to start local HTTP server
@@ -2749,6 +2856,8 @@ def main():
                 'open "http://localhost:8090/viewer.html" 2>/dev/null || true\n'
                 'python3 -m http.server 8090\n')
 
+    if ridge is not None and ridge_tmp is not None:
+        ridge_tmp.cleanup()
     sz = os.path.getsize(args.out) / 1e6
     print(f"[7/7] Done.")
     print(f"[done] {args.out} ({sz:.1f} MB)")

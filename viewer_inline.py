@@ -90,8 +90,26 @@ def docs_inline_json(side, read_page, cap=DOCS_INLINE_CAP):
     return json.dumps(out, separators=(',', ':')).replace('</', '<\\/')
 
 
+RIDGE_FILES = ('ridge_points.bin', 'ridge_patches.bin', 'ridge_shapes.bin', 'tex_brush.png')
+
+
+def ridge_inline_json(side, read, names):
+    """The text for PLACEHOLDER_RIDGE_JSON from an export's ridge.json (`side`)
+    and its ridge files: the object ridge.json keeps under `viewer` (file
+    names), each name replaced by the file's base64. None when there is none."""
+    import base64
+    obj = (side or {}).get('viewer')
+    if not isinstance(obj, dict) or not obj.get('points'):
+        return None
+    out = dict(obj)
+    for k in ('points', 'patches', 'shapes', 'brush'):
+        name = out.get(k)
+        out[k] = base64.b64encode(read(name)).decode('ascii') if name and name in names else None
+    return json.dumps(out, separators=(',', ':'))
+
+
 def build_inline_viewer(glb_path, tex_b64, caves_data, viewer_libs, progress=print,
-                        hs_b64=None, walls_bytes=None, docs_json=None):
+                        hs_b64=None, walls_bytes=None, docs_json=None, ridge_json=None):
     """
     glb_path: the terrain.glb file, or its bytes.
 
@@ -158,6 +176,9 @@ def build_inline_viewer(glb_path, tex_b64, caves_data, viewer_libs, progress=pri
 
     # 6. Documents (docs.json, see above); 'null' leaves the viewer to look for docs.json beside it
     html = html.replace('PLACEHOLDER_DOCS_JSON', docs_json or 'null')
+
+    # 7. V2 - Ridgewalking (export_ridge.py): the RIDGE object, 'null' for every other export
+    html = html.replace('PLACEHOLDER_RIDGE_JSON', ridge_json or 'null')
 
     progress(f"  Viewer HTML total: {len(html)//1024} KB")
     return html
