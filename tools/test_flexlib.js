@@ -978,16 +978,16 @@ const pid = 'proj1', cid = 'cave1', cid2 = 'cave2';
 {
   const LAT = 45.1234, LON = -100.5678, MX = 111320 * Math.cos(LAT * Math.PI / 180), MY = 110574;
   const at = (x, y) => ({ lon: LON + x / MX, lat: LAT + y / MY });                       // metres east / north of the example place
-  const first = L.rmarkBody(null, Object.assign({ kind: 'pit', note: ' 8 m free drop ', h: 512.345, feat: { id: 'f12', depth: 9.87654, returns: 41.2, entrance: 'true', size: [3, 2.44, 9.9], junk: 1 } }, at(0, 0)));
+  const first = L.rmarkBody(null, Object.assign({ kind: 'pit', note: ' 8 m free drop ', h: 512.345, feat: { id: 'f12', depth: 9.87654, returns: 43.2, entrance: 'true', size: [3, 2.44, 9.9], junk: 1 } }, at(0, 0)));
   ok('rmark: a new mark: its own id, kind, trimmed note, place to 1e-7 degrees, height, what was known of the feature; prev null',
     first.op === 'rmark.set' && /^[0-9a-z]{12}$/i.test(first.mark) && first.kind === 'pit' && first.note === '8 m free drop' && near(first.lon, LON, 1e-7) && first.h === 512.35 &&
-    JSON.stringify(first.feat) === JSON.stringify({ id: 'f12', depth: 9.88, returns: 41, entrance: 'true', size: [3, 2.4, 9.9] }) && first.prev === null, first);
+    JSON.stringify(first.feat) === JSON.stringify({ id: 'f12', depth: 9.88, returns: 43, entrance: 'true', size: [3, 2.4, 9.9] }) && first.prev === null, first);
   ok('rmark: no kind, an unknown kind or no place: no record', L.rmarkBody(null, at(0, 0)) === null && L.rmarkBody(null, Object.assign({ kind: 'dragon' }, at(0, 0))) === null && L.rmarkBody(null, { kind: 'cave' }) === null);
   const { op: _o, ...b1 } = first;
   const log = [A('rmark.set', b1)];
   let S = L.replayProject(log, pid);
   let m = S.rmarks[first.mark];
-  ok('rmark: replayed: kind, note, place, who and when; one line of history', m && m.kind === 'pit' && m.note === '8 m free drop' && near(m.lat, LAT, 1e-7) && m.h === 512.35 && m.feat.returns === 41 && m.created.who === 'Ana' && m.history.length === 1 && L.liveRmarks(S).length === 1, m);
+  ok('rmark: replayed: kind, note, place, who and when; one line of history', m && m.kind === 'pit' && m.note === '8 m free drop' && near(m.lat, LAT, 1e-7) && m.h === 512.35 && m.feat.returns === 43 && m.created.who === 'Ana' && m.history.length === 1 && L.liveRmarks(S).length === 1, m);
   // changing it is a new record; the latest wins; the history keeps both
   const ch = L.rmarkBody(m, { kind: 'cave', note: 'goes: 30 m of passage' });
   ok('rmark: a change names only what changed, what it was, and the record it was made on (so a phone whose clock is behind still comes after)', ch.base[0] === log[0].id && ch.mark === m.id && ch.kind === 'cave' && ch.note === 'goes: 30 m of passage' && ch.prev.kind === 'pit' && ch.prev.note === '8 m free drop' && !('lon' in ch) && !('feat' in ch), ch);

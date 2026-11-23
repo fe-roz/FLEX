@@ -37,7 +37,7 @@ LAT, LON = 45.1234, -100.5678                      # the project's example place
 # ── 1. Cleaning what the dialog sends ────────────────────────────────────────
 raw = {'marks': [
     {'id': 'm1', 'kind': 'cave', 'note': 'Goes. </script><b>', 'lon': LON, 'lat': LAT, 'h': 512.345, 'who': 'Ana', 't': '2026-11-20T10:00:00.000Z', 'changes': 2,
-     'feat': {'id': 'r1-2', 'depth': 9.876, 'returns': 41.4, 'entrance': 'true', 'size': [1, 2, 3], 'junk': 'x'}, 'extra': 1},
+     'feat': {'id': 'r1-2', 'depth': 9.876, 'returns': 43.4, 'entrance': 'true', 'size': [1, 2, 3], 'junk': 'x'}, 'extra': 1},
     {'id': 'm2', 'kind': 'unreached', 'lon': str(LON + 0.001), 'lat': LAT},
     {'id': 'm3', 'kind': 'dragon', 'lon': LON, 'lat': LAT},          # not a kind
     {'id': 'm4', 'kind': 'pit', 'lon': 'east', 'lat': LAT},           # no place
@@ -48,7 +48,7 @@ raw = {'marks': [
 c = vi.clean_ridge_marks(raw)
 check('cleaning: the two good marks stay, in order; the rest go', c and c['version'] == 1 and [m['id'] for m in c['marks']] == ['m1', 'm2'], c)
 check('…only the known fields, numbers rounded, the feature\'s hint kept', c['marks'][0] == {'id': 'm1', 'kind': 'cave', 'note': 'Goes. </script><b>', 'lon': LON, 'lat': LAT, 'who': 'Ana', 't': '2026-11-20T10:00:00.000Z', 'h': 512.35 if False else 512.35,
-      'feat': {'id': 'r1-2', 'depth': 9.88, 'returns': 41, 'entrance': 'true'}} or c['marks'][0]['h'] in (512.34, 512.35), c['marks'][0])
+      'feat': {'id': 'r1-2', 'depth': 9.88, 'returns': 43, 'entrance': 'true'}} or c['marks'][0]['h'] in (512.34, 512.35), c['marks'][0])
 check('…a number sent as text is read; no height and no feature are simply left out', c['marks'][1] == {'id': 'm2', 'kind': 'unreached', 'note': '', 'lon': round(LON + 0.001, 7), 'lat': LAT, 'who': '', 't': ''}, c['marks'][1])
 check('nothing usable: None (no file is written)', vi.clean_ridge_marks({'marks': []}) is None and vi.clean_ridge_marks(None) is None and vi.clean_ridge_marks({'marks': [{'kind': 'cave'}]}) is None and vi.clean_ridge_marks('x') is None)
 check('a plain list is read too; at most `limit` are kept', len(vi.clean_ridge_marks(raw['marks'])['marks']) == 2 and len(vi.clean_ridge_marks([dict(raw['marks'][0], id='k%d' % i) for i in range(30)], limit=7)['marks']) == 7)
