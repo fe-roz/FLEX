@@ -696,6 +696,9 @@ catch(e) { window.DOCS_EXPORT = null; }
 <!-- Surface features of the project (libs/viewer-features.js), view only: null in an export without them. -->
 <script>window['PLACEHOLDER_' + 'FEATURES_JSON'] = null;</script>
 <script>const FEATURES = PLACEHOLDER_FEATURES_JSON;</script>
+<!-- Trees and brush (libs/trees.js): null in an export without them. -->
+<script>window['PLACEHOLDER_' + 'TREES_JSON'] = null;</script>
+<script>const TREES = PLACEHOLDER_TREES_JSON;</script>
 <!-- ═══ THREE.JS LIBS (injected by export_terrain.py) ══════════════════════ -->
 <script src="libs/three.min.js"></script>
 <script src="libs/OrbitControls.js"></script>
@@ -711,6 +714,7 @@ catch(e) { window.DOCS_EXPORT = null; }
 <script src="libs/viewer-docs.js"></script>
 <script src="libs/ridgewalk.js"></script>
 <script src="libs/viewer-features.js"></script>
+<script src="libs/trees.js"></script>
 
 <script>
 'use strict';
@@ -2089,6 +2093,11 @@ setTimeout(() => {
       THREE, scene, camera, renderer, controls, features: typeof FEATURES === 'undefined' ? null : FEATURES, saved: DISP.features,
       toScene: gpsToScene, groundZ: gridZAt, textSprite: makeTextSprite, showInfo, flyTo: p => flyToPoint(p, Math.max(60, terrainScale * 0.05)),
       fmtLen: m => U.len(m), redraw: () => { requestRender(); wakeRender(); },
+    });
+    // Trees and brush as simple solids (nothing when TREES is null).
+    if (window.FlexTrees) FlexTrees.init({
+      THREE, scene, trees: typeof TREES === 'undefined' ? null : TREES, saved: DISP.trees, isAssetRef, b64ToArrayBuffer,
+      redraw: () => { requestRender(); wakeRender(); },
     });
     dispRestoreUi();
     setP(100, 'Ready');
@@ -4664,6 +4673,7 @@ function renderDisplaySheet() {
     chips.push(['📂', kmlNames.length ? kmlNames.join(', ') : 'Imported KML', importGroup.visible, on => { importGroup.visible = on; }]);
   sheetChips(chips);
   if (window.FlexRidge && FlexRidge.active()) FlexRidge.sheet({ el, sheet: sheetEl, head: sheetHead, chips: sheetChips });   // Below ground (V2)
+  if (window.FlexTrees && FlexTrees.active()) FlexTrees.sheet({ head: sheetHead, chips: sheetChips });   // Trees and brush
   if (window.ViewerFeatures && ViewerFeatures.active()) ViewerFeatures.sheet({ el, sheet: sheetEl, head: sheetHead, chips: sheetChips, close: closeSheet });   // the project's surface features
   const hsOk = document.getElementById('map-panel-layer').style.display === 'block';
   if (hsOk) {
@@ -8397,7 +8407,7 @@ function dispRestoreUi() {
 }
 function dispCapture() {
   const sl = id => { const n = document.getElementById(id); return n ? +n.value : undefined; };
-  dispSave({ wallMode, colourMode, wallAlpha: wallOpacity, stationMode, annot: annotMode, tracks: fieldGroup.visible, inv: window.ViewerInv ? ViewerInv.visible() : true, fx: FlexFx.serialize(), features: window.ViewerFeatures ? ViewerFeatures.serialize() : undefined, ridge: window.FlexRidge ? FlexRidge.serialize() : undefined, tex: texMode,
+  dispSave({ wallMode, colourMode, wallAlpha: wallOpacity, stationMode, annot: annotMode, tracks: fieldGroup.visible, inv: window.ViewerInv ? ViewerInv.visible() : true, fx: FlexFx.serialize(), trees: window.FlexTrees ? FlexTrees.serialize() : undefined, features: window.ViewerFeatures ? ViewerFeatures.serialize() : undefined, ridge: window.FlexRidge ? FlexRidge.serialize() : undefined, tex: texMode,
              opacity: sl('terrain-opacity-slider'), bright: sl('terrain-bright-slider'), fog: sl('terrain-fog-slider') });
 }
 let _dispTimer = null;

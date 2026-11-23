@@ -159,6 +159,17 @@ def features_text(side):
 RIDGE_FILES = ('ridge_points.bin', 'ridge_patches.bin', 'ridge_shapes.bin')
 
 
+def trees_inline_json(side, read, names):
+    """The text for PLACEHOLDER_TREES_JSON from an export's trees.json (`side`)
+    and trees.bin: the object trees.json keeps under `viewer`, the file name
+    replaced by the file's base64. None when there is none."""
+    import base64
+    obj = (side or {}).get('viewer')
+    if not isinstance(obj, dict) or not obj.get('file') or obj['file'] not in names:
+        return None
+    return json.dumps(dict(obj, file=base64.b64encode(read(obj['file'])).decode('ascii')), separators=(',', ':'))
+
+
 def ridge_inline_json(side, read, names):
     """The text for PLACEHOLDER_RIDGE_JSON from an export's ridge.json (`side`)
     and its ridge files: the object ridge.json keeps under `viewer` (file
@@ -177,7 +188,7 @@ def ridge_inline_json(side, read, names):
 
 def build_inline_viewer(glb_path, tex_b64, caves_data, viewer_libs, progress=print,
                         hs_b64=None, walls_bytes=None, docs_json=None, ridge_json=None, hsb_b64=None,
-                        features_json=None):
+                        features_json=None, trees_json=None):
     """
     glb_path: the terrain.glb file, or its bytes.
 
@@ -253,6 +264,9 @@ def build_inline_viewer(glb_path, tex_b64, caves_data, viewer_libs, progress=pri
 
     # 8. Surface features (features.json, see clean_features): 'null' for an export without them
     html = html.replace('PLACEHOLDER_FEATURES_JSON', features_json or 'null')
+
+    # 9. Trees and brush (export_trees.py): the TREES object, 'null' for an export without them
+    html = html.replace('PLACEHOLDER_TREES_JSON', trees_json or 'null')
 
     progress(f"  Viewer HTML total: {len(html)//1024} KB")
     return html

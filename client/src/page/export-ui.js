@@ -1288,8 +1288,13 @@
     const featOn = document.getElementById('export_features_on');
     const feats = featOn && featOn.checked ? _collectFeatures(w, s, e, n, poly) : null;
 
+    // Trees and brush: needs the LiDAR too (its tick box sits in the same rows)
+    const treesBox = document.getElementById('export_trees');
+    const trees = !mapTerrain && !!(treesBox && treesBox.checked);
+
     const body = {
       ...docsBody,
+      ...(trees ? { trees: true } : {}),
       ...(feats && feats.items.length ? { features: { version: 1, folders: feats.folders, items: feats.items } } : {}),
       ...(ridgewalk ? { ridgewalk: true, ..._ridgeOptions() } : {}),
       bbox: [w, s, e, n],

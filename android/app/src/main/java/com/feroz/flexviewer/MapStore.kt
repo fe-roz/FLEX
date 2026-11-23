@@ -47,7 +47,10 @@ class MapStore(private val ctx: Context) {
         val RIDGE_FILES = setOf("ridge_points.bin", "ridge_shapes.bin", "ridge_patches.bin", "ridge.json")
         /** Surface features of the project (an export made with "Include surface features"), view only: libs/viewer-features.js. */
         const val FEATURES_FILE = "features.json"
-        fun isDataFile(name: String): Boolean = name in DATA_FILES || name in RIDGE_FILES || name == FEATURES_FILE || name == "docs.json" || TILE_RE.matches(name) || DOC_RE.matches(name)
+        /** Trees and brush (an export made with that box ticked): one simple solid a tree or bush, libs/trees.js; trees.json has the count and detail. */
+        const val TREES_FILE = "trees.bin"
+        const val TREES_INFO = "trees.json"
+        fun isDataFile(name: String): Boolean = name in DATA_FILES || name in RIDGE_FILES || name == FEATURES_FILE || name == TREES_FILE || name == TREES_INFO || name == "docs.json" || TILE_RE.matches(name) || DOC_RE.matches(name)
         private val ID_RE = Regex("^[A-Za-z0-9_-]{1,64}$")
         private val SAFE_RE = Regex("^[A-Za-z0-9._ -]{1,120}$")
         fun validId(id: String?): Boolean = id != null && ID_RE.matches(id)
