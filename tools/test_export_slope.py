@@ -198,7 +198,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check('about: the FLEX commit, read from the checkout without git', A.get('flex', {}).get('commit', '') == ea.flex_commit(Path(__file__).resolve().parent.parent) and (not A.get('flex') or re.fullmatch(r'[0-9a-f]{12}', A['flex']['commit'])), A.get('flex'))
     try:
         g = subprocess.run(['git', '-C', str(Path(__file__).resolve().parent.parent), 'rev-parse', 'HEAD'], capture_output=True, text=True, timeout=10)
-        if g.returncode == 0:
+        if g.returncode == 0 and (Path(__file__).resolve().parent.parent / '.git').exists():       # (a copy without its .git sits inside some other checkout: git would name that one)
             check('…and it is the commit git names', ea.flex_commit(Path(__file__).resolve().parent.parent) == g.stdout.strip()[:12], g.stdout.strip()[:12])
     except Exception:
         pass

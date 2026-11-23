@@ -60,7 +60,7 @@ def about(root, width_m, height_m, area_m2, polygon, terrain, cell_m, lidar=(), 
         now = int(os.environ['SOURCE_DATE_EPOCH'])
     t = time.gmtime(now if now is not None else time.time())
     out = {'v': 1, 'exported': time.strftime('%Y-%m-%dT%H:%M:%SZ', t),
-           'area_km2': round(float(area_m2) / 1e6, 4), 'size_m': [round(float(width_m)), round(float(height_m))], 'polygon': bool(polygon),
+           'area_km2': round(float(area_m2) / 1e6, 6), 'size_m': [round(float(width_m)), round(float(height_m))], 'polygon': bool(polygon),
            'terrain': terrain, 'cell_m': round(float(cell_m), 3)}
     commit = flex_commit(root)
     if commit:
