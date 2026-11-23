@@ -90,6 +90,72 @@ def docs_inline_json(side, read_page, cap=DOCS_INLINE_CAP):
     return json.dumps(out, separators=(',', ':')).replace('</', '<\\/')
 
 
+# ── Surface features in an export ─────────────────────────────────────────────
+# The open project's points, lines and areas that fall inside the export area
+# (the Export dialog gathers them; view only on the phone). features.json:
+#   { version: 1, folders: [{ id, name, parent }],
+#     items: [{ id, kind: point|line|area, name, folder, colour, symbol, width, opacity, label?, note?,
+#               lonlat: [[lon, lat], ...] }] }
+# Drawn by viewer_build/libs/viewer-features.js from PLACEHOLDER_FEATURES_JSON.
+FEATURE_KINDS = {'point': 1, 'line': 2, 'area': 3}            # kind: the fewest positions it needs
+FEATURE_SYMBOLS = ('dot', 'square', 'triangle', 'diamond', 'star', 'cross')   # folder-style.js SYMBOLS
+FEATURE_COLOUR = '#ffb020'                                    # project-features.js ROOT_COLOR
+FEATURES_MAX_ITEMS, FEATURES_MAX_POSITIONS = 20000, 400000
+
+
+def clean_features(raw):
+    """features.json from what the dialog sent: only the known fields, every
+    value checked, folders that nothing uses left out. None: nothing to carry."""
+    import math, re
+    if not isinstance(raw, dict) or not isinstance(raw.get('items'), list):
+        return None
+    txt = lambda v, n: re.sub(r'[\x00-\x08\x0b-\x1f\x7f]', ' ', str(v if v is not None else ''))[:n]
+    num = lambda v, lo, hi, d: min(hi, max(lo, float(v))) if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) else d
+    folders = {}
+    for g in raw.get('folders') or []:
+        if isinstance(g, dict) and g.get('id'):
+            folders[txt(g['id'], 64)] = {'id': txt(g['id'], 64), 'name': txt(g.get('name'), 80).strip() or 'Folder', 'parent': txt(g.get('parent'), 64)}
+    items, used, npos = [], set(), 0
+    for k, it in enumerate(raw['items'][:FEATURES_MAX_ITEMS]):
+        if not isinstance(it, dict) or it.get('kind') not in FEATURE_KINDS:
+            continue
+        ll = [[round(float(c[0]), 7), round(float(c[1]), 7)] for c in (it.get('lonlat') or [])
+              if isinstance(c, (list, tuple)) and len(c) >= 2 and all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in c[:2])
+              and abs(c[0]) <= 180 and abs(c[1]) <= 90]
+        if it['kind'] == 'point':
+            ll = ll[:1]
+        if len(ll) < FEATURE_KINDS[it['kind']] or npos + len(ll) > FEATURES_MAX_POSITIONS:
+            continue
+        npos += len(ll)
+        folder = txt(it.get('folder'), 64)
+        if folder not in folders:
+            folder = ''
+        col = str(it.get('colour') or '')
+        o = {'id': txt(it.get('id'), 64) or f'f{k}', 'kind': it['kind'], 'name': txt(it.get('name'), 120).strip(), 'folder': folder,
+             'colour': col.lower() if re.fullmatch(r'#[0-9a-fA-F]{6}', col) else FEATURE_COLOUR,
+             'symbol': it.get('symbol') if it.get('symbol') in FEATURE_SYMBOLS else 'dot',
+             'width': num(it.get('width'), 1, 10, 2), 'opacity': num(it.get('opacity'), 0.1, 1, 1)}
+        if it.get('label') is False:
+            o['label'] = False
+        note = txt(it.get('note'), 4000).strip()
+        if note:
+            o['note'] = note
+        o['lonlat'] = ll
+        items.append(o)
+        while folder and folder not in used:                  # the folder and the ones it sits in
+            used.add(folder)
+            folder = folders[folder]['parent'] if folders[folder]['parent'] in folders else ''
+    if not items:
+        return None
+    keep = [dict(g, parent=g['parent'] if g['parent'] in used else '') for g in folders.values() if g['id'] in used]
+    return {'version': 1, 'folders': keep, 'items': items}
+
+
+def features_text(side):
+    """The text for PLACEHOLDER_FEATURES_JSON (and the features.json file): compact JSON, safe inside a <script>."""
+    return json.dumps(side, separators=(',', ':'), ensure_ascii=False).replace('</', '<\\/') if side else None
+
+
 RIDGE_FILES = ('ridge_points.bin', 'ridge_patches.bin', 'ridge_shapes.bin')
 
 
@@ -110,7 +176,8 @@ def ridge_inline_json(side, read, names):
 
 
 def build_inline_viewer(glb_path, tex_b64, caves_data, viewer_libs, progress=print,
-                        hs_b64=None, walls_bytes=None, docs_json=None, ridge_json=None, hsb_b64=None):
+                        hs_b64=None, walls_bytes=None, docs_json=None, ridge_json=None, hsb_b64=None,
+                        features_json=None):
     """
     glb_path: the terrain.glb file, or its bytes.
 
@@ -183,6 +250,9 @@ def build_inline_viewer(glb_path, tex_b64, caves_data, viewer_libs, progress=pri
 
     # 7. V2 - Ridgewalking (export_ridge.py): the RIDGE object, 'null' for every other export
     html = html.replace('PLACEHOLDER_RIDGE_JSON', ridge_json or 'null')
+
+    # 8. Surface features (features.json, see clean_features): 'null' for an export without them
+    html = html.replace('PLACEHOLDER_FEATURES_JSON', features_json or 'null')
 
     progress(f"  Viewer HTML total: {len(html)//1024} KB")
     return html

@@ -29,7 +29,7 @@ VIEWER_LIBS = {
         'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
 }
 
-from viewer_inline import build_inline_viewer, load_docs, docs_inline_json   # stdlib only (tools/rebuild_viewer.py)
+from viewer_inline import build_inline_viewer, load_docs, docs_inline_json, clean_features, features_text   # stdlib only (tools/rebuild_viewer.py)
 from tex_tiles import plan_tiles, make_tiles, meta_entry, derive_tiles   # texture tiles for areas over ~5 km
 
 import numpy as np
@@ -2303,6 +2303,9 @@ def main():
              'with real holes at true entrances, plus the ridge files for FLEX Field.')
     ap.add_argument('--ridgewalk-dir', default=None, metavar='DIR',
         help='With or without --ridgewalk: use this already computed ridge folder (ridgewalk.py --out DIR).')
+    ap.add_argument('--features', default=None, metavar='FILE',
+        help='Surface features to carry (the open project\'s points, lines and areas inside the area, as the Export '
+             'dialog gathers them): JSON { folders, items }; written as features.json, view only in the viewer.')
     ap.add_argument('--ridge-shapes', default='all', choices=['all', 'none'],
         help='With --ridgewalk: carry the shapes of the features (ridge_shapes.bin, large for a big area) or leave them out.')
     ap.add_argument('--brush-colours', default=None, metavar='LIGHT,MEDIUM,DENSE',
@@ -2856,6 +2859,21 @@ def main():
                     print(f"[6/7] Documents: {len(docs_side['entries'])} entries, {len(docs_files)} page images "
                           f"({sum(p['size'] for p in docs_side['pages']) // 1024} KB)")
 
+            # Surface features of the project (viewer_inline.clean_features): features.json, view only on the phone
+            features_json = None
+            if args.features and os.path.exists(args.features):
+                try:
+                    feat_side = clean_features(json.loads(Path(args.features).read_text(encoding='utf-8')))
+                except Exception as e:
+                    feat_side = None
+                    print(f"[6/7] WARNING: the surface features could not be read ({e}); left out")
+                if feat_side:
+                    features_json = features_text(feat_side)
+                    zf.writestr('features.json', features_json.replace('<\\/', '</'))
+                    nk = {k: sum(1 for it in feat_side['items'] if it['kind'] == k) for k in ('point', 'line', 'area')}
+                    print(f"[6/7] Surface features: {nk['point']} points, {nk['line']} lines, {nk['area']} areas "
+                          f"in {len(feat_side['folders'])} folders")
+
             # V2 - Ridgewalking: the ridge files in the viewer's frame (export_ridge.py)
             ridge_json = None
             if ridge is not None:
@@ -2877,7 +2895,7 @@ def main():
             inline_html = build_inline_viewer(
                 glb_path, tex_b64, caves_out, viewer_libs,
                 progress=lambda m: print(f"[6/7] {m}"),
-                hs_b64=hs_b64, walls_bytes=walls_bytes, docs_json=docs_json, ridge_json=ridge_json, hsb_b64=hsb_b64)
+                hs_b64=hs_b64, walls_bytes=walls_bytes, docs_json=docs_json, ridge_json=ridge_json, hsb_b64=hsb_b64, features_json=features_json)
             zf.writestr('viewer.html', inline_html.encode('utf-8'))
 
             # serve.bat (Windows) — double-click to start local HTTP server

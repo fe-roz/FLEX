@@ -17,7 +17,7 @@ import argparse, base64, json, os, sys, zipfile
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from viewer_inline import build_inline_viewer, local_viewer_libs, docs_inline_json, ridge_inline_json
+from viewer_inline import build_inline_viewer, local_viewer_libs, docs_inline_json, ridge_inline_json, clean_features, features_text
 
 
 def main():
@@ -43,7 +43,8 @@ def main():
         ridge_json = ridge_inline_json(json.loads(z.read('ridge.json')), z.read, names) if 'ridge.json' in names else None   # V2 - Ridgewalking
         html = build_inline_viewer(z.read('terrain.glb'), tex_b64, caves, local_viewer_libs(),
                                    progress=lambda m: print(m), hs_b64=hs_b64, walls_bytes=walls, docs_json=docs_json,
-                                   ridge_json=ridge_json, hsb_b64=hsb_b64)
+                                   ridge_json=ridge_json, hsb_b64=hsb_b64,
+                                   features_json=features_text(clean_features(json.loads(z.read('features.json')))) if 'features.json' in names else None)
         with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as zo:
             for info in z.infolist():
                 if info.filename == 'viewer.html':

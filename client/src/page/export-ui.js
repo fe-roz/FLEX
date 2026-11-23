@@ -827,6 +827,91 @@
     return out;
   }
 
+  // ── Surface features: the open project's points, lines and areas inside the area ──
+  // Points inside the box / polygon; lines and areas that touch it go whole. Each item with the colour, symbol,
+  // width and opacity it is drawn with here (its own colour or its folder's: project-features.js; the rest from the
+  // folders' display settings: folder-style.js). View only on the phone. → { version, folders, items, total }
+  const _FEAT_SYMBOLS = ['dot', 'square', 'triangle', 'diamond', 'star', 'cross'];
+  function _segsCross(a, b, c, d) {
+    const o = (p, q, r) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+    const d1 = o(c, d, a), d2 = o(c, d, b), d3 = o(a, b, c), d4 = o(a, b, d);
+    return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
+  }
+  function _collectFeatures(w, s, e, n, poly) {
+    const P = (window._pj || {}).P, FL = window.FlexLib;
+    if (!P || !FL || !(window._pj || {}).pid || !FL.liveFeatures) return { version: 1, folders: [], items: [], total: 0 };
+    const ring = poly && poly.length >= 3 ? poly : [[w, s], [e, s], [e, n], [w, n]];
+    const inside = c => c[0] >= w && c[0] <= e && c[1] >= s && c[1] <= n && (!poly || _pointInPoly(c[0], c[1], poly));
+    const touches = (cs, closed) => {
+      if (cs.some(inside)) return true;
+      const m = cs.length - (closed ? 0 : 1);
+      for (let i = 0; i < m; i++) {
+        const a = cs[i], b = cs[(i + 1) % cs.length];
+        for (let j = 0; j < ring.length; j++) if (_segsCross(a, b, ring[j], ring[(j + 1) % ring.length])) return true;
+      }
+      return closed && cs.length >= 3 && _pointInPoly(ring[0][0], ring[0][1], cs);       // the whole export area inside an area
+    };
+    const FS = window._folderStyle, pjf = window._pjf;
+    const styleOf = f => {
+      const st = {};
+      const keys = f.group ? FL.groupPath(P, f.group).map(g => 'project:' + g.id) : ['project:'];
+      if (FS && FS.get) keys.forEach(k => { const o = FS.get(k) || {}; ['width', 'symbol', 'opacity', 'labels'].forEach(x => { if (o[x] != null) st[x] = o[x]; }); });
+      return st;
+    };
+    const live = FL.liveFeatures(P), items = [], used = new Set();
+    for (const f of live) {
+      const kind = f.kind === 'area' || f.kind === 'polygon' ? 'area' : f.kind === 'line' ? 'line' : f.kind === 'point' ? 'point' : null;
+      if (!kind || !f.coords || !f.coords.length) continue;
+      const cs = f.coords.map(c => [+c[0], +c[1]]).filter(c => isFinite(c[0]) && isFinite(c[1]));
+      if (!cs.length || (kind === 'point' ? !inside(cs[0]) : !touches(cs, kind === 'area'))) continue;
+      const st = styleOf(f), own = f.style || {};
+      const colour = String((pjf && pjf.colorOf ? pjf.colorOf(f) : own.color) || '#ffb020').toLowerCase();
+      const it = { id: f.id, kind, name: String(f.name || '').slice(0, 120), folder: f.group || '',
+        colour: /^#[0-9a-f]{6}$/.test(colour) ? colour : '#ffb020', symbol: _FEAT_SYMBOLS.includes(st.symbol) ? st.symbol : 'dot',
+        width: st.width != null ? +st.width : 2, opacity: st.opacity != null ? +st.opacity : 1 };
+      if (kind === 'point' && (st.labels === false || (st.labels == null && own.label === false))) it.label = false;
+      if (f.desc) it.note = String(f.desc).slice(0, 4000);
+      it.lonlat = (kind === 'point' ? cs.slice(0, 1) : cs).map(c => [+c[0].toFixed(7), +c[1].toFixed(7)]);
+      items.push(it);
+      FL.groupPath(P, f.group).forEach(g => used.add(g.id));
+    }
+    const folders = FL.liveGroups(P).filter(g => used.has(g.id)).map(g => ({ id: g.id, name: g.name || 'Folder', parent: used.has(g.parent) ? g.parent : '' }));
+    return { version: 1, folders, items, total: live.length };
+  }
+  window._exportFeatures = _collectFeatures;          // tests
+  // The section shows when the open project has surface items; the line under the tick box says how many fall inside.
+  let _featKey = '';
+  function _refreshFeaturesInfo() {
+    const sec = document.getElementById('export_features_section'), lab = document.getElementById('export_features_count');
+    if (!sec || !lab) return;
+    const P = (window._pj || {}).P, FL = window.FlexLib;
+    const total = (window._pj || {}).pid && P && FL && FL.liveFeatures ? FL.liveFeatures(P).length : 0;
+    sec.style.display = total ? '' : 'none';
+    if (!total) { _featKey = ''; return; }
+    const has = _bboxCorner1 && _bboxCorner2;
+    const key = [(window._pj || {}).pid, total, has ? _bboxCorner1.concat(_bboxCorner2).join(',') : '', _exportPoly ? _exportPoly.length + ':' + _exportPoly[0] + ':' + _exportPoly[_exportPoly.length - 1] : ''].join('|');
+    if (key === _featKey) return;
+    _featKey = key;
+    if (!has) { lab.textContent = `${total} in the project; draw the area to see how many fall inside.`; return; }
+    const w = Math.min(_bboxCorner1[0], _bboxCorner2[0]), s = Math.min(_bboxCorner1[1], _bboxCorner2[1]);
+    const e = Math.max(_bboxCorner1[0], _bboxCorner2[0]), n = Math.max(_bboxCorner1[1], _bboxCorner2[1]);
+    const c = _collectFeatures(w, s, e, n, _exportPoly || null), k = x => c.items.filter(i => i.kind === x).length;
+    lab.textContent = c.items.length
+      ? `${c.items.length} of ${total} fall inside the area (${k('point')} point${k('point') === 1 ? '' : 's'}, ${k('line')} line${k('line') === 1 ? '' : 's'}, ${k('area')} area${k('area') === 1 ? '' : 's'}).`
+      : `None of the project's ${total} fall inside the area.`;
+  }
+  window._exportFeaturesInfo = () => { _featKey = ''; _refreshFeaturesInfo(); };
+  (function _featuresUi() {
+    const cb = document.getElementById('export_features_on');
+    if (!cb) return;
+    let v = null;
+    try { v = localStorage.getItem('flex.export.export_features_on'); } catch (_) {}
+    cb.checked = v === '1';                              // off unless it was ticked on this computer
+    cb.addEventListener('change', () => { try { localStorage.setItem('flex.export.export_features_on', cb.checked ? '1' : '0'); } catch (_) {} });
+    // While the Export panel is open: the project, its items and the drawn area can all change under it.
+    setInterval(() => { if (_exportCollapsible && _exportCollapsible.classList.contains('show')) _refreshFeaturesInfo(); }, 1200);
+  })();
+
   // ── Documents: how many the export would carry ───────────────────────────
   // Shown beside "Include documents" when the export panel opens or the project changes.
   async function _refreshDocsCount() {
@@ -1199,8 +1284,13 @@
     const ridgeBox = document.getElementById('export_ridgewalk');
     const ridgewalk = !mapTerrain && !!(ridgeBox && ridgeBox.checked);
 
+    // The open project's surface items inside the area ("Include surface features")
+    const featOn = document.getElementById('export_features_on');
+    const feats = featOn && featOn.checked ? _collectFeatures(w, s, e, n, poly) : null;
+
     const body = {
       ...docsBody,
+      ...(feats && feats.items.length ? { features: { version: 1, folders: feats.folders, items: feats.items } } : {}),
       ...(ridgewalk ? { ridgewalk: true, ..._ridgeOptions() } : {}),
       bbox: [w, s, e, n],
       polygon: poly,                 // null: the whole box

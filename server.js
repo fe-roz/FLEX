@@ -772,6 +772,7 @@ function handleExportTerrain(req, res) {
             hillshade_layer   = null,        // a map layer as the hillshade texture (hillshade_mode 'layer')
             docs_project      = null,        // project id: carry its documents (export_docs.js), with docs_caves = the exported caves' ids
             docs_caves        = null,
+            features          = null,        // { folders, items }: the open project's surface items inside the area (export-ui.js); checked again by the exporter
             ridge_shapes      = 'all',       // with ridgewalk: 'none' leaves the shapes of the features out
             brush_opacity     = null,        // with ridgewalk: 0..1, how strongly the brush lies over the hillshade
             ridgewalk         = false,       // V2 - Ridgewalking: the ridge step on the LiDAR, its ground as the terrain (export_ridge.py)
@@ -859,6 +860,15 @@ function handleExportTerrain(req, res) {
         if (mapName) args.push('--name', mapName);
         if (cavesFilePath) args.push('--caves', cavesFilePath);
         if (polyFile) args.push('--polygon', polyFile);
+        // Surface features: handed over as a file; the exporter keeps only the known fields (viewer_inline.clean_features)
+        if (features && typeof features === 'object' && Array.isArray(features.items) && features.items.length && features.items.length <= 20000) {
+            try {
+                const ff = path.join(EXPORT_OUT_DIR, `features_${jobId}.json`);
+                fs.writeFileSync(ff, JSON.stringify({ folders: Array.isArray(features.folders) ? features.folders : [], items: features.items }));
+                args.push('--features', ff);
+                demFiles.push(ff);                  // (cleaned up with the other temporary files when the job ends)
+            } catch (e) { _exportJobs[jobId].progress.push('⚠ Surface features left out: ' + (e.message || e)); }
+        }
         if (ridgewalk === true && !demGrid) {
             args.push('--ridgewalk');
             if (ridge_shapes === 'none') args.push('--ridge-shapes', 'none');
