@@ -241,7 +241,7 @@ def clean_ridge_marks(raw, limit=5000):
 
 def build_inline_viewer(glb_path, tex_b64, caves_data, viewer_libs, progress=print,
                         hs_b64=None, walls_bytes=None, docs_json=None, ridge_json=None, hsb_b64=None,
-                        features_json=None, trees_json=None):
+                        features_json=None, trees_json=None, slope_b64=None):
     """
     glb_path: the terrain.glb file, or its bytes.
 
@@ -295,6 +295,8 @@ def build_inline_viewer(glb_path, tex_b64, caves_data, viewer_libs, progress=pri
 
     # 4a. "Hillshade with brush" (the ridgewalking export's tex_hsb.jpg); an empty string when there is none
     html = html.replace('"PLACEHOLDER_HSB_B64"', f'"{hsb_b64 or ""}"')
+    # 4a'. The slope map (tex_slope.jpg, export_slope.py); an empty string when there is none
+    html = html.replace('"PLACEHOLDER_SLOPE_B64"', f'"{slope_b64 or ""}"')
 
     # 4b. Embed passage walls (walls.bin) as base64 — same bytes as the sidecar
     if walls_bytes:

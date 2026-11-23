@@ -2320,6 +2320,14 @@ def main():
     ap.add_argument('--brush-colours', default=None, metavar='LIGHT,MEDIUM,DENSE',
         help='With --ridgewalk: the three brush colours as RRGGBB values, light,medium,dense '
              '(default b7e4a0,5fae4f,1f5f1f).')
+    ap.add_argument('--slope-map', action='store_true',
+        help='One more map for the phone: the slope-angle colours over the hillshade (tex_slope.jpg). From the '
+             'ridgewalking ground or the LiDAR DEM; not made on map terrain (too coarse).')
+    ap.add_argument('--slope-opacity', type=float, default=None,
+        help='With --slope-map: how strongly the slope colours lie over the hillshade; default 0.7.')
+    ap.add_argument('--slope-colours', default=None, metavar='C27,C30,C35,C45,C50,C60',
+        help='With --slope-map: the six class colours as RRGGBB, gentlest first '
+             '(default ffe600,ff9900,ff1a00,a020f0,1f4fff,000000).')
     ap.add_argument('--brush-opacity', type=float, default=None,
         help='With --ridgewalk: how strongly the brush classes lie over the hillshade in "hillshade with brush" '
              '(tex_hsb.jpg); default 0.7.')
@@ -2763,6 +2771,34 @@ def main():
             import base64 as _hsb_b64m
             hsb_b64 = _hsb_b64m.b64encode(hsb_bytes).decode('ascii')
             print(f"[4b/7] Hillshade with brush: {len(hsb_bytes)//1024} KB (brush at {brush_opacity * 100:.0f}%)")
+        # 4b''. The slope map: the slope-angle classes over the hillshade (export_slope.py; tex_slope.jpg)
+        slope_bytes = slope_b64 = slope_meta = None
+        if args.slope_map and map_terrain:
+            print("[4b/7] Slope map: not made on map terrain (its cells are too coarse to say where it is steep)")
+        elif args.slope_map:
+            import export_slope
+            slope_cls = export_slope.slope_classes(args.slope_colours)
+            slope_op = export_slope.SLOPE_OPACITY if args.slope_opacity is None else min(1.0, max(0.0, args.slope_opacity))
+            slope_deg = ridge.slope()[::-1] if ridge is not None else export_slope.dem_slope(dem, args.resolution)     # rows north to south, on the grid
+            grid_rect = (grid.e0, grid.n0, grid.e1, grid.n1)
+            bake_slope = lambda im, rect: export_slope.bake(im, export_slope.crop(slope_deg, grid_rect, rect), opacity=slope_op, classes=slope_cls)
+            if hs_bytes:
+                slope_base = Image.open(_hs_io.BytesIO(hs_bytes))
+            else:                              # no hillshade in this export: the colours on plain grey
+                slope_base = Image.new('L', grid.tex_dims(min(args.hillshade_max_px, max(slope_deg.shape))), 205)
+            slope_img = bake_slope(slope_base, grid_rect)
+            if poly_utm is not None:
+                blank_outside(slope_img, grid, poly_utm)
+            slope_buf = _hs_io.BytesIO()
+            slope_img.save(slope_buf, format='JPEG', quality=90)
+            slope_bytes = slope_buf.getvalue()
+            import base64 as _slope_b64m
+            slope_b64 = _slope_b64m.b64encode(slope_bytes).decode('ascii')
+            slope_meta = export_slope.legend(slope_cls, slope_op)
+            steep = float((slope_deg >= slope_cls[0][0]).mean()) * 100
+            print(f"[4b/7] Slope map: {slope_img.size[0]}x{slope_img.size[1]} px, {len(slope_bytes)//1024} KB; "
+                  f"{steep:.0f}% of the area is {slope_cls[0][0]:g} degrees or steeper")
+            del slope_img, slope_base
         # 4c. Past ~5 km one texture caps the detail: every tile of the area gets
         # its own satellite + hillshade at full size (tex_tiles.py). The single
         # textures above stay as the overview.
@@ -2784,6 +2820,8 @@ def main():
             if hsb_bytes and tile_hs:
                 tile_hsb = derive_tiles(tile_files, 'hs', 'hsb', tcols, trows, grid, bake)
                 tile_files.update(tile_hsb)
+            if slope_bytes and tile_hs:
+                tile_files.update(derive_tiles(tile_files, 'hs', 'slope', tcols, trows, grid, bake_slope))
         del x, y, z
 
         # 5. UVs + GLB (geometry only) + separate texture encoding
@@ -2820,6 +2858,9 @@ def main():
                             compress_type=zipfile.ZIP_STORED)
             if hsb_bytes:
                 zf.writestr(zipfile.ZipInfo('tex_hsb.jpg'), hsb_bytes,
+                            compress_type=zipfile.ZIP_STORED)
+            if slope_bytes:
+                zf.writestr(zipfile.ZipInfo('tex_slope.jpg'), slope_bytes,
                             compress_type=zipfile.ZIP_STORED)
             for tname, tbytes in tile_files.items():
                 zf.writestr(zipfile.ZipInfo(tname), tbytes, compress_type=zipfile.ZIP_STORED)
@@ -2865,9 +2906,11 @@ def main():
                 **({"hillshade_brush": {"opacity": brush_opacity,
                                         **({"colours": ['%02x%02x%02x' % c for _, c in sorted(brush_cls)]} if args.brush_colours else {})}}
                    if hsb_bytes else {}),
+                **({"slope_map": slope_meta} if slope_bytes else {}),
             }
             if tile_files:
-                caves_out["meta"]["texture_tiles"] = meta_entry(tcols, trows, True, tile_hs, hsb=any(k.startswith('tex_hsb_') for k in tile_files))
+                caves_out["meta"]["texture_tiles"] = meta_entry(tcols, trows, True, tile_hs, hsb=any(k.startswith('tex_hsb_') for k in tile_files),
+                                                               slope=any(k.startswith('tex_slope_') for k in tile_files))
             if caves_out.get("_project"):
                 caves_out["meta"]["project"] = caves_out.pop("_project")
             if caves_out.get("_caves"):
@@ -2891,7 +2934,7 @@ def main():
                           f"{sum(g['icount'] for g in walls_desc['groups'])//3:,} triangles")
                 else:
                     walls_bytes = None
-            zf.writestr('caves.json', json.dumps(caves_out))
+            about_facts = {}                   # what "About this map" will say, gathered below (export_about.py)
 
             # Documents of the project that belong to these caves: docs.json + one file per page
             docs_json = None
@@ -2902,6 +2945,7 @@ def main():
                     for zname, fpath in docs_files:
                         zf.write(fpath, zname, compress_type=zipfile.ZIP_STORED)
                     docs_json = docs_inline_json(docs_side, lambda n: dict(docs_files)[n].read_bytes())
+                    about_facts['docs'] = {'entries': len(docs_side['entries']), 'pages': len(docs_files)}
                     print(f"[6/7] Documents: {len(docs_side['entries'])} entries, {len(docs_files)} page images "
                           f"({sum(p['size'] for p in docs_side['pages']) // 1024} KB)")
 
@@ -2917,6 +2961,7 @@ def main():
                     features_json = features_text(feat_side)
                     zf.writestr('features.json', features_json.replace('<\\/', '</'))
                     nk = {k: sum(1 for it in feat_side['items'] if it['kind'] == k) for k in ('point', 'line', 'area')}
+                    about_facts['features'] = {'points': nk['point'], 'lines': nk['line'], 'areas': nk['area'], 'folders': len(feat_side['folders'])}
                     print(f"[6/7] Surface features: {nk['point']} points, {nk['line']} lines, {nk['area']} areas "
                           f"in {len(feat_side['folders'])} folders")
 
@@ -2939,11 +2984,13 @@ def main():
                         rmarks = clean_ridge_marks(json.loads(Path(args.ridge_marks).read_text(encoding='utf-8')))
                         if rmarks:
                             rfiles[export_ridge.MARKS_FILE] = json.dumps(rmarks, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
+                            about_facts['marks'] = len(rmarks['marks'])
                             print(f"[6/7] Marks on ridgewalking features: {len(rmarks['marks'])} carried along")
                     except Exception as e:
                         print(f"[6/7] WARNING: the marks could not be read ({e}); left out")
                 for rname, rbytes in rfiles.items():
                     zf.writestr(zipfile.ZipInfo(rname), rbytes, compress_type=zipfile.ZIP_DEFLATED)
+                about_facts['ridge_shapes'] = 'ridge_shapes.bin' in rfiles
                 rside = ridge.side_json(utm_center_e, utm_center_n, FLEX_PC_Z_OFFSET, rfiles)
                 rside['mesh'] = ridge_mesh_stats
                 zf.writestr('ridge.json', json.dumps(rside, separators=(',', ':')))
@@ -2958,6 +3005,7 @@ def main():
                 tdetail = export_trees.detail_for(tn)
                 zf.writestr(zipfile.ZipInfo('trees.bin'), trees_bytes, compress_type=zipfile.ZIP_DEFLATED)
                 caves_meta_trees = {'count': tn, 'detail': tdetail, **{k: trees_counts[k] for k in ('cone', 'round', 'mound')}}
+                about_facts['trees'] = {'count': tn, **{k: int(trees_counts[k]) for k in ('cone', 'round', 'mound')}}
                 zf.writestr('trees.json', json.dumps({'version': 1, **caves_meta_trees, 'outside': trees_counts['outside'], 'cliff': trees_counts.get('cliff', 0), 'cliff_by_height': trees_counts.get('cliff_by_height', {}),
                                                       'viewer': export_trees.trees_object(tn, tdetail)}, separators=(',', ':')))
                 trees_json = json.dumps(export_trees.trees_object(tn, tdetail, data=trees_bytes), separators=(',', ':'))
@@ -2967,11 +3015,24 @@ def main():
                       + (f"; {trees_counts['cliff']:,} that a cliff explains left out" if trees_counts.get('cliff') else '')
                       + f"), trees.bin {len(trees_bytes) // 1024} KB, detail {tdetail}")
 
+            # What the map is and carries, for the "About this map" card; then caves.json (it holds the meta)
+            import export_about
+            caves_out["meta"]["about"] = export_about.about(
+                SCRIPT_DIR, grid.width, grid.height, polygon_area(poly_utm) if poly_utm is not None else grid.width * grid.height,
+                poly_utm is not None, 'ridge' if ridge is not None else 'map' if map_terrain else 'area' if area_terrain else 'lidar', args.resolution,
+                lidar=[] if map_terrain else [args.ept] + list(args.also_ept or []),
+                layers={'aerial': sat_used, 'hillshade': caves_out["meta"].get("hillshade"), 'hsb': bool(hsb_bytes), 'slope': bool(slope_bytes),
+                        **({'tiles': [int(tcols), int(trows)]} if tile_files else {})},
+                ridge_meta=ridge.meta if ridge is not None else None, ridge_shapes=about_facts.get('ridge_shapes'),
+                brush_opacity=brush_opacity if hsb_bytes else None, slope_opacity=slope_meta['opacity'] if slope_bytes else None,
+                trees=about_facts.get('trees'), features=about_facts.get('features'), marks=about_facts.get('marks'), docs=about_facts.get('docs'))
+            zf.writestr('caves.json', json.dumps(caves_out))
+
             # Viewer HTML: fully self-contained (Three.js + GLB + textures + caves all inline)
             inline_html = build_inline_viewer(
                 glb_path, tex_b64, caves_out, viewer_libs,
                 progress=lambda m: print(f"[6/7] {m}"),
-                hs_b64=hs_b64, walls_bytes=walls_bytes, docs_json=docs_json, ridge_json=ridge_json, hsb_b64=hsb_b64, features_json=features_json, trees_json=trees_json)
+                hs_b64=hs_b64, walls_bytes=walls_bytes, docs_json=docs_json, ridge_json=ridge_json, hsb_b64=hsb_b64, slope_b64=slope_b64, features_json=features_json, trees_json=trees_json)
             zf.writestr('viewer.html', inline_html.encode('utf-8'))
 
             # serve.bat (Windows) — double-click to start local HTTP server

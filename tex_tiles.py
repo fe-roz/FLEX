@@ -22,7 +22,7 @@ import re
 TILE_ABOVE_M = 5000.0      # tile an export whose long side is longer than this
 TILE_TARGET_M = 5000.0     # ... into tiles about this long
 TILE_MAX_SIDE = 4          # at most this many tiles along a side
-TILE_RE = re.compile(r'^tex_(sat|hsb|hs)_(\d+)_(\d+)\.jpg$')
+TILE_RE = re.compile(r'^tex_(sat|hsb|hs|slope)_(\d+)_(\d+)\.jpg$')
 
 
 def plan_tiles(width_m, height_m, above_m=TILE_ABOVE_M, target_m=TILE_TARGET_M, max_side=TILE_MAX_SIDE):
@@ -44,9 +44,10 @@ def sub_extent(e0, n0, e1, n1, col, row, cols, rows):
     return (e0 + col * w, n1 - (row + 1) * h, e0 + (col + 1) * w, n1 - row * h)
 
 
-def meta_entry(cols, rows, sat=True, hs=False, hsb=False):
+def meta_entry(cols, rows, sat=True, hs=False, hsb=False, slope=False):
     """`hsb` (hillshade with brush, tex_hsb_<c>_<r>.jpg: the ridgewalking export) is only named when there."""
-    return {'cols': int(cols), 'rows': int(rows), 'sat': bool(sat), 'hs': bool(hs), **({'hsb': True} if hsb else {})}
+    return {'cols': int(cols), 'rows': int(rows), 'sat': bool(sat), 'hs': bool(hs), **({'hsb': True} if hsb else {}),
+            **({'slope': True} if slope else {})}        # tex_slope_<c>_<r>.jpg: the slope map (export_slope.py)
 
 
 def derive_tiles(tiles, src, dst, cols, rows, grid, fn, quality=90):

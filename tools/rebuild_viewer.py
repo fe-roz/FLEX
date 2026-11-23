@@ -38,12 +38,13 @@ def main():
         tex_b64 = base64.b64encode(z.read('tex_sat.jpg')).decode('ascii')
         hs_b64 = base64.b64encode(z.read('tex_hs.jpg')).decode('ascii') if 'tex_hs.jpg' in names else None
         hsb_b64 = base64.b64encode(z.read('tex_hsb.jpg')).decode('ascii') if 'tex_hsb.jpg' in names else None
+        slope_b64 = base64.b64encode(z.read('tex_slope.jpg')).decode('ascii') if 'tex_slope.jpg' in names else None
         walls = z.read('walls.bin') if 'walls.bin' in names else None
         docs_json = docs_inline_json(json.loads(z.read('docs.json')), z.read) if 'docs.json' in names else None   # documents travel along
         ridge_json = ridge_inline_json(json.loads(z.read('ridge.json')), z.read, names) if 'ridge.json' in names else None   # V2 - Ridgewalking
         html = build_inline_viewer(z.read('terrain.glb'), tex_b64, caves, local_viewer_libs(),
                                    progress=lambda m: print(m), hs_b64=hs_b64, walls_bytes=walls, docs_json=docs_json,
-                                   ridge_json=ridge_json, hsb_b64=hsb_b64,
+                                   ridge_json=ridge_json, hsb_b64=hsb_b64, slope_b64=slope_b64,
                                    trees_json=trees_inline_json(json.loads(z.read('trees.json')), z.read, names) if 'trees.json' in names else None,   # trees and brush
                                    features_json=features_text(clean_features(json.loads(z.read('features.json')))) if 'features.json' in names else None)
         with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as zo:

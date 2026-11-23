@@ -1606,6 +1606,14 @@
                   <div style="font-size:10px; color:rgba(255,255,255,0.4);">
                     Pits, cracks and openings from the LiDAR, for FLEX Field. Needs a point cloud; reads it again with flight-pass ids, so it takes longer.
                   </div>
+                  <!-- The slope map (export_terrain.py --slope-map): one more map on the phone; remembered per computer (export-ui.js) -->
+                  <label style="display:block; margin:8px 0 3px;" id="export_slope_row">
+                    <input type="checkbox" id="export_slope_map">
+                    Slope map
+                  </label>
+                  <div style="font-size:10px; color:rgba(255,255,255,0.4);" id="export_slope_hint">
+                    Slope-angle colours over the hillshade (yellow from 27°, orange, red, purple, blue, black above 60°), as one more map to choose on the phone. Adds one more picture to the file, about one and a half times the size of the hillshade picture.
+                  </div>
                   <!-- its two options, shown while it is ticked; remembered per computer (export-ui.js) -->
                   <div id="export_ridge_opts" style="display:none; margin:6px 0 0 4px; padding-left:8px; border-left:2px solid rgba(255,255,255,0.12);">
                     <label style="display:block; margin:2px 0 3px;">
