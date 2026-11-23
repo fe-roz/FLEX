@@ -12,7 +12,7 @@
 //     V2 - Ridgewalking carries so the phone shows them from the start (export-ui.js → --ridge-marks).
 // A mark never changes what a ridgewalking run computes.
 //
-// window._ridgeMarks = { all, redraw, subject, paneSection, open, exportIn, set }
+// window._ridgeMarks = { all, redraw, subject, paneSection, open, exportIn, set, create, setVisible }
 (function () {
   'use strict';
   const A = window._pjApi, FL = window.FlexLib;
@@ -67,7 +67,21 @@
       }
       if (!own && window._groundH) window._groundH.track(e, m.lon, m.lat);
     });
+    src.show = showOn;
     v.scene.requestRender && v.scene.requestRender();
+    try { window.dispatchEvent(new CustomEvent('flex-rmarks-changed')); } catch (_) {}       // ridge-draw.js ties the marks to its features
+  }
+  /** The badges on or off (the Marks switch of a processed area's Ridgewalking result, ridge-draw.js). */
+  let showOn = true;
+  function setVisible(on) { showOn = !!on; if (src) src.show = showOn; const v = V(); v && v.scene.requestRender && v.scene.requestRender(); }
+  /** A new mark at a place: { kind, note, lon, lat, h, feat } → one record (flexlib's rmarkBody), or null. */
+  async function create(o) {
+    const body = FL.rmarkBody(null, o || {});
+    if (!body) return null;
+    const { op, ...data } = body;
+    const e = await A.record(op, data);
+    redraw();
+    return e;
   }
   /** Select a mark's badge (its details open); fly there with fly: true. */
   function open(id, opts) {
@@ -161,5 +175,5 @@
   /** The marks an export of this area carries (the box [w, s, e, n], and the polygon when there is one). */
   const exportIn = (bbox, ring) => (pj.pid && pj.P ? FL.rmarksPayload(pj.P, bbox, ring) : []);
 
-  window._ridgeMarks = { all, redraw, subject, paneSection, open, exportIn, set };
+  window._ridgeMarks = { all, redraw, subject, paneSection, open, exportIn, set, create, setVisible };
 })();

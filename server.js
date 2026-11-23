@@ -1012,6 +1012,8 @@ const LIDAR_OUT_DIR = path.join(__dirname, 'user_files', 'lidar');
 const areaGen = require('./areas_api')({ python: process.env.FLEX_AREA_PYTHON || CONDA_PYTHON, groundScript: process.env.FLEX_AREA_GROUND_SCRIPT || path.join(__dirname, 'area_ground.py'),
     vegScript: process.env.FLEX_VEG_SCRIPT || path.join(__dirname, 'veg_shapes.py'), lidarScript: process.env.FLEX_LIDAR_SCRIPT || LIDAR_SCRIPT,
     prospectScript: process.env.FLEX_PROSPECT_SCRIPT || path.join(__dirname, 'prospect.py'),
+    ridgeScript: process.env.FLEX_RIDGE_SCRIPT || path.join(__dirname, 'ridgewalk.py'),          // Analyze by area → Ridgewalking
+    ridgeAreaScript: process.env.FLEX_RIDGE_AREA_SCRIPT || path.join(__dirname, 'ridge_area.py'),
     mapsScript: process.env.FLEX_AREA_MAPS_SCRIPT || path.join(__dirname, 'area_maps.py'),
     root: AREAS_ROOT, terrainGen });
 // Running and recent jobs of the three kinds, for the Jobs panel (jobs_api.js)
