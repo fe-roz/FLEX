@@ -177,6 +177,8 @@ sys.path.insert(0, %r)
 import numpy as np, veg_shapes as vs, route_cost as rc
 a = sys.argv; p = json.load(open(a[a.index('--params') + 1])); out = a[a.index('--out') + 1]
 if os.environ.get('VEG_STUB_FAIL'): print('reading tile 1/1'); sys.exit(3)
+once = os.environ.get('VEG_STUB_FAIL_ONCE')
+if once and not os.path.exists(once): open(once, 'w').close(); print('could not read from the network'); sys.exit(134)
 ring = p['area']; zone = 14
 xy = [rc.lonlat_to_xy(q[0], q[1], zone) for q in ring]
 x0, y0, x1, y1 = min(q[0] for q in xy), min(q[1] for q in xy), max(q[0] for q in xy), max(q[1] for q in xy)
@@ -215,8 +217,13 @@ print('Done in 1.5 s')
     try:
         xt.run_veg_tiled(tmp / 'tiled_fail', '/data/cave-ridge/ept.json', R, 14, False, progress=lambda m: None, script=stub); check('a step that fails says so', False)
     except RuntimeError as ex:
-        check('a step that fails says so, with its last lines', 'code 3' in str(ex) and 'reading tile' in str(ex), ex)
+        check('a step that fails every time says so, with its last lines', 'code 3' in str(ex) and 'reading tile' in str(ex), ex)
     del os.environ['VEG_STUB_FAIL']
+    os.environ['VEG_STUB_FAIL_ONCE'] = str(tmp / 'failed_once'); again = []
+    idx3 = xt.run_veg_tiled(tmp / 'tiled_retry', '/data/cave-ridge/ept.json', R, 14, False, progress=again.append, script=stub)
+    del os.environ['VEG_STUB_FAIL_ONCE']
+    check('a tile whose read fails once is run again: all four tiles arrive, and the log says it was tried again', len(idx3['tiles']) == 4 and len(xt.Trees(tmp / 'tiled_retry').recs) == len(TT.recs) and
+          sum('trying it again' in l for l in again) == 1 and any('tile 1/4: tile 1 failed, trying it again (veg_shapes.py stopped with code 134' in l for l in again), [l for l in again if 'again' in l])
 
     # ── 4. Through the exporter ───────────────────────────────────────────────
     def no_points(*a, **k): raise AssertionError('no point cloud may be read')

@@ -46,6 +46,7 @@ DETAIL_1_FROM, DETAIL_2_FROM = 120_000, 300_000
 # The vegetation step holds a tile's whole cloud in memory (about 4 GB a km2 of dense cloud): the export runs it
 # in tiles of at most TILE_M a side, each read MARGIN_M wider so crowns on a tile line are whole.
 TILE_M, MARGIN_M = 700.0, 15.0
+TILE_TRIES = 3                      # a tile whose step fails is run again, up to this many times in all
 DTYPE = np.dtype([('x', '<f4'), ('y', '<f4'), ('z', '<f4'), ('h', '<f4'), ('r', '<u2'), ('kind', 'u1'), ('tint', 'u1'),
                   ('base', '<u2'), ('spare', '<u2')])
 DTYPE_V1 = np.dtype([('x', '<f4'), ('y', '<f4'), ('z', '<f4'), ('h', '<f4'), ('r', '<u2'), ('kind', 'u1'), ('tint', 'u1')])
@@ -137,7 +138,14 @@ def run_veg_tiled(out_dir, ept, rect, zone, south, polygon=None, also=(), progre
         ring = [[float(a), float(b)] for a, b in zip(lon, lat)]
         ring.append(ring[0])
         pct = lambda m, k=k: progress(f"Trees {int(100 * k / len(tiles))}% tile {k + 1}/{len(tiles)}: {m[len('Trees '):]}")
-        run_veg(out_dir / name, ept, ring, also=also, progress=pct, python=python, script=script, detail=detail)
+        for attempt in range(TILE_TRIES):                        # a read over the network can fail once: the tile is tried again
+            try:
+                run_veg(out_dir / name, ept, ring, also=also, progress=pct, python=python, script=script, detail=detail)
+                break
+            except RuntimeError as e:
+                if attempt + 1 == TILE_TRIES:
+                    raise
+                pct(f"Trees tile {k + 1} failed, trying it again ({str(e)[:120]})")
         index['tiles'].append({'dir': name, 'core': [float(v) for v in core]})
         (out_dir / 'tiles.json').write_text(json.dumps(index))
     return index

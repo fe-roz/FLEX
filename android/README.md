@@ -104,8 +104,8 @@ An export made with **Include surface features** also carries `features.json`
 🎨 Display → Surface features); `MapStore.FEATURES_FILE` keeps it and `MainActivity`
 puts its name in place of `PLACEHOLDER_FEATURES_JSON` (`null` for a map without it).
 
-An export made with **Trees and brush** also carries `trees.bin` (one 20-byte
-record a tree or bush) and `trees.json` (the count, the kinds, the detail
+An export made with **Trees and brush** also carries `trees.bin` (one 24-byte
+record a tree or bush; the 20-byte version 1 is read too) and `trees.json` (the count, the kinds, the detail
 level). `MapStore.kt` keeps both (`TREES_FILE`, `TREES_INFO`),
 `MainActivity.kt` hands the viewer `trees.json`'s `viewer` object as `TREES`
 (drawn by `viewer_build/libs/trees.js`: 🎨 Display → Trees and brush); a map
