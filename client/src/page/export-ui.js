@@ -1169,8 +1169,13 @@
       docsBody.docs_caves = (caves.cave_ids || []).map(c => c.id);
     }
 
+    // V2 - Ridgewalking: only with the LiDAR as the terrain (the tick box sits in its rows)
+    const ridgeBox = document.getElementById('export_ridgewalk');
+    const ridgewalk = !mapTerrain && !!(ridgeBox && ridgeBox.checked);
+
     const body = {
       ...docsBody,
+      ...(ridgewalk ? { ridgewalk: true } : {}),
       bbox: [w, s, e, n],
       polygon: poly,                 // null: the whole box
       eptPath,

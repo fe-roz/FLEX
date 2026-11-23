@@ -1598,6 +1598,14 @@
                       style="flex-shrink:0; background:#222; border:1px solid #444; border-radius:3px; color:#eee; font-size:13px; padding:3px 7px; cursor:pointer;" title="Refresh list">↺</button>
                   </div>
                   <div id="export_ept_hint" style="font-size:10px; color:rgba(255,255,255,0.35); margin-top:3px;"></div>
+                  <!-- V2 - Ridgewalking (export_terrain.py --ridgewalk): off every time the page loads -->
+                  <label style="display:block; margin:8px 0 3px;">
+                    <input type="checkbox" id="export_ridgewalk">
+                    V2 - Ridgewalking
+                  </label>
+                  <div style="font-size:10px; color:rgba(255,255,255,0.4);">
+                    Pits, cracks and openings from the LiDAR, for FLEX Ridgewalk. Needs a point cloud; reads it again with flight-pass ids, so it takes longer.
+                  </div>
                 </div>
               </div>
             </div>
