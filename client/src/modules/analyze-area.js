@@ -123,7 +123,23 @@
   /** Tools an area has not got yet (Run more tools here ticks these). */
   const missing = area => TOOLS.map(t => t.id).filter(k => !(area && area.results && area.results[k]));
 
-  const pure = { TOOLS, CHIP, offerOptions, optionsOf, toolRows, groundRow, plan, reduce, eyeOf, drawnOf, sizeKm, shortDate, fmtMB, missing, minTxt };
+  /** What a map detail costs: { cells, mb, minutes, share (cells with a ground return), sparse, text }. */
+  function mapsCost(km2, cell, density) {
+    const cells = km2 * 1e6 / (cell * cell), mb = cells * (2 + 2 / 9) / 1e6;
+    const minutes = Math.max(1, Math.round((10 * km2 + cells / 4e6) / 60));
+    const share = density ? 1 - Math.exp(-0.55 * density * cell * cell) : null, sparse = share != null && share < 0.25;   // 0.55: ground returns cluster along scan lines (a 12 per m² cloud: 41 % of 0.3 m cells)
+    const big = n => n >= 1e9 ? (n / 1e9).toFixed(1) + ' billion' : n >= 1e6 ? Math.round(n / 1e6) + ' million' : Math.round(n / 1e3) + ' thousand';
+    let text = `${big(cells)} cells, about ${mb >= 1000 ? (mb / 1000).toFixed(1) + ' GB' : Math.round(mb) + ' MB'} of maps, about ${minutes} min`;
+    if (share != null) text += `; about ${Math.round(share * 100)} % of the cells have a ground return (the rest is filled smoothly between them)`;
+    return { cells, mb, minutes, share, sparse, text, minCell: density ? Math.round(Math.sqrt(1 / density) * 100) / 100 : null };
+  }
+  /** The map detail typed: '' / 'auto' → null (auto); a number 0.2..2 → it; otherwise NaN. */
+  function mapsCellOf(v) {
+    v = String(v == null ? '' : v).trim().replace(',', '.');
+    if (!v || v === 'auto') return null;
+    const n = Number(v); return Number.isFinite(n) && n >= 0.2 && n <= 2 ? n : NaN;
+  }
+  const pure = { mapsCost, mapsCellOf, TOOLS, CHIP, offerOptions, optionsOf, toolRows, groundRow, plan, reduce, eyeOf, drawnOf, sizeKm, shortDate, fmtMB, missing, minTxt };
   if (typeof module !== 'undefined' && module.exports) module.exports = pure;
   if (!root || !root.document) return;
 
@@ -140,7 +156,8 @@
 
   let SHOW = { areas: {} };
   try { const o = JSON.parse(lget(SKEY) || 'null'); if (o && o.areas) SHOW = o; } catch (_) {}
-  const S = { avail: null, areas: [], cur: null, lidar: null, ticks: {}, fix: {}, check: null, checkErr: '', running: null,
+  const MKEY = 'flex.areas.mapsCell';
+  const S = { mapsCell: lget(MKEY) || '', avail: null, areas: [], cur: null, lidar: null, ticks: {}, fix: {}, check: null, checkErr: '', running: null,
     open: null, delAsk: null, delRes: null, lastRun: null, restored: false, picking: false };
   let picker = null, host = null, checkT = null, checkSeq = 0;
 
@@ -265,11 +282,18 @@
 
   // ── Check ──
   function scheduleCheck() { clearTimeout(checkT); checkT = setTimeout(check, 250); }
+  /** The map detail (options.ground.maps_cell: a number in metres; absent = Auto, the ground's own cell). */
+  function withMaps(o) {
+    const c = mapsCellOf(S.mapsCell);
+    if (c) { o = Object.assign({}, o); o.ground = Object.assign({}, o.ground, { maps_cell: c }); }
+    return o;
+  }
+  function setMapsCell(v) { S.mapsCell = String(v || '').trim(); lset(MKEY, S.mapsCell); paintTools(); const i = $('ar-mdv'); if (i && document.activeElement !== i && S.mapsCell) i.focus(); scheduleCheck(); }
   async function check() {
     if (!S.cur || !S.cur.ring || !S.avail) return null;
     const seq = ++checkSeq;
     let j;
-    try { j = await post('/api/areas/check', { ring: S.cur.ring, lidar: lidar(), tools: TOOLS.map(t => t.id), options: optionsOf(S.fix), id: S.cur.id }); }
+    try { j = await post('/api/areas/check', { ring: S.cur.ring, lidar: lidar(), tools: TOOLS.map(t => t.id), options: withMaps(optionsOf(S.fix)), id: S.cur.id }); }
     catch (e) { j = { ok: false, error: e.message || String(e) }; }
     if (seq !== checkSeq) return S.check;
     S.check = j && j.ok ? j : null; S.checkErr = j && j.ok ? '' : ((j && j.error) || 'The check did not answer.');
@@ -285,7 +309,7 @@
     tools = tools || plan(rows, S.check, curArea()).tools;
     if (!tools.length) return { ok: false, error: 'nothing ticked' };
     const name = S.cur.id ? S.cur.name : ((S.draftName || '').trim() || S.cur.name || 'New area');
-    const body = Object.assign(S.cur.id ? { id: S.cur.id } : { name, ring: S.cur.ring }, { project: PJ().pid || '', lidar: lidar(), tools, options: options || optionsOf(S.fix) });
+    const body = Object.assign(S.cur.id ? { id: S.cur.id } : { name, ring: S.cur.ring }, { project: PJ().pid || '', lidar: lidar(), tools, options: withMaps(options || optionsOf(S.fix)) });
     if (tools.includes('prospect') && w._areaProspects) { body.options.prospect = Object.assign({ known: await w._areaProspects.known() }, body.options.prospect || {}); }
     if (tools.includes('bush')) body.options.bush = Object.assign(bushParams(), body.options.bush || {});
     let j;
@@ -458,6 +482,23 @@
     const cov = S.check && S.check.ground && S.check.ground.coverage;
     $('ar-cov').textContent = cov != null && S.cur ? 'Ticked clouds cover ' + Math.round(cov * 100) + ' % of the current area.' : '';
   }
+  /** The Map detail control (under the tools): Auto (the ground's cell) or a typed cell in metres, what it costs. */
+  function detailHtml(area) {
+    const M = (S.check && S.check.maps) || {}, gc = M.groundCell || (area && area.results && area.results.ground && area.results.ground.cell) || null;
+    const km2 = (S.check && S.check.km2) || (area && area.km2) || 0, v = mapsCellOf(S.mapsCell), auto = v === null;
+    const made = area && area.results && area.results.ground && area.results.ground.maps;
+    let line = '', warn = '';
+    if (Number.isNaN(v)) warn = 'Type a cell between 0.2 and 2 m, or choose Auto.';
+    else if (!auto && km2) { const c = mapsCost(km2, v, M.density); line = c.text + '.'; if (c.sparse) warn = `The LiDAR is sparse for ${v} m (about ${M.density} ground returns per m²): most cells are filled between returns. ${c.minCell} m or more keeps detail honest.`; }
+    else line = 'Slope, hillshade and brush at the ground\'s own cell' + (gc ? ' (' + gc + ' m)' : '') + '.';
+    const canRemake = area && area.results && area.results.ground && v && !Number.isNaN(v) && !(made && made.cell === v);
+    const remake = canRemake ? (M.pointsStored === false ? '<div class="ar-why">The points of this area are not on this computer: the maps can only be remade with Ground (reads the LiDAR).</div>'
+      : `<div class="ar-offers"><button type="button" class="ar-btn" data-act="remaps">Remake the maps at ${v} m (the ground and other results stay)</button></div>`) : '';
+    return `<div class="ar-detail" id="ar-detail"><div class="ar-hd"><span class="ar-nm">Map detail</span>
+      <label class="ar-md"><input type="radio" name="ar-md" value="auto"${auto ? ' checked' : ''}> Auto${gc ? ' (' + gc + ' m)' : ''}</label>
+      <label class="ar-md"><input type="radio" name="ar-md" value="m"${auto ? '' : ' checked'}> <input type="text" id="ar-mdv" inputmode="decimal" size="4" placeholder="0.3" value="${esc(auto ? '' : S.mapsCell)}" aria-label="Map detail in metres"> m</label></div>
+      <div class="ar-why">${esc(line)}${made ? ' Now: ' + made.cell + ' m.' : ''}</div>${warn ? `<div class="ar-why ar-note">${esc(warn)}</div>` : ''}${remake}</div>`;
+  }
   function paintTools() {
     const box = $('ar-tools'); if (!box) return;
     const area = curArea(), g = groundRow(S.check, area), rows = toolRows(S.check, { ticks: S.ticks, fix: S.fix, area });
@@ -471,6 +512,7 @@
       if (r.used) h += `<div class="ar-offers"><button type="button" class="ar-btn" data-act="unfix" data-id="${r.id}">Back to the normal setting</button></div>`;
       h += '</div>';
     });
+    h += detailHtml(area);
     if (S.checkErr) h += `<div class="ar-bad">${esc(S.checkErr)}</div>`;
     box.innerHTML = h;
     paintRun();
@@ -559,6 +601,8 @@
       const t = e.target;
       if (t.closest('#ar-lidar')) setLidar([...host.querySelectorAll('#ar-lidar input:checked')].map(x => x.dataset.url));
       else if (t.dataset.act === 'tick') { S.ticks[t.dataset.id] = t.checked; paintRun(); }
+      else if (t.name === 'ar-md') { if (t.value === 'auto') setMapsCell(''); else { const i = $('ar-mdv'); setMapsCell((i && i.value) || '0.5'); } }
+      else if (t.id === 'ar-mdv') setMapsCell(t.value);
     });
     host.addEventListener('input', e => { if (e.target.id === 'ar-name') { S.draftName = e.target.value; paintRun(); } });
     ['areas-terrain-host'].forEach(id => { const e = $(id); if (e) e.addEventListener('click', onClick); });
@@ -570,6 +614,7 @@
     else if (act === 'fix') { const c = S.check && S.check.tools && S.check.tools[id], o = c && c.offers && c.offers[+b.dataset.i]; if (o) { S.fix[id] = o; S.ticks[id] = true; paint(); await check(); } }
     else if (act === 'unfix') { delete S.fix[id]; paint(); await check(); }
     else if (act === 'procsw') show(id, eyeOf(SHOW, id) !== 'on');
+    else if (act === 'remaps') { run(['maps']); }
     else if (act === 'ressw' && MAPRES.includes(b.dataset.res) && w._areaMaps) {      // bushwhack / ground: their map layers in 🗺 Layers (area-maps.js)
       const r = b.dataset.res, on = mapEye(id, r) !== 'on';
       if (on && eyeOf(SHOW, id) !== 'on') { show(id, true); await w._areaMaps.refresh(); }
@@ -659,6 +704,7 @@
   .ar-grow-row { padding: 5px 4px; }
   .ar-desc { padding-left: 21px; }
   .ar-note { color: #f2c24e; font-size: 10.5px; }
+  .ar-detail { padding: 6px 9px; border-top: 1px solid rgba(255,255,255,.08); } .ar-detail .ar-hd { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; } .ar-md { display: inline-flex; gap: 4px; align-items: center; font-size: 11px; } #ar-mdv { width: 46px; background: rgba(255,255,255,.07); color: inherit; border: 1px solid rgba(255,255,255,.2); border-radius: 4px; padding: 1px 4px; }
   .ar-coarse { font-size: 9.5px; color: #f2c24e; border: 1px solid rgba(242,194,78,.5); border-radius: 8px; padding: 0 5px; }
   .ar-x { background: none; border: 0; color: rgba(255,255,255,.45); cursor: pointer; font-size: 11px; padding: 0 2px; } .ar-x:hover { color: #ef7b6e; }`;
   doc.head.appendChild(css);

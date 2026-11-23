@@ -35,11 +35,12 @@ with tempfile.TemporaryDirectory() as d:
     m = json.load(open(os.path.join(out, "maps.json"))); g = m["grid"]
     b = [q for q in m["maps"] if q["id"] == "brush"][0]
     raw = np.fromfile(os.path.join(out, b["file"]), np.uint8).reshape(g["ny"], g["nx"])
-    val = np.where(raw == 0, np.nan, b["min"] + (raw.astype(float) - 1) / 254.0 * (b["max"] - b["min"]))
+    sys.path.insert(0, HERE); import area_maps
+    val = area_maps.decode(raw, b)            # 16 levels (round 2): each level stands for its centre
     xs = g["x0"] + (np.arange(g["nx"]) + 0.5) * g["cell"] - X0
     openb = np.nanmean(val[:, (xs > 3) & (xs < 27)]); under = np.nanmean(val[:, (xs > 33) & (xs < 57)])
     bare = val[:, (xs > 63) & (xs < 87)]
-    ok("brush in the open reads about 0.8 (12 of 15 returns reaching it)", 0.7 < openb < 0.9, openb)
+    ok("brush in the open reads about 0.8 (12 of 15 returns reaching it)", 0.7 < openb < 0.92, openb)
     ok("the same brush under a canopy reads the same (not diluted)", abs(under - openb) < 0.06, (openb, under))
     ok("bare ground reads nothing", np.nanmax(np.nan_to_num(bare)) < 0.05, np.nanmax(np.nan_to_num(bare)))
     ok("the units say what is measured", "reaching" in b["units"], b["units"])

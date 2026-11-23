@@ -44,7 +44,13 @@ const fakeTerrain = { jobs: {}, handle(req, res, rest) {
     if (/failterrain/.test(o.ept[0])) { fakeTerrain.jobs.t1 = { status: 'error', error: 'terrain broke', progress: [] }; } else fakeTerrain.jobs.t1 = { status: 'done', progress: ['[1/4] x'], result: { layers: ['a'] } };
     res.end(JSON.stringify({ ok: true, jobId: 't1' })); }); } };
 const root = path.join(tmp, 'areas');
-const api = require('../areas_api')({ python: 'python3', groundScript: groundPy, vegScript: vegPy, prospectScript: prospectPy, lidarScript: lidarPy, root, terrainGen: fakeTerrain, pollMs: 20, fetchTimeoutMs: 2000 });
+const mapsPy = W('maps.py', `
+import json, os, sys
+d = sys.argv[1]; cell = float(sys.argv[sys.argv.index('--maps-cell') + 1])
+print('[1/2] maps', flush=True)
+json.dump({'version': 2, 'maps_cell': cell, 'cells_with_ground': 0.5, 'args': sys.argv[2:], 'grid': {}, 'maps': []}, open(os.path.join(d, 'ground', 'maps.json'), 'w'))
+`);
+const api = require('../areas_api')({ python: 'python3', groundScript: groundPy, vegScript: vegPy, prospectScript: prospectPy, lidarScript: lidarPy, mapsScript: mapsPy, root, terrainGen: fakeTerrain, pollMs: 20, fetchTimeoutMs: 2000 });
 
 function call(method, url, data) {
   return new Promise(resolve => {
@@ -207,6 +213,27 @@ const srv = http.createServer((q, s) => {
   r = await post('delete-result', { id: AR, result: 'ground' }); ok('delete-result ground', r.j.ok && !fs.existsSync(path.join(root, AR, 'ground')));
   r = await post('delete-result', { id: AR, result: '../x' }); ok('delete-result bad name → 400', r.code === 400);
   r = await post('delete-result', { id: 'nope', result: 'veg' }); ok('delete-result unknown → 404', r.code === 404);
+  // the maps only (Map detail): from the stored points, no LiDAR; the ground and other results stay
+  {
+    const M = (await post('save', { name: 'Cave Ridge maps', ring: RING })).j.area.id;
+    fs.mkdirSync(path.join(root, M, 'ground'), { recursive: true }); fs.writeFileSync(path.join(root, M, 'ground', 'grid.json'), '{"cell":0.75}');
+    const a0 = JSON.parse(fs.readFileSync(path.join(root, M, 'area.json'))); a0.results = { ground: { cell: 0.75, date: 'x' }, veg: { date: 'y' } }; fs.writeFileSync(path.join(root, M, 'area.json'), JSON.stringify(a0));
+    r = await post('run', { id: M, tools: ['maps'], options: { ground: { maps_cell: 0.3 } } });
+    ok('maps only: no stored points → a plain error', r.code === 400 && /not stored/.test(r.j.error), r.j);
+    fs.mkdirSync(path.join(root, M, 'points'), { recursive: true }); fs.writeFileSync(path.join(root, M, 'points', 'points.json'), '{}');
+    r = await post('run', { id: M, tools: ['maps'], options: { ground: { maps_cell: 5 } } });
+    ok('maps only: a detail out of range → 400', r.code === 400 && /0.2 and 2/.test(r.j.error), r.j);
+    r = await post('run', { id: M, tools: ['maps'], options: { ground: { maps_cell: '0,3' } } });
+    ok('maps only: starts without LiDAR', r.j && r.j.ok, r.j);
+    const st = await waitRun(r.j.runId);
+    const a1 = JSON.parse(fs.readFileSync(path.join(root, M, 'area.json')));
+    ok('maps only: done, recorded on the ground result, the ground and vegetation kept', st.status === 'done' && a1.results.ground.maps && a1.results.ground.maps.cell === 0.3 && a1.results.ground.cell === 0.75 && a1.results.veg.date === 'y', [st, a1.results]);
+    const args = JSON.parse(fs.readFileSync(path.join(root, M, 'ground', 'maps.json'))).args;
+    ok('maps only: no bushwhack result → slope and hillshade only', args.includes('--no-brush'), args);
+    r = await post('check', { id: M, ring: RING, lidar: [], tools: ['bush'], options: { ground: { maps_cell: 0.3 } } });
+    ok('check: says whether the points are stored and the detail asked', r.j.maps && r.j.maps.pointsStored === true && r.j.maps.cell === 0.3 && r.j.maps.made === 0.3, r.j.maps);
+    await post('delete', { id: M });
+  }
   r = await post('delete', { id: AR }); ok('delete area', r.j.ok && !fs.existsSync(path.join(root, AR)) && !(await get('')).j.areas.some(x => x.id === AR));
   r = await post('delete', { id: AR }); ok('delete again → 404', r.code === 404);
   fs.writeFileSync(path.join(tmp, 'example-check.json'), JSON.stringify(exampleCheck));

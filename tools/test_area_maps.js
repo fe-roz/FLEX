@@ -12,7 +12,7 @@ const ok = (l, c, i) => { if (c) pass++; else { fail++; console.log('FAIL ' + l 
 const r = T.parseRamp('0:0b3d0b00_1:0b3d0bff');
 ok('ramp parses', r && r.length === 2 && r[0].a === 0 && r[1].a === 255 && r[1].g === 0x3d);
 ok('ramp: 6-digit colour = opaque', T.parseRamp('0:ff0000_1:00ff00')[0].a === 255);
-['', '0:ff0000', '0:ff0000_x:00ff00', '0.5:ff0000_0.2:00ff00', '0:ff0000_1.5:00ff00', '0:ff00_1:00ff00', Array(10).fill('0:ff0000').join('_'), '0:ff0000_1:00ff00;rm'].forEach(s => ok('ramp refused: ' + s.slice(0, 20), T.parseRamp(s) === null));
+['', '0:ff0000', '0:ff0000_x:00ff00', '0.5:ff0000_0.2:00ff00', '0:ff0000_1.5:00ff00', '0:ff00_1:00ff00', Array(17).fill('0:ff0000').join('_'), '0:ff0000_1:00ff00;rm'].forEach(s => ok('ramp refused: ' + s.slice(0, 20), T.parseRamp(s) === null));
 ok('ramp round trip', T.rampString(r) === '0:0b3d0b00_1:0b3d0bff');
 const mid = T.rampAt(T.parseRamp('0:000000ff_1:ffffffff'), 0.5);
 ok('interpolation midway', mid[0] === 128 && mid[3] === 255, mid);
@@ -20,8 +20,18 @@ ok('clamped below / above', T.rampAt(r, -1)[3] === 0 && T.rampAt(r, 2)[3] === 25
 const L = T.lut(T.parseRamp('0:000000ff_1:ffffffff'), 0, 1, 0, 1);
 ok('lut: byte 0 transparent, 1 = low end, 255 = high end', L[3] === 0 && L[4] === 0 && L[7] === 255 && L[255 * 4] === 255);
 // presets in area-maps.js are valid server ramps
-Object.entries(AM.PRESETS).forEach(([m, ps]) => ps.forEach(p => ok('preset ' + m + '/' + p.id + ' parses', !!T.parseRamp(AM.rampOf(p.stops)), AM.rampOf(p.stops))));
-ok('brush default: clear at 0, opaque dark green at full', AM.rampOf(AM.PRESETS.brush[0].stops) === '0:0b3d0b00_1:0b3d0bff');
+Object.entries(AM.PRESETS).forEach(([m, ps]) => ps.forEach(p => { const r = AM.rampOf(AM.stopsOf(m, Object.assign(AM.defaults(m, {}), { preset: p.id }))); ok('ramp ' + m + '/' + p.id + ' parses', !!T.parseRamp(r), r); }));
+ok('every ramp is offered on every map (classes on brush only)', ['slope', 'hillshade', 'voids'].every(m => AM.PRESETS[m].length === AM.RAMPS.length - 1) && AM.PRESETS.brush.length === AM.RAMPS.length);
+ok('defaults: brush classes, slope CalTopo-style, hillshade black to white', AM.defaults('brush').preset === 'classes' && AM.defaults('slope').preset === 'caltopo' && AM.defaults('hillshade').preset === 'bw');
+const cls = AM.stopsOf('brush', AM.defaults('brush'));
+ok('brush classes: none clear below 10 %, then light, medium, dense (dense opaque)', cls[0][2] === 0 && cls[1][0] === 0.1 && cls[1][2] === 0 && cls[2][2] > 0 && cls[cls.length - 1][2] === 1, cls);
+const cl2 = AM.stopsOf('brush', Object.assign(AM.defaults('brush'), { cuts: [0.2, 0.4, 0.8] }));
+ok('cut-offs move the class edges', cl2[1][0] === 0.2 && cl2[3][0] === 0.4 && cl2[5][0] === 0.8, cl2);
+const ct = T.parseRamp(AM.rampOf(AM.stopsOf('slope', AM.defaults('slope'))));
+ok('CalTopo-style slope: clear below 27 deg, yellow from 27, black from 60 (over 0-70)', T.rampAt(ct, 20 / 70)[3] === 0 && T.rampAt(ct, 28 / 70)[0] === 255 && T.rampAt(ct, 28 / 70)[3] > 200 && T.rampAt(ct, 65 / 70)[0] === 0);
+const cu = AM.stopsOf('slope', { preset: 'custom', start: '#ff0000', sa: 0.2, end: '#0000ff', ea: 1, lo: 0, hi: 70 });
+ok('your two colours: start and end with their transparency', cu.length === 2 && cu[0][1] === 'ff0000' && cu[0][2] === 0.2 && cu[1][1] === '0000ff', cu);
+ok('the pickers start from the chosen ramp', AM.endsOf('hillshade', AM.defaults('hillshade')).start === '#000000' && AM.endsOf('hillshade', AM.defaults('hillshade')).end === '#ffffff');
 ok('url carries ramp, range and version', /\/api\/areas\/tiles\/a1\/slope\/\{z\}\/\{x\}\/\{y\}\.png\?ramp=.+&lo=0&hi=70&v=5$/.test(AM.urlOf('a1', 'slope', AM.defaults('slope', {}), 5)));
 
 // utm: zone 14 central meridian -99; -100.5678, 45.1234 → known values (pyproj: 376426.6, 4997578.5 approx)
@@ -67,9 +77,10 @@ ok('bush maps.json: brush + voids, row0 north', bj.grid.row0 === 'north' && bj.m
 ok('ground maps.json: slope + hillshade, row0 south', gj.grid.row0 === 'south' && gj.maps.map(m => m.id).join() === 'slope,hillshade');
 ok('rasters one byte a cell', ['bush/brush.u8', 'bush/voids.u8', 'ground/slope.u8', 'ground/hillshade.u8'].every(f => fs.statSync(path.join(A, f)).size === nx * ny));
 const br = fs.readFileSync(path.join(A, 'bush', 'brush.u8'));
-ok('brush: top rows no data (north-up), west edge = 1 (zero brush), east = 255', br[0] === 0 && br[30 * nx] === 1 && br[30 * nx + nx - 1] === 255);
+ok('brush: top rows no data (north-up), west edge = level 1 (no brush), east = level 16', br[0] === 0 && br[30 * nx] === 1 && br[30 * nx + nx - 1] === 16);
 const sl = fs.readFileSync(path.join(A, 'ground', 'slope.u8')), mid45 = sl[80 * nx + 100];
-ok('slope of a 45 deg plane ≈ 45 deg', Math.abs((mid45 - 1) / 254 * 90 - 45) < 1.5, mid45);
+ok('slope of a 45 deg plane: the 45-50 deg level', gj.maps[0].values[mid45 - 1] === 45, mid45);
+ok('16 levels with their values in maps.json', gj.maps.every(m => m.levels === 16 && m.values.length === 16) && bj.maps.every(m => m.levels === 16));
 ok('slope: no data where the ground has none', sl[80 * nx + 3] === 0);
 
 // tiles
@@ -109,6 +120,21 @@ ok('unknown map → 404', call(tiles.tile, `a1/canopy/17/${tx}/${ty}.png`, {}).s
 ok('bad id → 400/404', [400, 404].includes(call(tiles.tile, `../x/brush/17/${tx}/${ty}.png`, {}).s));
 const t0 = Date.now(); for (let z = 14; z <= 18; z++) { const [a, b] = tileOf(-100.5678, 45.1234, z); call(tiles.tile, `a1/slope/${z}/${a}/${b}.png`, { ramp: '0:000000ff_1:ff0000ff' }); }
 ok('five fresh tiles under a second', Date.now() - t0 < 1000, Date.now() - t0);
+// bilinear close up: at z21 slope is soft (many distinct colours), brush stays as cells (few)
+const [bx21, by21] = tileOf(-100.5678, 45.1234, 21);
+const distinct = png => { const D = decode(png), set = new Set(); for (let i = 0; i < D.px.length; i += 4) if (D.px[i + 3]) set.add(D.px[i] + ',' + D.px[i + 1]); return set.size; };
+const hs21 = call(tiles.tile, `a1/hillshade/21/${bx21}/${by21}.png`, { ramp: '0:000000ff_1:ffffffff' }).b, hs21h = call(tiles.tile, `a1/hillshade/21/${bx21}/${by21}.png`, { ramp: '0:000000ff_1:ffffffff', smooth: '0' }).b;
+ok('close up, hillshade is bilinear (softer than hard cells)', distinct(hs21) >= distinct(hs21h), [distinct(hs21), distinct(hs21h)]);
+const sl21 = decode(call(tiles.tile, `a1/slope/21/${bx21}/${by21}.png`, { ramp: '0:000000ff_1:ffffffff', lo: '0', hi: '90' }).b);
+ok('close up slope stays right (45 deg plane mid grey)', Math.abs(sl21.px[(128 * 256 + 128) * 4] - 128) < 8);
+// version 1 files (1..255, no values) still draw
+const V1 = path.join(root, 'v1', 'ground'); fs.mkdirSync(V1, { recursive: true });
+fs.writeFileSync(path.join(V1, 'maps.json'), JSON.stringify({ version: 1, grid: Object.assign({}, grid, { row0: 'south' }), maps: [{ id: 'slope', file: 'slope.u8', units: 'degrees', min: 0, max: 90, suggest: [0, 60] }] }));
+fs.writeFileSync(path.join(V1, 'slope.u8'), Buffer.alloc(nx * ny, 128));
+const v1 = decode(call(tiles.tile, `v1/slope/17/${tx}/${ty}.png`, { ramp: '0:000000ff_1:ffffffff', lo: '0', hi: '90', smooth: '0' }).b);
+ok('version 1 map: byte 128 = 45 deg (mid grey)', Math.abs(v1.px[(128 * 256 + 128) * 4] - 128) < 4, v1.px[(128 * 256 + 128) * 4]);
+const V2 = T.valuesOf({ values: [0, 5, 10] });
+ok('valuesOf: version 2 levels', V2[1] === 0 && V2[3] === 10 && isNaN(V2[0]) && isNaN(V2[4]));
 // legacy: an area with only the old pngs
 const B = path.join(root, 'old1', 'bush'); fs.mkdirSync(B, { recursive: true });
 fs.writeFileSync(path.join(B, 'derived.json'), JSON.stringify({ raster_bounds_lonlat: [-100.57, 45.12, -100.56, 45.13] })); fs.writeFileSync(path.join(B, 'vegetation.png'), 'x');
