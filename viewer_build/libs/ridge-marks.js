@@ -288,6 +288,7 @@
     const { f, cur } = current(ref);
     const body = markBody(f, cur, next);
     if (!body) return null;
+    if (S.ensureAuthor) { try { await S.ensureAuthor(); } catch (_) {} }       // who is marking (asked once, as for a note)
     const { op, ...data } = body;
     const e = S.record(op, data);
     refresh();
@@ -300,7 +301,7 @@
     inverse: e => FL.rmarkUndo(e),
 
     // o: { THREE, scene, camera, features, marks (RIDGE's: a list or a file name each), saved, ridge (FlexRidge), project(),
-    //      hasProject(), ensureProject(), record(op, data), toScene(lat, lon) -> { x, y }, toLonLat(x, y) -> { lat, lon },
+    //      hasProject(), ensureProject(), ensureAuthor(), record(op, data), toScene(lat, lon) -> { x, y }, toLonLat(x, y) -> { lat, lon },
     //      groundZ(x, y), toast(text), redraw() }.  Resolves true when there is a list of features (or marks) to work with.
     init(o) {
       S = null;
@@ -310,7 +311,7 @@
         features.forEach(f => { if ((f.lon === null || f.lat === null) && o.toLonLat) { const ll = o.toLonLat(f.x, f.y); if (ll) { f.lon = num(ll.lon); f.lat = num(ll.lat); } } });
         if (!features.length && !ml.length) return false;
         S = { THREE: o.THREE, scene: o.scene, camera: o.camera, features, exported: ml, st: restore(o.saved), ridge: o.ridge, project: o.project, hasProject: o.hasProject,
-              ensureProject: o.ensureProject, record: o.record, toScene: o.toScene, groundZ: o.groundZ, toast: o.toast, redraw: o.redraw,
+              ensureProject: o.ensureProject, ensureAuthor: o.ensureAuthor, record: o.record, toScene: o.toScene, groundZ: o.groundZ, toast: o.toast, redraw: o.redraw,
               group: new o.THREE.Group(), badges: [], tex: {}, marks: [], M: { byFeature: {}, alone: [], ofMark: {} }, card: null };
         S.group.name = 'ridge-marks'; S.scene.add(S.group);
         refresh();

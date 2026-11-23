@@ -2092,7 +2092,7 @@ setTimeout(() => {
     // Marks on ridgewalking features (libs/ridge-marks.js): nothing unless the export lists its features.
     if (window.RidgeMarks && typeof RIDGE !== 'undefined' && RIDGE) RidgeMarks.init({
       THREE, scene, camera, features: RIDGE.features, marks: RIDGE.marks, saved: DISP.rmarks, ridge: window.FlexRidge,
-      project: () => (ffPid ? ffP : null), hasProject: () => !!ffPid, ensureProject: ffEnsureProject,
+      project: () => (ffPid ? ffP : null), hasProject: () => !!ffPid, ensureProject: ffEnsureProject, ensureAuthor: ffEnsureAuthor,
       record: (op, data) => ffRecord(op, data), toScene: gpsToScene, toLonLat: sceneToLatLon, groundZ: gridZAt,
       toast: m => showToast(m), redraw: () => { requestRender(); wakeRender(); },
     });
