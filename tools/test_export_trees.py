@@ -15,6 +15,7 @@ Trees and brush in an export (export_terrain.py --trees, export_trees.py). No PD
     python tools/test_export_trees.py [--keep DIR]     (--keep: leave trees.zip and plain.zip there, to look at)
 """
 import base64, io, json, math, os, re, subprocess, sys, tempfile, time, zipfile
+os.environ['SOURCE_DATE_EPOCH'] = '1795000000'       # a fixed export time, so two exports of the same thing are the same bytes
 from pathlib import Path
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.insert(0, ROOT)
