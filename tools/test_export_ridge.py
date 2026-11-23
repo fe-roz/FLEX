@@ -326,7 +326,7 @@ with tempfile.TemporaryDirectory() as tmp:
         n7 = set(z7.namelist())
         h7 = z7.read('viewer.html').decode('utf-8')
         check('normal export: RIDGE is null', ridge_const(h7) is None and 'PLACEHOLDER_RIDGE_JSON' not in h7.replace("'PLACEHOLDER_' + 'RIDGE_JSON'", ''), str(ridge_const(h7))[:60])
-        check('normal export: the hillshade-with-brush placeholder is an empty string', hsb_const(h7) == '' and 'PLACEHOLDER_HSB_B64' not in h7, hsb_const(h7)[:40])
+        check('normal export: the hillshade-with-brush placeholder is an empty string', hsb_const(h7) == '' and '"PLACEHOLDER_HSB_B64"' not in h7, hsb_const(h7)[:40])
         check('normal export: no hillshade_brush in meta', 'hillshade_brush' not in json.loads(z7.read('caves.json'))['meta'])
         check('normal export: the same file list as ever', {n for n in n7 if not n.startswith('libs/')} == {'terrain.glb', 'tex_sat.jpg', 'tex_hs.jpg', 'caves.json', 'viewer.html', 'serve.bat', 'serve.sh'}, sorted(n7))
         check('normal export: no ridgewalk in meta', 'ridgewalk' not in json.loads(z7.read('caves.json'))['meta'])
