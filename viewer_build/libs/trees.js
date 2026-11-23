@@ -26,12 +26,12 @@
   var STATE_V = 1;
   var TILE_TARGET = 6000, TILE_MAX = 8;                        // about this many shapes a ground tile, at most 8 x 8 tiles
   // The stock solids, as a profile turned round the vertical: [sides, [radius, height] rings from the
-  // bottom up], closed by a point at the top (height 1); `foot` adds a point at the bottom.
+  // bottom up], closed by a point at the top (height 1).
   var SOLIDS = [
     // cone
     [{ sides: 12, rings: [[1, -SINK]] }, { sides: 6, rings: [[1, -SINK]] }, { sides: 4, rings: [[1, -SINK]] }],
-    // round crown: a point on the ground, widest above the middle
-    [{ sides: 5, rings: [[0.8, 0.32], [0.86, 0.72]], foot: true }, { sides: 5, rings: [[1, 0.55]], foot: true }, { sides: 4, rings: [[1, 0.55]], foot: true }],
+    // round crown: wide from the ground up, a blunt top
+    [{ sides: 5, rings: [[0.92, -SINK], [0.92, 0.55]] }, { sides: 4, rings: [[0.95, -SINK], [0.85, 0.6]] }, { sides: 3, rings: [[1, -SINK], [0.85, 0.6]] }],
     // low mound
     [{ sides: 4, rings: [[1, -SINK], [0.66, 0.68]] }, { sides: 6, rings: [[1, -SINK]] }, { sides: 4, rings: [[1, -SINK]] }],
   ];
@@ -41,7 +41,6 @@
     var S = def.sides, rings = def.rings, pos = [], k, i;
     var at = function (ring, s) { var a = 2 * Math.PI * (s % S) / S; return [ring[0] * Math.cos(a), ring[0] * Math.sin(a), ring[1]]; };
     var tri = function (a, b, c) { pos.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]); };
-    if (def.foot) for (i = 0; i < S; i++) tri([0, 0, -SINK], at(rings[0], i + 1), at(rings[0], i));
     for (k = 0; k + 1 < rings.length; k++) for (i = 0; i < S; i++) {
       tri(at(rings[k], i), at(rings[k], i + 1), at(rings[k + 1], i + 1));
       tri(at(rings[k], i), at(rings[k + 1], i + 1), at(rings[k + 1], i));
@@ -50,7 +49,8 @@
     for (i = 0; i < S; i++) tri(at(top, i), at(top, i + 1), [0, 0, 1]);
     return new Float32Array(pos);
   }
-  function triangles(kind, detail) { return solid(SOLIDS[kind][detail]).length / 9; }
+  function solidFor(kind, detail) { return solid(SOLIDS[kind][detail]); }
+  function triangles(kind, detail) { return solidFor(kind, detail).length / 9; }
 
   // { n, f32, u16, u8 }: views over the bytes, nothing copied. Tree i: x, y, z, height = f32[i*5 .. +3],
   // radius cm = u16[i*10 + 8], kind = u8[i*20 + 18], tint = u8[i*20 + 19].
@@ -104,7 +104,7 @@
     for (k = 0; k < 3; k++) {
       mats[k] = screenDoor(new THREE.MeshLambertMaterial({ color: 0xffffff }), S.uSee);
       var g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(solid(SOLIDS[k][detail]), 3));
+      g.setAttribute('position', new THREE.BufferAttribute(solidFor(k, detail), 3));
       g.computeVertexNormals();
       geos[k] = g;
       for (t = 0; t < G * G; t++) {
@@ -155,7 +155,7 @@
   function redraw() { if (S && S.redraw) S.redraw(); }
 
   var R = {
-    DEFAULTS: DEFAULTS, STATE_V: STATE_V, KINDS: KINDS, parse: parse, restore: restore, plan: plan, solid: solid, triangles: triangles,
+    DEFAULTS: DEFAULTS, STATE_V: STATE_V, KINDS: KINDS, parse: parse, restore: restore, plan: plan, solidFor: solidFor, triangles: triangles,
 
     // o: { THREE, scene, trees, saved, isAssetRef, b64ToArrayBuffer, redraw }.
     // Returns a promise that settles when the trees are in the scene (null trees: at once, false).

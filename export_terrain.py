@@ -2401,12 +2401,14 @@ def main():
                 trees_tmp = tempfile.TemporaryDirectory(prefix='flex_trees_')
                 trees_dir = trees_tmp.name
                 print("[1/7] Trees 0% starting (the returns are read once more, for the vegetation)", flush=True)
-                export_trees.run_veg(trees_dir, args.ept, poly_ll.tolist() if poly_ll is not None else export_trees.bbox_ring(args.bbox),
-                                     also=args.also_ept, progress=lambda m: print(f"[1/7] {m}", flush=True))
-            trees = export_trees.Trees(trees_dir)
+                t_rect = ridge.rect if ridge is not None else utm_rect_covering(args.bbox, zone, 1.0)
+                t_poly = polygon_to_utm(poly_ll, zone) if poly_ll is not None else None
+                export_trees.run_veg_tiled(trees_dir, args.ept, t_rect, zone, south, polygon=t_poly, also=args.also_ept,
+                                           progress=lambda m: print(f"[1/7] {m}", flush=True))
+            trees = export_trees.Trees(trees_dir, zone, south)
             trees_utm = trees.utm()
             print(f"[1/7] Trees: {len(trees.recs):,} shapes from the vegetation step"
-                  + (f" ({trees.seconds:.0f} s)" if trees.seconds else ''))
+                  + (f" ({trees.seconds:.0f} s in {trees.tiles} tile{'s' if trees.tiles != 1 else ''})" if trees.seconds else ''))
         except (Exception, SystemExit) as e:
             print(f"[1/7] WARNING: trees and brush left out ({e})")
             trees = None

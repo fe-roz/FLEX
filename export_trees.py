@@ -42,6 +42,9 @@ LOW_TREE_M = 3.0
 # Sides of the solids by how many there are (the viewer has three levels):
 # 0 full, 1 fewer sides, 2 fewest.
 DETAIL_1_FROM, DETAIL_2_FROM = 120_000, 300_000
+# The vegetation step holds a tile's whole cloud in memory (about 4 GB a km2 of dense cloud): the export runs it
+# in tiles of at most TILE_M a side, each read MARGIN_M wider so crowns on a tile line are whole.
+TILE_M, MARGIN_M = 700.0, 15.0
 DTYPE = np.dtype([('x', '<f4'), ('y', '<f4'), ('z', '<f4'), ('h', '<f4'), ('r', '<u2'), ('kind', 'u1'), ('tint', 'u1')])
 assert DTYPE.itemsize == RECORD
 
@@ -81,6 +84,57 @@ def run_veg(out_dir, ept, ring_ll, also=(), progress=print, python=None, script=
         raise RuntimeError(f"veg_shapes.py stopped with code {code}: " + ' | '.join(tail[-3:]))
 
 
+def tile_grid(rect, tile_m=None, polygon=None):
+    """Split a UTM rectangle into equal tiles no wider than tile_m; with a
+    polygon (UTM ring), only the tiles it reaches. -> [(i, j, (x0, y0, x1, y1))]"""
+    tile_m = tile_m or TILE_M
+    x0, y0, x1, y1 = [float(v) for v in rect]
+    nx = max(1, int(np.ceil((x1 - x0) / tile_m - 1e-9))); ny = max(1, int(np.ceil((y1 - y0) / tile_m - 1e-9)))
+    out = []
+    for j in range(ny):
+        for i in range(nx):
+            core = (x0 + (x1 - x0) * i / nx, y0 + (y1 - y0) * j / ny, x0 + (x1 - x0) * (i + 1) / nx, y0 + (y1 - y0) * (j + 1) / ny)
+            if polygon is None or rect_meets_ring(core, polygon):
+                out.append((i, j, core))
+    return out
+
+
+def rect_meets_ring(r, ring):
+    """Does the rectangle (x0, y0, x1, y1) share ground with the ring? (a grid
+    of points of the rectangle inside the ring, or a ring corner inside it)"""
+    ring = np.asarray(ring, np.float64)
+    if ((ring[:, 0] >= r[0]) & (ring[:, 0] <= r[2]) & (ring[:, 1] >= r[1]) & (ring[:, 1] <= r[3])).any():
+        return True
+    gx, gy = np.meshgrid(np.linspace(r[0], r[2], 9), np.linspace(r[1], r[3], 9))
+    return bool(point_in_ring(gx.ravel(), gy.ravel(), ring).any())
+
+
+def run_veg_tiled(out_dir, ept, rect, zone, south, polygon=None, also=(), progress=print, python=None, script=None,
+                  tile_m=None, margin=None, detail='medium'):
+    """The vegetation step over a UTM rectangle, tile by tile (one child after
+    the other), so its memory follows the tile, not the area: about 4 GB a
+    km2 of dense cloud otherwise. Each tile is read with `margin` metres more
+    all round, so crowns on a tile line are whole; a tree is kept by the tile
+    its foot stands in (Trees). Writes out_dir/tiles.json."""
+    import route_cost as rc
+    margin = MARGIN_M if margin is None else float(margin)
+    out_dir = Path(out_dir); out_dir.mkdir(parents=True, exist_ok=True)
+    tiles = tile_grid(rect, tile_m, polygon)
+    index = {'version': 1, 'zone': int(zone), 'south': bool(south), 'rect': [float(v) for v in rect], 'margin': margin, 'tiles': []}
+    for k, (i, j, core) in enumerate(tiles):
+        name = f't_{i}_{j}'
+        e = np.array([core[0] - margin, core[2] + margin, core[2] + margin, core[0] - margin])
+        n = np.array([core[1] - margin, core[1] - margin, core[3] + margin, core[3] + margin])
+        lon, lat = rc.xy_to_lonlat(e, n, int(zone), bool(south))
+        ring = [[float(a), float(b)] for a, b in zip(lon, lat)]
+        ring.append(ring[0])
+        pct = lambda m, k=k: progress(f"Trees {int(100 * k / len(tiles))}% tile {k + 1}/{len(tiles)}: {m[len('Trees '):]}")
+        run_veg(out_dir / name, ept, ring, also=also, progress=pct, python=python, script=script, detail=detail)
+        index['tiles'].append({'dir': name, 'core': [float(v) for v in core]})
+        (out_dir / 'tiles.json').write_text(json.dumps(index))
+    return index
+
+
 def bbox_ring(bbox):
     """[minLon, minLat, maxLon, maxLat] -> a closed lon/lat ring."""
     w, s, e, n = [float(v) for v in bbox]
@@ -89,12 +143,15 @@ def bbox_ring(bbox):
 
 def kinds_of(recs):
     """trees.bin kind per shapes.bin record [n, 12]: brush mounds and low
-    crowns -> mound; a crown widest in its lower half -> cone; else round."""
+    crowns -> mound; a tapering crown -> cone; else round."""
     recs = np.asarray(recs, np.float32).reshape(-1, 12)
     vk, h = recs[:, 6], recs[:, 3]
     prof = recs[:, 8:12]                                   # r1..r4 at 10 / 35 / 60 / 85 % of the crown
-    low_wide = prof[:, :2].max(axis=1) >= prof[:, 2:].max(axis=1)
-    kind = np.where(low_wide, CONE, ROUND).astype(np.uint8)
+    # A cone is what the vegetation step itself calls one (a narrow top on a crown at least twice as long as
+    # wide). Measured outlines are nearly all widest at the bottom, cones and domes alike, so "widest in its
+    # lower half" alone would make nine trees in ten a cone; a crown that swells above its start never is one.
+    swells = prof[:, 2:].max(axis=1) > prof[:, :2].max(axis=1)
+    kind = np.where((vk == VEG_CONE) & ~swells, CONE, ROUND).astype(np.uint8)
     kind[(vk == VEG_BRUSH) | (h <= LOW_TREE_M)] = MOUND
     return kind
 
@@ -168,38 +225,71 @@ def point_in_ring(e, n, ring):
 
 
 class Trees:
-    """A veg_shapes.py output folder, read."""
+    """The vegetation step's output, read: one veg_shapes.py folder (veg.json,
+    shapes.bin), or a folder of tiles (tiles.json, written by run_veg_tiled).
+    `recs` [n, 12] are shapes.bin's records, `e`, `n` their feet in UTM zone
+    `zone`."""
 
-    def __init__(self, folder):
+    def __init__(self, folder, zone=None, south=None):
         d = self.dir = Path(folder)
+        self.seconds = 0.0
+        parts = []
+        if (d / 'tiles.json').exists():
+            idx = json.loads((d / 'tiles.json').read_text())
+            zone = int(idx['zone']) if zone is None else zone
+            south = bool(idx['south']) if south is None else south
+            for t in idx['tiles']:
+                recs, e, n, secs = self._one(d / t['dir'], zone, south)
+                x0, y0, x1, y1 = t['core']                       # each tree belongs to the tile its foot is in
+                k = (e >= x0) & (e < x1) & (n >= y0) & (n < y1)
+                parts.append((recs[k], e[k], n[k]))
+                self.seconds += secs
+            self.tiles = len(idx['tiles'])
+        else:
+            recs, e, n, secs = self._one(d, zone, south)
+            parts.append((recs, e, n))
+            self.seconds, self.tiles = secs, 1
+        self.zone, self.south = self._zone
+        self.recs = np.concatenate([p[0] for p in parts]) if parts else np.zeros((0, 12), np.float32)
+        self.e = np.concatenate([p[1] for p in parts]) if parts else np.zeros(0)
+        self.n = np.concatenate([p[2] for p in parts]) if parts else np.zeros(0)
+
+    def _one(self, d, zone, south):
+        """(records, e, n, seconds) of one veg_shapes.py folder, in UTM `zone`
+        (None: the folder's own). The veg frame is a tangent plane at its
+        origin, metres east / north; veg_shapes.Frame has the exact map back."""
+        import veg_shapes as vs
+        import route_cost as rc
         if not (d / 'veg.json').exists() or not (d / 'shapes.bin').exists():
             raise RuntimeError("no veg.json / shapes.bin in the trees folder")
-        self.meta = m = json.loads((d / 'veg.json').read_text())
+        m = json.loads((d / 'veg.json').read_text())
         raw = np.fromfile(d / 'shapes.bin', '<f4')
         rec = int((m.get('shapes') or {}).get('record') or 48) // 4
         if rec < 12 or len(raw) % rec:
             raise RuntimeError("shapes.bin is not version 2 (48-byte records)")
-        self.recs = raw.reshape(-1, rec)[:, :12]
-        st = m.get('stats') or {}
-        self.zone, self.south = int(st.get('utm_zone') or 0), bool(st.get('south'))
-        self.seconds = st.get('seconds')
+        recs = raw.reshape(-1, rec)[:, :12]
+        st, o = m.get('stats') or {}, m['origin']
+        vzone = int(st.get('utm_zone') or rc.et().utm_zone_for(o['lon']))
+        vsouth = bool(st.get('south')) if 'south' in st else float(o['lat']) < 0
+        if zone is None:
+            zone, south = vzone, vsouth
+        self._zone = (int(zone), bool(south))
+        x, y = recs[:, 0].astype(np.float64), recs[:, 1].astype(np.float64)
+        if not len(x):
+            return recs, x, y, float(st.get('seconds') or 0)
+        e0, n0 = rc.lonlat_to_xy(float(o['lon']), float(o['lat']), vzone)
+        f = vs.Frame(vzone, vsouth, e0, n0, float(o.get('h', 0.0)))
+        pad = 10.0
+        f.fit_inverse((e0 + x.min() - pad, n0 + y.min() - pad, e0 + x.max() + pad, n0 + y.max() + pad))
+        e, n = f.to_utm(x, y)
+        if (vzone, vsouth) != (int(zone), bool(south)):          # the export's zone is another one (an area on a zone line)
+            lon, lat = rc.xy_to_lonlat(e, n, vzone, vsouth)
+            en = np.array([rc.lonlat_to_xy(a, b, int(zone)) for a, b in zip(lon, lat)], np.float64)
+            e, n = en[:, 0], en[:, 1]
+        return recs, e, n, float(st.get('seconds') or 0)
 
     def utm(self):
-        """The records' feet in UTM (the veg frame is a tangent plane at its
-        origin: metres east / north; veg_shapes.Frame has the exact map back)."""
-        import veg_shapes as vs
-        import route_cost as rc
-        o = self.meta['origin']
-        zone = self.zone or rc.et().utm_zone_for(o['lon'])
-        e0, n0 = rc.lonlat_to_xy(float(o['lon']), float(o['lat']), zone)
-        f = vs.Frame(zone, self.south, e0, n0, float(o.get('h', 0.0)))
-        x, y = self.recs[:, 0].astype(np.float64), self.recs[:, 1].astype(np.float64)
-        if not len(x):
-            return x, y
-        pad = 10.0
-        # the frame's own inverse is fitted on a UTM box: the records' reach round the origin
-        f.fit_inverse((e0 + x.min() - pad, n0 + y.min() - pad, e0 + x.max() + pad, n0 + y.max() + pad))
-        return f.to_utm(x, y)
+        return self.e, self.n
 
     def binary(self, center_e, center_n, z_offset, dem=None, x_bins=None, y_bins=None, polygon=None, utm=None):
         """trees.bin in the viewer's frame. The foot stands on the export's
@@ -207,7 +297,7 @@ class Trees:
         one, else on the vegetation step's ground + z_offset. `polygon`: a UTM
         ring; trees whose foot is outside it are left out. Returns (bytes,
         counts {cone, round, mound, outside})."""
-        e, n = utm if utm is not None else self.utm()
+        e, n = utm if utm is not None else (self.e, self.n)
         r = self.recs
         keep = np.isfinite(e) & np.isfinite(n) & (r[:, 3] > 0) & (r[:, 4] > 0)
         outside = 0
