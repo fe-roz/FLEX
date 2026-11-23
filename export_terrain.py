@@ -2307,7 +2307,7 @@ def main():
         help='With --ridgewalk: carry the shapes of the features (ridge_shapes.bin, large for a big area) or leave them out.')
     ap.add_argument('--brush-opacity', type=float, default=None,
         help='With --ridgewalk: how strongly the brush classes lie over the hillshade in "hillshade with brush" '
-             '(tex_hsb.jpg); default 0.3.')
+             '(tex_hsb.jpg); default 0.7.')
     args = ap.parse_args()
     ridge_mode = bool(args.ridgewalk or args.ridgewalk_dir)
     if ridge_mode and (args.dem_grid or args.area_dir or args.project_terrain):

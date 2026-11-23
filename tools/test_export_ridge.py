@@ -9,7 +9,7 @@ No PDAL, no network: the ridge folder is a stand-in written here, to the contrac
   * the terrain has real holes: no triangle over a true-entrance cell (holes == 1);
   * the patches lie over the guessed cells (holes == 2), 0.08 m above the ground;
   * points and shapes are moved into the viewer's frame;
-  * "hillshade with brush" (tex_hsb.jpg, and tex_hsb_<c>_<r>.jpg when tiled): the brush classes at 30 % over the
+  * "hillshade with brush" (tex_hsb.jpg, and tex_hsb_<c>_<r>.jpg when tiled): the brush classes at 70 % over the
     hillshade, inlined as TERRAIN_HSB_B64; no tex_brush.png, no RIDGE.brush; --ridge-shapes none;
   * steep ground keeps its triangles, flat ground goes coarse;
   * --ridgewalk runs the step as a child and relays its progress;
@@ -214,19 +214,19 @@ with tempfile.TemporaryDirectory() as tmp:
     check('hillshade: the cliff shows', abs(int(ha[:, 252:260].mean()) - int(ha[:, 100:200].mean())) > 25, (ha[:, 252:260].mean(), ha[:, 100:200].mean()))
     hb = Image.open(io.BytesIO(z.read('tex_hsb.jpg')))
     check('hillshade with brush: the hillshade\'s size, in colour', hb.size == hs.size and hb.mode == 'RGB', (hb.size, hb.mode))
-    check('hillshade with brush: inlined in the single file, brush opacity in meta', base64.b64decode(hsb_const(html)) == z.read('tex_hsb.jpg') and meta.get('hillshade_brush') == {'opacity': 0.3}, meta.get('hillshade_brush'))
+    check('hillshade with brush: inlined in the single file, brush opacity in meta', base64.b64decode(hsb_const(html)) == z.read('tex_hsb.jpg') and meta.get('hillshade_brush') == {'opacity': 0.7}, meta.get('hillshade_brush'))
     hba = np.asarray(hb).astype(float)
     def block(bj, bi=15):                                # mean colour of brush block (bj, bi) there, and the hillshade's grey
         rows = slice(NY - 3 * bj - 3 + 1, NY - 3 * bj - 1); cols = slice(3 * bi + 1, 3 * bi + 2)
         return hba[rows, cols].reshape(-1, 3).mean(axis=0), float(ha[rows, cols].mean())
-    def near(bj, col, op=0.3):
+    def near(bj, col, op=0.7):
         got, g = block(bj)
         want = (1 - op) * g + op * np.array(col, float) if col else np.array([g, g, g])
         return bool(np.abs(got - want).max() < 9), (got.round(), want.round())
     for label, bj, col in (('none: the hillshade', 5, None), ('light', 15, (0xb7, 0xe4, 0xa0)), ('medium', 35, (0x5f, 0xae, 0x4f)),
                            ('dense', 55, (0x1f, 0x5f, 0x1f)), ('blank: the hillshade', 75, None)):
         okc, det = near(bj, col)
-        check(f'hillshade with brush: {label} at 30 %', okc, det)
+        check(f'hillshade with brush: {label} at 70 %', okc, det)
 
     # --brush-opacity and --ridge-shapes none
     outb, logb = run('strong.zip', ['--ridgewalk-dir', str(rdir), '--brush-opacity', '0.8', '--ridge-shapes', 'none'])
@@ -252,7 +252,7 @@ with tempfile.TemporaryDirectory() as tmp:
     t_hs = Image.open(io.BytesIO(zt.read('tex_hs_0_1.jpg'))); t_hb = Image.open(io.BytesIO(zt.read('tex_hsb_0_1.jpg')))   # the south-west tile holds the light and medium blocks
     ta = np.asarray(t_hb).astype(float); tg = np.asarray(t_hs.convert('L')).astype(float)
     r0, c0 = (NY // 2 - 3 * 15 - 2), 3 * 15 + 1                                  # brush block (15, 15) in that tile
-    want = 0.7 * tg[r0, c0] + 0.3 * np.array([0xb7, 0xe4, 0xa0], float)
+    want = 0.3 * tg[r0, c0] + 0.7 * np.array([0xb7, 0xe4, 0xa0], float)
     check('tiled: the tile is the hillshade tile with the brush on it', t_hb.size == t_hs.size and t_hb.mode == 'RGB' and np.abs(ta[r0, c0] - want).max() < 12
           and np.abs(ta[5, 5] - tg[5, 5]).max() < 6, (ta[r0, c0], want))
     import tex_tiles

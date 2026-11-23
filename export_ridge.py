@@ -45,7 +45,7 @@ FLAT_DIV = 10                     # background grid = 1/10 of the triangles (nor
 BRUSH_CLASSES = ((0.6, (0x1f, 0x5f, 0x1f)),             # dense
                  (0.3, (0x5f, 0xae, 0x4f)),             # medium
                  (0.1, (0xb7, 0xe4, 0xa0)))             # light; under 0.1 and blank: nothing
-BRUSH_OPACITY = 0.3
+BRUSH_OPACITY = 0.7
 
 
 def run_ridgewalk(out_dir, ept, bbox, polygon=None, also=(), progress=print, python=None, script=None, shapes=True):
