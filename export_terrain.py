@@ -2306,6 +2306,11 @@ def main():
     ap.add_argument('--features', default=None, metavar='FILE',
         help='Surface features to carry (the open project\'s points, lines and areas inside the area, as the Export '
              'dialog gathers them): JSON { folders, items }; written as features.json, view only in the viewer.')
+    ap.add_argument('--trees', action='store_true',
+        help='Trees and brush: run veg_shapes.py on the LiDAR of the area and carry one simple solid a tree or bush '
+             '(trees.bin; export_trees.py). Needs a point cloud (--ept).')
+    ap.add_argument('--trees-dir', default=None, metavar='DIR',
+        help='With or without --trees: use this already computed vegetation folder (veg_shapes.py --out DIR).')
     ap.add_argument('--ridge-shapes', default='all', choices=['all', 'none'],
         help='With --ridgewalk: carry the shapes of the features (ridge_shapes.bin, large for a big area) or leave them out.')
     ap.add_argument('--brush-colours', default=None, metavar='LIGHT,MEDIUM,DENSE',
@@ -2360,6 +2365,35 @@ def main():
     bbox_center_lat = (minLat + maxLat) / 2
     zone = utm_zone_for(bbox_center_lon)
     south = bbox_center_lat < 0
+
+    # Trees and brush: the vegetation step runs now, before this process reads
+    # any points of its own, so the two never hold the cloud at the same time.
+    # It never stops the export: without it the map is made without trees.
+    # (Before the ridgewalking step, so the job's percent only goes up.)
+    trees = None
+    if (args.trees or args.trees_dir) and not args.project_terrain:
+        import export_trees
+        trees_dir, trees_tmp = args.trees_dir, None
+        try:
+            if not trees_dir:
+                if not args.ept:
+                    raise RuntimeError("it needs a point cloud (--ept)")
+                trees_tmp = tempfile.TemporaryDirectory(prefix='flex_trees_')
+                trees_dir = trees_tmp.name
+                print("[1/7] Trees 0% starting (the returns are read once more, for the vegetation)", flush=True)
+                t_rect = utm_rect_covering(args.bbox, zone, 1.0)
+                t_poly = polygon_to_utm(poly_ll, zone) if poly_ll is not None else None
+                export_trees.run_veg_tiled(trees_dir, args.ept, t_rect, zone, south, polygon=t_poly, also=args.also_ept,
+                                           progress=lambda m: print(f"[1/7] {m}", flush=True))
+            trees = export_trees.Trees(trees_dir, zone, south)
+            trees_utm = trees.utm()
+            print(f"[1/7] Trees 100% {len(trees.recs):,} shapes from the vegetation step"
+                  + (f" ({trees.seconds:.0f} s in {trees.tiles} tile{'s' if trees.tiles != 1 else ''})" if trees.seconds else ''))
+        except (Exception, SystemExit) as e:
+            print(f"[1/7] WARNING: trees and brush left out ({e})")
+            trees = None
+        if trees_tmp is not None:
+            trees_tmp.cleanup()
 
     # V2 - Ridgewalking: the step runs first (its own read of the returns, with
     # flight-pass ids); its grid, cell and zone are then the export's.
@@ -2560,6 +2594,14 @@ def main():
                                            y_bins[:-1] + args.resolution / 2)
             covered_m2 = float((~drop & cells_in).sum()) * args.resolution ** 2
             del cells_in
+        # Trees and brush in the viewer's frame, each foot on this export's own ground (export_trees.py)
+        trees_bytes = trees_counts = None
+        if trees is not None:
+            try:
+                trees_bytes, trees_counts = trees.binary(utm_center_e, utm_center_n, FLEX_PC_Z_OFFSET, dem=dem, x_bins=x_bins, y_bins=y_bins,
+                                                         polygon=poly_utm, utm=trees_utm)
+            except Exception as e:
+                print(f"[2/7] WARNING: trees and brush left out ({e})")
         # The frame every texture is resampled into -- exactly the span
         # compute_uvs() maps the mesh onto.
         grid = UtmGrid(x_bins[0], y_bins[0], x_bins[-1], y_bins[-1], zone, south)
@@ -2891,11 +2933,27 @@ def main():
                 ridge_json = json.dumps(export_ridge.ridge_object(ridge.meta, rfiles, data=rfiles), separators=(',', ':'))
                 print(f"[6/7] Ridge files: " + ', '.join(f"{n} {len(b) // 1024} KB" for n, b in rfiles.items()))
 
+            # Trees and brush (export_trees.py): trees.bin, one simple solid a tree or bush
+            trees_json = None
+            if trees_bytes is not None and trees_counts and len(trees_bytes) > 8:
+                import export_trees
+                tn = (len(trees_bytes) - 8) // export_trees.RECORD
+                tdetail = export_trees.detail_for(tn)
+                zf.writestr(zipfile.ZipInfo('trees.bin'), trees_bytes, compress_type=zipfile.ZIP_DEFLATED)
+                caves_meta_trees = {'count': tn, 'detail': tdetail, **{k: trees_counts[k] for k in ('cone', 'round', 'mound')}}
+                zf.writestr('trees.json', json.dumps({'version': 1, **caves_meta_trees, 'outside': trees_counts['outside'],
+                                                      'viewer': export_trees.trees_object(tn, tdetail)}, separators=(',', ':')))
+                trees_json = json.dumps(export_trees.trees_object(tn, tdetail, data=trees_bytes), separators=(',', ':'))
+                print(f"[6/7] Trees and brush: {tn:,} ({trees_counts['cone']:,} cones, {trees_counts['round']:,} round crowns, "
+                      f"{trees_counts['mound']:,} low mounds"
+                      + (f"; {trees_counts['outside']:,} outside the polygon left out" if trees_counts['outside'] else '')
+                      + f"), trees.bin {len(trees_bytes) // 1024} KB, detail {tdetail}")
+
             # Viewer HTML: fully self-contained (Three.js + GLB + textures + caves all inline)
             inline_html = build_inline_viewer(
                 glb_path, tex_b64, caves_out, viewer_libs,
                 progress=lambda m: print(f"[6/7] {m}"),
-                hs_b64=hs_b64, walls_bytes=walls_bytes, docs_json=docs_json, ridge_json=ridge_json, hsb_b64=hsb_b64, features_json=features_json)
+                hs_b64=hs_b64, walls_bytes=walls_bytes, docs_json=docs_json, ridge_json=ridge_json, hsb_b64=hsb_b64, features_json=features_json, trees_json=trees_json)
             zf.writestr('viewer.html', inline_html.encode('utf-8'))
 
             # serve.bat (Windows) — double-click to start local HTTP server

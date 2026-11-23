@@ -297,7 +297,8 @@ def viewer_for(i):
              .replace('"PLACEHOLDER_WALLS_B64"', '"walls.bin"' if has('walls.bin') else '"PLACEHOLDER_WALLS_B64"')
              .replace('PLACEHOLDER_CAVES_JSON', 'ffSidecarJson("caves.json")')
              .replace('PLACEHOLDER_RIDGE_JSON', ridge_for(has))
-             .replace('PLACEHOLDER_FEATURES_JSON', '"features.json"' if has('features.json') else 'null'))
+             .replace('PLACEHOLDER_FEATURES_JSON', '"features.json"' if has('features.json') else 'null')
+             .replace('PLACEHOLDER_TREES_JSON', '(ffSidecarJson("trees.json").viewer || null)' if has('trees.bin') and has('trees.json') else 'null'))
 
 def ridge_for(has):
     # as MainActivity.ridgeFor: the ridgewalking files by name, or null

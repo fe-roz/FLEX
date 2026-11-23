@@ -776,6 +776,7 @@ function handleExportTerrain(req, res) {
             ridge_shapes      = 'all',       // with ridgewalk: 'none' leaves the shapes of the features out
             brush_opacity     = null,        // with ridgewalk: 0..1, how strongly the brush lies over the hillshade
             ridgewalk         = false,       // V2 - Ridgewalking: the ridge step on the LiDAR, its ground as the terrain (export_ridge.py)
+            trees             = false,       // Trees and brush: the vegetation step on the LiDAR, one simple solid a tree (export_trees.py)
         } = params;
         const hsMode  = ['lidar', 'dem', 'url', 'none', 'layer'].includes(hillshade_mode) ? hillshade_mode : 'lidar';
         // Map terrain: heights FLEX sampled from its own 3D terrain on a lon/lat
@@ -869,6 +870,7 @@ function handleExportTerrain(req, res) {
                 demFiles.push(ff);                  // (cleaned up with the other temporary files when the job ends)
             } catch (e) { _exportJobs[jobId].progress.push('⚠ Surface features left out: ' + (e.message || e)); }
         }
+        if (trees === true && !demGrid) args.push('--trees');
         if (ridgewalk === true && !demGrid) {
             args.push('--ridgewalk');
             if (ridge_shapes === 'none') args.push('--ridge-shapes', 'none');
@@ -944,7 +946,9 @@ function exportPct(job) {
     let pct = 5;
     const step = /\[(\d)(b?)\/\d\]/.exec(last);
     const ridge = /^\[1\/7\] Ridgewalking (\d+)%/.exec(last);       // the ridge step's own share: 5 to 40
+    const trees = /^\[1\/7\] Trees (\d+)%/.exec(last);              // the vegetation step (trees and brush), before it: 2 to 5
     if (ridge) pct = 5 + Math.round(Math.min(100, +ridge[1]) * 0.35);
+    else if (trees) pct = 2 + Math.round(Math.min(100, +trees[1]) * 0.03);
     else if (step && PCT[step[1] + step[2]] !== undefined) pct = PCT[step[1] + step[2]];
     else if (last.includes('Building CSF')) pct = 40;
     else if (last.includes('Triangul')) pct = 55;
