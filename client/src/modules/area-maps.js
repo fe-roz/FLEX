@@ -22,49 +22,73 @@
     { id: 'hillshade', result: 'ground', name: 'LiDAR hillshade', show: false, alpha: 0.7, scale: 1, unit: '', step: 0.01 },
     { id: 'voids', result: 'bush', name: 'Below ground (voids) (beta)', show: false, alpha: 1, scale: 1, unit: 'm', step: 0.1 },
   ];
-  // Presets: stops [pos, 'RRGGBB', alpha 0..1]; the first is each map's default.
-  const PRESETS = {
-    brush: [
-      { id: 'green', name: 'Clear to dark green', stops: [[0, '0b3d0b', 0], [1, '0b3d0b', 1]] },
-      { id: 'yr', name: 'Yellow to red', stops: [[0, 'ffe45c', 0], [0.15, 'ffd23f', 0.55], [0.6, 'f07c22', 0.85], [1, 'b3170f', 1]] },
-      { id: 'viridis', name: 'Viridis', stops: [[0, '440154', 0], [0.1, '440154', 0.7], [0.4, '31688e', 0.85], [0.7, '35b779', 0.95], [1, 'fde725', 1]] },
-      { id: 'greys', name: 'Greys', stops: [[0, 'ffffff', 0], [1, '111111', 1]] },
-    ],
-    slope: [
-      { id: 'gyr', name: 'Green, yellow, red; cliffs purple', stops: [[0, '2e9b4a', 0.15], [0.3, 'f2e14c', 0.6], [0.6, 'e0402a', 0.85], [0.64, '8a2be2', 1], [1, '5a0f8a', 1]] },
-      { id: 'greys', name: 'Greys', stops: [[0, 'ffffff', 0], [1, '000000', 1]] },
-    ],
-    hillshade: [
-      { id: 'grey', name: 'Classic grey', stops: [[0, '000000', 1], [1, 'ffffff', 1]] },
-      { id: 'warm', name: 'Warm', stops: [[0, '2b1a0e', 1], [0.6, 'b88a5a', 1], [1, 'fff1d6', 1]] },
-      { id: 'contrast', name: 'High contrast', stops: [[0, '000000', 1], [0.45, '3a3a3a', 1], [0.7, 'c8c8c8', 1], [1, 'ffffff', 1]] },
-    ],
-    voids: [
-      { id: 'blues', name: 'Blues', stops: [[0, '9ecae1', 0.6], [0.5, '3182bd', 0.9], [1, '08306b', 1]] },
-      { id: 'magenta', name: 'Magenta', stops: [[0, 'f7a1d8', 0.6], [1, '7a0177', 1]] },
-    ],
+  // Ramps: stops [pos 0..1 over the chosen range, 'RRGGBB', alpha 0..1]. Every ramp is offered for every map
+  // ('classes' only where the map has cut-offs: brush). 'custom' = the two colour pickers.
+  const CT = d => d / 70;          // the CalTopo-style slope ramp is laid out in degrees over 0-70
+  const RAMPS = [
+    { id: 'classes', name: 'None, light, medium, dense (green)', classes: true },
+    { id: 'caltopo', name: 'Slope angle (CalTopo style)', stops: [[0, 'ffff00', 0], [CT(27), 'ffff00', 0], [CT(27), 'ffe600', 0.9], [CT(30), 'ffe600', 0.9], [CT(30), 'ff9900', 0.9], [CT(35), 'ff9900', 0.9],
+      [CT(35), 'ff1a00', 0.9], [CT(45), 'ff1a00', 0.9], [CT(45), 'a020f0', 0.9], [CT(50), 'a020f0', 0.9], [CT(50), '1f4fff', 0.9], [CT(60), '1f4fff', 0.9], [CT(60), '000000', 0.95], [1, '000000', 0.95]] },
+    { id: 'bw', name: 'Black to white', stops: [[0, '000000', 1], [1, 'ffffff', 1]] },
+    { id: 'green', name: 'Clear to dark green', stops: [[0, '0b3d0b', 0], [1, '0b3d0b', 1]] },
+    { id: 'viridis', name: 'Viridis', stops: [[0, '440154', 1], [0.25, '3b528b', 1], [0.5, '21918c', 1], [0.75, '5ec962', 1], [1, 'fde725', 1]] },
+    { id: 'magma', name: 'Magma', stops: [[0, '000004', 1], [0.25, '51127c', 1], [0.5, 'b73779', 1], [0.75, 'fc8961', 1], [1, 'fcfdbf', 1]] },
+    { id: 'yr', name: 'Yellow to red', stops: [[0, 'ffe45c', 0], [0.15, 'ffd23f', 0.55], [0.6, 'f07c22', 0.85], [1, 'b3170f', 1]] },
+    { id: 'gyr', name: 'Green, yellow, red', stops: [[0, '2e9b4a', 0.3], [0.5, 'f2e14c', 0.7], [1, 'e0402a', 0.95]] },
+    { id: 'blues', name: 'Blues', stops: [[0, 'deebf7', 0.6], [0.5, '3182bd', 0.9], [1, '08306b', 1]] },
+    { id: 'greys', name: 'Greys', stops: [[0, 'ffffff', 0], [1, '111111', 1]] },
+    { id: 'warm', name: 'Warm', stops: [[0, '2b1a0e', 1], [0.6, 'b88a5a', 1], [1, 'fff1d6', 1]] },
+    { id: 'contrast', name: 'High contrast grey', stops: [[0, '000000', 1], [0.45, '3a3a3a', 1], [0.7, 'c8c8c8', 1], [1, 'ffffff', 1]] },
+  ];
+  const CLASS_COL = [['ffffff', 0], ['b7e4a0', 0.55], ['5fae4f', 0.8], ['1f5f1f', 1]];     // none (clear), light, medium, dense
+  const DEF = {
+    brush: { preset: 'classes', lo: 0, hi: 1, cuts: [0.1, 0.3, 0.6] },
+    slope: { preset: 'caltopo', lo: 0, hi: 70 },
+    hillshade: { preset: 'bw', lo: 0, hi: 1 },
+    voids: { preset: 'blues', lo: 1, hi: 16 },
   };
-  // Slope's default range 0-70 deg puts 45 deg at 0.64 of the ramp: the purple cliffs start there.
-  const DEF_RANGE = { slope: [0, 70] };
+  const PRESETS = {};     // per map, for the dialog and the tests
+  MAPS.forEach(M => { PRESETS[M.id] = RAMPS.filter(r => !r.classes || M.id === 'brush'); });
 
   // ── Pure ──
   const hx2 = a => Math.max(0, Math.min(255, Math.round(a * 255))).toString(16).padStart(2, '0');
-  /** Preset stops → the server's ramp string "<pos>:<RRGGBBAA>_…". */
-  function rampOf(stops) { return stops.map(s => String(+(+s[0]).toFixed(3)) + ':' + s[1] + hx2(s[2])).join('_'); }
-  function presetOf(map, id) { const P = PRESETS[map] || []; return P.find(p => p.id === id) || P[0]; }
-  /** The default colours of a map (from its info: suggest). */
+  const hex6 = h => String(h || '').replace(/^#/, '').toLowerCase();
+  /** Stops → the server's ramp string "<pos>:<RRGGBBAA>_…". */
+  function rampOf(stops) { return stops.map(s => String(+(+s[0]).toFixed(3)) + ':' + hex6(s[1]) + hx2(s[2])).join('_'); }
+  function presetOf(map, id) { const P = PRESETS[map] || RAMPS; return P.find(p => p.id === id) || P.find(p => p.id === (DEF[map] || {}).preset) || P[0]; }
+  /** The default colours of a map. */
   function defaults(map, info) {
-    const r = DEF_RANGE[map] || (info && Array.isArray(info.suggest) ? info.suggest : [0, 1]);
-    return { preset: (PRESETS[map] || [{}])[0].id, lo: +r[0], hi: +r[1] };
+    const d = Object.assign({}, DEF[map] || { preset: 'bw', lo: 0, hi: 1 });
+    if (map === 'brush' && info && Array.isArray(info.cuts) && info.cuts.length === 3) d.cuts = info.cuts.slice();
+    if (d.cuts) d.cuts = d.cuts.slice();
+    return d;
+  }
+  /** The stops colours c stand for (classes from the cut-offs; custom from the two pickers). */
+  function stopsOf(map, c) {
+    if (c.preset === 'custom') return [[0, hex6(c.start || '#ffffff'), c.sa == null ? 1 : +c.sa], [1, hex6(c.end || '#000000'), c.ea == null ? 1 : +c.ea]];
+    const p = presetOf(map, c.preset);
+    if (p.classes) {
+      const span = (+c.hi - +c.lo) || 1, cuts = (c.cuts || DEF.brush.cuts).map(v => Math.max(0, Math.min(1, (v - c.lo) / span)));
+      const st = [[0, CLASS_COL[0][0], CLASS_COL[0][1]]];
+      cuts.forEach((t, i) => { st.push([t, CLASS_COL[i][0], CLASS_COL[i][1]], [t, CLASS_COL[i + 1][0], CLASS_COL[i + 1][1]]); });
+      st.push([1, CLASS_COL[3][0], CLASS_COL[3][1]]);
+      for (let i = 1; i < st.length; i++) if (st[i][0] < st[i - 1][0]) st[i][0] = st[i - 1][0];
+      return st;
+    }
+    return p.stops;
+  }
+  /** The first and last colour of colours c (what the pickers show). */
+  function endsOf(map, c) {
+    const st = stopsOf(map, c), a = st[0], b = st[st.length - 1];
+    return { start: '#' + a[1], sa: a[2], end: '#' + b[1], ea: b[2] };
   }
   /** Tile URL template for an area's map with colours c. */
   function urlOf(areaId, map, c, ver) {
-    const p = presetOf(map, c.preset);
     const num = v => String(+(+v).toFixed(4));
-    return '/api/areas/tiles/' + encodeURIComponent(areaId) + '/' + map + '/{z}/{x}/{y}.png?ramp=' + rampOf(p.stops) + '&lo=' + num(c.lo) + '&hi=' + num(c.hi) + (ver ? '&v=' + ver : '');
+    return '/api/areas/tiles/' + encodeURIComponent(areaId) + '/' + map + '/{z}/{x}/{y}.png?ramp=' + rampOf(stopsOf(map, c)) + '&lo=' + num(c.lo) + '&hi=' + num(c.hi) + (ver ? '&v=' + ver : '');
   }
   const layerId = (areaId, map) => 'am-' + areaId + '-' + map;
-  const pure = { MAPS, PRESETS, rampOf, presetOf, defaults, urlOf, layerId };
+  const pure = { MAPS, RAMPS, PRESETS, DEF, rampOf, presetOf, defaults, stopsOf, endsOf, urlOf, layerId };
   if (typeof module !== 'undefined' && module.exports) module.exports = pure;
   if (!root || !root.document) return;
 
@@ -81,7 +105,12 @@
   }
   function setColours(id, c) {
     const all = allColours();
-    if (c) all[id] = { preset: c.preset, lo: +c.lo, hi: +c.hi }; else delete all[id];
+    if (c) {
+      const o = { preset: c.preset, lo: +c.lo, hi: +c.hi };
+      if (c.preset === 'custom') Object.assign(o, { start: c.start, sa: +c.sa, end: c.end, ea: +c.ea });
+      if (Array.isArray(c.cuts)) o.cuts = c.cuts.map(Number);
+      all[id] = o;
+    } else delete all[id];
     try { localStorage.setItem(CK, JSON.stringify(all)); } catch (_) {}
     build(); push();
   }
@@ -144,20 +173,26 @@
 
   // ── Colours… ──
   let dlg = null;
+  const RANGE = { brush: [0, 1], slope: [0, 90], hillshade: [0, 1], voids: [0, 17] };
   function dialog(id) {
     const L = cur.find(l => l.id === id); if (!L || !L.colours) return;
     close();
     const M = MAPS.find(m => m.id === L.map), mi = L.info, c0 = colours(id);
-    let c = Object.assign({}, c0);
-    const vmin = mi.min * M.scale, vmax = mi.max * M.scale, step = M.step;
+    let c = JSON.parse(JSON.stringify(c0));
+    const R = RANGE[L.map] || [mi.min, mi.max], vmin = R[0] * M.scale, vmax = R[1] * M.scale, step = M.step;
     const fmt = v => (Math.round(v * M.scale / step) * step).toFixed(step < 1 ? (step < 0.1 ? 2 : 1) : 0);
+    const ramps = PRESETS[L.map] || RAMPS, hasCuts = L.map === 'brush';
+    const pick = (k, label) => `<label class="am-pick">${label} <input type="color" id="am-${k}"> <span class="am-dim">see-through</span> <input type="range" id="am-${k}a" min="0" max="100" step="5" title="0 = clear, 100 = solid"></label>`;
     dlg = doc.createElement('div'); dlg.className = 'pj-modal am-modal'; dlg.id = 'am-colours';
     dlg.innerHTML = `<div class="am-box" role="dialog" aria-label="Colours of ${esc(L.name)}">
       <div class="am-h"><b>Colours</b> <span class="am-dim">${esc(L.name)}</span><button type="button" class="am-x" data-a="close" aria-label="Close">×</button></div>
-      <div class="am-presets" role="radiogroup">${(PRESETS[L.map] || []).map(p => `<button type="button" class="am-pre" data-p="${p.id}" role="radio"><span class="am-strip" style="background:${grad(p.stops)}"></span><span>${esc(p.name)}</span></button>`).join('')}</div>
+      <div class="am-presets" role="radiogroup">${ramps.map(p => `<button type="button" class="am-pre" data-p="${p.id}" role="radio"><span class="am-strip" style="background:${grad(stopsOf(L.map, Object.assign({}, c, { preset: p.id })))}"></span><span>${esc(p.name)}</span></button>`).join('')}
+        <button type="button" class="am-pre" data-p="custom" role="radio"><span class="am-strip" id="am-cstrip"></span><span>Your two colours</span></button></div>
+      <div class="am-picks">${pick('start', 'Start')}${pick('end', 'End')}</div>
       <div class="am-range"><div class="am-dim">Values shown from … to … (${esc(mi.units)})</div>
         <label>From <input type="range" id="am-lo" min="${vmin}" max="${vmax}" step="${step}"> <input type="number" id="am-lon" min="${vmin}" max="${vmax}" step="${step}"> ${esc(M.unit)}</label>
         <label>To <input type="range" id="am-hi" min="${vmin}" max="${vmax}" step="${step}"> <input type="number" id="am-hin" min="${vmin}" max="${vmax}" step="${step}"> ${esc(M.unit)}</label>
+        ${hasCuts ? `<div class="am-cuts" id="am-cuts"><span class="am-dim">Light from</span> <input type="number" id="am-c0" min="0" max="100" step="1"> <span class="am-dim">medium from</span> <input type="number" id="am-c1" min="0" max="100" step="1"> <span class="am-dim">dense from</span> <input type="number" id="am-c2" min="0" max="100" step="1"> %</div>` : ''}
         <div class="am-legend"><span class="am-strip am-big"></span><div class="am-ends"><span id="am-l0"></span><span id="am-l1"></span></div></div>
       </div>
       <div class="am-btns"><button type="button" class="am-btn" data-a="reset">Reset to default</button><button type="button" class="am-btn am-ok" data-a="close">Done</button></div></div>`;
@@ -165,9 +200,14 @@
     const $ = s => dlg.querySelector(s);
     let t = null;
     const paint = () => {
-      dlg.querySelectorAll('.am-pre').forEach(b => { const on = b.dataset.p === presetOf(L.map, c.preset).id; b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on)); });
+      const pid = c.preset === 'custom' ? 'custom' : presetOf(L.map, c.preset).id;
+      dlg.querySelectorAll('.am-pre').forEach(b => { const on = b.dataset.p === pid; b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on)); });
+      const e = endsOf(L.map, c);
+      $('#am-start').value = e.start; $('#am-starta').value = Math.round(e.sa * 100); $('#am-end').value = e.end; $('#am-enda').value = Math.round(e.ea * 100);
+      $('#am-cstrip').style.background = grad(stopsOf(L.map, Object.assign({}, c, { preset: 'custom' }, c.preset === 'custom' ? {} : e)));
       $('#am-lo').value = $('#am-lon').value = fmt(c.lo); $('#am-hi').value = $('#am-hin').value = fmt(c.hi);
-      $('.am-big').style.background = grad(presetOf(L.map, c.preset).stops);
+      if (hasCuts) { const cut = c.cuts || DEF.brush.cuts; [0, 1, 2].forEach(i => { $('#am-c' + i).value = Math.round(cut[i] * 100); }); $('#am-cuts').hidden = presetOf(L.map, c.preset).classes !== true || c.preset === 'custom'; }
+      $('.am-big').style.background = grad(stopsOf(L.map, c));
       $('#am-l0').textContent = fmt(c.lo) + ' ' + M.unit; $('#am-l1').textContent = fmt(c.hi) + ' ' + M.unit;
     };
     const apply = () => { clearTimeout(t); t = setTimeout(() => setColours(id, c), 250); };
@@ -177,35 +217,53 @@
       if (k === 'lo') c.lo = Math.min(v, c.hi - gap); else c.hi = Math.max(v, c.lo + gap);
       paint(); apply();
     };
+    const setPick = () => {          // a picker moved: the ramp becomes "your two colours"
+      if (c.preset !== 'custom') { Object.assign(c, endsOf(L.map, c)); c.preset = 'custom'; }
+      c.start = $('#am-start').value; c.end = $('#am-end').value; c.sa = +$('#am-starta').value / 100; c.ea = +$('#am-enda').value / 100;
+      paint(); apply();
+    };
+    const setCut = () => {
+      const v = [0, 1, 2].map(i => Math.max(0, Math.min(100, +$('#am-c' + i).value || 0)) / 100);
+      if (!(v[0] < v[1] && v[1] < v[2])) { paint(); return; }
+      c.cuts = v; paint(); apply();
+    };
     dlg.addEventListener('click', e => {
       const b = e.target.closest('button'); if (e.target === dlg) return close(); if (!b) return;
-      if (b.dataset.p) { c.preset = b.dataset.p; paint(); apply(); }
+      if (b.dataset.p) {
+        if (b.dataset.p === 'custom') { if (c.preset !== 'custom') { Object.assign(c, endsOf(L.map, c)); c.preset = 'custom'; } }
+        else c.preset = b.dataset.p;
+        paint(); apply();
+      }
       else if (b.dataset.a === 'reset') { c = defaults(L.map, mi); paint(); clearTimeout(t); setColours(id, null); }
       else if (b.dataset.a === 'close') close();
     });
     $('#am-lo').addEventListener('input', e => setV('lo', e.target.value)); $('#am-hi').addEventListener('input', e => setV('hi', e.target.value));
     $('#am-lon').addEventListener('change', e => setV('lo', e.target.value)); $('#am-hin').addEventListener('change', e => setV('hi', e.target.value));
+    ['#am-start', '#am-end', '#am-starta', '#am-enda'].forEach(k => $(k).addEventListener('input', setPick));
+    if (hasCuts) [0, 1, 2].forEach(i => $('#am-c' + i).addEventListener('change', setCut));
     dlg.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
     paint();
   }
   function close() { if (dlg) { dlg.remove(); dlg = null; } }
   /** CSS gradient of stops over a checker (so transparency shows). */
   function grad(stops) {
-    const rgba = s => `rgba(${parseInt(s[1].slice(0, 2), 16)},${parseInt(s[1].slice(2, 4), 16)},${parseInt(s[1].slice(4, 6), 16)},${s[2]})`;
+    const rgba = s => { const h = hex6(s[1]); return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)},${s[2]})`; };
     return `linear-gradient(90deg, ${stops.map(s => rgba(s) + ' ' + Math.round(s[0] * 100) + '%').join(', ')}), repeating-conic-gradient(#bbb 0% 25%, #eee 0% 50%) 0 0 / 8px 8px`;
   }
 
   const css = doc.createElement('style');
   css.textContent = `
   .am-modal { position: fixed; inset: 0; z-index: 10050; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; }
-  .am-box { background: rgba(24,27,32,.98); color: #e8ece9; border: 1px solid rgba(255,255,255,.18); border-radius: 8px; padding: 12px 14px; width: min(340px, calc(100vw - 32px)); font-size: 12px; box-shadow: 0 8px 30px rgba(0,0,0,.5); }
+  .am-box { background: rgba(24,27,32,.98); color: #e8ece9; border: 1px solid rgba(255,255,255,.18); border-radius: 8px; padding: 12px 14px; width: min(420px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; font-size: 12px; box-shadow: 0 8px 30px rgba(0,0,0,.5); }
   .am-h { display: flex; gap: 6px; align-items: baseline; margin-bottom: 8px; } .am-h .am-dim { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .am-dim { color: rgba(255,255,255,.6); font-size: 11px; }
   .am-x { background: none; border: 0; color: rgba(255,255,255,.6); font-size: 16px; cursor: pointer; }
-  .am-presets { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+  .am-presets { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 8px; max-height: 42vh; overflow: auto; }
+  .am-picks { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; } .am-pick { display: flex; gap: 6px; align-items: center; } .am-pick input[type=color] { width: 34px; height: 20px; border: 0; padding: 0; background: none; } .am-pick input[type=range] { flex: 1; }
+  .am-cuts { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 5px 0; } .am-cuts input { width: 44px; background: rgba(255,255,255,.07); color: inherit; border: 1px solid rgba(255,255,255,.2); border-radius: 4px; padding: 1px 4px; }
   .am-pre { display: flex; gap: 8px; align-items: center; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.14); border-radius: 5px; color: inherit; padding: 4px 6px; cursor: pointer; text-align: left; font: inherit; }
   .am-pre.on { border-color: #3fae6e; background: rgba(63,174,110,.15); }
-  .am-strip { display: inline-block; width: 70px; height: 12px; border-radius: 3px; flex-shrink: 0; border: 1px solid rgba(255,255,255,.2); }
+  .am-strip { display: inline-block; width: 48px; height: 12px; border-radius: 3px; flex-shrink: 0; border: 1px solid rgba(255,255,255,.2); }
   .am-strip.am-big { width: 100%; height: 14px; display: block; }
   .am-range label { display: flex; gap: 6px; align-items: center; margin: 5px 0; } .am-range input[type=range] { flex: 1; } .am-range input[type=number] { width: 62px; background: rgba(255,255,255,.07); color: inherit; border: 1px solid rgba(255,255,255,.2); border-radius: 4px; padding: 1px 4px; }
   .am-legend { margin-top: 6px; } .am-ends { display: flex; justify-content: space-between; color: rgba(255,255,255,.6); font-size: 10.5px; }

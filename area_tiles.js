@@ -1,16 +1,20 @@
 // area_tiles.js — a processed area's maps as coloured XYZ tiles (mounted by areas_api.js under /api/areas/).
 //
-//   GET /api/areas/maps/<areaId>                                   { ok, maps: [{ id, folder, units, min, max, suggest }],
+//   GET /api/areas/maps/<areaId>                                   { ok, maps: [{ id, folder, units, min, max, suggest, cell, levels, values, cuts }],
 //                                                                    bounds: [w, s, e, n], minZoom, maxZoom, legacy: [...] }
 //   GET /api/areas/tiles/<areaId>/<map>/<z>/<x>/<y>.png?ramp=<stops>&lo=<v>&hi=<v>[&v=<ver>]   (v: the file's time, so a
 //                                                                  refreshed map is a new URL; not read here)
 //
 // The maps are the area's saved value rasters (area_maps.py): bush/brush.u8, bush/voids.u8, ground/slope.u8,
-// ground/hillshade.u8, each listed in its folder's maps.json. One byte per cell: 0 = no data, 1..255 = min..max.
+// ground/hillshade.u8, each listed in its folder's maps.json (each folder its own grid). One byte per cell: 0 = no data,
+// 1..16 = the level whose value maps.json lists (`values`); files without `values` (version 1): 1..255 over min..max.
 // Only the colours are made here, per request: `ramp` is up to MAX_STOPS stops "<pos>:<RRGGBBAA>" joined by "_"
 // (pos 0..1, increasing), linear between stops; lo / hi = the values put at 0 and 1 (default: the map's suggest).
 // Each tile pixel's centre is taken to UTM (WGS84 transverse Mercator, zone from maps.json) and the nearest cell is
-// read (zoomed out: the mean of up to 4 x 4 cells per pixel); the file is read by offset, only the rows the tile touches. Outside the grid or no data = transparent.
+// read (zoomed out: the mean of up to 4 x 4 cells per pixel; zoomed in past the cell, slope and hillshade bilinear
+// between cell centres, unless &smooth=0); the colour is taken for the VALUE (a 1024-step palette over lo..hi), so a
+// step ramp (brush classes) stays sharp. The file is read by offset, only the rows the tile touches. Outside the grid or
+// no data = transparent.
 // A new ramp is a new URL, so the browser may keep each tile for a day.
 'use strict';
 const fs = require('fs');
@@ -19,8 +23,9 @@ const zlib = require('zlib');
 
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
 const MAPS = { brush: 'bush', voids: 'bush', slope: 'ground', hillshade: 'ground' };
-const MAX_STOPS = 8, T = 256;
+const MAX_STOPS = 16, T = 256;
 const MIN_ZOOM = 11;
+const SMOOTH = new Set(['slope', 'hillshade']);     // drawn bilinear when zoomed in past the cell
 
 // ── PNG ──
 const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
@@ -41,7 +46,7 @@ const BLANK = pngRGBA(1, 1, Buffer.alloc(4));
 // ── Ramps ──
 /** "<pos>:<RRGGBBAA>_..." → [{ p, r, g, b, a }] (a 0..255) or null when anything is off. */
 function parseRamp(s) {
-  if (typeof s !== 'string' || s.length > 200) return null;
+  if (typeof s !== 'string' || s.length > 400) return null;
   const parts = s.split('_');
   if (parts.length < 2 || parts.length > MAX_STOPS) return null;
   const out = [];
@@ -68,10 +73,26 @@ function rampAt(stops, t) {
   }
   const s = stops[stops.length - 1]; return [s.r, s.g, s.b, s.a];
 }
-/** 256 × RGBA lookup for bytes: 0 transparent, 1..255 = min..max mapped through lo..hi to the ramp. */
-function lut(stops, min, max, lo, hi) {
-  const L = Buffer.alloc(256 * 4), span = hi - lo || 1e-9;
-  for (let b = 1; b < 256; b++) { const v = min + (b - 1) / 254 * (max - min), c = rampAt(stops, Math.max(0, Math.min(1, (v - lo) / span))); L[b * 4] = c[0]; L[b * 4 + 1] = c[1]; L[b * 4 + 2] = c[2]; L[b * 4 + 3] = c[3]; }
+/** The value each byte stands for (index 0 = no data): version 2 files list `values` (16 levels), version 1 files are
+ *  1..255 over min..max. */
+function valuesOf(m) {
+  const V = new Float64Array(256).fill(NaN);
+  if (Array.isArray(m.values) && m.values.length >= 2 && m.values.length <= 255 && m.values.every(Number.isFinite)) m.values.forEach((v, i) => { V[i + 1] = v; });
+  else for (let b = 1; b < 256; b++) V[b] = m.min + (b - 1) / 254 * (m.max - m.min);
+  return V;
+}
+const PAL = 1024;
+/** PAL × RGBA colours over lo..hi (value → colour: palIndex()). */
+function palette(stops, lo, hi) {
+  const L = Buffer.alloc(PAL * 4);
+  for (let i = 0; i < PAL; i++) { const c = rampAt(stops, i / (PAL - 1)); L[i * 4] = c[0]; L[i * 4 + 1] = c[1]; L[i * 4 + 2] = c[2]; L[i * 4 + 3] = c[3]; }
+  return { L, lo, span: hi - lo || 1e-9 };
+}
+const palIndex = (P, v) => Math.max(0, Math.min(PAL - 1, Math.round((v - P.lo) / P.span * (PAL - 1)))) * 4;
+/** 256 × RGBA lookup for bytes (0 transparent), for the tests and old callers. */
+function lut(stops, min, max, lo, hi, m) {
+  const V = valuesOf(m || { min, max }), P = palette(stops, lo, hi), L = Buffer.alloc(256 * 4);
+  for (let b = 1; b < 256; b++) { if (V[b] !== V[b]) continue; const q = palIndex(P, V[b]); P.L.copy(L, b * 4, q, q + 4); }
   return L;
 }
 
@@ -129,7 +150,7 @@ module.exports = function areaTiles({ root, cacheTiles = 400, openFiles = 12 }) 
     const j = mapsOf(id, MAPS[map]); if (!j) return null;
     const m = j.maps.find(x => x && x.id === map && /^[a-z]+\.u8$/.test(String(x.file)));
     if (!m || !Number.isFinite(m.min) || !Number.isFinite(m.max) || m.max <= m.min) return null;
-    return { G: j.grid, m, file: path.join(root, id, MAPS[map], m.file) };
+    return { G: j.grid, m, V: valuesOf(m), file: path.join(root, id, MAPS[map], m.file) };
   }
   function openFd(file) {
     let e = fds.get(file);
@@ -140,30 +161,40 @@ module.exports = function areaTiles({ root, cacheTiles = 400, openFiles = 12 }) 
     return e;
   }
 
-  /** The tile as RGBA pixels (Buffer T*T*4) or null when nothing in it has data. Where a pixel is wider than a cell
-   *  (zoomed out), it is the mean of k x k cells spread over the pixel (k up to 4), so patchy maps read as a density. */
-  function render(info, L, z, x, y) {
-    const { G } = info, nx = G.nx, ny = G.ny;
+  /** The tile as RGBA pixels (Buffer T*T*4) or null when nothing in it has data.
+   *  Zoomed out (a pixel wider than a cell): the mean of k x k cells spread over the pixel (k up to 4).
+   *  Zoomed in past the cell, for `smooth` maps (slope, hillshade): bilinear between the four nearest cell centres,
+   *  so close up the map is soft instead of hard squares. Otherwise the nearest cell. */
+  function render(info, P, z, x, y, smooth) {
+    const { G } = info, nx = G.nx, ny = G.ny, V = info.V;
     const e = openFd(info.file);
     if (e.size < nx * ny) throw new Error('the map file is shorter than its grid');
-    // UTM at the pixel corners (T+1)^2, exact; inside a pixel the sub-samples are interpolated between them
+    // UTM at the pixel corners (T+1)^2, exact; inside a pixel the samples are interpolated between them
     const N1 = T + 1, cu = new Float64Array(N1 * N1), cv = new Float64Array(N1 * N1);
     for (let py = 0; py <= T; py++) {
       const lat = tileLat(y + py / T, z);
       for (let px = 0; px <= T; px++) { const p = utm(tileLon(x + px / T, z), lat, G.zone, G.south); cu[py * N1 + px] = (p[0] - G.x0) / G.cell; cv[py * N1 + px] = (p[1] - G.y0) / G.cell; }
     }
-    const span = Math.hypot(cu[1] - cu[0], cv[1] - cv[0]), k = Math.max(1, Math.min(4, Math.round(span)));
-    const S = T * T * k * k, col = new Int32Array(S).fill(-1), row = new Int32Array(S);
+    const span = Math.hypot(cu[1] - cu[0], cv[1] - cv[0]), bil = smooth && span < 0.9;
+    const k = bil ? 1 : Math.max(1, Math.min(4, Math.round(span))), per = bil ? 4 : k * k;
+    const S = T * T * per, col = new Int32Array(S).fill(-1), row = new Int32Array(S), wt = new Float32Array(S);
+    const rowOf = rs => (G.row0 === 'south' ? rs : ny - 1 - rs);
     let rmin = Infinity, rmax = -1, n = 0;
+    const put = (c, rs, w) => { if (c < 0 || rs < 0 || c >= nx || rs >= ny || w <= 0) { n++; return; } const r = rowOf(rs); col[n] = c; row[n] = r; wt[n] = w; n++; if (r < rmin) rmin = r; if (r > rmax) rmax = r; };
     for (let py = 0; py < T; py++) for (let px = 0; px < T; px++) {
       const a = py * N1 + px, b = a + 1, c = a + N1, d = c + 1;
-      for (let sy = 0; sy < k; sy++) { const ty = (sy + 0.5) / k; for (let sx = 0; sx < k; sx++, n++) {
+      if (bil) {
+        const u = (cu[a] + cu[b] + cu[c] + cu[d]) / 4 - 0.5, v = (cv[a] + cv[b] + cv[c] + cv[d]) / 4 - 0.5;
+        if (u < -0.5 || v < -0.5 || u > nx - 0.5 || v > ny - 0.5) { n += 4; continue; }
+        const c0 = Math.floor(u), r0 = Math.floor(v), fx = u - c0, fy = v - r0;
+        put(c0, r0, (1 - fx) * (1 - fy)); put(c0 + 1, r0, fx * (1 - fy)); put(c0, r0 + 1, (1 - fx) * fy); put(c0 + 1, r0 + 1, fx * fy);
+        continue;
+      }
+      for (let sy = 0; sy < k; sy++) { const ty = (sy + 0.5) / k; for (let sx = 0; sx < k; sx++) {
         const tx = (sx + 0.5) / k;
         const u = (cu[a] * (1 - tx) + cu[b] * tx) * (1 - ty) + (cu[c] * (1 - tx) + cu[d] * tx) * ty;
         const v = (cv[a] * (1 - tx) + cv[b] * tx) * (1 - ty) + (cv[c] * (1 - tx) + cv[d] * tx) * ty;
-        if (u < 0 || v < 0 || u >= nx || v >= ny) continue;
-        const r = G.row0 === 'south' ? Math.floor(v) : Math.min(ny - 1, Math.floor(ny - v));
-        col[n] = Math.floor(u); row[n] = r; if (r < rmin) rmin = r; if (r > rmax) rmax = r;
+        put(Math.floor(u), Math.floor(v), 1);
       } }
     }
     if (rmax < 0) return null;
@@ -172,14 +203,14 @@ module.exports = function areaTiles({ root, cacheTiles = 400, openFiles = 12 }) 
     for (let q = 0; q < S; q++) if (col[q] >= 0) { const i = row[q] - rmin; if (col[q] < lo[i]) lo[i] = col[q]; if (col[q] > hi[i]) hi[i] = col[q]; }
     const bufs = new Array(nr);
     for (let i = 0; i < nr; i++) if (hi[i] >= 0) { const len = hi[i] - lo[i] + 1, bb = Buffer.alloc(len); fs.readSync(e.fd, bb, 0, len, (rmin + i) * nx + lo[i]); bufs[i] = bb; }
-    const out = Buffer.alloc(T * T * 4), kk = k * k; let any = false;
+    const out = Buffer.alloc(T * T * 4); let any = false;
     for (let p = 0; p < T * T; p++) {
-      let sum = 0, cnt = 0;
-      for (let q = p * kk, qe = q + kk; q < qe; q++) { if (col[q] < 0) continue; const i = row[q] - rmin, v = bufs[i][col[q] - lo[i]]; if (v) { sum += v; cnt++; } }
-      if (!cnt) continue;
-      const o = p * 4, idx = Math.max(1, Math.min(255, Math.round(sum / cnt))) * 4;
-      out[o] = L[idx]; out[o + 1] = L[idx + 1]; out[o + 2] = L[idx + 2]; out[o + 3] = L[idx + 3];
-      if (L[idx + 3]) any = true;
+      let sum = 0, ws = 0;
+      for (let q = p * per, qe = q + per; q < qe; q++) { if (col[q] < 0) continue; const i = row[q] - rmin, b = bufs[i][col[q] - lo[i]]; if (b) { const val = V[b]; if (val === val) { sum += val * wt[q]; ws += wt[q]; } } }
+      if (!(ws > 0)) continue;
+      const o = p * 4, idx = palIndex(P, sum / ws);
+      out[o] = P.L[idx]; out[o + 1] = P.L[idx + 1]; out[o + 2] = P.L[idx + 2]; out[o + 3] = P.L[idx + 3];
+      if (P.L[idx + 3]) any = true;
     }
     return any ? out : null;
   }
@@ -201,11 +232,11 @@ module.exports = function areaTiles({ root, cacheTiles = 400, openFiles = 12 }) 
     const lo = num(q.lo, +sug[0]), hi = num(q.hi, +sug[1]);
     if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return json(res, { ok: false, error: 'bad range' }, 400);
     let mt = 0; try { mt = fs.statSync(info.file).mtimeMs; } catch (_) { return json(res, { ok: false, error: 'not found' }, 404); }
-    const key = [m[1], m[2], z, x, y, rampString(stops), lo, hi, mt].join('|');
+    const key = [m[1], m[2], z, x, y, rampString(stops), lo, hi, mt, q.smooth === '0' ? 0 : 1].join('|');
     let png = tiles.get(key);
     if (png) { tiles.delete(key); tiles.set(key, png); }
     else {
-      try { const px = render(info, lut(stops, info.m.min, info.m.max, lo, hi), z, x, y); png = px ? pngRGBA(T, T, px) : BLANK; }
+      try { const px = render(info, palette(stops, lo, hi), z, x, y, SMOOTH.has(m[2]) && q.smooth !== '0'); png = px ? pngRGBA(T, T, px) : BLANK; }
       catch (e) { return json(res, { ok: false, error: e.message }, 500); }
       tiles.set(key, png); while (tiles.size > cacheTiles) tiles.delete(tiles.keys().next().value);
     }
@@ -216,13 +247,16 @@ module.exports = function areaTiles({ root, cacheTiles = 400, openFiles = 12 }) 
   function maps(res, id) {
     if (!ID_RE.test(String(id))) return json(res, { ok: false, error: 'not found' }, 404);
     const out = [];
-    let G = null;
+    let G = null, cellMin = Infinity;
     for (const map of Object.keys(MAPS)) {
       const info = mapInfo(id, map); if (!info) continue;
       try { if (fs.statSync(info.file).size < info.G.nx * info.G.ny) continue; } catch (_) { continue; }
       G = G || info.G;
       let ver = 0; try { ver = Math.round(fs.statSync(info.file).mtimeMs / 1000); } catch (_) {}
-      out.push({ id: map, ver, folder: MAPS[map], units: String(info.m.units || ''), min: info.m.min, max: info.m.max, suggest: Array.isArray(info.m.suggest) ? info.m.suggest : [info.m.min, info.m.max] });
+      const M = info.m;
+      out.push({ id: map, ver, folder: MAPS[map], units: String(M.units || ''), min: M.min, max: M.max, suggest: Array.isArray(M.suggest) ? M.suggest : [M.min, M.max],
+        cell: info.G.cell, levels: Array.isArray(M.values) ? M.values.length : 255, values: Array.isArray(M.values) ? M.values : null, cuts: Array.isArray(M.cuts) ? M.cuts : null });
+      cellMin = Math.min(cellMin, info.G.cell);
     }
     const r = { ok: true, maps: out, legacy: [] };
     if (G) {
@@ -230,7 +264,7 @@ module.exports = function areaTiles({ root, cacheTiles = 400, openFiles = 12 }) 
       r.bounds = [Math.min(...cs.map(p => p[0])), Math.min(...cs.map(p => p[1])), Math.max(...cs.map(p => p[0])), Math.max(...cs.map(p => p[1]))];
       const lat = (r.bounds[1] + r.bounds[3]) / 2;
       r.minZoom = MIN_ZOOM;
-      r.maxZoom = Math.max(MIN_ZOOM + 1, Math.min(21, Math.ceil(Math.log2(156543.03 * Math.cos(lat * Math.PI / 180) / G.cell))));
+      r.maxZoom = Math.max(MIN_ZOOM + 1, Math.min(22, 1 + Math.ceil(Math.log2(156543.03 * Math.cos(lat * Math.PI / 180) / cellMin))));   // one past a pixel per cell: soft close up
     }
     // an area made before the value rasters: the bushwhack pngs as plain images
     if (!out.some(x => x.folder === 'bush')) {
@@ -245,4 +279,4 @@ module.exports = function areaTiles({ root, cacheTiles = 400, openFiles = 12 }) 
   return { tile, maps, render, mapInfo };
 };
 const DEFAULT_RAMP = parseRamp('0:0b3d0b00_1:0b3d0bff');
-Object.assign(module.exports, { parseRamp, rampString, rampAt, lut, utm, lonlatOf, cellOf, pngRGBA, MAPS, MAX_STOPS });
+Object.assign(module.exports, { parseRamp, rampString, rampAt, lut, valuesOf, palette, utm, lonlatOf, cellOf, pngRGBA, MAPS, MAX_STOPS });
