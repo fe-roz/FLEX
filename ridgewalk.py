@@ -4,7 +4,7 @@ V2 - Ridgewalking, the step: what the LiDAR returns say is BELOW the ground.
 
     python ridgewalk.py --ept URL [--also-ept URL ...] --bbox W S E N [--polygon ring.json] --out DIR
                         [--tile 96] [--margin 12] [--workers N] [--no-shapes] [--cell 0.3]
-    python ridgewalk.py --npz FILE --out DIR     points from a file (x, y, z, c, psid; metres): tests
+    python ridgewalk.py --npz FILE --out DIR     points from a file (x, y, z, c, psid, and rn / nr when known; metres): tests
     python ridgewalk.py --demo DIR               a made-up scene, no PDAL, no network
 
 The method (numbers in PARAMS):
@@ -45,7 +45,10 @@ import numpy as np
 PARAMS = dict(
     cell=0.3,            # m, the grid
     lid_width=2.0,       # m, the closing
-    below=0.5,           # m under the lid, at right angles
+    below=0.5,           # m under the lid, at right angles: the candidates
+    measure='normal',    # a candidate is below ground when it lies behind the local face
+    min_behind=1.0,      # m behind the face
+    face_radius=[2.5, 1.5, 4.0], face_min=12, face_sheet=0.35, face_rms=0.30, face_passes=4, face_smooth=10, face_cap=150,
     max_depth=35.0,      # m
     link=1.5,            # m, returns closer than this are one group
     lone_far=5.0,        # m, a lone return farther than this from any other = likely noise
@@ -210,32 +213,34 @@ def load_tile(C, t):
     p = pfile(C, t)
     if os.path.exists(p):
         with np.load(p) as Z:
-            d = (Z['x'], Z['y'], Z['z'], Z['c'], Z['psid'])
+            d = (Z['x'], Z['y'], Z['z'], Z['c'], Z['psid'], Z['last'].astype(bool) if 'last' in Z.files else np.ones(len(Z['x']), bool))
     else:
-        d = (np.zeros(0, 'f4'), np.zeros(0, 'f4'), np.zeros(0, 'f4'), np.zeros(0, 'u1'), np.zeros(0, 'i4'))
+        d = (np.zeros(0, 'f4'), np.zeros(0, 'f4'), np.zeros(0, 'f4'), np.zeros(0, 'u1'), np.zeros(0, 'i4'), np.zeros(0, bool))
     if len(_cache) >= 12:
         _cache.pop(next(iter(_cache)))
     _cache[t] = d
     return d
 
 
-def load_box(C, x0, y0, x1, y1, ground_only=False):
-    """x, y, z (f8), class, pass of the returns in a box (metres from the origin), from the tile files."""
+def load_box(C, x0, y0, x1, y1, ground_only=False, core=None):
+    """x, y, z (f8), class, pass, last-return flag of the returns in a box (metres from the origin), from the tile
+    files; with core (a tile) a seventh array says which returns are that tile's own."""
     Tm = C['tile_c'] * C['cell']; out = []
     for tj in range(max(0, int(y0 // Tm)), int(y1 // Tm) + 1):
         for ti in range(max(0, int(x0 // Tm)), int(x1 // Tm) + 1):
-            x, y, z, c, ps = load_tile(C, (tj, ti))
+            x, y, z, c, ps, la = load_tile(C, (tj, ti))
             if not len(x):
                 continue
             m = (x >= x0) & (x < x1) & (y >= y0) & (y < y1)
             if ground_only:
                 m &= c == 2
             if m.any():
-                out.append((x[m], y[m], z[m], c[m], ps[m]))
+                out.append((x[m], y[m], z[m], c[m], ps[m], la[m], np.full(int(m.sum()), (tj, ti) == core)))
     if not out:
-        return np.zeros(0), np.zeros(0), np.zeros(0), np.zeros(0, 'u1'), np.zeros(0, 'i4')
-    return (np.concatenate([o[0] for o in out]).astype('f8'), np.concatenate([o[1] for o in out]).astype('f8'),
-            np.concatenate([o[2] for o in out]).astype('f8'), np.concatenate([o[3] for o in out]), np.concatenate([o[4] for o in out]))
+        r = (np.zeros(0), np.zeros(0), np.zeros(0), np.zeros(0, 'u1'), np.zeros(0, 'i4'), np.zeros(0, bool), np.zeros(0, bool))
+    else:
+        r = tuple(np.concatenate([o[k] for o in out]).astype('f8') if k < 3 else np.concatenate([o[k] for o in out]) for k in range(7))
+    return r if core is not None else r[:6]
 
 
 def _init(C):
@@ -347,15 +352,17 @@ def w_read(t):
         x = a['X'] - C['ox']; y = a['Y'] - C['oy']
         m = (x >= x0) & (x < x1) & (y >= y0) & (y < y1)
         ps = a['PointSourceId'][m].astype('i4') if 'PointSourceId' in a.dtype.names else np.zeros(int(m.sum()), 'i4')
-        parts.append((x[m].astype('f4'), y[m].astype('f4'), a['Z'][m].astype('f4'), a['Classification'][m].astype('u1'), ps + 100000 * k))
+        la = (a['ReturnNumber'][m] == a['NumberOfReturns'][m]) if 'ReturnNumber' in a.dtype.names and 'NumberOfReturns' in a.dtype.names else np.ones(int(m.sum()), bool)
+        parts.append((x[m].astype('f4'), y[m].astype('f4'), a['Z'][m].astype('f4'), a['Classification'][m].astype('u1'), ps + 100000 * k, la.astype('u1')))
         del a
     n = sum(len(p[0]) for p in parts)
     np.savez(pfile(C, t), x=np.concatenate([p[0] for p in parts]), y=np.concatenate([p[1] for p in parts]),
-             z=np.concatenate([p[2] for p in parts]), c=np.concatenate([p[3] for p in parts]), psid=np.concatenate([p[4] for p in parts]))
+             z=np.concatenate([p[2] for p in parts]), c=np.concatenate([p[3] for p in parts]), psid=np.concatenate([p[4] for p in parts]),
+             last=np.concatenate([p[5] for p in parts]))
     return t, n, None
 
 
-def split_points(C, x, y, z, c, psid):
+def split_points(C, x, y, z, c, psid, last):
     """Points held in memory (--npz, --demo) into the same scratch files a read makes."""
     Tm = C['tile_c'] * C['cell']
     key = (y // Tm).astype(np.int64) * 100000 + (x // Tm).astype(np.int64)
@@ -363,7 +370,7 @@ def split_points(C, x, y, z, c, psid):
     for k, a, b in zip(ks, st, en):
         i = o[a:b]
         np.savez(pfile(C, (int(k // 100000), int(k % 100000))), x=x[i].astype('f4'), y=y[i].astype('f4'), z=z[i].astype('f4'),
-                 c=c[i].astype('u1'), psid=psid[i].astype('i4'))
+                 c=c[i].astype('u1'), psid=psid[i].astype('i4'), last=last[i].astype('u1'))
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -375,7 +382,7 @@ def w_ground(t):
     C = _C; cell = C['cell']; M = C['marg_c']; K = C['coarse']
     j0, j1, i0, i1 = tile_cells(C, t)
     J0, J1, I0, I1 = max(0, j0 - M), min(C['ny'], j1 + M), max(0, i0 - M), min(C['nx'], i1 + M)
-    x, y, z, _c, _p = load_box(C, I0 * cell, J0 * cell, I1 * cell, J1 * cell, ground_only=True)
+    x, y, z = load_box(C, I0 * cell, J0 * cell, I1 * cell, J1 * cell, ground_only=True)[:3]
     H, W = J1 - J0, I1 - I0
     core = (slice(j0 - J0, j1 - J0), slice(i0 - I0, i1 - I0))
     cj, ci = (j1 - j0 + K - 1) // K, (i1 - i0 + K - 1) // K
@@ -425,37 +432,129 @@ def lid_window(C, J0, J1, I0, I1):
     return L, 1.0 / np.sqrt(1 + gx * gx + gy * gy)
 
 
+def face_fit(Q, S, outd, key, chunk=512):
+    """How far each point of Q lies BEHIND THE LOCAL FACE: a plane fitted in 3D to the surface returns S around it
+    (the radii in turn, at least face_min returns; the outer sheet: what lies more than face_sheet behind the plane
+    is dropped and the plane refitted, three times; a rough fit at the first radius goes on to the next). outd is
+    the air side for each point. Where there are more than face_cap returns around a point the fit uses about that
+    many of them, picked by key (a number 0..1 per surface return that does not depend on the tile). Returns behind
+    (NaN = no fit) and the plane's unit normal (towards the air)."""
+    from itertools import chain
+    from scipy.spatial import cKDTree
+    P_ = PARAMS; n = len(Q); behind = np.full(n, np.nan); nvec = np.zeros((n, 3))
+    if len(S) < P_['face_min'] or not n:
+        return behind, nvec
+    tree = cKDTree(S); todo = np.arange(n); sheet = -P_['face_sheet']; cap = P_['face_cap']
+    for ri, r in enumerate(P_['face_radius']):
+        left = []
+        for a in range(0, len(todo), chunk):
+            ids = todo[a:a + chunk]
+            cnt = tree.query_ball_point(Q[ids], r, return_length=True)
+            ok = cnt >= P_['face_min']; left.append(ids[~ok]); ids = ids[ok]; ln = cnt[ok]
+            if not len(ids):
+                continue
+            flat = np.fromiter(chain.from_iterable(tree.query_ball_point(Q[ids], r)), np.int64, int(ln.sum()))
+            rep = np.repeat(np.arange(len(ids)), ln); scale = np.ones(len(ids))
+            if (ln > cap).any():                                   # many returns: about cap of them make the same plane
+                sel = key[flat] * ln[rep] < cap
+                flat = flat[sel]; rep = rep[sel]; l2 = np.bincount(rep, minlength=len(ids))
+                scale = ln / np.maximum(l2, 1); ln = l2
+                if (ln == 0).any():                                # (cannot happen in practice: cap of many)
+                    raise ValueError('face fit: no returns left')
+            st = np.r_[0, np.cumsum(ln)[:-1]]
+            D = S[flat] - Q[ids][rep]                              # from each point to its neighbours
+
+            def plane(w):
+                if w is None:
+                    k = ln.astype('f8'); Dw = D
+                else:
+                    k = np.add.reduceat(w.astype('f8'), st); Dw = D * w[:, None]
+                c = np.add.reduceat(Dw, st, 0) / np.maximum(k, 1)[:, None]
+                d = D - c[rep]
+                if w is not None: d = d * w[:, None]
+                u = np.add.reduceat(np.c_[d[:, 0] * d[:, 0], d[:, 0] * d[:, 1], d[:, 0] * d[:, 2], d[:, 1] * d[:, 1], d[:, 1] * d[:, 2], d[:, 2] * d[:, 2]], st, 0)
+                return c, np.linalg.eigh(u[:, [0, 1, 2, 1, 3, 4, 2, 4, 5]].reshape(-1, 3, 3))[1][:, :, 0]
+            c, nrm = plane(None)
+            nrm[(nrm * outd[ids]).sum(1) < 0] *= -1
+            active = np.ones(len(ids), bool)
+            for _ in range(3):
+                keep = ((D - c[rep]) * nrm[rep]).sum(1) > sheet
+                active &= np.add.reduceat(keep.astype('f8'), st) * scale >= 10
+                if not active.any():
+                    break
+                c2, n2 = plane(keep)
+                n2[(n2 * nrm).sum(1) < 0] *= -1
+                c[active] = c2[active]; nrm[active] = n2[active]
+            dd = ((D - c[rep]) * nrm[rep]).sum(1); m = dd > sheet
+            km = np.add.reduceat(m.astype('f8'), st)
+            with np.errstate(invalid='ignore', divide='ignore'):
+                rms = np.sqrt(np.add.reduceat(dd * dd * m, st) / km)
+            acc = (rms < P_['face_rms']) | (ri > 0)
+            behind[ids[acc]] = (c[acc] * nrm[acc]).sum(1); nvec[ids[acc]] = nrm[acc]
+            left.append(ids[~acc])
+        todo = np.concatenate(left) if left else np.zeros(0, int)
+        if not len(todo):
+            break
+    return behind, nvec
+
+
 def w_classify(t):
-    """The returns of one tile against the stitched lid: candidates below it, the pass statistics, brush counts."""
-    C = _C; cell = C['cell']; B = 3
+    """The returns of one tile against the stitched lid: the candidates (under the lid), how far each lies behind
+    the local face (worked with the margin, so a fit near the tile's edge sees its neighbours), the pass
+    statistics, brush counts."""
+    from scipy import ndimage
+    C = _C; cell = C['cell']; P_ = PARAMS; B = 3 * P_['face_smooth'] + 4
+    M = max(C['marg_c'], int(math.ceil(2.2 * max(P_['face_radius']) / cell)))
     j0, j1, i0, i1 = tile_cells(C, t)
-    x, y, z, c, ps = load_tile(C, t)
     lidm = np.load(C['lfile'], mmap_mode='r')
-    if not len(x) or not np.isfinite(lidm[j0:j1, i0:i1]).any():
+    if not np.isfinite(lidm[j0:j1, i0:i1]).any():
         return t, None
-    x = x.astype('f8'); y = y.astype('f8'); z = z.astype('f8')
-    if C.get('ring') is not None:
-        k = in_ring(x, y, C['ring']); x, y, z, c, ps = x[k], y[k], z[k], c[k], ps[k]
-        if not len(x):
-            return t, None
-    J0, J1, I0, I1 = max(0, j0 - B), min(C['ny'], j1 + B), max(0, i0 - B), min(C['nx'], i1 + B)
+    x, y, z, c, ps, last, own = load_box(C, max(0, i0 - M) * cell, max(0, j0 - M) * cell, min(C['nx'], i1 + M) * cell, min(C['ny'], j1 + M) * cell, core=t)
+    if C.get('ring') is not None and own.any():
+        own = own & in_ring(x, y, C['ring'])
+    if not own.any():
+        return t, None
+    J0, J1, I0, I1 = max(0, j0 - M - B), min(C['ny'], j1 + M + B), max(0, i0 - M - B), min(C['nx'], i1 + M + B)
     L, cosm = lid_window(C, J0, J1, I0, I1)
-    lx = x - I0 * cell; ly = y - J0 * cell
-    ix = np.clip((lx / cell).astype(int), 0, I1 - I0 - 1); iy = np.clip((ly / cell).astype(int), 0, J1 - J0 - 1)
+    lx = x - I0 * cell; ly = y - J0 * cell; H, W = L.shape
+    ix = np.clip((lx / cell).astype(int), 0, W - 1); iy = np.clip((ly / cell).astype(int), 0, H - 1)
     dv = bilin(L, lx, ly, cell) - z
-    b0 = np.flatnonzero(dv * cosm[iy, ix] > PARAMS['below'])
-    ids, nall = np.unique(ps, return_counts=True)
-    deep = ps[b0[dv[b0] > PARAMS['deep']]]
-    stats = {int(p): (int(n), int((deep == p).sum())) for p, n in zip(ids, nall)}
+    cand = dv * cosm[iy, ix] > P_['below']
+    ids, nall = np.unique(ps[own], return_counts=True)
+    stats = {int(p): [int(n), 0] for p, n in zip(ids, nall)}        # [returns, deep ones: counted once the measure is known]
     # brush: of the returns that got down to brush height, the share the band stopped (as lidar_derive.py)
     G = fill_nan_nearest(np.array(np.load(C['gfile'], mmap_mode='r')[J0:J1, I0:I1], 'f8'))
-    hag = z - bilin(G, lx, ly, cell); lo, hi = PARAMS['brush_band']; S = PARAMS['brush_block']
+    hag = z[own] - bilin(G, lx[own], ly[own], cell); lo, hi = P_['brush_band']; S = P_['brush_block']
     bj0, bi0 = j0 // S, i0 // S; bh, bw = (j1 - 1) // S - bj0 + 1, (i1 - 1) // S - bi0 + 1
-    f = (np.clip(iy + J0, j0, j1 - 1) // S - bj0) * bw + (np.clip(ix + I0, i0, i1 - 1) // S - bi0)
+    f = (np.clip(iy[own] + J0, j0, j1 - 1) // S - bj0) * bw + (np.clip(ix[own] + I0, i0, i1 - 1) // S - bi0)
     inband = np.bincount(f[(hag >= lo) & (hag <= hi)], minlength=bh * bw).reshape(bh, bw)
     under = np.bincount(f[(hag < lo) & (hag > -1.0)], minlength=bh * bw).reshape(bh, bw)
-    return t, dict(n=len(x), stats=stats, x=x[b0], y=y[b0], z=z[b0], dv=dv[b0], ps=ps[b0],
-                   brush=(bj0, bi0, inband.astype('i4'), under.astype('i4')))
+    # the measure: behind the local face, fitted to the last returns that are not candidates; candidates that turn
+    # out to lie on the face join it and the fit is repeated
+    ci = np.flatnonzero(cand); behind = np.full(len(ci), np.nan); nvec = np.zeros((len(ci), 3))
+    if len(ci) and own[ci].any():
+        gy, gx = np.gradient(ndimage.gaussian_filter(L, P_['face_smooth'], mode='nearest'), cell)       # the air side: the coarse ground's slope
+        outd = np.c_[-gx[iy[ci], ix[ci]], -gy[iy[ci], ix[ci]], np.ones(len(ci))]; outd /= np.linalg.norm(outd, axis=1)[:, None]
+        K = 4; reach = int(np.ceil(max(P_['face_radius']) / (K * cell))) + 1
+        nearc = np.zeros((H // K + 1, W // K + 1), bool); nearc[iy[ci] // K, ix[ci] // K] = True
+        nearc = ndimage.maximum_filter(nearc, 2 * reach + 1)
+        si = np.flatnonzero(last & ~cand & nearc[iy // K, ix // K])
+        XYZ = np.c_[lx, ly, z]; Q = XYZ[ci]; cl = last[ci]; onface = np.zeros(len(ci), bool)
+        key = np.abs(np.sin(x * 12.9898 + y * 78.233 + z * 37.719) * 43758.5453) % 1.0
+        todo = np.arange(len(ci))
+        for _ in range(P_['face_passes']):
+            use = np.r_[si, ci[onface & cl]]
+            behind[todo], nvec[todo] = face_fit(Q[todo], XYZ[use], outd[todo], key[use])
+            new_on = np.isfinite(behind) & (behind < P_['face_sheet'])
+            ch = (new_on != onface) & cl                         # the surface changed here: only what is around is fitted again
+            onface = new_on
+            if not ch.any():
+                break
+            from scipy.spatial import cKDTree
+            todo = np.flatnonzero(cKDTree(Q[ch]).query(Q, distance_upper_bound=max(P_['face_radius']))[0] < np.inf)
+    k = own[ci]; ci = ci[k]; behind = behind[k]; nvec = nvec[k]
+    return t, dict(n=int(own.sum()), stats=stats, x=x[ci], y=y[ci], z=z[ci], dv=dv[ci], ps=ps[ci], behind=behind,
+                   foot=np.where(np.isfinite(behind), behind, 0.0)[:, None] * nvec, brush=(bj0, bi0, inband.astype('i4'), under.astype('i4')))
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -471,8 +570,8 @@ def w_cluster(job):
     from scipy.sparse import csgraph
     from scipy.spatial import cKDTree
     C = _C; cell = VOX = C['cell']; P = PARAMS
-    idx, g4 = job
-    gd = g4[:, 3]
+    idx, g4 = job                       # x, y, z, depth behind the face, depth under the lid, the foot on the face (3), fitted
+    gd = g4[:, 4]; fit = g4[:, 8] > 0
     # the lid around the cluster: far enough that every return's nearest way out is inside the window
     pad = min(max(float(gd.max()), 4.0), P['max_depth']) + 2.0
     I0 = max(0, int((g4[:, 0].min() - pad) / cell)); I1 = min(C['nx'], int((g4[:, 0].max() + pad) / cell) + 1)
@@ -496,16 +595,21 @@ def w_cluster(job):
     SP = np.concatenate(SP); stree = cKDTree(SP)
     ds, ek = stree.query(gp); E = SP[ek]                    # every return's way out
     horiz = np.linalg.norm(E[:, :2] - gp[:, :2], axis=1); vertd = np.abs(E[:, 2] - gp[:, 2])
-    # open = no returns on the lid around the way out (an entrance); roofed = there are
-    ex0, ey0, ex1, ey1 = E[:, 0].min() - 1, E[:, 1].min() - 1, E[:, 0].max() + 1, E[:, 1].max() + 1
-    px, py, pz, _c, _p = load_box(C, ex0 + I0 * cell, ey0 + J0 * cell, ex1 + I0 * cell, ey1 + J0 * cell)
+    # open = no returns on the surface where the return comes out (an entrance); roofed = there are. Where it comes
+    # out: the foot of the perpendicular on its fitted face (any return there is the face); with no fit, its way
+    # out on the lid (the returns lying on the lid there)
+    T = np.where(fit[:, None], gp + g4[:, 5:8], E)
+    px, py, pz = load_box(C, T[:, 0].min() - 1 + I0 * cell, T[:, 1].min() - 1 + J0 * cell, T[:, 0].max() + 1 + I0 * cell, T[:, 1].max() + 1 + J0 * cell)[:3]
     cnt = np.zeros(len(gp), int)
     if len(px):
         px = px - I0 * cell; py = py - J0 * cell
-        pix = np.clip((px / cell).astype(int), 0, W - 1); piy = np.clip((py / cell).astype(int), 0, H - 1)
-        near = np.abs((bilin(Lw, px, py, cell) - pz) * cosw[piy, pix]) < P['below']
-        if near.any():
-            cnt = cKDTree(np.c_[px[near], py[near], pz[near]]).query_ball_point(E, 0.6, return_length=True)
+        if fit.any():
+            cnt[fit] = cKDTree(np.c_[px, py, pz]).query_ball_point(T[fit], 0.6, return_length=True)
+        if not fit.all():
+            pix = np.clip((px / cell).astype(int), 0, W - 1); piy = np.clip((py / cell).astype(int), 0, H - 1)
+            near = np.abs((bilin(Lw, px, py, cell) - pz) * cosw[piy, pix]) < P['below']
+            if near.any():
+                cnt[~fit] = cKDTree(np.c_[px[near], py[near], pz[near]]).query_ball_point(T[~fit], 0.6, return_length=True)
     openp = cnt < 3
     # the voxel box: just around the returns and their ways out
     bp = 3.0
@@ -623,13 +727,14 @@ def w_cluster(job):
     out = dict(idx=idx, flab=flab, openp=openp, side=horiz > vertd, nf=int(nf), wrapped=len(wrapped), shapes=int(nb), left=int(left), joined=nfix,
                true=((tj + gj0) * C['nx'] + ti + gi0).astype(np.int64), guess=((qj + gj0) * C['nx'] + qi + gi0).astype(np.int64), mesh=None)
     if C['shapes'] and Vx.any():
-        out['mesh'] = shape_mesh(C, Vx, L, zc, zlo, gp, gj0, gi0, I0, J0, Lw)
+        out['mesh'] = shape_mesh(C, Vx, L, zc, zlo, gp, gj0, gi0, I0, J0, stree)
     return out
 
 
-def shape_mesh(C, Vx, L, zc, zlo, gp, gj0, gi0, I0, J0, Lw):
+def shape_mesh(C, Vx, L, zc, zlo, gp, gj0, gi0, I0, J0, stree):
     """The walls of the shapes in a box: the surface of (rock = under the lid and outside every shape), its ground
-    part dropped, simplified, then hugged half-way onto the returns with the mouth left alone."""
+    part dropped, simplified, then hugged half-way onto the returns with the mouth left alone. A vertex's depth is its
+    distance from the lid surface (straight up on flat ground, sideways at a wall)."""
     import veg_mesh
     from scipy.spatial import cKDTree
     VOX = cell = C['cell']; P = PARAMS; nj, ni, nz = Vx.shape
@@ -645,7 +750,7 @@ def shape_mesh(C, Vx, L, zc, zlo, gp, gj0, gi0, I0, J0, Lw):
     vv = np.asarray(veg_mesh.taubin(vv, tt, iters=2), 'f8')
     # metres from the window's corner
     V = np.c_[(vv[:, 1] + gi0 - I0 + 0.5) * VOX, (vv[:, 0] + gj0 - J0 + 0.5) * VOX, zlo + (vv[:, 2] + 0.5) * VOX]
-    dep = np.maximum(0, bilin(Lw, V[:, 0], V[:, 1], cell) - V[:, 2])
+    dep = stree.query(V)[0]
     tt = tt[(dep[tt] > 0.45).any(1)]                      # the shape part: the ground around it is the exporter's
     if not len(tt):
         return None
@@ -656,13 +761,13 @@ def shape_mesh(C, Vx, L, zc, zlo, gp, gj0, gi0, I0, J0, Lw):
         except Exception:
             pass
     V = np.asarray(V, 'f8'); tt = np.asarray(tt)
-    dep = np.maximum(0, bilin(Lw, V[:, 0], V[:, 1], cell) - V[:, 2])
+    dep = stree.query(V)[0]
     wall = np.flatnonzero(dep > 0.45)
     if len(wall):
         d0, k0 = cKDTree(gp).query(V[wall]); nr = d0 <= P['hug']
         fade = np.clip((dep[wall][nr] - 0.6) / 1.5, 0, 1)[:, None]     # no pull in the first 0.6 m, full from 2.1 m down
         V[wall[nr]] += P['pull'] * fade * (gp[k0[nr]] - V[wall[nr]])
-        dep = np.maximum(0, bilin(Lw, V[:, 0], V[:, 1], cell) - V[:, 2])
+        dep = stree.query(V)[0]
     V[:, 0] += I0 * cell; V[:, 1] += J0 * cell
     return V.astype('f4'), dep.astype('f4'), tt.astype('u4')
 
@@ -743,9 +848,18 @@ def run(C, notes):
             nret += r['n']; stats[t] = r['stats']
             bj0, bi0, a, b = r['brush']; b_in[bj0:bj0 + a.shape[0], bi0:bi0 + a.shape[1]] += a; b_un[bj0:bj0 + a.shape[0], bi0:bi0 + a.shape[1]] += b
             if len(r['x']):
-                cand.append((r['x'], r['y'], r['z'], r['dv'], r['ps'], np.full(len(r['x']), t[0] * 100000 + t[1], np.int64)))
+                cand.append((r['x'], r['y'], r['z'], r['dv'], r['ps'], np.full(len(r['x']), t[0] * 100000 + t[1], np.int64), r['behind'], r['foot']))
         cat = lambda k, dt: np.concatenate([c[k] for c in cand]).astype(dt) if cand else np.zeros(0, dt)
-        X, Y, Z, DV, PS, TK = cat(0, 'f8'), cat(1, 'f8'), cat(2, 'f8'), cat(3, 'f8'), cat(4, 'i8'), cat(5, 'i8')
+        X, Y, Z, DV, PS, TK, BH = cat(0, 'f8'), cat(1, 'f8'), cat(2, 'f8'), cat(3, 'f8'), cat(4, 'i8'), cat(5, 'i8'), cat(6, 'f8')
+        FT = np.concatenate([c[7] for c in cand]) if cand else np.zeros((0, 3))
+        # below ground = behind the local face by more than min_behind; no face could be fitted: the lid's measure stands
+        FIT = np.isfinite(BH); ok = ~FIT | (BH > C['min_behind'])
+        ncand = len(X); nonface = int((FIT & ~ok).sum()); nofit = int((~FIT).sum())
+        X, Y, Z, PS, TK, FT, FIT = X[ok], Y[ok], Z[ok], PS[ok], TK[ok], FT[ok], FIT[ok]
+        DVL = DV[ok]; DV = np.where(FIT, BH[ok], DVL)            # from here on the depth is the distance behind the face
+        dk, dn = np.unique(np.c_[TK, PS][DV > P['deep']], axis=0, return_counts=True)
+        for (tk, p), q in zip(dk, dn):
+            stats[(int(tk // 100000), int(tk % 100000))][int(p)][1] = int(q)
         lap('returns')
         # 5. patterned noise: per tile, on the statistics of the tile and its 8 neighbours
         say(70, 'flight passes')
@@ -799,7 +913,7 @@ def run(C, notes):
             for part in np.split(o, cuts):
                 ps_ = split_cluster(xy, part, P['cluster_max']); nsplit += len(ps_) > 1
                 for q in ps_:
-                    jobs.append((gi[q], np.c_[pts[gi[q]], DV[bi][gi[q]]]))
+                    jobs.append((gi[q], np.c_[pts[gi[q]], DV[bi][gi[q]], DVL[bi][gi[q]], FT[bi][gi[q]], FIT[bi][gi[q]]]))
             # jobs near each other go to the same worker (it keeps the tiles' returns in memory); big ones first
             Tm = C['tile_c'] * cell; byt = {}
             for j in jobs:
@@ -839,6 +953,7 @@ def run(C, notes):
     brush = np.where(reach >= P['brush_min'], b_in / np.maximum(reach, 1), np.nan).astype('f4')
     counts = dict(returns=int(nret), below=int(len(bi)), groups=ngroups, lone=int((kb == 1).sum()), likely_noise=int((kb == 2).sum()),
                   pattern_noise=int((kind == 3).sum()), pattern_confirmed=confirmed, deeper_than_max=too_deep,
+                  candidates=int(ncand), on_face=nonface, no_face=nofit,
                   features=cnt['features'], wrapped=cnt['wrapped'], shapes=cnt['shapes'], not_reaching=cnt['not_reaching'],
                   true_cells=int((holes == 1).sum()), guessed_cells=int((holes == 2).sum()),
                   deepest=round(float(pD[pK < 3].max()), 2) if (pK < 3).any() else 0.0, shape_triangles=int(sum(len(t) for t in T)))
@@ -891,11 +1006,15 @@ def read_shapes_bin(path):
 # The made-up scene (--demo, tests, the other steps' tests)
 # ---------------------------------------------------------------------------------------------------------
 DEMO = dict(
-    size=(192.0, 144.0), cliff_y=110.1, cliff_h=10.0,
+    size=(192.0, 144.0),
+    cliff_y=110.1, cliff_h=10.0, cliff_run=1.2, cliff_lip=0.45,   # a wall: 10 m up over 1.2 m, the ground above it reaching out over its top
+    talus=(2.0, 1.2),                            # the ground rises 1.2 m over the last 2 m to the wall's foot
     pit=(96.0, 38.0, 2.0, 9.0),                  # x, y, radius, depth: a vertical pit (on the line between two tiles)
     slant=(37.0, 38.0, 2.2, 8.0),                # x, y, mouth radius, length: a pit going down at 45 degrees to the east
     slant_deep=(50.0, 38.0, 10.0),               # x, y, depth: a group under a roof, joined to the slanted pit
-    cliff_open=(140.0, 110.1, 6.0),              # x, y of the opening at the foot of the cliff, how far it goes in (north)
+    cliff_open=(140.0, 3.3),                     # x of the opening at the foot of the wall, how far its returns run into the rock
+    pit_shallow=(70.0, 20.0, 1.5, 0.8),          # x, y, radius, depth: too shallow to be found
+    pit_low=(120.0, 20.0, 1.5, 1.5),             # deep enough
     crack=(130.0, 146.0, 38.0, 0.6, 4.0),        # x from, x to, y, width, depth
     lone_far=(20.0, 100.0, 7.0), lone_near=(39.0, 34.5, 3.0),
     stripes=(150.0, 190.0, 10.0, 100.0), stripe_pass=9, confirmed=(164.0, 60.0, 5.0),
@@ -904,23 +1023,28 @@ DEMO = dict(
 
 
 def demo_ground(x, y):
-    return 100.0 + 0.02 * x + 0.04 * y + 0.3 * np.sin(x / 23.0) * np.cos(y / 31.0) + np.where(y > DEMO['cliff_y'], DEMO['cliff_h'], 0.0)
+    tw, th = DEMO['talus']
+    return (100.0 + 0.02 * x + 0.04 * y + 0.3 * np.sin(x / 23.0) * np.cos(y / 31.0) + th * np.clip((y - DEMO['cliff_y'] + tw) / tw, 0, 1)
+            + np.where(y > DEMO['cliff_y'] + DEMO['cliff_lip'], DEMO['cliff_h'], 0.0))
 
 
 def demo_points(seed=3):
-    """x, y, z, class, pass of the made-up scene (see DEMO)."""
+    """x, y, z, class, pass, last-return flag of the made-up scene (see DEMO)."""
     D = DEMO; rng = np.random.default_rng(seed); W, H = D['size']
     n = int(W * H * 9)
     x = rng.uniform(0, W, n); y = rng.uniform(0, H, n)
     px, py, pr, pd = D['pit']; sx, sy, sr, sl = D['slant']; c0, c1, cy, cw, cd = D['crack']
     keep = (np.hypot(x - px, y - py) > pr) & (np.hypot(x - sx, y - sy) > sr) & ~((x > c0) & (x < c1) & (np.abs(y - cy) < cw / 2))
-    x, y = x[keep], y[keep]
-    P = [(x, y, demo_ground(x, y) + rng.normal(0, 0.03, len(x)), np.full(len(x), 2), rng.integers(1, 5, len(x)))]
+    keep &= ~((y > D['cliff_y']) & (y <= D['cliff_y'] + D['cliff_lip']))
+    x, y = x[keep], y[keep]; z = demo_ground(x, y) + rng.normal(0, 0.03, len(x))
+    for qx, qy, qr, qd in (D['pit_shallow'], D['pit_low']):          # two small pits: the ground returns reach their floors
+        z = z - np.where(np.hypot(x - qx, y - qy) < qr, qd, 0.0)
+    P = [(x, y, z, np.full(len(x), 2), rng.integers(1, 5, len(x)), np.ones(len(x), bool))]
 
-    def add(ax, ay, az, cls=1, ps=None):
+    def add(ax, ay, az, cls=1, ps=None, last=True):
         ax = np.atleast_1d(np.asarray(ax, 'f8')); k = len(ax)
         P.append((ax, np.broadcast_to(np.asarray(ay, 'f8'), (k,)).copy(), np.broadcast_to(np.asarray(az, 'f8'), (k,)).copy(),
-                  np.full(k, cls), rng.integers(1, 5, k) if ps is None else np.full(k, ps)))
+                  np.full(k, cls), rng.integers(1, 5, k) if ps is None else np.full(k, ps), np.full(k, last)))
     # the vertical pit: returns down its wall and on its floor
     a = rng.uniform(0, 2 * np.pi, 140); d = rng.uniform(0.9, pd, 140); g = float(demo_ground(px, py))
     add(px + (pr - 0.15) * np.cos(a), py + (pr - 0.15) * np.sin(a), g - d)
@@ -931,9 +1055,14 @@ def demo_points(seed=3):
     add(sx + s + 0.5 * np.cos(a), sy + 1.1 * np.sin(a), g - s + 0.5 * np.cos(a))
     dx, dy, dd = D['slant_deep']; q = rng.normal(0, 0.45, (30, 3))
     add(dx + q[:, 0], dy + q[:, 1], float(demo_ground(dx, dy)) - dd + q[:, 2])
-    # the opening at the foot of the cliff: returns going in under the upper ground
-    ox_, oy_, ol = D['cliff_open']; k = 60; gl = float(demo_ground(ox_, oy_ - 1.0))
-    add(ox_ + rng.uniform(-1.0, 1.0, k), oy_ + rng.uniform(0.4, ol, k), gl + rng.uniform(0.8, 2.0, k))
+    # the wall's face: returns all over it, except at the opening at its foot; then the opening's returns, running
+    # into the rock from the face
+    ox_, ol = D['cliff_open']; cy0, run, ch = D['cliff_y'], D['cliff_run'], D['cliff_h']; k = int(W * ch * 10)
+    fx = rng.uniform(0, W, k); ft = rng.uniform(0, 1, k)
+    m = ~((np.abs(fx - ox_) < 1.0) & (ft * ch < 2.2)); fx, ft = fx[m], ft[m]
+    add(fx, cy0 + ft * run + rng.normal(0, 0.02, len(fx)), demo_ground(fx, np.full(len(fx), cy0)) + ft * ch)
+    k = 70; hh = rng.uniform(0.4, 1.8, k); gl = float(demo_ground(ox_, cy0))
+    add(ox_ + rng.uniform(-0.8, 0.8, k), cy0 + hh / ch * run + rng.uniform(0.3, ol, k), gl + hh)
     # the crack
     k = 80; cx_ = rng.uniform(c0 + 0.3, c1 - 0.3, k)
     add(cx_, cy + rng.uniform(-0.2, 0.2, k), demo_ground(cx_, np.full(k, cy)) - rng.uniform(1.0, cd, k))
@@ -954,9 +1083,9 @@ def demo_points(seed=3):
     # brush: returns 0.3-2 m above the ground in one patch
     b0, b1, b2, b3 = D['brush']; k = int((b1 - b0) * (b3 - b2) * 6)
     bx_ = rng.uniform(b0, b1, k); by_ = rng.uniform(b2, b3, k)
-    add(bx_, by_, demo_ground(bx_, by_) + rng.uniform(0.35, 1.9, k), cls=3)
+    add(bx_, by_, demo_ground(bx_, by_) + rng.uniform(0.35, 1.9, k), cls=3, last=False)
     cat = lambda i, dt: np.concatenate([p[i] for p in P]).astype(dt)
-    return cat(0, 'f8'), cat(1, 'f8'), cat(2, 'f8'), cat(3, 'u1'), cat(4, 'i4')
+    return cat(0, 'f8'), cat(1, 'f8'), cat(2, 'f8'), cat(3, 'u1'), cat(4, 'i4'), cat(5, bool)
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -969,6 +1098,7 @@ def main(argv=None):
     ap.add_argument('--tile', type=float, default=96.0); ap.add_argument('--margin', type=float, default=12.0)
     ap.add_argument('--workers', type=int, default=0); ap.add_argument('--no-shapes', action='store_true')
     ap.add_argument('--cell', type=float, default=PARAMS['cell'])
+    ap.add_argument('--min-behind', type=float, default=PARAMS['min_behind'], help='m behind the local face for a return to count as below ground')
     ap.add_argument('--debug', action='store_true', help='also write debug.npz (per below return: feature, open, sideways)')
     ap.add_argument('--keep-work', action='store_true', help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
@@ -979,7 +1109,7 @@ def main(argv=None):
     cell = float(a.cell); K = PARAMS['coarse']
     C = dict(out=out, tmp=os.path.join(out, '_work'), cell=cell, coarse=K, tile_c=max(K, int(round(a.tile / cell / K)) * K),
              marg_c=max(4, int(round(a.margin / cell))), shapes=not a.no_shapes, debug=a.debug,
-             workers=a.workers or max(1, min((os.cpu_count() or 2) - 1, 20)), ox=0.0, oy=0.0, read_timeout=120)
+             workers=a.workers or max(1, min((os.cpu_count() or 2) - 1, 20)), ox=0.0, oy=0.0, read_timeout=120, min_behind=float(a.min_behind))
     shutil.rmtree(C['tmp'], ignore_errors=True); os.makedirs(C['tmp'])
     notes = []; ring = None
     if a.polygon:
@@ -1014,17 +1144,18 @@ def main(argv=None):
         meta = dict(epsg=C['epsg'], zone=zone, south=bool(south), bbox_lonlat=[W_, S_, E_, N_])
     else:
         if a.demo:
-            x, y, z, c, ps = demo_points()
+            x, y, z, c, ps, last = demo_points()
         else:
             with np.load(a.npz) as Zf:
                 x, y, z = (np.asarray(Zf[k], 'f8') for k in ('x', 'y', 'z')); c = np.asarray(Zf['c'])
                 ps = np.asarray(Zf['psid']) if 'psid' in Zf.files else np.zeros(len(x), 'i4')
                 if 'psid' not in Zf.files: notes.append('the file has no flight pass ids: no patterned-noise check')
+                last = (np.asarray(Zf['rn']) == np.asarray(Zf['nr'])) if 'rn' in Zf.files and 'nr' in Zf.files else np.ones(len(x), bool)
         C['ox'] = float(math.floor(x.min())); C['oy'] = float(math.floor(y.min()))
         x = x - C['ox']; y = y - C['oy']
         C['nx'] = int(math.ceil((x.max() + 1e-6) / cell)); C['ny'] = int(math.ceil((y.max() + 1e-6) / cell))
         if ring is not None: C['ring'] = ring - [C['ox'], C['oy']]
-        split_points(C, x, y, z, c, ps); del x, y, z, c, ps
+        split_points(C, x, y, z, c, ps, last); del x, y, z, c, ps, last
     say(1, 'area %.0f x %.0f m, %d tiles, %d workers' % (C['nx'] * cell, C['ny'] * cell, len(tile_list(C)), C['workers']))
     counts, passes, cover = run(C, notes)
     notes.append('Tile-independent: groups, lone returns, noise and features (worked over the whole area, each cluster in its own box). '
@@ -1036,7 +1167,7 @@ def main(argv=None):
     ox, oy = C['ox'], C['oy']
     J = dict(version=1, epsg=meta['epsg'], zone=meta['zone'], south=meta['south'], origin=[ox, oy],
              bbox_utm=[ox, oy, ox + C['nx'] * cell, oy + C['ny'] * cell], bbox_lonlat=meta['bbox_lonlat'], cell=cell, nx=C['nx'], ny=C['ny'],
-             params=dict(PARAMS, cell=cell, tile=C['tile_c'] * cell, margin=C['marg_c'] * cell, workers=C['workers'], shapes=C['shapes']),
+             params=dict(PARAMS, cell=cell, min_behind=C['min_behind'], tile=C['tile_c'] * cell, margin=C['marg_c'] * cell, workers=C['workers'], shapes=C['shapes']),
              counts=counts, passes=passes, ground_cover=round(cover, 3), stages=C.get('stages'), seconds=round(time.time() - t0, 1), notes=notes)
     json.dump(J, open(os.path.join(out, 'ridge.json'), 'w'), indent=1)
     say(100, 'done in %.0f s: %d returns, %d below the ground in %d groups, %d lone, %d likely noise, %d patterned noise; %d features' % (
