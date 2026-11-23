@@ -889,7 +889,7 @@
     sec.style.display = total ? '' : 'none';
     if (!total) { _featKey = ''; return; }
     const has = _bboxCorner1 && _bboxCorner2;
-    const key = [(window._pj || {}).pid, total, has ? _bboxCorner1.concat(_bboxCorner2).join(',') : '', _exportPoly ? _exportPoly.length + ':' + _exportPoly[0] + ':' + _exportPoly[_exportPoly.length - 1] : ''].join('|');
+    const key = [(window._pj || {}).pid, total, has ? _bboxCorner1.concat(_bboxCorner2).join(',') : '', _exportPoly ? JSON.stringify(_exportPoly) : ''].join('|');
     if (key === _featKey) return;
     _featKey = key;
     if (!has) { lab.textContent = `${total} in the project; draw the area to see how many fall inside.`; return; }

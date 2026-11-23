@@ -27,6 +27,7 @@
   var DRAPE_STEP = 4, DRAPE_MAX = 6000; // a ground height every 4 m of line, at most this many per item
   var FILL_ALPHA = 0.18, FILL_MAX_RING = 2000;
   var HIT_POINT_PX = 26, HIT_LINE_PX = 13;
+  var FOLDERS_OPEN_MAX = 12;            // more folders than this: the list in Display starts folded
   var DEFAULT_COLOUR = '#ffb020';
   var S = null;
 
@@ -376,7 +377,7 @@
         var T = o.THREE;
         S = { THREE: T, scene: o.scene, camera: o.camera, renderer: o.renderer, toScene: o.toScene, groundZ: o.groundZ, textSprite: o.textSprite,
               showInfo: o.showInfo, flyTo: o.flyTo, fmtLen: o.fmtLen, redraw: o.redraw, st: restore(o.saved), data: data, tree: tree(data),
-              groups: {}, recs: [], byId: {}, tex: {}, res: { value: new T.Vector2(1200, 800) }, labelGroup: null, labelsShown: 0, open: {} };
+              groups: {}, recs: [], byId: {}, tex: {}, res: { value: new T.Vector2(1200, 800) }, labelGroup: null, labelsShown: 0, open: {}, listOpen: false };
         S.lineMat = lineMaterial();
         var t0 = Date.now();
         build(); resize();
@@ -411,6 +412,13 @@
       ui.sheet.appendChild(box);
       function paint() {
         box.textContent = '';
+        if (S.tree.list.length > FOLDERS_OPEN_MAX) {          // many folders: the list waits behind one row
+          var top = ui.el('div', 'sh-row vf-folders'); top.appendChild(ui.el('span', 'sh-i', S.listOpen ? '\u25BE' : '\u25B8'));
+          top.appendChild(ui.el('span', 'sh-t', 'Folders (' + S.tree.list.length + ')'));
+          top.addEventListener('click', function () { S.listOpen = !S.listOpen; paint(); });
+          box.appendChild(top);
+          if (!S.listOpen) return;
+        }
         S.tree.list.forEach(function (f) {
           var row = ui.el('div', 'sh-row vf-folder'); row.style.paddingLeft = (10 + f.depth * 16) + 'px'; row.dataset.folder = f.id;
           row.style.opacity = folderShown(f.id) ? '1' : '0.45';

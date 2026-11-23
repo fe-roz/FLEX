@@ -9,7 +9,7 @@ Surface features in an export (export_terrain.py --features, viewer_inline.clean
     script block;
   * an export without them is as it was: FEATURES is null and no features.json.
 
-    python tools/test_export_features.py [--keep DIR]     (--keep: leave big.zip there, the made-up 300 items, to look at)
+    python tools/test_export_features.py [--keep DIR]     (--keep: leave big.zip, the made-up 300 items, and plain.zip there, to look at)
 """
 import io, json, math, os, re, subprocess, sys, tempfile, time, zipfile
 from pathlib import Path
@@ -151,6 +151,7 @@ with tempfile.TemporaryDirectory() as tmp:
     if keep:
         keep.mkdir(parents=True, exist_ok=True)
         (keep / 'big.zip').write_bytes(out.read_bytes())
+        (keep / 'plain.zip').write_bytes(out0.read_bytes())
 
     # ── 3. What is cleaned ───────────────────────────────────────────────────
     P = lambda **k: dict({'id': 'x', 'kind': 'point', 'name': 'N', 'folder': '', 'colour': '#112233', 'symbol': 'star', 'width': 3, 'opacity': 0.5, 'lonlat': [ll(0, 0)]}, **k)

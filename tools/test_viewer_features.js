@@ -204,6 +204,13 @@ function fakeUi() {
   ok('the All chip turns everything off', v.VF.state().all === false && box.children[0].style.opacity === '0.45');
   u.chips[0][3](true);
 
+  // FEATURES as a file name (FLEX Field): read from beside the viewer
+  const vf = makeViewer(); let asked = null;
+  vf.ctx.fetch = url => { asked = url; return Promise.resolve({ ok: true, json: () => Promise.resolve(features()) }); };
+  ok('a file name: fetched, then drawn', await vf.VF.init(vf.opts('features.json')) === true && asked === 'features.json' && vf.VF.count() === 14, asked);
+  const vg = makeViewer(); vg.ctx.fetch = () => Promise.resolve({ ok: false, status: 404 });
+  ok('a file that is not there: no features, no error thrown', await vg.VF.init(vg.opts('features.json')) === false && !vg.VF.active());
+
   // ── 6. 500 items ────────────────────────────────────────────────────────────
   const big = { version: 1, folders: Array.from({ length: 20 }, (_, i) => ({ id: 'f' + i, name: 'Folder ' + i, parent: i % 5 ? 'f' + (i - 1) : '' })), items: [] };
   for (let i = 0; i < 500; i++) {
@@ -219,6 +226,10 @@ function fakeUi() {
   ok('500 items build in well under a second (' + ms + ' ms)', ms < 1000 && vb.VF.count() === 500, ms);
   ok('lines and fills are merged per folder: 200 lines and areas in ' + draws + ' meshes', draws <= 40 && draws >= 8, draws);
   ok('symbol pictures are shared: at most 18 for 300 points', new Set(Ob.recs.filter(r => r.sprite).map(r => r.sprite.material.map)).size <= 18);
+  const ub = fakeUi(); vb.VF.sheet(ub.ui); const bb = ub.box(); ub.wipe(bb);
+  ok('20 folders: the list in Display starts folded behind one row', bb.children.length === 1 && bb.children[0].children[1].textContent === 'Folders (20)');
+  bb.children[0].listeners.click();
+  ok('…and opens to a row per folder', bb.children.length === 21);
   ok('names are capped (at most 140 at once), made only when shown', Ob.labelsShown > 20 && Ob.labelsShown <= 140 && vb.labels.length <= 500, [Ob.labelsShown, vb.labels.length]);
   const t1 = Date.now(); for (let k = 0; k < 20; k++) vb.VF.relabel(); const per = (Date.now() - t1) / 20;
   ok('working the names out again takes a few ms (' + per.toFixed(1) + ' ms)', per < 30, per);
