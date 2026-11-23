@@ -284,6 +284,8 @@ def host(method, a):
         shutil.rmtree(d); return json.dumps({'cancelled': True})
     if method in ('shareMapData', 'shareFile', 'homeReady', 'setKeepAwake', 'importIncoming'): return True
     if method == 'appVersion': return '2.0-sim'
+    if method == 'inboxList': return '[]'          # maps sent from the PC (Inbox.kt): none in the simulator
+    if method in ('inboxImport', 'inboxDiscard'): return False
     if method == 'isNativeHost': return True
     return None
 

@@ -99,6 +99,25 @@ Only the export's data files are unpacked; the zip's big single-file
 `viewer.html` is skipped. Exports made before the sidecar files existed are
 unpacked from that `viewer.html` instead (slower, once).
 
+### Maps sent from the PC ("Send to phone")
+
+FLEX on the PC can send an export over the USB cable with adb (`phone_api.js`); the app
+takes it in `Inbox.kt`, with no permission and no network:
+
+- **A local socket**, `flexfield_inbox` (a unix socket of the app, opened in `onCreate`; not an
+  internet socket, so no `INTERNET` permission): the PC runs `adb forward tcp:0
+  localabstract:flexfield_inbox` and streams the zip (`PING` / `SEND <bytes> <name>`); only adb
+  (the shell user) is answered; the file is kept in the app's own `files/inbox/`.
+- **A folder**, `Android/data/com.feroz.flexfield/files/inbox/` on the shared storage, that
+  `adb push` can write. Whether the app can read what adb put there differs between phones, so
+  every time the map list asks, the app writes what it found and whether it could read it to
+  `files/inbox_status.json` beside it; the PC reads that and, if the copy is no use, moves it to
+  `Download` and says so.
+
+The map list (`flexfield/index.html`) shows "1 map from your PC is waiting" with **Import**
+(the normal import: name match, update) and ✕ (discard); bridge methods `inboxList`,
+`inboxImport`, `inboxDiscard`. The PC's copy is deleted once the map is in.
+
 An export made with **Include surface features** also carries `features.json`
 (the project's points, lines and areas, view only: `viewer_build/libs/viewer-features.js`,
 🎨 Display → Surface features); `MapStore.FEATURES_FILE` keeps it and `MainActivity`

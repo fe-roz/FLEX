@@ -1770,6 +1770,23 @@
                 <a id="export_download_link" class="btn btn-primary" style="width:100%; text-align:center; display:block; font-size:12px;"
                   href="#" download><svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-download"/></svg>Download ZIP</a>
               </div>
+              <!-- Send to phone: a finished export to FLEX Field over the USB cable (phone-send.js, phone_api.js) -->
+              <div id="phone_box" style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.08);">
+                <div style="display:flex; align-items:center; gap:6px; font-size:11px; color:rgba(255,255,255,0.85);">
+                  <span style="flex:1; font-weight:600;">Send to phone (USB)</span>
+                  <button id="phone_refresh" title="Look for the phone again"
+                    style="flex-shrink:0; background:#222; border:1px solid #444; border-radius:3px; color:#eee; font-size:13px; padding:1px 7px; cursor:pointer;">↺</button>
+                </div>
+                <div id="phone_status" style="font-size:11px; color:rgba(255,255,255,0.7); margin:4px 0 2px;">Looking for a phone…</div>
+                <div id="phone_hint" style="display:none; font-size:10px; color:rgba(255,255,255,0.45); margin-bottom:4px;"></div>
+                <select id="phone_device" style="display:none; width:100%; margin:2px 0 4px; background:#222; color:#eee; border:1px solid #444; border-radius:3px; padding:3px 6px; font-size:11px;"></select>
+                <select id="phone_export" style="width:100%; margin:2px 0 6px; background:#222; color:#eee; border:1px solid #444; border-radius:3px; padding:3px 6px; font-size:11px;"></select>
+                <button id="phone_send" class="btn btn-primary" style="width:100%; font-size:12px;" disabled>Send to phone</button>
+                <div id="phone_msg" style="display:none; font-size:11px; color:rgba(255,255,255,0.8); margin-top:5px;"></div>
+                <div style="font-size:10px; color:rgba(255,255,255,0.4); margin-top:4px;">
+                  Copies the zip to the phone plugged into this computer; the map then waits in FLEX Field under "from your PC". The phone needs USB debugging on.
+                </div>
+              </div>
             </div>
 
           </div>
@@ -2187,6 +2204,7 @@
 <script src="client/src/modules/cave-columns.js"></script>
 <!-- 📍 Surface: project | My data -->
 <div id="jobs-panel" class="jobs-panel" hidden></div>  <!-- filled by jobs-panel.js -->
+<script src="client/src/modules/phone-send.js"></script>  <!-- Send to phone over USB: the box under the export's download button (window._phone) -->
 <script src="client/src/modules/jobs-panel.js"></script>  <!-- the Jobs panel along the bottom of the map: running, waiting and failed jobs (window._jobs) -->
 <script src="client/src/modules/surface-route.js"></script>  <!-- 🔬 Analyze → Surface route: picks, weights, Find routes (route_cost.py on the server), cards, graph, save as line, overlays (window._surfRoute) -->
 <script src="client/src/modules/veg-draw.js"></script>  <!-- vegetation shapes on the globe: crowns / shell, see-through, lit rims, follows the terrain shown (window._vegDraw) -->
