@@ -37,12 +37,11 @@
             '#caveCollapsible',
             '#lidarCollapsible',
             '#terrainCollapsible',
-            '#exportCollapsible',
+            '#processCollapsible',
             '#projectCollapsible',
             '#docsCollapsible',
             '#leadsCollapsible',
             '#reviewCollapsible',
-            '#lidarDeriveCollapsible',
           ];
 
           document.querySelectorAll('#flex-rail [data-target], #pj-top-btn').forEach(button => {

@@ -23,14 +23,15 @@
 
   // ── Pure ─────────────────────────────────────────────────────────────────
   const TOOLS = [
-    { id: 'terrain', name: 'Terrain + hillshade', icon: '⛰' },
-    { id: 'veg', name: 'Trees and brush', icon: '🌲' },
-    { id: 'bush', name: 'Brush / voids', icon: '∴' },
+    { id: 'terrain', name: 'Terrain for the project', icon: '⛰', desc: 'The ground and its hillshade as the project\u2019s own terrain on this map (⛰ Terrain lists it).' },
+    { id: 'veg', name: 'Trees and brush', icon: '🌲', desc: 'Light shapes of the trees and the brush, drawn on this map and reused by a map for the phone.' },
+    { id: 'bush', name: 'Brush', icon: '∴', desc: 'How thick the brush is, as a map layer, and the returns below the ground. Its settings are under Settings here.' },
     { id: 'prospect', name: 'Prospects (beta)', icon: '◎', desc: 'Possible entrances: hollows, points below the ground, cliff openings. A list to look at, not a ranking.' },
     { id: 'ridge', name: 'Ridgewalking', icon: '🕳', desc: 'What the LiDAR saw below the ground: pits, cracks and openings, as on the phone (shapes, returns, true entrances and guessed openings), drawn on this map.' },
   ];
   const RNAME = { ground: 'Ground', terrain: 'Terrain', veg: 'Trees and brush', bush: 'Brush', prospect: 'Prospects (beta)', ridge: 'Ridgewalking' };
   const RKEYS = ['ground', 'terrain', 'veg', 'bush', 'prospect', 'ridge'];
+  const SHOWN_ORDER = ['bush', 'veg', 'ridge', 'prospect', 'terrain'];      // the order of the rows in 3 · What to make (after Ground and maps)
   const SHOWABLE = ['terrain', 'veg', 'bush', 'prospect', 'ridge'];
   const MAPRES = ['bush', 'ground'];      // results drawn as map layers in 🗺 Layers (area-maps.js), not here
   const CHIP = { fits: ['ok', 'Fits'], partly: ['warn', 'Partly covered'], toobig: ['bad', 'Too big'], needslidar: ['bad', 'Needs LiDAR'] };
@@ -179,13 +180,78 @@
     let j = null; try { j = await r.json(); } catch (_) {}
     if (!j || !j.ok) { if (S.avail !== true) setAvail(false); return S.areas; }
     S.areas = Array.isArray(j.areas) ? j.areas : [];
+    try { await syncProject(); } catch (e) { console.warn('[areas] project areas', e); }
     setTimeout(outline, 0);
     if (S.cur && S.cur.id) { const a = S.areas.find(x => x.id === S.cur.id); if (a) S.cur = curOf(a); }
     setAvail(true);
     paint(); fire('list');
     return S.areas;
   }
-  const curOf = a => ({ id: a.id, name: a.name, ring: a.ring, src: a.results && Object.keys(a.results).length ? 'Processed area' : 'Saved area' });
+  const curOf = a => ({ id: a.id, name: a.name, ring: a._fring || a.ring, src: a.results && Object.keys(a.results).length ? 'Processed area' : 'Saved area' });
+
+  // ── Saved areas belong to the project ──
+  // A saved area is an area feature in the project's "Process areas" folder (flexlib processAreas): it syncs, shows on
+  // the map and in Surface, and can go to CalTopo like any area. What was made for it stays on this computer
+  // (areas_api.js), tied to the feature by its id. Here the two are brought together: a project area that has no
+  // record on this computer gets one (empty); its name follows the project's; an area whose outline was changed in the
+  // project since its results were made is marked out of date (a._state). Everything else on this computer (made
+  // without a project, or whose project item is gone) is an "earlier area": usable, and it can be moved into the project.
+  const FL = () => w.FlexLib;
+  const hasProject = () => !!(PJ().pid && PJ().P && FL() && FL().processAreas);
+  const isProjectArea = a => !!(a && a._f);
+  async function syncProject() {
+    S.areas.forEach(a => { delete a._f; delete a._fring; delete a._state; });
+    if (!hasProject()) return;
+    const pid = PJ().pid, F = FL(), feats = F.processAreas(PJ().P);
+    for (const f of feats) {
+      const ring = F.areaRing(f); if (ring.length < 4) continue;
+      let a = S.areas.find(x => x.project === pid && x.feature === f.id);
+      if (!a) { const j = await post('/api/areas/save', { name: f.name || 'Area', ring, project: pid, feature: f.id }); if (!j || !j.ok) continue; a = j.area; S.areas.unshift(a); }
+      else if ((f.name || 'Area') !== a.name) { const j = await post('/api/areas/rename', { id: a.id, name: f.name || 'Area' }); if (j && j.ok) a.name = j.area.name; }
+      a._f = f.id; a._fring = ring; a._state = F.processAreaState(f, a);
+    }
+    // a record of this project whose item is gone and that holds nothing: nothing to keep
+    for (const a of S.areas.slice()) {
+      if (a.project === pid && a.feature && !a._f && !(a.results && Object.keys(a.results).length)) { await post('/api/areas/delete', { id: a.id }); S.areas.splice(S.areas.indexOf(a), 1); }
+    }
+  }
+  /** The open project's "Process areas" folder, made when first needed → its id. */
+  async function processFolder() {
+    const F = FL(), A = w._pjApi, g = F.processGroup(PJ().P);
+    if (g) return g.id;
+    const id = F.uid(10);
+    await A.record('group.set', { group: id, name: F.PROCESS_GROUP_NAME, parent: '', kind: F.PROCESS_GROUP_KIND }, null, { quiet: true });
+    return id;
+  }
+  /** Save an outline as an area of the open project → this computer's record of it (or null with the reason toasted). */
+  async function saveInProject(name, ring) {
+    if (!hasProject() || !w._pjApi) { toast('Open a project first: areas are kept in the project.'); return null; }
+    const F = FL(), open = ring.slice(); if (open.length > 1 && open[0][0] === open[open.length - 1][0] && open[0][1] === open[open.length - 1][1]) open.pop();
+    if (open.length < 3) return null;
+    const group = await processFolder(), fid = F.uid(12);
+    await w._pjApi.record('feature.set', { feature: fid, kind: 'area', name: String(name || 'Area').slice(0, 120), coords: open.map(p => [+p[0], +p[1], 0]), group });
+    await refresh();
+    return S.areas.find(a => a._f === fid) || null;
+  }
+  /** "Move into this project": an earlier area becomes a project area, keeping what was made for it. */
+  async function moveIn(id) {
+    const a = areaById(id);
+    if (!a || isProjectArea(a)) return null;
+    if (!hasProject() || !w._pjApi) { toast('Open a project first.'); return null; }
+    const F = FL(), group = await processFolder(), fid = F.uid(12), open = a.ring.slice(0, -1);
+    await w._pjApi.record('feature.set', { feature: fid, kind: 'area', name: a.name, coords: open.map(p => [+p[0], +p[1], 0]), group });
+    const j = await post('/api/areas/link', { id: a.id, project: PJ().pid, feature: fid });
+    if (!j || !j.ok) { await w._pjApi.record('feature.set', { feature: fid, removed: true }, null, { quiet: true }); toast('Could not move it: ' + ((j && j.error) || 'no answer')); }
+    await refresh();
+    return j && j.ok ? areaById(id) : null;
+  }
+  async function renameArea(id, name) {
+    const a = areaById(id); name = String(name || '').trim().slice(0, 120);
+    if (!a || !name) return null;
+    if (isProjectArea(a) && w._pjApi) { await w._pjApi.record('feature.set', { feature: a._f, name }); }
+    else await post('/api/areas/rename', { id, name });
+    await refresh(); return areaById(id);
+  }
   const areaById = id => S.areas.find(a => a.id === id) || null;
   const curArea = () => (S.cur && S.cur.id ? areaById(S.cur.id) : null);
 
@@ -213,7 +279,7 @@
   // ── The current area ──
   function current() { return S.cur ? { id: S.cur.id, name: S.cur.name, ring: S.cur.ring } : null; }
   function setCurrent(a) {
-    if (!a) { S.cur = null; S.fix = {}; S.check = null; paint(); outline(); return null; }
+    if (!a) { S.cur = null; S.fix = {}; S.check = null; paint(); outline(); fire('current'); return null; }
     if (a.id && areaById(a.id)) S.cur = curOf(areaById(a.id));
     else S.cur = { id: a.id, name: a.name || 'New area', ring: a.ring, src: a.src || 'Drawn' };
     S.fix = {}; S.check = null;
@@ -310,14 +376,22 @@
     tools = tools || plan(rows, S.check, curArea()).tools;
     if (!tools.length) return { ok: false, error: 'nothing ticked' };
     const name = S.cur.id ? S.cur.name : ((S.draftName || '').trim() || S.cur.name || 'New area');
-    const body = Object.assign(S.cur.id ? { id: S.cur.id } : { name, ring: S.cur.ring }, { project: PJ().pid || '', lidar: lidar(), tools, options: withMaps(options || optionsOf(S.fix)) });
+    const isNewRun = !S.cur.id;
+    if (!S.cur.id) {                                    // a new area: it is saved in the project first (no areas outside a project)
+      if (!hasProject()) { toast('Open a project first: areas are kept in the project.'); return { ok: false, error: 'no project' }; }
+      const made = await saveInProject(name, S.cur.ring);
+      if (!made) return { ok: false, error: 'not saved' };
+      S.cur = curOf(made); S.draftName = '';
+    }
+    const ca0 = curArea();
+    const body = Object.assign({ id: S.cur.id }, isProjectArea(ca0) ? { ring: ca0._fring, feature: ca0._f, name: ca0.name } : {}, { project: (ca0 && ca0.project) || PJ().pid || '', lidar: lidar(), tools, options: withMaps(options || optionsOf(S.fix)) });
     if (tools.includes('prospect') && w._areaProspects) { body.options.prospect = Object.assign({ known: await w._areaProspects.known() }, body.options.prospect || {}); }
     if (tools.includes('bush')) body.options.bush = Object.assign(bushParams(), body.options.bush || {});
     let j;
     try { j = await post('/api/areas/run', body); } catch (e) { j = { ok: false, error: e.message || String(e) }; }
     if (!j || !j.ok) { toast('Could not start: ' + ((j && j.error) || 'no answer')); return j || { ok: false }; }
     S.running = { runId: j.runId, areaId: j.areaId, name, pct: 0, step: '', notes: [], seen: 0 };
-    try { if (w._jobs) w._jobs.add({ id: 'area.' + j.runId, kind: 'area', name: 'Analyze: ' + name, server: true }); } catch (_) {}
+    try { if (w._jobs) w._jobs.add({ id: 'area.' + j.runId, kind: 'area', name: 'Process: ' + name, server: true }); } catch (_) {}
     paint(); fire('run');
     return new Promise(resolve => {
       const tick = async () => {
@@ -330,7 +404,7 @@
         S.running = null;
         const aid = st.areaId || j.areaId;
         if (st.status === 'done') {
-          const isNew = !(S.cur && S.cur.id);
+          const isNew = isNewRun;
           await refresh();
           const a = areaById(aid);
           if (a) {
@@ -432,6 +506,8 @@
 
   // ── Delete ──
   async function remove(id) {
+    const gone = areaById(id);
+    if (isProjectArea(gone) && w._pjApi) { await w._pjApi.record('feature.set', { feature: gone._f, removed: true }); }
     const j = await post('/api/areas/delete', { id });
     if (j && j.ok) { dispatch({ type: 'show', id, on: false }); await apply(); if (w._areaProspects) w._areaProspects.forget(id); SHOW = reduce(SHOW, { type: 'forget', id }); lset(SKEY, JSON.stringify(SHOW)); if (S.cur && S.cur.id === id) setCurrent(null); }
     S.delAsk = null; await refresh(); return j;
@@ -460,10 +536,23 @@
   }
   function paintArea() {
     const box = $('ar-list'); if (!box) return;
-    box.innerHTML = S.areas.length ? S.areas.map(a => {
-      const sel = S.cur && S.cur.id === a.id, proc = a.results && Object.keys(a.results).length;
-      return `<button type="button" class="ar-row${sel ? ' sel' : ''}" data-act="pick" data-id="${esc(a.id)}" role="radio" aria-checked="${!!sel}"><span class="ar-radio"></span><span class="ar-grow"><span class="ar-nm">${esc(a.name)}</span>${proc ? ' <span class="ar-tag">processed</span>' : ''}</span><span class="ar-dim">${(+a.km2 || 0).toFixed(1)} km²</span></button>`;
-    }).join('') : '<div class="ar-none">No saved areas yet. Choose a new one below.</div>';
+    const row = a => {
+      const sel = S.cur && S.cur.id === a.id, res = a.results ? RKEYS.filter(k => a.results[k]) : [], pa = isProjectArea(a);
+      const tag = a._state === 'outofdate' ? ' <span class="ar-tag ar-stale" title="The outline was changed in the project since this was made">out of date</span>' : res.length ? ' <span class="ar-tag">processed</span>' : '';
+      const made = res.length ? res.map(k => RNAME[k]).join(', ') + ' \u00b7 ' + shortDate(a.updated || a.created) : 'nothing made yet';
+      const tools = pa ? `<button type="button" class="ar-x ar-edit" data-act="rename" data-id="${esc(a.id)}" title="Rename this area">\u270e</button><button type="button" class="ar-x" data-act="del" data-id="${esc(a.id)}" title="Delete this area">\u2715</button>`
+        : (hasProject() ? `<button type="button" class="ar-btn ar-movein" data-act="movein" data-id="${esc(a.id)}" title="Make it an area of the open project, keeping what was made for it">Move into this project</button>` : '')
+          + `<button type="button" class="ar-x" data-act="del" data-id="${esc(a.id)}" title="Delete this area">\u2715</button>`;
+      const ask = S.delAsk === a.id ? `<div class="ar-ask">Delete \u201c${esc(a.name)}\u201d${res.length ? ' and what was made for it on this computer' : ''}${pa ? ' (it leaves the project too)' : ''}? <button type="button" class="ar-btn ar-danger" data-act="delyes" data-id="${esc(a.id)}">Yes, delete</button><button type="button" class="ar-btn" data-act="delno">No</button></div>` : '';
+      return `<div class="ar-rowwrap" data-area="${esc(a.id)}"><button type="button" class="ar-row${sel ? ' sel' : ''}" data-act="pick" data-id="${esc(a.id)}" role="radio" aria-checked="${!!sel}"><span class="ar-radio"></span><span class="ar-grow"><span class="ar-nm">${esc(a.name)}</span>${tag}<br><span class="ar-dim ar-small">${(+a.km2 || 0).toFixed(2)} km\u00b2 \u00b7 ${esc(made)}</span></span></button><span class="ar-rowtools">${tools}</span>${ask}</div>`;
+    };
+    const mine = S.areas.filter(isProjectArea), earlier = S.areas.filter(a => !isProjectArea(a));
+    let lh = '';
+    if (hasProject()) lh += mine.length ? mine.map(row).join('') : '<div class="ar-none">No saved areas in this project yet. Choose a new one below.</div>';
+    else lh += '<div class="ar-none" id="ar-noproject">Open a project to save and process areas: they are kept in the project.</div>';
+    if (earlier.length) lh += `<div class="ar-sub" id="ar-earlier">Earlier areas (no project)</div>` + earlier.map(row).join('');
+    box.innerHTML = lh;
+    const pk = $('ar-picker'); if (pk) pk.style.display = hasProject() ? '' : 'none';
     const card = $('ar-card'); if (!card) return;
     if (!S.cur) { card.innerHTML = '<div class="ar-dim">No area chosen. Pick a saved one above, or draw one.</div>'; return; }
     const km2 = w._areaPicker ? w._areaPicker.ringKm2(S.cur.ring) : 0, d = sizeKm(S.cur.ring);
@@ -471,8 +560,11 @@
       <div class="ar-facts"><span><b>${km2.toFixed(1)}</b> km²</span><span><b>${d[0].toFixed(1)} × ${d[1].toFixed(1)}</b> km (width × height)</span></div>`;
     if (w._weather) h += '<button type="button" class="ar-btn" data-act="wx" data-id="' + esc(S.cur.id || '') + '">Weather</button>';
     if (S.cur.crossing) h += '<div class="ar-bad">Its edges cross: draw it again so they don’t.</div>';
-    if (!S.cur.id) h += `<input type="text" id="ar-name" class="ar-in" maxlength="60" placeholder="Name it (optional)" value="${esc(S.draftName || '')}" aria-label="Area name"><div class="ar-dim">Saved automatically as a processed area when a tool finishes.</div>`;
-    else h += `<div class="ar-dim">${curArea() && Object.keys(curArea().results || {}).length ? 'Processed area: its results are listed below.' : 'Saved area. Not a map feature, never sent to CalTopo.'}</div>`;
+    const ca = curArea();
+    if (!S.cur.id) h += `<input type="text" id="ar-name" class="ar-in" maxlength="60" placeholder="Name it" value="${esc(S.draftName || '')}" aria-label="Area name"><div class="ar-offers"><button type="button" class="ar-btn" data-act="savearea" id="ar-save">Save in the project</button></div><div class="ar-dim">A saved area is kept in the project (\ud83d\udccd Surface \u2192 Process areas) and can be sent to CalTopo from there. Processing saves it too.</div>`;
+    else if (ca && ca._state === 'outofdate') h += `<div class="ar-why ar-note" id="ar-stale">Its outline was changed in the project since these results were made: they are for the old outline. Process the area again to bring them up to date.</div>`;
+    else if (ca && !isProjectArea(ca)) h += `<div class="ar-dim">An earlier area, not in a project.${hasProject() ? ' \u201cMove into this project\u201d keeps what was made for it.' : ''}</div>`;
+    else h += `<div class="ar-dim">${ca && Object.keys(ca.results || {}).length ? 'Its results are listed below.' : 'Saved in the project (\ud83d\udccd Surface \u2192 Process areas); nothing made for it yet.'}</div>`;
     if (card.dataset.h !== h) { const f = doc.activeElement && doc.activeElement.id === 'ar-name'; card.dataset.h = h; card.innerHTML = h; if (f) { const i = $('ar-name'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }
   }
   function paintLidar() {
@@ -504,19 +596,28 @@
   function paintTools() {
     const box = $('ar-tools'); if (!box) return;
     const area = curArea(), g = groundRow(S.check, area), rows = toolRows(S.check, { ticks: S.ticks, fix: S.fix, area });
-    if (!S.cur) { box.innerHTML = '<div class="ar-none">Choose an area first.</div>'; paintRun(); return; }
-    let h = `<div class="ar-item ${g.st}" data-tool="ground"><div class="ar-hd"><span class="ar-lock" title="Always first">🔒</span><span class="ar-nm">Ground</span><span class="ar-chip ${g.st}">${g.chip}</span></div><div class="ar-why">${esc(g.why)}</div></div>`;
-    rows.forEach(r => {
-      h += `<div class="ar-item ${r.st}" data-tool="${r.id}"><div class="ar-hd"><input type="checkbox" class="keep-box" data-act="tick" data-id="${r.id}"${r.ticked ? ' checked' : ''}${r.disabled ? ' disabled' : ''} aria-label="${esc(r.name)}"><span class="ar-ic">${r.icon}</span><span class="ar-nm">${esc(r.name)}</span><span class="ar-chip ${r.st}">${esc(r.chip)}</span></div>`;
-      if (r.desc) h += `<div class="ar-why ar-desc">${esc(r.desc)}</div>`;
+    if (!S.cur) { const b0 = $('brush_void_settings'); if (b0 && box.contains(b0)) host.appendChild(b0); box.innerHTML = '<div class="ar-none">Choose an area first.</div>'; paintRun(); return; }
+    S.q = S.q || {};
+    const q = id => `<button type="button" class="ar-q${S.q[id] ? ' on' : ''}" data-act="q" data-id="${id}" title="What is this?" aria-label="What is this?" aria-expanded="${!!S.q[id]}">?</button>`;
+    // Show on map: the switch of what was made for this area (the same switch as in the list under Made)
+    const eye = k => { if (!area || !area.results || !area.results[k]) return '';
+      const maps = MAPRES.includes(k) && w._areaMaps, st = maps ? mapEye(area.id, k) : eyeOf(SHOW, area.id, k);
+      return (SHOWABLE.includes(k) || maps) ? `<span class="ar-show">${eyeBtn(st, 'ressw', area.id, k, 'Show ' + RNAME[k] + ' on the map', true)}</span>` : ''; };
+    let h = `<div class="ar-item ${g.st}" data-tool="ground"><div class="ar-hd"><span class="ar-lock" title="Always first">🔒</span><span class="ar-nm">Ground and maps</span>${q('ground')}<span class="ar-chip ${g.st}">${g.chip}</span>${eye('ground')}</div>${S.q.ground ? '<div class="ar-why ar-desc">The bare ground from the LiDAR and its maps (hillshade, slope, LiDAR quality). Made once, first; everything else here and a map for the phone reuse it.</div>' : ''}<div class="ar-why">${esc(g.why)}</div></div>`;
+    rows.slice().sort((a, b) => SHOWN_ORDER.indexOf(a.id) - SHOWN_ORDER.indexOf(b.id)).forEach(r => {
+      h += `<div class="ar-item ${r.st}" data-tool="${r.id}"><div class="ar-hd"><input type="checkbox" class="keep-box" data-act="tick" data-id="${r.id}"${r.ticked ? ' checked' : ''}${r.disabled ? ' disabled' : ''} aria-label="${esc(r.name)}"><span class="ar-ic">${r.icon}</span><span class="ar-nm">${esc(r.name)}</span>${r.desc ? q(r.id) : ''}<span class="ar-chip ${r.st}">${esc(r.chip)}</span>${eye(r.id)}</div>`;
+      if (r.desc && S.q[r.id]) h += `<div class="ar-why ar-desc">${esc(r.desc)}</div>`;
       if (r.why) h += `<div class="ar-why">${esc(r.why)}</div>`;
       if (r.offers) h += `<div class="ar-offers">${r.offers.map((o, i) => `<button type="button" class="ar-btn" data-act="fix" data-id="${r.id}" data-i="${i}">${esc(o.label || o.key)}</button>`).join('')}</div>`;
       if (r.used) h += `<div class="ar-offers"><button type="button" class="ar-btn" data-act="unfix" data-id="${r.id}">Back to the normal setting</button></div>`;
+      if (r.id === 'bush') h += '<div class="ar-set" id="ar-set-bush"></div>';       // its settings (#brush_void_settings of index.html) fold in here
       h += '</div>';
     });
     h += detailHtml(area);
     if (S.checkErr) h += `<div class="ar-bad">${esc(S.checkErr)}</div>`;
+    const bs = $('brush_void_settings'); if (bs && box.contains(bs)) host.appendChild(bs);     // kept while the rows are written again
     box.innerHTML = h;
+    const slot = $('ar-set-bush'); if (bs && slot) slot.appendChild(bs);
     paintRun();
   }
   function paintRun() {
@@ -525,7 +626,7 @@
     if (R) { t.textContent = (R.step ? (RNAME[R.step] || R.step) + ': ' : '') + Math.round(R.pct || 0) + ' %'; b.disabled = true; b.textContent = 'Running…'; bar.style.setProperty('--ar-pct', (R.pct || 0) + '%'); bar.classList.add('running'); return; }
     bar.classList.remove('running');
     const p = plan(toolRows(S.check, { ticks: S.ticks, fix: S.fix, area: curArea() }), S.check, curArea());
-    t.textContent = S.cur ? p.text : 'Choose an area.'; b.textContent = 'Run ticked';
+    t.textContent = S.cur ? p.text : 'Choose an area.'; b.textContent = 'Process area';
     const ca = curArea(), noLidarOk = p.tools.every(t => t === 'prospect') && !!(ca && ca.results && ca.results.ground);   // Prospects reads only the area's ground and points
     b.disabled = !S.cur || !p.tools.length || !!(S.cur && S.cur.crossing) || (!lidar().length && !noLidarOk);
     const lr = $('ar-last'); if (lr) { lr.hidden = !S.lastRun; lr.textContent = S.lastRun ? 'Run finished: ' + S.lastRun.text : ''; }
@@ -586,6 +687,7 @@
   function mk() {
     host = $('areas-host'); if (!host) return;
     host.hidden = true;
+    const bs0 = $('brush_void_settings');
     host.innerHTML = `<div class="ar-box">
       <h3 class="ar-h" id="ar-sec-area">1 · Area <small>saved areas, or choose a new one</small></h3>
       <div class="ar-list" id="ar-list" role="radiogroup" aria-label="Saved areas"></div>
@@ -593,13 +695,14 @@
       <div class="ar-card" id="ar-card"></div>
       <h3 class="ar-h">2 · LiDAR <small>loaded now + project clouds</small></h3>
       <div class="ar-list" id="ar-lidar"></div><div class="ar-dim" id="ar-cov"></div>
-      <h3 class="ar-h">3 · Tools to run in this area <small>tick, then run once</small></h3>
+      <h3 class="ar-h">3 · What to make <small>tick, then Process area</small></h3>
       <div class="ar-list" id="ar-tools"></div>
-      <div class="ar-runbar" id="ar-runbar"><span class="ar-dim" id="ar-runtxt"></span><button type="button" class="ar-btn ar-go" id="ar-run">Run ticked</button></div>
+      <div class="ar-runbar" id="ar-runbar"><span class="ar-dim" id="ar-runtxt"></span><button type="button" class="ar-btn ar-go" id="ar-run">Process area</button></div>
       <div class="ar-last" id="ar-last" hidden></div>
-      <h3 class="ar-h">Processed areas <small>kept after a run, with or without a project</small></h3>
+      <h3 class="ar-h" id="ar-sec-made">Made · Show on map <small>what was made on this computer, a switch each</small></h3>
       <div class="ar-list" id="ar-procs"></div>
       <div class="ar-runbar"><span class="ar-dim" id="ar-imptxt"></span><button type="button" class="ar-btn" data-act="import" id="ar-import" title="An area package (FLEX-area-….zip) made on another FLEX: its ground, vegetation, bushwhack and prospects">Import a processed area…</button></div></div>`;
+    if (bs0) host.appendChild(bs0);                 // waits here (hidden) until the Brush row is drawn
     host.addEventListener('click', onClick);
     host.addEventListener('change', e => {
       const t = e.target;
@@ -617,6 +720,7 @@
     if (act === 'pick') { const a = areaById(id); if (a) { setCurrent(a); try { const v = V(), bb = w._areaPicker.bboxOf(a.ring); v.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(bb[0], bb[1], bb[2], bb[3]), duration: 1.2 }); } catch (_) {} } }
     else if (act === 'fix') { const c = S.check && S.check.tools && S.check.tools[id], o = c && c.offers && c.offers[+b.dataset.i]; if (o) { S.fix[id] = o; S.ticks[id] = true; paint(); await check(); } }
     else if (act === 'unfix') { delete S.fix[id]; paint(); await check(); }
+    else if (act === 'q') { S.q = S.q || {}; S.q[id] = !S.q[id]; paintTools(); }
     else if (act === 'procsw') show(id, eyeOf(SHOW, id) !== 'on');
     else if (act === 'remaps') { run(['maps']); }
     else if (act === 'quality') { const a = areaById(id); if (w._lidarQuality) w._lidarQuality.open(id, a ? a.name : ''); }
@@ -629,13 +733,19 @@
     else if (act === 'procopen') { S.open = S.open === id ? null : id; paintProcs(); }
     else if (act === 'more') runMore(id);
     else if (act === 'wx') { const a = (id && areaById(id)) || S.cur; if (a && w._weather) w._weather.open({ name: a.name, ring: a.ring }); }
-    else if (act === 'del') { S.delAsk = id; paintProcs(); }
-    else if (act === 'delno') { S.delAsk = null; paintProcs(); }
+    else if (act === 'del') { S.delAsk = id; paintArea(); paintProcs(); }
+    else if (act === 'delno') { S.delAsk = null; paintArea(); paintProcs(); }
     else if (act === 'delyes') remove(id);
     else if (act === 'delres') { S.delRes = id + ':' + b.dataset.res; paintProcs(); }
     else if (act === 'delresno') { S.delRes = null; paintProcs(); }
     else if (act === 'delresyes') removeResult(id, b.dataset.res);
     else if (act === 'import') importArea();
+    else if (act === 'savearea') { if (S.cur && !S.cur.id) { const made = await saveInProject((S.draftName || '').trim() || S.cur.name || 'Area', S.cur.ring); if (made) { S.draftName = ''; setCurrent(made); } } }
+    else if (act === 'movein') { const a = await moveIn(id); if (a) { setCurrent(a); toast('\u201c' + a.name + '\u201d is now an area of this project.'); } }
+    else if (act === 'rename') { const a = areaById(id), ask = w._pjApi && w._pjApi.dialog; if (!a) return;
+      let nm = null;
+      if (ask) { const r = await ask({ title: 'Rename the area', input: { value: a.name }, buttons: [{ label: 'Cancel', value: null }, { label: 'Save', value: 'ok', primary: true }] }); nm = r && r.button === 'ok' ? r.value : null; } else nm = w.prompt('Name of the area', a.name);
+      if (nm && nm.trim()) await renameArea(id, nm); }
   }
   /** An area package (tools/area_pack.js) from another FLEX → POST /api/areas/import; an id already here asks before replacing. */
   function importArea() {
@@ -677,6 +787,18 @@
   .ar-none { color: rgba(255,255,255,.45); font-size: 11px; padding: 6px 9px; }
   .ar-tag { font-size: 10px; color: rgba(255,255,255,.6); border: 1px solid rgba(255,255,255,.15); border-radius: 9px; padding: 0 6px; white-space: nowrap; }
   .ar-picker { margin-top: 7px; }
+  .ar-rowwrap { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; }
+  .ar-rowwrap > .ar-row { flex: 1 1 0; min-width: 0; text-align: left; }
+  .ar-rowtools { display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+  .ar-ask { flex: 1 1 100%; font-size: 11px; padding: 3px 4px 5px; }
+  .ar-sub { margin: 8px 0 3px; font-size: 10px; letter-spacing: .05em; text-transform: uppercase; opacity: .6; }
+  .ar-tag.ar-stale { background: rgba(232,163,61,.25); color: #f0b65a; }
+  .ar-small { font-size: 10px; }
+  .ar-q { width: 15px; height: 15px; line-height: 13px; margin-left: 5px; padding: 0; border-radius: 50%; border: 1px solid rgba(255,255,255,.35); background: none; color: rgba(255,255,255,.75); font-size: 10px; cursor: pointer; flex: 0 0 auto; }
+  .ar-q.on { background: rgba(255,255,255,.18); }
+  .ar-show { margin-left: 6px; display: inline-flex; align-items: center; }
+  .ar-set .lp-section { margin: 3px 0 0 21px; }
+  #areas-host > #brush_void_settings { display: none; }
   .ar-card { border: 1px solid rgba(255,255,255,.12); border-radius: 6px; padding: 8px 9px; background: rgba(255,255,255,.04); margin-top: 7px; }
   .ar-cn { font-size: 13.5px; } .ar-facts { display: flex; flex-wrap: wrap; gap: 3px 14px; margin: 3px 0; } .ar-facts b { font-size: 14px; font-variant-numeric: tabular-nums; }
   .ar-in { width: 100%; background: #1a1a2e; color: #eee; border: 1px solid #444; border-radius: 4px; padding: 4px 6px; font-size: 11.5px; margin: 5px 0 3px; box-sizing: border-box; }
@@ -716,6 +838,9 @@
   doc.head.appendChild(css);
 
   w._areas = { available: () => !!S.avail, list: () => S.areas.slice(), refresh, current, setCurrent, lidar, setLidar, check, run, show, showResult,
+    ticks: () => Object.assign({}, S.ticks), setTicks: o => { S.ticks = Object.assign({}, o || {}); paint(); }, mapsCell: () => S.mapsCell, setMapsCell,   // presets (process-panel.js)
+    lidarPicked: () => (S.lidar || []).slice(),      // the choice as it stands, without reading the list of clouds again
+    projectAreas: () => S.areas.filter(isProjectArea), earlierAreas: () => S.areas.filter(a => !isProjectArea(a)), saveInProject, moveIn, rename: renameArea,
     shown: () => JSON.parse(JSON.stringify(SHOW)), eyeOf: (id, r) => eyeOf(SHOW, id, r), remove, removeResult, runMore, restore, pure,
     state: () => S };
 

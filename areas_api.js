@@ -7,6 +7,9 @@
 //   GET  /api/areas?project=<pid>             { ok, areas }   (that project's and My data's, newest first; no project param: all)
 //   POST /api/areas/save    { id?, name, ring, project? }   → { ok, area }
 //   POST /api/areas/rename  { id, name }    POST /api/areas/delete { id }    POST /api/areas/delete-result { id, result }
+//   GET  /api/areas/reuse?id=&lidar=   { ok, ground, ridge, trees, shapes, why }: what an export of the area can reuse (reuse())
+//   POST /api/areas/link    { id, project, feature, name? }   an earlier area becomes the area of a project item ("Move into this project")
+//   area.json `feature`: the id of the project's area feature (flexlib processAreas) this area was made for; save / run take it too
 //   POST /api/areas/check   { ring, lidar, tools, options } → { ok, km2, tools: { <tool>: { status, why, offers, minutes } }, ground }
 //   POST /api/areas/run     { id? | name+ring, project?, lidar, tools, options } → { ok, runId, areaId }
 //   GET  /api/areas/status/<runId>            { ok, status, step, steps, progress, message, notes, error, areaId }
@@ -338,6 +341,21 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
     a.name = cleanName(o.name, a.name || 'Area');
     a.ring = r.ring; a.km2 = r.km2;
     if (o.project !== undefined || !('project' in a)) a.project = project;
+    // the project item this area belongs to (a feature of the project's "Process areas" folder): the link is by its id
+    if (o.feature !== undefined) { const f = o.feature == null || o.feature === '' ? '' : String(o.feature); if (f && !ID_RE.test(f)) return { code: 400, error: 'bad feature id' }; if (f) a.feature = f; else delete a.feature; }
+    writeArea(a);
+    return { ok: true, area: a };
+  }
+  /** "Move into this project": an earlier area (no project) becomes the area of a project item. { id, project, feature, name? } */
+  function link(o) {
+    const a = readArea(o.id);
+    if (!a) return { code: ID_RE.test(String(o.id || '')) ? 404 : 400, error: ID_RE.test(String(o.id || '')) ? 'Unknown area' : 'bad id' };
+    const project = cleanProject(o.project);
+    if (!project) return { code: 400, error: 'a project is needed' };
+    if (!ID_RE.test(String(o.feature || ''))) return { code: 400, error: 'bad feature id' };
+    if (listAll().some(x => x.id !== a.id && x.project === project && x.feature === String(o.feature))) return { code: 409, error: 'That project area already has processed results on this computer.' };
+    a.project = project; a.feature = String(o.feature);
+    if (o.name != null) a.name = cleanName(o.name, a.name);
     writeArea(a);
     return { ok: true, area: a };
   }
@@ -570,6 +588,8 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
         res = r;
       }
       res.date = new Date().toISOString();
+      if (!res.ringKey) res.ringKey = ringKey(area.ring);          // what it was made for: the export reuses a result only for the same ring and LiDAR (reuse())
+      res.lidar = lidar.slice();
       res.seconds = Math.round((Date.now() - t0) / 100) / 10;
       res.bytes = dirBytes(path.join(DIR, key));
       res.notes = notes;
@@ -592,9 +612,9 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
       if (!ID_RE.test(String(o.id))) return { code: 400, error: 'bad id' };
       area = readArea(o.id);
       if (!area) return { code: 404, error: 'Unknown area' };
-      if (o.ring != null) { const s = save({ id: o.id, name: o.name || area.name, ring: o.ring, project: o.project }); if (!s.ok) return s; area = s.area; }
+      if (o.ring != null) { const s = save({ id: o.id, name: o.name || area.name, ring: o.ring, project: o.project, feature: o.feature }); if (!s.ok) return s; area = s.area; }
     } else {
-      const s = save({ name: o.name, ring: o.ring, project: o.project });
+      const s = save({ name: o.name, ring: o.ring, project: o.project, feature: o.feature });
       if (!s.ok) return s;
       area = s.area;
     }
@@ -676,6 +696,11 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
       if (req.method === 'GET' && rest === '') return json(res, list(query));
       if (req.method === 'POST' && rest === 'save') return void post(save);
       if (req.method === 'POST' && rest === 'rename') return void post(rename);
+      if (req.method === 'POST' && rest === 'link') return void post(link);
+      // what a map of this area can take from it, for its own outline and this point cloud (the Process pane's estimate)
+      if (req.method === 'GET' && rest === 'reuse') { const a = readArea(query && query.id); if (!a) return json(res, { ok: false, error: 'Unknown area' }, 404);
+        const r = reuse(a.id, { ring: a.ring, lidar: query.lidar }); return json(res, { ok: true, ground: !!r.ground.dir, ridge: !!r.ridge.dir, trees: !!r.trees.dir, shapes: !!(r.ridge.dir && r.ridge.shapes),
+          why: { ground: r.ground.why || '', ridge: r.ridge.why || '', trees: r.trees.why || '' } }); }
       if (req.method === 'POST' && rest === 'delete') return void post(del);
       if (req.method === 'POST' && rest === 'delete-result') return void post(delResult);
       if (req.method === 'POST' && rest === 'check') return void post(check);
@@ -688,6 +713,52 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
       return json(res, { ok: false, error: 'not found' }, 404);
     } catch (e) { return fail(e); }
   }
-  return { jobs, pctOf, handle, check, LIMITS };
+  // ── What an export of this area can take from it instead of reading the LiDAR again ──
+  // want = { ring: [[lon, lat], ...] (open or closed; a box is its four corners), lidar: url | [urls] }.
+  // → { ok, area: { id, name }, ground | ridge | trees: { dir, date } | { why } }: a product is reused only when the area's
+  // result was made for this very ring and LiDAR and its files are there; `why` says what stands in the way (for the log).
+  const samePoints = (a, b) => {
+    const open = r => { const o = r.slice(); if (o.length > 1 && o[0][0] === o[o.length - 1][0] && o[0][1] === o[o.length - 1][1]) o.pop(); return o.map(p => (+p[0]).toFixed(6) + ',' + (+p[1]).toFixed(6)); };
+    const A = open(a), B = open(b); if (A.length !== B.length || !A.length) return false;
+    const k = B.indexOf(A[0]); if (k < 0) return false;
+    const fwd = A.every((p, i) => p === B[(k + i) % B.length]), back = A.every((p, i) => p === B[(k - i + B.length * 2) % B.length]);
+    return fwd || back;                                        // the same corners, wherever the ring starts and whichever way it runs
+  };
+  function reuse(id, want) {
+    const a = readArea(id);
+    if (!a) return { ok: false, why: 'the area is not on this computer' };
+    const out = { ok: true, area: { id: a.id, name: a.name } }, DIR = areaDir(a.id);
+    const ring = want && Array.isArray(want.ring) ? want.ring.filter(lonlat) : [];
+    const lidar = cleanUrls(want && (Array.isArray(want.lidar) ? want.lidar : [want.lidar]));
+    const allNo = why => { for (const k of ['ground', 'ridge', 'trees']) out[k] = { why }; return out; };
+    if (ring.length < 3 || !samePoints(ring, a.ring)) return allNo('the export area is not the saved area\u2019s outline');
+    const rk = ringKey(a.ring), has = (...f) => f.every(x => fs.existsSync(path.join(DIR, ...x.split('/'))));
+    const R = a.results || {};
+    const madeFor = (res, legacyOk) => {
+      if (!res) return 'not made yet for this area';
+      const l = Array.isArray(res.lidar) ? res.lidar : (legacyOk ? a.lidar || [] : null);
+      if (!l) return 'made before FLEX kept what it was made from: run it once more';
+      if ((res.ringKey || (legacyOk ? rk : '')) !== rk) return 'made for another outline of this area (it is out of date)';
+      if (JSON.stringify(l) !== JSON.stringify(lidar)) return 'made from another point cloud';
+      return '';
+    };
+    // ground: stamped since it exists (ringKey; the area's lidar is the ground's)
+    let why = madeFor(R.ground, true) || (has('ground/grid.json', 'ground/ground.npy') ? '' : 'its files are gone');
+    out.ground = why ? { why } : { dir: DIR, date: R.ground.date || null };
+    // ridgewalking: a result from before the stamp is taken when its own ridge.json covers this area's box
+    const rj = readJson(path.join(DIR, 'ridge', 'ridge.json'));
+    const legacyRidge = !!(R.ridge && !R.ridge.lidar && rj && Array.isArray(rj.bbox_lonlat) && bboxOf(a.ring).every((v, i) => Math.abs(v - rj.bbox_lonlat[i]) < 2e-5));
+    why = madeFor(R.ridge, legacyRidge) || (has('ridge/ridge.json', 'ridge/lid.npy', 'ridge/holes.npy', 'ridge/points.bin') ? '' : 'its ground files are not on this computer (an imported area carries only what the map draws)');
+    out.ridge = why ? { why } : { dir: path.join(DIR, 'ridge'), date: R.ridge.date || null, shapes: has('ridge/shapes.bin'), brush: has('ridge/brush.npy', 'ridge/brush.json') };
+    // trees and brush: the vegetation shapes (shapes.bin version 2: 48-byte records, what the exporter reads)
+    const vj = readJson(path.join(DIR, 'veg', 'veg.json'));
+    const legacyVeg = !!(R.veg && !R.veg.lidar && vj && Array.isArray(vj.area) && samePoints(vj.area, a.ring));
+    why = madeFor(R.veg, legacyVeg) || (has('veg/veg.json', 'veg/shapes.bin') ? '' : 'its files are gone')
+      || (vj && vj.shapes && +vj.shapes.record === 48 ? '' : 'its shapes are in the old format: run Trees and brush once more');
+    out.trees = why ? { why } : { dir: path.join(DIR, 'veg'), date: R.veg.date || null };
+    return out;
+  }
+
+  return { jobs, pctOf, handle, check, LIMITS, reuse };
 };
 module.exports.FILES = FILES;

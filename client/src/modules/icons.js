@@ -71,6 +71,7 @@
     // Performance: a gauge (arc, needle, ticks)
     gauge: '<path d="M4.6 18a9 9 0 1 1 14.8 0"/><path d="m12 14 4.2-5.4"/><circle cx="12" cy="14" r="1.3"/><path d="M12 5.5v1.4M5.6 9.2l1.2.8M18.4 9.2l-1.2.8"/>',
     layers: '<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>',
+    process: '<path d="m12 3 8 4.5-8 4.5-8-4.5z"/><path d="m4 12 8 4.5 8-4.5"/><path d="m4 16.5 8 4.5 8-4.5"/>',      // Process: layers made one after the other
     // Inventories: a small chest (arched lid, band, lock)
     chest: '<path d="M3 11V8.5A3.5 3.5 0 0 1 6.5 5h11A3.5 3.5 0 0 1 21 8.5V11"/><rect x="3" y="11" width="18" height="9" rx="1.5"/><path d="M3 14.5h6.5M14.5 14.5H21"/><rect x="9.5" y="12.5" width="5" height="4.5" rx="1"/>',
   };

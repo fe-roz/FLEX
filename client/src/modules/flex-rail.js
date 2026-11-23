@@ -80,7 +80,7 @@
   // A click on the map (not a drag) closes the open menu panel, except while
   // a panel is in the middle of something on the map (picking an area or a
   // station, drawing) or is one whose work is on the map (Export, Analyze).
-  const KEEP_OPEN = new Set(['#exportCollapsible', '#lidarDeriveCollapsible']);
+  const KEEP_OPEN = new Set(['#processCollapsible', '#exportCollapsible', '#lidarDeriveCollapsible']);
   const busy = () => !!((window._pjfState && window._pjfState.draw) || window._apDrawing ||
     [...document.querySelectorAll('[id$="pick-banner"], .pjf-banner')].some(el => el.offsetParent !== null && getComputedStyle(el).display !== 'none'));
   let down = null;
