@@ -37,12 +37,13 @@ def main():
         caves = json.loads(z.read('caves.json'))
         tex_b64 = base64.b64encode(z.read('tex_sat.jpg')).decode('ascii')
         hs_b64 = base64.b64encode(z.read('tex_hs.jpg')).decode('ascii') if 'tex_hs.jpg' in names else None
+        hsb_b64 = base64.b64encode(z.read('tex_hsb.jpg')).decode('ascii') if 'tex_hsb.jpg' in names else None
         walls = z.read('walls.bin') if 'walls.bin' in names else None
         docs_json = docs_inline_json(json.loads(z.read('docs.json')), z.read) if 'docs.json' in names else None   # documents travel along
         ridge_json = ridge_inline_json(json.loads(z.read('ridge.json')), z.read, names) if 'ridge.json' in names else None   # V2 - Ridgewalking
         html = build_inline_viewer(z.read('terrain.glb'), tex_b64, caves, local_viewer_libs(),
                                    progress=lambda m: print(m), hs_b64=hs_b64, walls_bytes=walls, docs_json=docs_json,
-                                   ridge_json=ridge_json)
+                                   ridge_json=ridge_json, hsb_b64=hsb_b64)
         with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as zo:
             for info in z.infolist():
                 if info.filename == 'viewer.html':

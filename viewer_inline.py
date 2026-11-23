@@ -90,7 +90,7 @@ def docs_inline_json(side, read_page, cap=DOCS_INLINE_CAP):
     return json.dumps(out, separators=(',', ':')).replace('</', '<\\/')
 
 
-RIDGE_FILES = ('ridge_points.bin', 'ridge_patches.bin', 'ridge_shapes.bin', 'tex_brush.png')
+RIDGE_FILES = ('ridge_points.bin', 'ridge_patches.bin', 'ridge_shapes.bin')
 
 
 def ridge_inline_json(side, read, names):
@@ -102,14 +102,15 @@ def ridge_inline_json(side, read, names):
     if not isinstance(obj, dict) or not obj.get('points'):
         return None
     out = dict(obj)
-    for k in ('points', 'patches', 'shapes', 'brush'):
+    out.pop('brush', None)                              # (round 1 exports: the overlay picture is no longer used)
+    for k in ('points', 'patches', 'shapes'):
         name = out.get(k)
         out[k] = base64.b64encode(read(name)).decode('ascii') if name and name in names else None
     return json.dumps(out, separators=(',', ':'))
 
 
 def build_inline_viewer(glb_path, tex_b64, caves_data, viewer_libs, progress=print,
-                        hs_b64=None, walls_bytes=None, docs_json=None, ridge_json=None):
+                        hs_b64=None, walls_bytes=None, docs_json=None, ridge_json=None, hsb_b64=None):
     """
     glb_path: the terrain.glb file, or its bytes.
 
@@ -160,6 +161,9 @@ def build_inline_viewer(glb_path, tex_b64, caves_data, viewer_libs, progress=pri
         progress(f"  Embedding hillshade texture ({len(hs_b64)//1024} KB)...")
         html = html.replace('"PLACEHOLDER_HS_B64"', f'"{hs_b64}"')
     # (if not provided the placeholder stays, viewer JS will detect and hide the toggle)
+
+    # 4a. "Hillshade with brush" (the ridgewalking export's tex_hsb.jpg); an empty string when there is none
+    html = html.replace('"PLACEHOLDER_HSB_B64"', f'"{hsb_b64 or ""}"')
 
     # 4b. Embed passage walls (walls.bin) as base64 — same bytes as the sidecar
     if walls_bytes:

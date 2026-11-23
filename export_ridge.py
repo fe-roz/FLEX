@@ -12,7 +12,9 @@ into what an export carries:
   * the hillshade of the lid (area_maps.slope_shade, the multidirectional one);
   * the sidecars in the viewer's frame (metres from the terrain's centre, the
     point clouds' vertical shift added): ridge_points.bin, ridge_shapes.bin,
-    ridge_patches.bin, tex_brush.png, ridge.json.
+    ridge_patches.bin, ridge.json;
+  * "hillshade with brush": the brush classes baked over a hillshade picture
+    (tex_hsb.jpg and its tiles).
 
 numpy + scipy + Pillow; no PDAL here (the child process has it).
 """
@@ -38,12 +40,15 @@ STEEP_FROM, STEEP_FULL = 12.0, 35.0
 EDGE_SIGMA, EDGE_FROM, EDGE_FULL = 1.5, 0.15, 0.6
 RIM_CELLS = 3                     # full detail this many cells round a true hole
 FLAT_DIV = 10                     # background grid = 1/10 of the triangles (normal export: 1/4)
-BRUSH_CLASSES = ((0.6, (0x1f, 0x5f, 0x1f, 255)),        # dense
-                 (0.3, (0x5f, 0xae, 0x4f, 204)),        # medium, a 0.8
-                 (0.1, (0xb7, 0xe4, 0xa0, 140)))        # light,  a 0.55
+# "Hillshade with brush" (tex_hsb.jpg): the brush classes over the hillshade.
+# The one place for the look; bake_brush takes both as parameters.
+BRUSH_CLASSES = ((0.6, (0x1f, 0x5f, 0x1f)),             # dense
+                 (0.3, (0x5f, 0xae, 0x4f)),             # medium
+                 (0.1, (0xb7, 0xe4, 0xa0)))             # light; under 0.1 and blank: nothing
+BRUSH_OPACITY = 0.3
 
 
-def run_ridgewalk(out_dir, ept, bbox, polygon=None, also=(), progress=print, python=None, script=None):
+def run_ridgewalk(out_dir, ept, bbox, polygon=None, also=(), progress=print, python=None, script=None, shapes=True):
     """Run ridgewalk.py as a child (same interpreter) and relay its `[ridge] NN% text` lines."""
     import os
     script = Path(script or os.environ.get('FLEX_RIDGE_SCRIPT') or SCRIPT_DIR / 'ridgewalk.py')
@@ -56,6 +61,8 @@ def run_ridgewalk(out_dir, ept, bbox, polygon=None, also=(), progress=print, pyt
     if polygon:
         cmd += ['--polygon', str(polygon)]
     cmd += ['--out', str(out_dir)]
+    if not shapes:
+        cmd += ['--no-shapes']
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                             encoding='utf-8', errors='replace', bufsize=1)
     tail = []
@@ -183,32 +190,48 @@ class Ridge:
         tris = np.stack([sw, se, ne, sw, ne, nw], axis=1).reshape(-1, 3)                 # counter-clockwise from above
         return pack_patches(tris + shift)
 
-    def brush_png(self, grid_rect):
-        """brush.npy as an RGBA picture on the export's rectangle (the same
-        extent and UV as tex_hs), one pixel per brush block. None: no brush."""
-        from PIL import Image
-        f, j = self.dir / 'brush.npy', self.dir / 'brush.json'
-        if not (f.exists() and j.exists()):
+    def has_brush(self):
+        return (self.dir / 'brush.npy').exists() and (self.dir / 'brush.json').exists()
+
+    def brush_values(self, grid_rect, w, h):
+        """brush.npy (share 0..1, NaN = blank; row 0 = south, as ridgewalk.py
+        writes it) sampled on a w x h picture of the UTM rectangle `grid_rect`
+        (row 0 = north), nearest block. None: no brush."""
+        if not self.has_brush():
             return None
-        b = np.load(f).astype(np.float32)
-        m = json.loads(j.read_text())
-        bc = float(m['cell'])
-        x0, y0 = float(m.get('x0', 0.0)), float(m.get('y0', 0.0))
-        if abs(x0) < 1e5:                              # metres from the ridge origin (the contract); else UTM
-            x0 += self.ox; y0 += self.oy
+        if getattr(self, '_brush', None) is None:
+            m = json.loads((self.dir / 'brush.json').read_text())
+            x0, y0 = float(m.get('x0', 0.0)), float(m.get('y0', 0.0))
+            if abs(x0) < 1e5:                          # metres from the ridge origin (the contract); else UTM
+                x0 += self.ox; y0 += self.oy
+            self._brush = (np.load(self.dir / 'brush.npy').astype(np.float32), float(m['cell']), x0, y0)
+        b, bc, x0, y0 = self._brush
         e0, n0, e1, n1 = grid_rect
-        w = max(1, int(round((e1 - e0) / bc))); h = max(1, int(round((n1 - n0) / bc)))
         E = e0 + (np.arange(w) + 0.5) * (e1 - e0) / w
-        N = n1 - (np.arange(h) + 0.5) * (n1 - n0) / h                                    # row 0 = north
+        N = n1 - (np.arange(h) + 0.5) * (n1 - n0) / h
         bi = np.floor((E - x0) / bc).astype(np.int64); bj = np.floor((N - y0) / bc).astype(np.int64)
         ok = ((bj >= 0) & (bj < b.shape[0]))[:, None] & ((bi >= 0) & (bi < b.shape[1]))[None, :]
-        v = np.where(ok, b[np.clip(bj, 0, b.shape[0] - 1)][:, np.clip(bi, 0, b.shape[1] - 1)], np.nan)
-        rgba = np.zeros((h, w, 4), dtype=np.uint8)                                       # none / blank = clear
-        for cut, col in reversed(BRUSH_CLASSES):
-            rgba[np.nan_to_num(v, nan=-1.0) >= cut] = col
-        buf = io.BytesIO()
-        Image.fromarray(rgba, 'RGBA').save(buf, format='PNG', optimize=True)
-        return buf.getvalue()
+        return np.where(ok, b[np.clip(bj, 0, b.shape[0] - 1)][:, np.clip(bi, 0, b.shape[1] - 1)], np.nan)
+
+    def bake_brush(self, hs_img, grid_rect, opacity=BRUSH_OPACITY, classes=BRUSH_CLASSES):
+        """"Hillshade with brush": the brush classes laid over a hillshade
+        picture of `grid_rect` at `opacity`, at the picture's own size.
+        `classes`: ((cut-off, (r, g, b)), ...), densest first; under the
+        lowest cut-off and blank cells the hillshade shows as it is.
+        Returns a PIL RGB image, or None when there is no brush."""
+        from PIL import Image
+        w, h = hs_img.size
+        v = self.brush_values(grid_rect, w, h)
+        if v is None:
+            return None
+        v = np.nan_to_num(v, nan=-1.0)
+        base = np.asarray(hs_img.convert('RGB')).astype(np.float32)
+        out = base.copy()
+        a = np.float32(min(1.0, max(0.0, opacity)))
+        for cut, col in sorted(classes):               # lightest first, denser classes over them
+            m = v >= cut
+            out[m] = (1 - a) * base[m] + a * np.array(col[:3], np.float32)
+        return Image.fromarray(np.clip(out + 0.5, 0, 255).astype(np.uint8), 'RGB')
 
     def side_json(self, center_e, center_n, z_offset, files):
         """ridge.json for the zip: the step's own, plus the frame and the
@@ -231,7 +254,7 @@ def ridge_object(meta, files, data=None):
         return base64.b64encode(data[name]).decode('ascii') if data is not None else name
     return {'version': 1, 'counts': meta.get('counts') or {},
             'points': ref('ridge_points.bin'), 'patches': ref('ridge_patches.bin'),
-            'shapes': ref('ridge_shapes.bin'), 'brush': ref('tex_brush.png'), 'depthCap': DEPTH_CAP}
+            'shapes': ref('ridge_shapes.bin'), 'depthCap': DEPTH_CAP}
 
 
 def fill_nearest(a, blank):
