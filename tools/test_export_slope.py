@@ -181,7 +181,7 @@ with tempfile.TemporaryDirectory() as tmp:
     outp, logp = run('plain.zip', ['--dem-grid', str(tmp / 'dem.json')])
     zp = zipfile.ZipFile(outp); hp = zp.read('viewer.html').decode('utf-8')
     check('an export without the slope map: the placeholder is an empty string, no file, no meta, the same file list as ever', const(hp, 'TERRAIN_SLOPE_B64') == '' and 'slope_map' not in json.loads(zp.read('caves.json'))['meta']
-          and {n for n in zp.namelist() if not n.startswith('libs/')} == {'terrain.glb', 'tex_sat.jpg', 'tex_hs.jpg', 'caves.json', 'viewer.html', 'serve.bat', 'serve.sh'}, sorted(zp.namelist()))
+          and {n for n in zp.namelist() if not n.startswith('libs/')} == {'terrain.glb', 'tex_sat.jpg', 'tex_hs.jpg', 'caves.json', 'viewer.html', 'serve.bat', 'serve.sh', 'manifest.json'}, sorted(zp.namelist()))
     check('asking for the map on map terrain changes nothing in the viewer (byte for byte the plain one)', hm == hp)
 
     # ── 5. the card's facts, ridgewalking export ─────────────────────────────

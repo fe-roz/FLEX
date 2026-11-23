@@ -114,7 +114,7 @@ with tempfile.TemporaryDirectory() as tmp:
     out0, log0 = run('plain.zip', [])
     z0 = zipfile.ZipFile(out0); h0 = z0.read('viewer.html').decode('utf-8')
     check('plain export: FEATURES is null, nothing left of the placeholder', features_const(h0) is None and 'PLACEHOLDER_FEATURES_JSON' not in h0.replace("'PLACEHOLDER_' + 'FEATURES_JSON'", ''), str(features_const(h0))[:80])
-    check('plain export: the same file list as ever', {n for n in z0.namelist() if not n.startswith('libs/')} == {'terrain.glb', 'tex_sat.jpg', 'tex_hs.jpg', 'caves.json', 'viewer.html', 'serve.bat', 'serve.sh'}, sorted(z0.namelist()))
+    check('plain export: the same file list as ever', {n for n in z0.namelist() if not n.startswith('libs/')} == {'terrain.glb', 'tex_sat.jpg', 'tex_hs.jpg', 'caves.json', 'viewer.html', 'serve.bat', 'serve.sh', 'manifest.json'}, sorted(z0.namelist()))
     check('plain export: the log does not mention them', 'Surface features' not in log0)
     out0b, _ = run('plain2.zip', ['--features', str(tmp / 'not-there.json')])
     check('a features file that is not there changes nothing', zipfile.ZipFile(out0b).read('viewer.html') == z0.read('viewer.html') and 'features.json' not in zipfile.ZipFile(out0b).namelist())
