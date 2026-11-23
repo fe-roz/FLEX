@@ -397,7 +397,7 @@
   const TRIP_LISTS = ['people', 'caves', 'links'];
   function emptyProject(pid) {
     return { id: pid, name: '', desc: '', lists: {}, caves: {}, aliases: {}, notes: {}, leads: {},
-             surveys: {}, order: [], caveUpdates: {}, surveyVersions: {}, segments: {}, cavefiles: {}, systems: {}, layers: {}, features: {}, groups: {}, arealabels: {}, rmarks: {}, trips: {}, proposals: {}, archived: null, footprint: null, moves: {}, log: [], byId: new Map() };
+             surveys: {}, order: [], caveUpdates: {}, surveyVersions: {}, segments: {}, cavefiles: {}, systems: {}, layers: {}, features: {}, groups: {}, presets: {}, arealabels: {}, rmarks: {}, trips: {}, proposals: {}, archived: null, footprint: null, moves: {}, log: [], byId: new Map() };
   }
   // Field-survey entries name their survey in `sid`. survey.set and survey.delete once wrote it in `id`, over
   // the entry's own id ("<dev>.<seq>"), so every later change to a survey looked like a copy of its first and was
@@ -562,6 +562,15 @@
           if (e.caves !== undefined) g.caves = clone(e.caves);                 // My data: a saved cave set
           if (e.removed != null) g.removed = !!e.removed;
           g.updated = { t: e.t, who: e.who };
+          break;
+        }
+        case 'preset.set': {                                  // a Process preset (desktop): a named set of ticks and settings
+          if (!e.preset) break;
+          const q = S.presets[e.preset] || (S.presets[e.preset] = { id: String(e.preset), name: '', values: {} });
+          if (e.name != null) q.name = String(e.name).slice(0, 60);
+          if (e.values !== undefined) q.values = presetClean(e.values);
+          if (e.removed != null) q.removed = !!e.removed;
+          q.updated = { t: e.t, who: e.who };
           break;
         }
         case 'layer.set': {
@@ -1310,6 +1319,35 @@
     if (areaRingKey(area.ring) !== k) return 'outofdate';
     return res.some(r => area.results[r].ringKey && area.results[r].ringKey !== k) ? 'outofdate' : 'made';
   }
+
+  // ── Process presets: named sets of what to make and how to pack it for the phone ──
+  // values = { v: 1, make: { bush, veg, ridge, prospect, terrain: bool }, mapsCell: '' | metres, set: { <control id>: bool | string } }.
+  // `set` holds the Process pane's own controls by id (export_*, lidar_*): never the map's name, the chosen cloud or a
+  // link typed in (a private tile link must not travel in a preset).
+  const PRESET_MAKE = ['bush', 'veg', 'ridge', 'prospect', 'terrain'];
+  const PRESET_NEVER = ['export_map_name', 'export_ept_select', 'export_hillshade_url', 'export_bbox_text'];
+  function presetClean(v) {
+    const out = { v: 1, make: {}, mapsCell: '', set: {} };
+    if (!v || typeof v !== 'object') return out;
+    PRESET_MAKE.forEach(k => { if (v.make && v.make[k] != null) out.make[k] = !!v.make[k]; });
+    if (v.mapsCell != null && /^[0-9.]{0,6}$/.test(String(v.mapsCell))) out.mapsCell = String(v.mapsCell);
+    Object.keys(v.set || {}).slice(0, 60).forEach(k => {
+      if (!/^(export|lidar)_[a-z_]{1,40}$/.test(k) || PRESET_NEVER.includes(k)) return;
+      const x = v.set[k];
+      if (typeof x === 'boolean') out.set[k] = x;
+      else if ((typeof x === 'string' || typeof x === 'number') && String(x).length <= 80 && !/^https?:/i.test(String(x))) out.set[k] = String(x);
+    });
+    return out;
+  }
+  /** The presets FLEX comes with (they cannot be renamed or deleted; "Save current as" makes your own from one). */
+  const PROCESS_PRESETS = [
+    { id: 'ship-ridgewalk', name: 'Ridgewalk trip', shipped: true, values: presetClean({ make: { bush: true, veg: true, ridge: true, prospect: false, terrain: false },
+      set: { export_terrain_source: 'lidar', export_caves_mode: 'lines', export_features_on: true, export_ridgewalk: true, export_ridge_shapes: true, export_trees: true, export_slope_map: true, export_hillshade_mode: 'lidar' } }) },
+    { id: 'ship-survey', name: 'Cave survey', shipped: true, values: presetClean({ make: { bush: false, veg: false, ridge: false, prospect: false, terrain: true },
+      set: { export_terrain_source: 'lidar', export_caves_mode: 'walls', export_docs_on: true, export_features_on: true, export_ridgewalk: false, export_trees: false, export_slope_map: false, export_hillshade_mode: 'lidar' } }) },
+  ];
+  /** The project's own presets, by name. */
+  function livePresets(S) { return Object.values((S && S.presets) || {}).filter(q => !q.removed && q.name).sort((a, b) => a.name.localeCompare(b.name)); }
 
   // A group and everything under it.
   function groupPath(S, id) { const out = [], seen = new Set(); while (id && S.groups[id] && !seen.has(id)) { seen.add(id); out.unshift(S.groups[id]); id = S.groups[id].parent; } return out; }
@@ -2337,7 +2375,7 @@
     segmentsOf, segmentIndex, segmentsAt, proposalTarget, segmentStates, liveCavefiles, liveLayers, areaLabelsOf, areaLabelId, areaLabelState, areaLabelUndo,
     tripState, tripEdit, tripUndo, tripsOf, tripsFor, tripGroups, tripMoves, tripDays, fullDay, TRIP_NONE,
     snapshotTime, entriesAt, replayProjectAt, replayDocsAt, changeDays, caveBundle, moveRenames, caveMoveEntries, caveMoveClear, moveRecord, movesOf,
-    liveFeatures, liveGroups, groupPath, PROCESS_GROUP_KIND, PROCESS_GROUP_NAME, processGroup, processAreas, areaRing, areaRingKey, processAreaState, featuresGeoJSON, featuresKML, featuresGPX, flexTag, makeFlexTag,
+    liveFeatures, liveGroups, groupPath, PROCESS_GROUP_KIND, PROCESS_GROUP_NAME, processGroup, processAreas, areaRing, areaRingKey, processAreaState, presetClean, PROCESS_PRESETS, livePresets, featuresGeoJSON, featuresKML, featuresGPX, flexTag, makeFlexTag,
     selectForSync, syncManifest, newEntries,
     parseNum, shotFlags, shotReading, computeSurvey, stationLruds, nextStationName, fmtDecl, parseDecl, fixLegacy, suggestCaves,
     liveSystems, systemsOf, systemTotals, fileGroups, planMulti, systemUndo, multiUndo, entrancesOf, entranceFit,

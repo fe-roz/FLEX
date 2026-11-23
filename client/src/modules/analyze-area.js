@@ -838,6 +838,7 @@
   doc.head.appendChild(css);
 
   w._areas = { available: () => !!S.avail, list: () => S.areas.slice(), refresh, current, setCurrent, lidar, setLidar, check, run, show, showResult,
+    ticks: () => Object.assign({}, S.ticks), setTicks: o => { S.ticks = Object.assign({}, o || {}); paint(); }, mapsCell: () => S.mapsCell, setMapsCell,   // presets (process-panel.js)
     lidarPicked: () => (S.lidar || []).slice(),      // the choice as it stands, without reading the list of clouds again
     projectAreas: () => S.areas.filter(isProjectArea), earlierAreas: () => S.areas.filter(a => !isProjectArea(a)), saveInProject, moveIn, rename: renameArea,
     shown: () => JSON.parse(JSON.stringify(SHOW)), eyeOf: (id, r) => eyeOf(SHOW, id, r), remove, removeResult, runMore, restore, pure,

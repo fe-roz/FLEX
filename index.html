@@ -2180,6 +2180,12 @@
   .process-step span { text-transform: none; letter-spacing: 0; font-size: 10px; color: rgba(255,255,255,0.5); margin-left: 6px; }
   #exportCollapsible.process-has-lidar #export_lidar_rows > * { display: none !important; }
   #exportCollapsible.process-has-lidar #export_lidar_rows::before { content: "The point cloud ticked in 2 \00b7 LiDAR, above."; font-size: 11px; color: rgba(255,255,255,0.7); }
+  #process-presets { padding: 6px 6px 2px; font-size: 11px; }
+  #process-presets .pp-row { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-bottom: 4px; }
+  #process-presets select { flex: 1 1 120px; min-width: 0; background: #222; color: #eee; border: 1px solid #444; border-radius: 3px; padding: 3px 5px; font-size: 11px; }
+  #process-presets .pp-btn { background: #222; border: 1px solid #444; border-radius: 3px; color: #eee; font-size: 11px; padding: 3px 8px; cursor: pointer; }
+  #process-presets .pp-btn:disabled { opacity: .4; cursor: default; }
+  #process-presets .pp-note { font-size: 10px; color: rgba(255,255,255,.55); }
   /* an explanation waits behind its "?" (process-panel.js) */
   #processCollapsible .exp-hint-off { display: none; }
   #processCollapsible .exp-q { display: inline-block; width: 16px; height: 16px; line-height: 14px; margin-left: 6px; padding: 0; border-radius: 50%; border: 1px solid rgba(255,255,255,0.35); background: none; color: rgba(255,255,255,0.75); font-size: 10px; cursor: pointer; vertical-align: middle; }

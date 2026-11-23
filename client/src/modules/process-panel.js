@@ -82,18 +82,114 @@
     if (w._exportSyncModes) try { w._exportSyncModes(); } catch (_) {}
     return S.reuse;
   }
-  function opened() { applyArea(); }
+  function opened() { applyArea(); paintPresets(); }
+
+  // ── Presets ───────────────────────────────────────────────────────────────
+  // A preset is a named set of the ticks of 3 and the settings of 3 and 4 (flexlib.js presetClean says what may be in
+  // one). FLEX comes with two; yours are kept in the open project (op preset.set, so they sync) or, with no project,
+  // on this computer (localStorage flex.process.presets).
+  const PKEY = 'flex.process.presets', FL = () => w.FlexLib, PJ = () => w._pj || {};
+  const SET_IDS = ['export_terrain_source', 'export_map_cell', 'export_caves_mode', 'export_docs_on', 'export_features_on', 'export_ridgewalk', 'export_ridge_shapes', 'export_trees', 'export_slope_map',
+    'export_satellite_source', 'export_hillshade_mode', 'export_brush_strength', 'export_resolution', 'export_max_tri', 'export_tex_size', 'lidar_veg_lo', 'lidar_veg_hi', 'lidar_void_depth', 'lidar_void_min', 'lidar_low_cut'];
+  const inProject = () => !!(PJ().pid && PJ().P && w._pjApi && !PJ().readonly);
+  const localList = () => { try { const a = JSON.parse(lget(PKEY) || '[]'); return Array.isArray(a) ? a.filter(q => q && q.id && q.name).map(q => ({ id: String(q.id), name: String(q.name).slice(0, 60), values: FL().presetClean(q.values) })) : []; } catch (_) { return []; } };
+  /** Shipped ones first, then the project's (or this computer's, with no project). */
+  function presets() {
+    if (!FL() || !FL().PROCESS_PRESETS) return [];
+    const own = inProject() ? FL().livePresets(PJ().P).map(q => ({ id: q.id, name: q.name, values: q.values, where: 'project' })) : localList().map(q => Object.assign(q, { where: 'computer' }));
+    return FL().PROCESS_PRESETS.map(q => Object.assign({}, q)).concat(own);
+  }
+  /** The ticks and settings as they stand → a preset's values. */
+  function capture() {
+    const v = { make: {}, mapsCell: '', set: {} }, t = (w._areas && w._areas.ticks) ? w._areas.ticks() : {};
+    ['bush', 'veg', 'ridge', 'prospect', 'terrain'].forEach(k => { v.make[k] = !!t[k]; });
+    if (w._areas && w._areas.mapsCell) v.mapsCell = w._areas.mapsCell() || '';
+    SET_IDS.forEach(id => { const e = $(id); if (!e) return; v.set[id] = e.type === 'checkbox' ? !!e.checked : String(e.value); });
+    return FL().presetClean(v);
+  }
+  /** Put a preset's ticks and settings in the pane. What this computer cannot do (a map layer it has not, a greyed option) is left as it is → { applied, skipped: [ids] }. */
+  function applyPreset(id) {
+    const q = presets().find(x => x.id === id); if (!q) return null;
+    const v = q.values || {}, skipped = [];
+    if (w._areas && w._areas.setTicks) w._areas.setTicks(Object.assign(w._areas.ticks(), v.make || {}));
+    if (w._areas && w._areas.setMapsCell && (v.mapsCell || '') !== (w._areas.mapsCell() || '')) w._areas.setMapsCell(v.mapsCell || '');
+    // the terrain source first: it decides which of the others can be had
+    Object.keys(v.set || {}).sort((a, b) => (a === 'export_terrain_source' ? -1 : b === 'export_terrain_source' ? 1 : 0)).forEach(k => {
+      const e = $(k), x = v.set[k]; if (!e) return void skipped.push(k);
+      if (e.type === 'checkbox') { if (e.checked === !!x) return; if (e.disabled) return void skipped.push(k); e.click(); return; }
+      if (String(e.value) === String(x)) return;
+      if (e.tagName === 'SELECT' && ![...e.options].some(o => o.value === String(x))) return void skipped.push(k);
+      e.value = String(x); e.dispatchEvent(new Event('input', { bubbles: true })); e.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    try { if (w._exportSyncModes) w._exportSyncModes(); } catch (_) {}
+    S.preset = id; paintPresets();
+    return { applied: q.name, skipped };
+  }
+  async function savePreset(name, id) {
+    name = String(name || '').trim().slice(0, 60); if (!name) return null;
+    const values = capture(); id = id || ('q' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6));
+    if (inProject()) { const e = await w._pjApi.record('preset.set', { preset: id, name, values }); if (!e) return null; }
+    else { const l = localList().filter(q => q.id !== id); l.push({ id, name, values }); lset(PKEY, JSON.stringify(l)); }
+    S.preset = id; paintPresets(); return id;
+  }
+  async function renamePreset(id, name) {
+    const q = presets().find(x => x.id === id); name = String(name || '').trim().slice(0, 60);
+    if (!q || q.shipped || !name) return false;
+    if (q.where === 'project') { if (!(await w._pjApi.record('preset.set', { preset: id, name }))) return false; }
+    else lset(PKEY, JSON.stringify(localList().map(x => x.id === id ? Object.assign(x, { name }) : x)));
+    paintPresets(); return true;
+  }
+  async function removePreset(id) {
+    const q = presets().find(x => x.id === id); if (!q || q.shipped) return false;
+    if (q.where === 'project') { if (!(await w._pjApi.record('preset.set', { preset: id, removed: true }))) return false; }
+    else lset(PKEY, JSON.stringify(localList().filter(x => x.id !== id)));
+    if (S.preset === id) S.preset = ''; paintPresets(); return true;
+  }
+  const esc = t => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  function paintPresets() {
+    const host = $('process-presets'); if (!host || !FL() || !FL().PROCESS_PRESETS) return;
+    const list = presets(), cur = list.find(q => q.id === S.preset), own = cur && !cur.shipped;
+    const h = `<div class="pp-row"><label for="process-preset">Preset</label><select id="process-preset" aria-label="Preset"><option value="">— choose —</option>${list.map(q => `<option value="${esc(q.id)}"${q.id === S.preset ? ' selected' : ''}>${esc(q.name)}${q.shipped ? '' : q.where === 'project' ? ' (project)' : ' (this computer)'}</option>`).join('')}</select>
+      <button type="button" class="pp-btn" data-pp="apply"${cur ? '' : ' disabled'} title="Set the ticks and settings below to this preset">Apply</button></div>
+      <div class="pp-row"><button type="button" class="pp-btn" data-pp="save" title="Keep the ticks and settings as they are now under a name${inProject() ? ', in the project' : ', on this computer (open a project to keep them in it)'}">Save current as…</button>
+      <button type="button" class="pp-btn" data-pp="rename"${own ? '' : ' disabled'}>Rename</button><button type="button" class="pp-btn" data-pp="delete"${own ? '' : ' disabled'}>Delete</button><span class="pp-note" id="process-preset-note">${esc(S.presetNote || '')}</span></div>`;
+    if (host.dataset.h !== h) { host.dataset.h = h; host.innerHTML = h; }
+  }
+  async function askName(title, value) {
+    const dlg = w._pjApi && w._pjApi.dialog;
+    if (!dlg) { const r = w.prompt(title, value || ''); return r && r.trim(); }
+    const r = await dlg({ title, input: { value: value || '' }, buttons: [{ label: 'Cancel', value: null }, { label: 'Save', value: 'ok', primary: true }] });
+    return r && r.button === 'ok' ? String(r.value || '').trim() : null;
+  }
+  function presetEvents() {
+    const host = $('process-presets'); if (!host) return;
+    host.addEventListener('change', e => { if (e.target.id === 'process-preset') { S.preset = e.target.value; S.presetNote = ''; paintPresets(); } });
+    host.addEventListener('click', async e => {
+      const b = e.target.closest('[data-pp]'); if (!b || b.disabled) return;
+      const act = b.dataset.pp, q = presets().find(x => x.id === S.preset);
+      if (act === 'apply' && q) { const r = applyPreset(q.id); S.presetNote = r ? 'Applied.' + (r.skipped.length ? ' ' + r.skipped.length + ' setting' + (r.skipped.length > 1 ? 's' : '') + ' not available here left as they were.' : '') : ''; paintPresets(); }
+      else if (act === 'save') { const n = await askName('Save the current ticks and settings as a preset', q && !q.shipped ? q.name : ''); if (n) { const same = presets().find(x => !x.shipped && x.name === n); await savePreset(n, same && same.id); S.presetNote = 'Saved' + (inProject() ? ' in the project.' : ' on this computer.'); paintPresets(); } }
+      else if (act === 'rename' && q) { const n = await askName('Rename the preset', q.name); if (n) await renamePreset(q.id, n); }
+      else if (act === 'delete' && q) {
+        const dlg = w._pjApi && w._pjApi.dialog;
+        const yes = dlg ? ((await dlg({ title: 'Delete the preset “' + q.name + '”?', text: 'The ticks and settings in the pane stay as they are.', buttons: [{ label: 'Cancel', value: null }, { label: 'Delete', value: 'ok', primary: true }] })) || {}).button === 'ok' || false : w.confirm('Delete the preset “' + q.name + '”?');
+        if (yes) await removePreset(q.id);
+      }
+    });
+    w.addEventListener('flex-project-changed', paintPresets);
+  }
 
   function start() {
     if (!$(PANE)) return;
     mirror();
     questionMarks();
+    presetEvents(); paintPresets();
     // the line that says what the map is of, at the top of part 4
     const part = $('exportCollapsible'), wrap = part && part.querySelector('.lp-panel-wrap');
     if (wrap && !$('process-map-of')) { const d = doc.createElement('div'); d.id = 'process-map-of'; d.style.cssText = 'font-size:11px; color:rgba(255,255,255,0.75); padding:4px 6px 6px;'; wrap.insertBefore(d, wrap.firstChild); }
-    w.addEventListener('flex-areas-changed', () => { S.reuseKey = ''; if ($(PANE).classList.contains('show')) applyArea(); });
+    w.addEventListener('flex-areas-changed', () => { S.reuseKey = ''; paintPresets(); if ($(PANE).classList.contains('show')) applyArea(); });
     applyArea();
   }
-  w._process = { pick, reuse: () => S.reuse, askReuse, applyArea, open: () => { const b = doc.querySelector('[data-target="#' + PANE + '"]'); if (b && !$(PANE).classList.contains('show')) b.click(); } };
+  w._process = { pick, reuse: () => S.reuse, askReuse, applyArea, presets: { list: presets, capture, apply: applyPreset, save: savePreset, rename: renamePreset, remove: removePreset }, open: () => { const b = doc.querySelector('[data-target="#' + PANE + '"]'); if (b && !$(PANE).classList.contains('show')) b.click(); } };
   if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', start); else start();
 })();

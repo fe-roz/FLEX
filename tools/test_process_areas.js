@@ -42,6 +42,23 @@ const log2 = log.concat([Object.assign(E('feature.set', { feature: 'a1', coords:
 ok('a change of the outline made elsewhere arrives with the sync and makes the results here out of date', FL.processAreaState(FL.processAreas(replay(log2)).find(f => f.id === 'a1'), { ring, results: { ground: { ringKey: key } } }) === 'outofdate');
 ok('a process area exports like any area (it can go to CalTopo with the project\'s other features)', FL.featuresGeoJSON(S).features.some(f => f.properties && /Ridge north/.test(JSON.stringify(f.properties)) && /Polygon/.test(f.geometry.type)), FL.featuresGeoJSON(S).features.map(f => f.geometry.type));
 
+// ── flexlib: presets ─────────────────────────────────────────────────────────
+{
+  const ship = FL.PROCESS_PRESETS;
+  ok('two presets come with FLEX: "Ridgewalk trip" and "Cave survey"', ship.length === 2 && ship[0].name === 'Ridgewalk trip' && ship[1].name === 'Cave survey' && ship.every(q => q.shipped && q.values.v === 1));
+  ok('Ridgewalk trip: brush, trees and ridgewalking made; the map with ridgewalking, shapes, trees, slope map', ship[0].values.make.ridge && ship[0].values.make.veg && ship[0].values.make.bush && !ship[0].values.make.terrain && ship[0].values.set.export_ridgewalk === true && ship[0].values.set.export_trees === true && ship[0].values.set.export_slope_map === true, ship[0].values);
+  ok('Cave survey: terrain for the project; the map with cave walls and documents, no ridgewalking', ship[1].values.make.terrain && !ship[1].values.make.ridge && ship[1].values.set.export_caves_mode === 'walls' && ship[1].values.set.export_docs_on === true && ship[1].values.set.export_ridgewalk === false, ship[1].values);
+  const c = FL.presetClean({ make: { ridge: 1, veg: 0, other: true }, mapsCell: '0.3', set: { export_trees: true, export_caves_mode: 'lines', export_hillshade_url: 'kept out', export_map_name: 'kept out', export_ept_select: 'kept out', export_satellite_source: 'https://tiles.example.org/{z}/{x}/{y}', somewhere_else: 'x', export_resolution: 0.5, export_bad: { a: 1 } } });
+  ok('a preset keeps ticks and the pane\'s settings only: no map name, no chosen cloud, no typed link, nothing that is a link', JSON.stringify(c) === JSON.stringify({ v: 1, make: { veg: false, ridge: true }, mapsCell: '0.3', set: { export_trees: true, export_caves_mode: 'lines', export_resolution: '0.5' } }), c);
+  ok('nothing or rubbish gives an empty preset', JSON.stringify(FL.presetClean(null)) === JSON.stringify({ v: 1, make: {}, mapsCell: '', set: {} }) && FL.presetClean({ mapsCell: 'abc' }).mapsCell === '');
+  let L = log.concat([E('preset.set', { preset: 'q1', name: 'Winter trip', values: { make: { ridge: true }, set: { export_trees: true, export_hillshade_url: 'x' } } }), E('preset.set', { preset: 'q2', name: 'Another', values: {} })]);
+  let P = replay(L);
+  ok('a project\'s presets are replayed from its log (they travel in sync files), cleaned, by name', FL.livePresets(P).map(q => q.name).join() === 'Another,Winter trip' && FL.livePresets(P)[1].values.make.ridge === true && !('export_hillshade_url' in FL.livePresets(P)[1].values.set), FL.livePresets(P));
+  P = replay(L.concat([E('preset.set', { preset: 'q1', name: 'Winter trip 2' }), E('preset.set', { preset: 'q2', removed: true })]));
+  ok('rename keeps the values; delete removes it', FL.livePresets(P).length === 1 && FL.livePresets(P)[0].name === 'Winter trip 2' && FL.livePresets(P)[0].values.set.export_trees === true, FL.livePresets(P));
+  ok('a project with none has none', FL.livePresets(replay(log)).length === 0);
+}
+
 // ── the server: the link ─────────────────────────────────────────────────────
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'parea-'));
 const api = require('../areas_api')({ python: 'python3', root: tmp, terrainGen: null });
