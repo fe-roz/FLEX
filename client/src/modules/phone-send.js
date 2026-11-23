@@ -43,7 +43,7 @@
     const sel = $('phone_export'), keep = S.prefer || sel.value;
     sel.textContent = '';
     if (!S.exports.length) sel.add(new Option('No finished export on this computer yet', ''));
-    S.exports.forEach(e => sel.add(new Option(`${e.name} · ${mb(e.bytes)} · ${when(e.time)}`, e.id)));
+    S.exports.forEach(e => sel.add(new Option(`${e.name} · ${mb(e.bytes)}${e.kind === 'update' && e.full_bytes ? ' (full map ' + mb(e.full_bytes) + ')' : ''} · ${when(e.time)}`, e.id)));      // an update package: only what changed
     if (keep && S.exports.some(e => e.id === keep)) sel.value = keep;
     sel.disabled = !S.exports.length;
     const btn = $('phone_send');

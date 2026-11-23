@@ -1871,6 +1871,14 @@
                 onclick="window._exportRun()" disabled>
                 <svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-pack"/></svg>Make the map
               </button>
+              <!-- Make an update: the same map again as only what changed since an earlier one (map-update.js); shown when there is one -->
+              <div id="export_update_row" style="display:none; margin-top:6px;">
+                <button id="export_update_btn" class="btn btn-secondary" style="width:100%; font-size:12px;" disabled
+                  title="Make the map as usual, then a small package with only the files that changed since the earlier map: for FLEX Field, which brings its map up to date with it">Make an update</button>
+                <select id="export_update_base" style="display:none; width:100%; margin-top:4px; background:#222; color:#eee; border:1px solid #444; border-radius:3px; padding:3px 6px; font-size:11px;"></select>
+                <div style="font-size:10px; color:rgba(255,255,255,0.45); margin-top:3px;"><span id="export_update_one"></span> Only what changed, for a phone that already has that map.</div>
+              </div>
+              <div id="export_update_card" style="display:none; margin-top:8px; padding:6px 8px; font-size:11px; color:rgba(255,255,255,0.9); background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.12); border-radius:4px;"></div>
               <div id="export_progress_wrap" style="display:none; margin-top:8px;">
                 <div style="height:4px; background:rgba(255,255,255,.12); border-radius:2px;">
                   <div id="export_progress_bar" style="height:4px; width:0; background:#00e5ff; border-radius:2px; transition:width .4s;"></div>
@@ -2200,6 +2208,7 @@
 </style>
 <div id="jobs-panel" class="jobs-panel" hidden></div>  <!-- filled by jobs-panel.js -->
 <script src="client/src/modules/process-panel.js"></script>  <!-- Process: Analyze and Export as one flow (the pane's two parts, the area handed to the map, "?" explanations, presets) -->
+<script src="client/src/modules/map-update.js"></script>  <!-- Make an update: a phone map again as only what changed (window._mapUpdate) -->
 <script src="client/src/modules/phone-send.js"></script>  <!-- Send to phone over USB: the box under the export's download button (window._phone) -->
 <script src="client/src/modules/jobs-panel.js"></script>  <!-- the Jobs panel along the bottom of the map: running, waiting and failed jobs (window._jobs) -->
 <script src="client/src/modules/surface-route.js"></script>  <!-- 🔬 Analyze → Surface route: picks, weights, Find routes (route_cost.py on the server), cards, graph, save as line, overlays (window._surfRoute) -->

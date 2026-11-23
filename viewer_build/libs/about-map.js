@@ -6,7 +6,8 @@
 // stations, leads) and what it actually loaded. An older export has no `about`: the card then shows what the rest
 // of its meta says and leaves the rest out. Nothing here changes anything.
 //
-//   AboutMap.facts({ meta, caves, ridge, trees, features, has: { sat, hs, hsb, slope }, units })
+//   AboutMap.facts({ meta, caves, ridge, trees, features, has: { sat, hs, hsb, slope }, units, version })
+//       version: FLEX Field's map_version.json after an update package { exported, updated_from, updates, first }
 //       → [{ h: 'Section' } | { k: 'Label', v: 'value' }]          (pure: tools/test_about_map.js)
 //   AboutMap.open({ el, dialog, ...the same })                    the card, in the viewer's own dialog
 (function (root) {
@@ -35,6 +36,9 @@
     var out = [], row = function (k, v) { if (v != null && v !== '') out.push({ k: k, v: String(v) }); }, head = function (t) { out.push({ h: t }); };
     row('Map', meta.name || 'No name');
     row('Exported', A && when(A.exported) ? when(A.exported) : 'not recorded (an older export)');
+    // the map's version is its export time; a map brought up to date by update packages says from what (map_version.json, FLEX Field)
+    var V = o && o.version && typeof o.version === 'object' ? o.version : null;
+    if (V && when(V.updated_from) && when(V.exported)) row('Updated', 'from ' + when(V.updated_from) + ' to ' + when(V.exported) + (num(V.updates) && V.updates > 1 ? ' (' + V.updates + ' updates since the full map of ' + when(V.first) + ')' : ''));
     // the area: the exporter's numbers, else the terrain's rectangle (and the polygon when it was cut to one)
     var ex = meta.extent_utm, w = A && A.size_m ? +A.size_m[0] : ex ? ex[2] - ex[0] : null, h = A && A.size_m ? +A.size_m[1] : ex ? ex[3] - ex[1] : null;
     var km2 = A && num(A.area_km2) ? A.area_km2 : Array.isArray(meta.area_polygon) && meta.area_polygon.length > 2 ? ringArea(meta.area_polygon) / 1e6 : (num(w) && num(h) ? w * h / 1e6 : null);

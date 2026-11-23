@@ -316,6 +316,16 @@ class MainActivity : AppCompatActivity() {
                 val s = contentResolver.openInputStream(uri)?.use { input ->
                     store.stage(input) { msg, _ -> js("window.ffImportProgress && ffImportProgress(${q(msg)})") }
                 } ?: throw IllegalStateException("Could not read that file")
+                val upd = s.update
+                if (upd != null) {                  // an update package: only for the map it was made against, applied whole or not at all
+                    val (tid, why) = store.findForUpdate(upd, targetId)
+                    if (tid == null) { store.discard(s.token); throw IllegalStateException(why ?: "This update cannot be applied.") }
+                    js("window.ffImportProgress && ffImportProgress(${q("Checking and applying the update…")})")
+                    val id = try { store.applyUpdate(s.dir, upd, tid, author) } catch (e: MapUpdate.Refused) { store.discard(s.token); throw IllegalStateException(e.message) }
+                    if (fromInbox != null) inbox.remove(fromInbox, true)
+                    done(id, true)
+                    return@execute
+                }
                 if (targetId != null) {
                     val id = store.commit(s.dir, s.name, s.formatVersion, targetId, author)
                     if (fromInbox != null) inbox.remove(fromInbox, true)

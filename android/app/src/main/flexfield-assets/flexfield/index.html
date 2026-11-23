@@ -160,12 +160,15 @@ function renderInbox() {
   box.textContent = '';
   if (!items.length) return;
   const head = document.createElement('div'); head.className = 'inbox-h';
-  head.textContent = items.length === 1 ? '1 map from your PC is waiting' : items.length + ' maps from your PC are waiting';
+  // an update package (only what changed, for a map already here) says which map it is for
+  const ups = items.filter(it => it.update).length, maps = items.length - ups;
+  head.textContent = items.length === 1 ? (ups ? 'An update for ' + items[0].update + ' from your PC' : '1 map from your PC is waiting')
+    : !ups ? items.length + ' maps from your PC are waiting' : !maps ? ups + ' updates from your PC are waiting' : maps + (maps === 1 ? ' map and ' : ' maps and ') + ups + (ups === 1 ? ' update' : ' updates') + ' from your PC are waiting';
   box.appendChild(head);
   items.forEach(it => {
     const row = document.createElement('div'); row.className = 'map inbox-row';
-    row.innerHTML = `<div class="ic">⇩</div><div class="tx"><div class="t1">${esc(it.name.replace(/\.zip$/i, ''))}</div><div class="t2">${esc(it.readable ? human(it.bytes || 0) : 'FLEX Field cannot read this copy on this phone: send it again from the PC')}</div></div>`;
-    if (it.readable) { const b = document.createElement('button'); b.className = 'btn primary inbox-import'; b.textContent = 'Import';
+    row.innerHTML = `<div class="ic">⇩</div><div class="tx"><div class="t1">${esc(it.update ? 'Update for ' + it.update : it.name.replace(/\.zip$/i, ''))}</div><div class="t2">${esc(it.readable ? human(it.bytes || 0) + (it.update ? ' · only what changed' : '') : 'FLEX Field cannot read this copy on this phone: send it again from the PC')}</div></div>`;
+    if (it.readable) { const b = document.createElement('button'); b.className = 'btn primary inbox-import'; b.textContent = it.update ? 'Update' : 'Import';
       b.addEventListener('click', async e => { e.stopPropagation(); if (inboxBusy) return; inboxBusy = true; try { H.inboxImport(it.name, (await ensureAuthor()) || ''); } finally { setTimeout(() => { inboxBusy = false; }, 1500); } });
       row.appendChild(b); }
     const x = document.createElement('button'); x.className = 'more inbox-discard'; x.setAttribute('aria-label', 'Discard'); x.textContent = '✕';
@@ -236,7 +239,7 @@ $('#import').addEventListener('click', async () => { H.importZip('', (await ensu
 window.ffIncomingZip = async () => { H.importIncoming((await ensureAuthor()) || ''); };
 window.ffImportProgress = msg => showBusy(msg);
 window.ffImportCancelled = () => hideBusy();
-window.ffImportFailed = async msg => { hideBusy(); await dialog({ title: 'Import failed', text: msg }); load(); };
+window.ffImportFailed = async msg => { hideBusy(); await dialog({ title: /^(This|The) update\b/.test(String(msg)) ? 'The update was not applied' : 'Import failed', text: msg }); load(); };
 window.ffImportDone = json => {
   hideBusy();
   let m = {}; try { m = JSON.parse(json); } catch (_) {}

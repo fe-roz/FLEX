@@ -137,7 +137,7 @@ object MapUpdate {
                 } else {
                     val src = File(exportDir, name)
                     if (!src.isFile) throw Refused(WRONG_BASE.format(u.baseExported.ifBlank { "unknown" }, "missing $name"))
-                    try { Files.createLink(dst.toPath(), src.toPath()) } catch (_: Exception) { src.copyTo(dst, true) }      // the same bytes under a second name: no copy
+                    try { Files.createLink(dst.toPath(), src.toPath()) } catch (_: Throwable) { src.copyTo(dst, true) }      // the same bytes under a second name: no copy
                     if (dst.length() != want.size || sha256(dst) != want.sha256) throw Refused(WRONG_BASE.format(u.baseExported.ifBlank { "unknown" }, "changed: $name"))
                 }
                 done++

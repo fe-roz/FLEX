@@ -36,6 +36,11 @@ class MapStore(private val ctx: Context) {
     val root: File = File(ctx.filesDir, "maps").apply { mkdirs() }
     private val staging: File = File(root, ".staging").apply { mkdirs() }
 
+    init {
+        // An update (or a full replace) stopped half way, e.g. the phone switched off: the old map is put back whole.
+        try { root.listFiles()?.forEach { d -> if (d.isDirectory && !d.name.startsWith(".")) MapUpdate.recover(File(d, "export")) } } catch (_: Exception) {}
+    }
+
     companion object {
         /** The data files an export carries. Nothing else is extracted. */
         val DATA_FILES = setOf("terrain.glb", "tex_sat.jpg", "tex_hs.jpg", "tex_hsb.jpg", "tex_slope.jpg", "walls.bin", "caves.json")
@@ -50,7 +55,9 @@ class MapStore(private val ctx: Context) {
         /** Trees and brush (an export made with that box ticked): one simple solid a tree or bush, libs/trees.js; trees.json has the count and detail. */
         const val TREES_FILE = "trees.bin"
         const val TREES_INFO = "trees.json"
-        fun isDataFile(name: String): Boolean = name in DATA_FILES || name in RIDGE_FILES || name == FEATURES_FILE || name == TREES_FILE || name == TREES_INFO || name == "docs.json" || TILE_RE.matches(name) || DOC_RE.matches(name)
+        /** The export's manifest (every data file with size and sha256: what an update is checked against) and what the last update did. */
+        const val MANIFEST_FILE = MapUpdate.MANIFEST
+        fun isDataFile(name: String): Boolean = name == MANIFEST_FILE || name == MapUpdate.VERSION_FILE || name in DATA_FILES || name in RIDGE_FILES || name == FEATURES_FILE || name == TREES_FILE || name == TREES_INFO || name == "docs.json" || TILE_RE.matches(name) || DOC_RE.matches(name)
         private val ID_RE = Regex("^[A-Za-z0-9_-]{1,64}$")
         private val SAFE_RE = Regex("^[A-Za-z0-9._ -]{1,120}$")
         fun validId(id: String?): Boolean = id != null && ID_RE.matches(id)
@@ -119,7 +126,7 @@ class MapStore(private val ctx: Context) {
     fun has(id: String, file: String): Boolean = exportDir(id)?.let { File(it, file).isFile } ?: false
 
     // ── Import ──────────────────────────────────────────────────────────────
-    class Staged(val token: String, val dir: File, val name: String, val formatVersion: Int, val bytes: Long)
+    class Staged(val token: String, val dir: File, val name: String, val formatVersion: Int, val bytes: Long, val update: MapUpdate.Update? = null)
 
     /** Unzip the data files of an export into a staging folder. Legacy exports
      *  that only carry the single-file viewer.html are unpacked from it. */
@@ -134,7 +141,7 @@ class MapStore(private val ctx: Context) {
             while (e != null) {
                 if (!e.isDirectory) {
                     val base = e.name.replace('\\', '/').substringAfterLast('/')
-                    val wanted = isDataFile(base) && base !in seen
+                    val wanted = (isDataFile(base) || base == MapUpdate.UPDATE) && base != MapUpdate.VERSION_FILE && base !in seen
                     // viewer.html only when the sidecars it would stand in for
                     // have not turned up yet (exports before sidecars existed).
                     val legacy = base == "viewer.html" && !gotViewer &&
@@ -151,6 +158,13 @@ class MapStore(private val ctx: Context) {
                 zin.closeEntry()
                 e = zin.nextEntry
             }
+        }
+        // An update package (export_update.py): update.json and only the files that changed. Applied by applyUpdate().
+        val uf = File(dir, MapUpdate.UPDATE)
+        if (uf.isFile) {
+            val u = try { MapUpdate.parseUpdate(uf.readText(Charsets.UTF_8)) } catch (e: MapUpdate.Refused) { dir.deleteRecursively(); throw IllegalArgumentException(e.message) }
+            uf.delete(); File(dir, "viewer.html").delete()
+            return Staged(token, dir, u.name, 0, dirSize(dir), u)
         }
         val viewer = File(dir, "viewer.html")
         if (viewer.isFile) {
@@ -200,6 +214,7 @@ class MapStore(private val ctx: Context) {
             old.deleteRecursively()
             val info = readInfo(targetId) ?: JSONObject().put("id", targetId).put("name", name)
             info.put("exportName", exportName).put("formatVersion", fv).put("updatedAt", now)
+            putVersion(info, ex); info.remove("updatedFrom")
             writeInfo(targetId, info)
             appendLog(targetId, logEntry("map.update", author, JSONObject().put("export", exportName)))
             return targetId
@@ -209,11 +224,51 @@ class MapStore(private val ctx: Context) {
         val d = File(root, id).apply { mkdirs() }
         if (!staged.renameTo(File(d, "export"))) { d.deleteRecursively(); throw IllegalStateException("could not move the export in") }
         File(d, "user").mkdirs()
-        writeInfo(id, JSONObject().put("id", id).put("name", name.ifBlank { "Map" })
+        writeInfo(id, putVersion(JSONObject().put("id", id).put("name", name.ifBlank { "Map" })
             .put("exportName", exportName).put("formatVersion", fv)
-            .put("importedAt", now).put("updatedAt", now))
+            .put("importedAt", now).put("updatedAt", now), File(d, "export")))
         appendLog(id, logEntry("map.import", author, JSONObject().put("export", exportName)))
         return id
+    }
+
+    /** The map's identity from its manifest, into map.json: the id it keeps across exports and when it was exported. */
+    private fun putVersion(info: JSONObject, exportDir: File): JSONObject {
+        val m = MapUpdate.readManifest(exportDir)
+        if (m != null) info.put("mapId", m.mapId).put("exported", m.exported) else { info.remove("mapId"); info.remove("exported") }
+        return info
+    }
+
+    /** The map an update is for: by its id, else by its name; of several, the one that is the update's base.
+     *  → (map id, null) or (null, why not, in plain words). */
+    fun findForUpdate(u: MapUpdate.Update, targetId: String?): Pair<String?, String?> {
+        val cands = ArrayList<String>()
+        if (targetId != null && mapDir(targetId) != null) cands.add(targetId)
+        else {
+            val all = root.listFiles()?.filter { it.isDirectory && !it.name.startsWith(".") }?.mapNotNull { d -> readInfo(d.name)?.let { d.name to it } } ?: emptyList()
+            all.filter { u.mapId.isNotBlank() && it.second.optString("mapId") == u.mapId }.forEach { cands.add(it.first) }
+            if (cands.isEmpty()) all.filter { it.second.optString("exportName").equals(u.name, ignoreCase = true) || it.second.optString("name").equals(u.name, ignoreCase = true) }.forEach { cands.add(it.first) }
+        }
+        if (cands.isEmpty()) return null to MapUpdate.NO_MAP.format(u.name)
+        var why: String? = null
+        for (id in cands) {
+            try { MapUpdate.check(File(mapDir(id), "export"), u); return id to null } catch (e: MapUpdate.Refused) { if (why == null || e.message != MapUpdate.NEEDS_FULL) why = e.message }
+        }
+        return null to why
+    }
+
+    /** Apply a staged update package to a map (MapUpdate.apply: built beside, every file checked, then swapped; a
+     *  refusal changes nothing). What was added on the phone is untouched, as with a full update. */
+    fun applyUpdate(staged: File, u: MapUpdate.Update, targetId: String, author: String): String {
+        val ex = exportDir(targetId) ?: throw MapUpdate.Refused(MapUpdate.NO_MAP.format(u.name))
+        val r = try { MapUpdate.apply(ex, staged, u) } finally { staged.deleteRecursively() }
+        val info = readInfo(targetId) ?: JSONObject().put("id", targetId).put("name", u.name)
+        info.put("updatedAt", System.currentTimeMillis()).put("exported", r.to).put("updatedFrom", r.from)
+        if (u.mapId.isNotBlank()) info.put("mapId", u.mapId)
+        if (File(ex, "caves.json").isFile) { val (en, fv) = readMeta(File(ex, "caves.json")); info.put("exportName", en).put("formatVersion", fv) }
+        writeInfo(targetId, info)
+        appendLog(targetId, logEntry("map.update", author, JSONObject().put("export", info.optString("exportName")).put("partial", true).put("from", r.from).put("to", r.to)
+            .put("added", r.added).put("replaced", r.replaced).put("removed", r.removed).put("bytes", r.bytes)))
+        return targetId
     }
 
     /** meta.name and meta.format_version from caves.json, read as a stream: a
