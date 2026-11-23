@@ -5,7 +5,7 @@
 // shape), then checks: nothing at all when RIDGE is null; the binary layouts; the objects made and how
 // they are drawn (through the ground, after the terrain); defaults on / off; every switch and the dot
 // size; the colours of a 0 m, 10 m and 30 m deep return; the saved choices; shapes loaded on first
-// use; the brush map only over the hillshade. Synthetic numbers only.
+// use; the hillshade with brush is a picture of the export (a third Imagery choice), not made here. Synthetic numbers only.
 //
 //   node tools/test_viewer_ridge.js
 'use strict';
@@ -53,7 +53,7 @@ const PATCH = [30, 30, 500.08, 31, 30, 500.08, 30, 31, 500.08, 31, 30, 500.08, 3
 const SHAPE = { xyz: [10, 20, 500, 11, 20, 490, 12, 21, 470, 12, 22, 495], depth: [0, 10, 30, 5], tri: [0, 1, 2, 0, 2, 3, 0, 1, 3, 1, 2, 3] };
 const b64 = b => b.toString('base64');
 const ridge = () => ({ version: 1, counts: { below: PTS.length }, points: b64(pointsBin(PTS)), patches: b64(patchesBin(PATCH)),
-  shapes: b64(shapesBin(SHAPE.xyz, SHAPE.depth, SHAPE.tri)), brush: 'iVBORbrush', depthCap: 20 });
+  shapes: b64(shapesBin(SHAPE.xyz, SHAPE.depth, SHAPE.tri)), depthCap: 20 });
 
 // ── A viewer to load it into ─────────────────────────────────────────────────
 function makeViewer() {
@@ -90,13 +90,11 @@ const isHex = (c, hex, e = 0.004) => near(c[0], (hex >> 16 & 255) / 255, e) && n
   let heads = 0;
   v.FR.sheet({ head: () => heads++, chips: () => heads++, el: () => ({}), sheet: { appendChild() { heads++; } } });
   ok('…and no rows in Display', heads === 0);
-  const tex0 = { image: { width: 4, height: 4 } };
-  ok('…and the hillshade texture comes back as it is', v.FR.mapTexture(tex0, 'hs') === tex0);
   v.FR.set('ret', false);                              // must not throw
   ok('the viewer template has the placeholder, the script line and the hooks', (() => {
     const h = fs.readFileSync(path.join(root, 'viewer_build', 'viewer.html'), 'utf8');
     return h.split('PLACEHOLDER_RIDGE_JSON').length === 2 && h.includes('<script>const RIDGE = PLACEHOLDER_RIDGE_JSON;</script>') && h.includes('<script src="libs/ridgewalk.js"></script>') &&
-      h.includes('FlexRidge.init(') && h.includes('FlexRidge.mapTexture(') && h.includes('FlexRidge.sheet(') && h.includes('FlexRidge.serialize()');
+      h.includes('FlexRidge.init(') && h.includes('FlexRidge.sheet(') && h.includes('FlexRidge.serialize()');
   })());
 
   // ── 2. The pure parts ───────────────────────────────────────────────────────
@@ -115,8 +113,8 @@ const isHex = (c, hex, e = 0.004) => near(c[0], (hex >> 16 & 255) / 255, e) && n
   ok('deeper than the cap is the last colour; above the lid, or no number, the first', isHex(FR.rampColour(30, 20), 0x4a2cff) && isHex(FR.rampColour(-3, 20), 0xffe85c) && isHex(FR.rampColour(NaN, 20), 0xffe85c));
   ok('half way between two stops is half way between their colours', near(FR.rampColour(2.5, 20)[1], (0xe8 + 0x9a) / 2 / 255) && near(FR.rampColour(5, 40)[1], (0xe8 + 0x9a) / 2 / 255));
   ok('saved choices: odd values fall back to the defaults', (() => {
-    const s = FR.restore({ ret: false, lone: 'no', pattern: true, size: 99, shapes: 1, brush: false, extra: 1 });
-    return s.ret === false && s.lone === true && s.pattern === true && s.size === 4 && s.shapes === false && s.brush === false && !('extra' in s) && FR.restore(null).size === 4 && FR.restore({ size: 7 }).size === 7;
+    const s = FR.restore({ ret: false, lone: 'no', pattern: true, size: 99, shapes: 1, brush: false, extra: 1 });      // brush: a choice saved by the first build, ignored now
+    return s.ret === false && s.lone === true && s.pattern === true && s.size === 4 && s.shapes === false && !('brush' in s) && !('extra' in s) && FR.restore(null).size === 4 && FR.restore({ size: 7 }).size === 7;
   })());
 
   // ── 3. With RIDGE: what is made, and the defaults ───────────────────────────
@@ -125,8 +123,8 @@ const isHex = (c, hex, e = 0.004) => near(c[0], (hex >> 16 & 255) / 255, e) && n
   let o = v.FR.objects();
   ok('active; four sets of dots and the patches are in the scene; one redraw asked for', r === true && v.FR.active() && o.points.every(p => p && p.isPoints && p.parent === v.scene) && o.patches && o.patches.isMesh && o.patches.parent === v.scene && v.redraws === 1, v.redraws);
   ok('the kinds are separate objects with their own returns: 4 in groups, 2 lone, 1 likely noise, 3 patterned', o.points.map(p => p.geometry.attributes.position.count).join() === '4,2,1,3');
-  ok('defaults: returns, lone, likely noise and openings on; patterned noise and shapes off; brush on; dots 4 px', o.points.map(p => p.visible).join() === 'true,true,true,false' && o.patches.visible === true && o.shapes === null &&
-    JSON.stringify(v.FR.state()) === JSON.stringify({ ret: true, lone: true, noise: true, pattern: false, patches: true, shapes: false, brush: true, size: 4 }), v.FR.state());
+  ok('defaults: returns, lone, likely noise and openings on; patterned noise and shapes off; dots 4 px', o.points.map(p => p.visible).join() === 'true,true,true,false' && o.patches.visible === true && o.shapes === null &&
+    JSON.stringify(v.FR.state()) === JSON.stringify({ ret: true, lone: true, noise: true, pattern: false, patches: true, shapes: false, size: 4 }), v.FR.state());
   ok('the shapes were not even decoded (loaded on first use)', v.decoded.length === 2 && v.scene.children.length === 5, v.decoded.length);
   const col = o.points[0].geometry.attributes.color;
   ok('a 0 m deep return is yellow, a 10 m one red, a 30 m one blue (cap 20), a 5 m one orange', isHex(rgb(col, 0), 0xffe85c) && isHex(rgb(col, 1), 0xe8322a) && isHex(rgb(col, 2), 0x4a2cff) && isHex(rgb(col, 3), 0xff9a2e), Array.from(col.array));
@@ -169,17 +167,17 @@ const isHex = (c, hex, e = 0.004) => near(c[0], (hex >> 16 & 255) / 255, e) && n
   // ── 5. Saved choices ────────────────────────────────────────────────────────
   v.FR.set('lone', false); v.FR.set('size', 6);
   const saved = JSON.parse(JSON.stringify(v.FR.serialize()));
-  ok('what is saved: every switch and the size', saved.lone === false && saved.shapes === true && saved.size === 6 && Object.keys(saved).length === 8, saved);
+  ok('what is saved: every switch and the size', saved.lone === false && saved.shapes === true && saved.size === 6 && Object.keys(saved).length === 7, saved);
   const v2 = makeViewer();
   await v2.FR.init(v2.opts(ridge(), saved));
   const o2 = v2.FR.objects();
   ok('a map opened again starts from them (shapes left on are loaded at once)', o2.points[1].visible === false && o2.points[0].visible && o2.points[0].material.size === 6 && o2.shapes && o2.shapes.visible && v2.decoded.length === 3);
 
   // ── 6. Parts that are missing ───────────────────────────────────────────────
-  const v3 = makeViewer(), bare = ridge(); bare.patches = null; bare.shapes = null; bare.brush = null; bare.points = b64(pointsBin(PTS.filter(p => p[4] === 0)));
+  const v3 = makeViewer(), bare = ridge(); bare.patches = null; bare.shapes = null; bare.points = b64(pointsBin(PTS.filter(p => p[4] === 0)));
   await v3.FR.init(v3.opts(bare));
   const o3 = v3.FR.objects(), rows = [];
-  ok('only grouped returns, no patches, shapes or brush: one set of dots, nothing else, no image asked for', o3.points[0] && !o3.points[1] && !o3.points[2] && !o3.points[3] && !o3.patches && v3.scene.children.length === 1 && v3.ctx._images.length === 0);
+  ok('only grouped returns, no patches or shapes: one set of dots, nothing else, no image asked for', o3.points[0] && !o3.points[1] && !o3.points[2] && !o3.points[3] && !o3.patches && v3.scene.children.length === 1 && v3.ctx._images.length === 0);
   v3.FR.set('shapes', true); v3.FR.set('lone', false); v3.FR.set('patches', false);                       // nothing to act on: must not throw
   v3.FR.sheet({ head: t => rows.push('H:' + t), chips: c => c.forEach(x => rows.push(x[1] + (x[2] ? ':on' : ':off'))), el: (tag, cls, text) => ({ tag, cls, text, style: {}, addEventListener() {}, appendChild() {} }), sheet: { appendChild: e => rows.push('row:' + e.cls) } });
   ok('…and Display offers only what the export has', rows.join('|') === 'H:Below ground (V2)|Returns:on|Lone:off|Likely noise:on|Patterned noise:off|row:sh-sl', rows);
@@ -191,32 +189,19 @@ const isHex = (c, hex, e = 0.004) => near(c[0], (hex >> 16 & 255) / 255, e) && n
   const mkEl = (tag, cls, text) => { const e = { tag, cls, text, style: {}, kids: [], on: {}, addEventListener: (ev, f) => { e.on[ev] = f; }, appendChild: k => e.kids.push(k), set textContent(t) { e.text = t; }, get textContent() { return e.text; } }; return e; };
   v.FR.set('lone', true);
   v.FR.sheet({ head: t => ui.rows.push('H:' + t), chips: c => { ui.chips = c; c.forEach(x => ui.rows.push(x[1] + (x[2] ? ':on' : ':off'))); }, el: mkEl, sheet: { appendChild: e => { ui.rows.push('row:' + e.cls); ui.slider = e; } } });
-  ok('heading “Below ground (V2)”, then Returns, Lone, Likely noise, Patterned noise (off), Guessed openings, Shapes, Brush, and the dot size',
-    ui.rows.join('|') === 'H:Below ground (V2)|Returns:on|Lone:on|Likely noise:on|Patterned noise:off|Guessed openings:on|Shapes:on|Brush:on|row:sh-sl', ui.rows);
+  ok('heading “Below ground (V2)”, then Returns, Lone, Likely noise, Patterned noise (off), Guessed openings, Shapes, and the dot size',
+    ui.rows.join('|') === 'H:Below ground (V2)|Returns:on|Lone:on|Likely noise:on|Patterned noise:off|Guessed openings:on|Shapes:on|row:sh-sl', ui.rows);
   ui.chips[3][3](true); ui.chips[0][3](false);
   ok('a chip switches its layer', v.FR.objects().points[3].visible === true && v.FR.objects().points[0].visible === false);
   const [lab, inp, val] = ui.slider.kids;
   inp.value = '9'; inp.on.input();
   ok('the Dot size slider (1 to 12) sets the size and shows it', lab.text === 'Dot size' && inp.type === 'range' && inp.min === '1' && inp.max === '12' && v.FR.state().size === 9 && val.text === '9 px' && v.FR.objects().points[1].material.size === 9, [lab.text, val.text]);
 
-  // ── 8. The brush map over the hillshade ─────────────────────────────────────
-  const hs = new v.THREE.Texture({ tag: 'hs', width: 64, height: 32 }); hs.flipY = false;
-  const sat = new v.THREE.Texture({ tag: 'sat', width: 64, height: 32 });
-  const img = v.ctx._images[0];
-  ok('the brush map is asked for once, through the viewer’s own source rule', v.ctx._images.length === 1 && img.src === 'data:image/png;base64,iVBORbrush', img && img.src);
-  ok('before it has arrived the hillshade is drawn as it is', v.FR.mapTexture(hs, 'hs') === hs && v.canvases.length === 0);
-  img.tag = 'brush'; const rt = v.retex; img.onload();
-  ok('when it arrives the viewer is asked to put the map on again', v.retex === rt + 1);
-  const comp = v.FR.mapTexture(hs, 'hs');
-  ok('hillshade shown, brush on: one canvas of the hillshade’s size, the hillshade first and the brush on top', comp !== hs && comp.isTexture && comp.flipY === false && v.canvases.length === 1 && v.canvases[0].width === 64 && v.canvases[0].height === 32 &&
-    JSON.stringify(v.canvases[0].drawn) === JSON.stringify([['hs', 0, 0, 64, 32], ['brush', 0, 0, 64, 32]]), v.canvases[0] && v.canvases[0].drawn);
-  ok('asked again: the same texture, nothing drawn again', v.FR.mapTexture(hs, 'hs') === comp && v.canvases.length === 1);
-  ok('the aerial stays clean', v.FR.mapTexture(sat, 'sat') === sat && v.canvases.length === 1);
-  ok('a tiled hillshade (big export) and no texture at all are left alone', (() => { const t = { _tiled: 'hs' }; return v.FR.mapTexture(t, 'hs') === t && v.FR.mapTexture(null, 'hs') === null; })());
-  const rt2 = v.retex; v.FR.set('brush', false);
-  ok('Brush off: the plain hillshade again, and the viewer is asked to put the map on again', v.FR.mapTexture(hs, 'hs') === hs && v.retex === rt2 + 1);
-  v.FR.set('brush', true);
-  ok('Brush on again: the canvas made before is used', v.FR.mapTexture(hs, 'hs') === comp && v.canvases.length === 1);
+  // ── 8. The brush is not this module's any more: it is a third picture of the export ─────
+  const h = fs.readFileSync(path.join(root, 'viewer_build', 'viewer.html'), 'utf8');
+  ok('the template has the third picture’s placeholder next to the hillshade’s, once', h.includes('<script>const TERRAIN_HS_B64  = "PLACEHOLDER_HS_B64";</script>\n<script>const TERRAIN_HSB_B64 = "PLACEHOLDER_HSB_B64";</script>') && h.split('"PLACEHOLDER_HSB_B64"').length === 2);
+  ok('…a button for it, tiles of it loaded like the hillshade’s, and the choice saved', h.includes('id="btn-layer-hsb"') && h.includes("tt.hsb ? ['hsb'] : []") && h.includes("'Hillshade + brush'") && h.includes('tex: texMode'));
+  ok('no compositing left in the module or the viewer', typeof v.FR.mapTexture === 'undefined' && !h.includes('FlexRidge.mapTexture') && v.ctx._images.length === 0 && v.canvases.length === 0);
 
   console.log(`${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

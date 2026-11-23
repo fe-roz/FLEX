@@ -1,7 +1,7 @@
-// V2 - Ridgewalking in the portable viewer / FLEX Field / FLEX Ridgewalk (window.FlexRidge).
+// V2 - Ridgewalking in the portable viewer / FLEX Field (window.FlexRidge).
 //
 // An export made with "V2 - Ridgewalking" carries RIDGE = { version, counts, points, patches, shapes,
-// brush, depthCap }; each of points / patches / shapes / brush is a sidecar file name or inline base64
+// depthCap }; each of points / patches / shapes is a sidecar file name or inline base64
 // (the viewer's own dual mode). A normal export has RIDGE = null and this file does nothing at all.
 //
 //   points   "RWP1", uint32 n, float32 xyz[n*3], float32 depth[n], uint8 kind[n]
@@ -13,7 +13,7 @@
 // What it draws: the returns below ground as dots THROUGH the ground (no depth test), coloured by
 // depth; lone returns white, likely noise pink, patterned noise light blue (off); the guessed openings
 // as dark patches lying on the ground; the shapes (walls of the features, off, loaded on first use);
-// and the brush map on top of the hillshade. Nothing animates: every change asks the viewer for one
+// (The brush map is baked into the export's third picture, "Hillshade + brush": viewer.html.) Nothing animates: every change asks the viewer for one
 // redraw. three.js r128.   Test: tools/test_viewer_ridge.js
 (function (root) {
   'use strict';
@@ -23,7 +23,7 @@
   var KINDS = ['ret', 'lone', 'noise', 'pattern'];                    // by the file's kind number
   var KIND_COLOUR = [null, 0xffffff, 0xff4dd2, 0x7fd4ff];             // kind 0 is coloured by depth
   var PATCH_COLOUR = 0x141312, PATCH_OPACITY = 0.72;
-  var DEFAULTS = { ret: true, lone: true, noise: true, pattern: false, patches: true, shapes: false, brush: true, size: 4 };
+  var DEFAULTS = { ret: true, lone: true, noise: true, pattern: false, patches: true, shapes: false, size: 4 };
   var SIZE_MIN = 1, SIZE_MAX = 12;
 
   // [r, g, b] 0..1 of a depth in metres.
@@ -152,27 +152,19 @@
     }).catch(function (e) { console.warn('Ridgewalk shapes not loaded:', e); });
     return S.shapesLoading;
   }
-  function loadBrush() {
-    if (!S.ridge.brush || typeof Image === 'undefined') return;
-    var img = new Image();
-    img.onload = function () { S.brushImg = img; if (S.retexture) S.retexture(); };
-    img.onerror = function () { console.warn('Ridgewalk brush map not loaded'); };
-    img.src = S.textureSrc ? S.textureSrc(S.ridge.brush) : S.ridge.brush;
-  }
-
   var R = {
     RAMP: RAMP, DEFAULTS: DEFAULTS, rampColour: rampColour, parsePoints: parsePoints, parseShapes: parseShapes, parsePatches: parsePatches,
     splitKinds: splitKinds, restore: restore,
 
-    // o: { THREE, scene, ridge, saved, isAssetRef, b64ToArrayBuffer, textureSrc, redraw, retexture }.
+    // o: { THREE, scene, ridge, saved, isAssetRef, b64ToArrayBuffer, redraw }.
     // Returns a promise that settles when the dots and patches are in the scene (null ridge: at once).
     init: function (o) {
       S = null;
       var ridge = o && o.ridge;
       if (!ridge || typeof ridge !== 'object' || !ridge.points) return Promise.resolve(false);
       S = { THREE: o.THREE, scene: o.scene, ridge: ridge, cap: ridge.depthCap > 0 ? +ridge.depthCap : 20, st: restore(o.saved),
-            isAssetRef: o.isAssetRef, b64ToArrayBuffer: o.b64ToArrayBuffer, textureSrc: o.textureSrc, redraw: o.redraw, retexture: o.retexture,
-            points: [null, null, null, null], patches: null, shapes: null, shapesLoading: null, brushImg: null, comp: null, compOf: null };
+            isAssetRef: o.isAssetRef, b64ToArrayBuffer: o.b64ToArrayBuffer, redraw: o.redraw,
+            points: [null, null, null, null], patches: null, shapes: null, shapesLoading: null };
       var jobs = [loadBin(ridge.points).then(function (buf) {
         splitKinds(parsePoints(buf), S.cap).forEach(function (part, k) {
           if (!part.n) return;
@@ -184,7 +176,6 @@
         if (Q.nv) { S.patches = patchesOf(Q); S.scene.add(S.patches); }
       }).catch(function (e) { console.warn('Ridgewalk openings not loaded:', e); }));
       if (S.st.shapes) jobs.push(loadShapes());            // shapes only when they were left on
-      loadBrush();
       return Promise.all(jobs).then(function () { redraw(); return true; });
     },
     active: function () { return !!S; },
@@ -193,7 +184,7 @@
     objects: function () { return S ? { points: S.points.slice(), patches: S.patches, shapes: S.shapes } : null; },
     counts: function () { return S && S.ridge.counts || {}; },
 
-    // One switch (ret, lone, noise, pattern, patches, shapes, brush) or the dot size.
+    // One switch (ret, lone, noise, pattern, patches, shapes) or the dot size.
     set: function (key, v) {
       if (!S || !(key in DEFAULTS)) return;
       if (key === 'size') {
@@ -207,30 +198,7 @@
       if (k >= 0) { if (S.points[k]) S.points[k].visible = !!v; }
       else if (key === 'patches') { if (S.patches) S.patches.visible = !!v; }
       else if (key === 'shapes') { if (S.shapes) S.shapes.visible = !!v; else if (v) loadShapes(); }
-      else if (key === 'brush') { if (S.retexture) S.retexture(); }
       redraw();
-    },
-
-    // The texture to put on the terrain: the hillshade with the brush map over it while the brush
-    // switch is on and the hillshade is the shown map; anything else comes back as it is. The two
-    // are drawn onto one canvas once. A tiled hillshade (exports over 5 km) is left alone.
-    mapTexture: function (tex, mode) {
-      if (!S || mode !== 'hs' || !tex || tex._tiled || !S.st.brush || !S.brushImg || !tex.image) return tex;
-      if (S.comp && S.compOf === tex) return S.comp;
-      try {
-        var img = tex.image, w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
-        if (!(w > 0 && h > 0)) return tex;
-        var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
-        var c2 = cv.getContext('2d');
-        c2.drawImage(img, 0, 0, w, h);
-        c2.drawImage(S.brushImg, 0, 0, w, h);
-        var t = new S.THREE.Texture(cv);
-        t.flipY = tex.flipY; t.encoding = tex.encoding; if (tex.colorSpace !== undefined) t.colorSpace = tex.colorSpace;
-        t.needsUpdate = true;
-        if (S.comp) S.comp.dispose();
-        S.comp = t; S.compOf = tex;
-        return t;
-      } catch (e) { console.warn('Ridgewalk brush overlay failed:', e); return tex; }
     },
 
     // The rows in Display. ui: { el, sheet, head, chips } (the viewer's own builders).
@@ -241,7 +209,6 @@
       var chips = [chip('🟡', 'Returns', 'ret'), chip('⚪', 'Lone', 'lone'), chip('🟣', 'Likely noise', 'noise'), chip('🔵', 'Patterned noise', 'pattern')];
       if (S.ridge.patches) chips.push(chip('⬛', 'Guessed openings', 'patches'));
       if (S.ridge.shapes) chips.push(chip('🧱', 'Shapes', 'shapes'));
-      if (S.ridge.brush) chips.push(chip('🌿', 'Brush', 'brush'));
       ui.chips(chips);
       // The two long names ("Patterned noise", "Guessed openings") wrap instead of being cut short.
       var grid = ui.sheet.lastChild;

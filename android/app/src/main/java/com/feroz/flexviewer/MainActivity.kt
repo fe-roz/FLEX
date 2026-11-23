@@ -525,6 +525,7 @@ class MainActivity : AppCompatActivity() {
             return t.replace("\"PLACEHOLDER_GLB_B64\"", "\"terrain.glb\"")
                 .replace("\"PLACEHOLDER_TEX_B64\"", if (has("tex_sat.jpg")) "\"tex_sat.jpg\"" else "\"PLACEHOLDER_TEX_B64\"")
                 .replace("\"PLACEHOLDER_HS_B64\"", if (has("tex_hs.jpg")) "\"tex_hs.jpg\"" else "\"PLACEHOLDER_HS_B64\"")
+                .replace("\"PLACEHOLDER_HSB_B64\"", if (has("tex_hsb.jpg")) "\"tex_hsb.jpg\"" else "\"\"")
                 .replace("\"PLACEHOLDER_WALLS_B64\"", if (has("walls.bin")) "\"walls.bin\"" else "\"PLACEHOLDER_WALLS_B64\"")
                 .replace("PLACEHOLDER_CAVES_JSON", "ffSidecarJson(\"caves.json\")")
                 .replace("PLACEHOLDER_RIDGE_JSON", ridgeFor(has))
@@ -537,7 +538,7 @@ class MainActivity : AppCompatActivity() {
             val ref = { f: String -> if (has(f)) "\"$f\"" else "null" }
             val counts = if (has("ridge.json")) "(ffSidecarJson(\"ridge.json\").counts || {})" else "{}"
             return "{ version: 1, counts: $counts, points: \"ridge_points.bin\", patches: ${ref("ridge_patches.bin")}, " +
-                "shapes: ${ref("ridge_shapes.bin")}, brush: ${ref("tex_brush.png")}, depthCap: 20 }"
+                "shapes: ${ref("ridge_shapes.bin")}, depthCap: 20 }"
         }
 
         private fun html(s: String) = WebResourceResponse("text/html", "utf-8", ByteArrayInputStream(s.toByteArray(Charsets.UTF_8))).apply {

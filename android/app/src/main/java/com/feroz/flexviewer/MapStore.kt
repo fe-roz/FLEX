@@ -38,13 +38,13 @@ class MapStore(private val ctx: Context) {
 
     companion object {
         /** The data files an export carries. Nothing else is extracted. */
-        val DATA_FILES = setOf("terrain.glb", "tex_sat.jpg", "tex_hs.jpg", "walls.bin", "caves.json")
+        val DATA_FILES = setOf("terrain.glb", "tex_sat.jpg", "tex_hs.jpg", "tex_hsb.jpg", "walls.bin", "caves.json")
         /** Texture tiles of a big export (tex_sat_<col>_<row>.jpg, tex_hs_…), see tex_tiles.py. */
-        private val TILE_RE = Regex("^tex_(sat|hs)_[0-9]{1,2}_[0-9]{1,2}\\.jpg$")
+        private val TILE_RE = Regex("^tex_(sat|hs|hsb)_[0-9]{1,2}_[0-9]{1,2}\\.jpg$")
         /** Documents of the project that belong to the export: docs.json and one image per page (docs_<sha256>.<ext>), see viewer_inline.py. */
         private val DOC_RE = Regex("^docs_[0-9a-f]{64}\\.(jpg|jpeg|png|webp)$")
-        /** V2 - Ridgewalking (an export made with that box ticked): returns below ground, shapes, guessed openings, the step's summary, the brush map. */
-        val RIDGE_FILES = setOf("ridge_points.bin", "ridge_shapes.bin", "ridge_patches.bin", "ridge.json", "tex_brush.png")
+        /** V2 - Ridgewalking (an export made with that box ticked): returns below ground, shapes, guessed openings, the step's summary (its hillshade with brush is tex_hsb.jpg, above). */
+        val RIDGE_FILES = setOf("ridge_points.bin", "ridge_shapes.bin", "ridge_patches.bin", "ridge.json")
         fun isDataFile(name: String): Boolean = name in DATA_FILES || name in RIDGE_FILES || name == "docs.json" || TILE_RE.matches(name) || DOC_RE.matches(name)
         private val ID_RE = Regex("^[A-Za-z0-9_-]{1,64}$")
         private val SAFE_RE = Regex("^[A-Za-z0-9._ -]{1,120}$")
