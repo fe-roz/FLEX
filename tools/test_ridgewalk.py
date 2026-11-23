@@ -283,6 +283,21 @@ Gg = os.path.join(tmp, 'g')
 run(['--npz', npz3, '--out', Gg, '--no-shapes', '--workers', '4', '--tile', '48'])
 Rg = load(Gg); ka_ = np.lexsort(Rf['xyz'].T); kb_ = np.lexsort(Rg['xyz'].T)
 check('the traced path does not depend on the tile size', len(Rf['xyz']) == len(Rg['xyz']) and np.array_equal(Rf['xyz'][ka_], Rg['xyz'][kb_]) and np.array_equal(Rf['kind'][ka_], Rg['kind'][kb_]))
+# ---- clusters on cells give the same answer as linking every pair of returns (and need no pair list of a dense hollow)
+from scipy import sparse as _sp
+from scipy.sparse import csgraph as _cg
+from scipy.spatial import cKDTree as _kd
+rng = np.random.default_rng(1); same = True
+for trial in range(5):
+    lx = np.arange(0, 290, 5.9 + 0.05 * trial)                       # a chain of points right at the limit, scattered ones, a dense blob
+    pxy = np.r_[rng.uniform(0, 300, (4000, 2)), rng.normal(100, 8, (3000, 2)), np.c_[lx, np.full(len(lx), 290.0)]]
+    pr_ = _kd(pxy).query_pairs(6.0, output_type='ndarray')
+    n0, l0 = _cg.connected_components(_sp.coo_matrix((np.ones(len(pr_)), (pr_[:, 0], pr_[:, 1])), shape=(len(pxy), len(pxy))), directed=False)
+    l1 = rw.cluster_labels(pxy, 6.0)
+    same &= n0 == len(np.unique(l1)) == len(np.unique(np.c_[l0, l1], axis=0))
+check('clusters worked on cells are the clusters of the returns themselves', same)
+t1 = time.time(); dense = rng.uniform(0, 110, (300000, 2)); ld = rw.cluster_labels(dense, 6.0)
+check('a hollow full of returns (300,000 on a hectare) is one cluster, quickly', len(np.unique(ld)) == 1 and time.time() - t1 < 6, '%.1f s' % (time.time() - t1))
 check('work folder removed', not os.path.exists(os.path.join(A, '_work')))
 
 import shutil
