@@ -340,7 +340,7 @@ def w_read(t):
     x0, y0, x1, y1 = i0 * cell, j0 * cell, i1 * cell, j1 * cell
     ex = np.array([x0, x1, x0, x1, (x0 + x1) / 2]) + C['ox']; ey = np.array([y0, y0, y1, y1, (y0 + y1) / 2]) + C['oy']
     lon, lat = utm_to_lonlat(ex, ey, C['zone'], C['south'])
-    parts = []; err = None
+    parts = []; err = None; tries = 0; qr = {}
     for k, (url, code) in enumerate(C['epts']):
         qx, qy = lonlat_to_crs(lon, lat, code)
         pad = 3.0 if code != 4326 else 3e-5
@@ -358,8 +358,10 @@ def w_read(t):
                 err = '%s' % (str(e).splitlines()[0][:160] if str(e) else type(e).__name__); time.sleep(1.5 * (attempt + 1))
         if a is None:
             return t, 0, err or 'read failed'
+        tries += attempt + 1
         x = a['X'] - C['ox']; y = a['Y'] - C['oy']
         m = (x >= x0) & (x < x1) & (y >= y0) & (y < y1)
+        quality_of_read(qr, a, m, k)                 # (the quality report: time and scan angles, seen only here)
         ps = a['PointSourceId'][m].astype('i4') if 'PointSourceId' in a.dtype.names else np.zeros(int(m.sum()), 'i4')
         la = (a['ReturnNumber'][m] == a['NumberOfReturns'][m]) if 'ReturnNumber' in a.dtype.names and 'NumberOfReturns' in a.dtype.names else np.ones(int(m.sum()), bool)
         parts.append((x[m].astype('f4'), y[m].astype('f4'), a['Z'][m].astype('f4'), a['Classification'][m].astype('u1'), ps + 100000 * k, la.astype('u1')))
@@ -367,7 +369,7 @@ def w_read(t):
     n = sum(len(p[0]) for p in parts)
     np.savez(pfile(C, t), x=np.concatenate([p[0] for p in parts]), y=np.concatenate([p[1] for p in parts]),
              z=np.concatenate([p[2] for p in parts]), c=np.concatenate([p[3] for p in parts]), psid=np.concatenate([p[4] for p in parts]),
-             last=np.concatenate([p[5] for p in parts]))
+             last=np.concatenate([p[5] for p in parts]), **quality_read_arrays(qr, tries))
     return t, n, None
 
 
@@ -1000,6 +1002,9 @@ def run(C, notes):
             if len(failed) == len(work):
                 raise SystemExit('[ridge] no tile could be read: %s' % failed[0][1])
         lap('read')
+        if C.get('quality', True):                  # the LiDAR quality report: measured here, written at the end; changes nothing below
+            quality_gather(C, work, failed if (C.get('epts') and not C.get('have_tiles')) else None)
+            lap('quality')
         # 2. fine ground + the coarse lows
         ch, cw = (ny + K - 1) // K, (nx + K - 1) // K
         coarse = np.full((ch, cw), np.nan, 'f4'); cover = []
@@ -1164,6 +1169,8 @@ def run(C, notes):
                   deepest=round(float(pD[pK < 3].max()), 2) if (pK < 3).any() else 0.0, shape_triangles=int(sum(len(t) for t in T)))
     write_outputs(C, holes, (pX, pY, pZ, pD, pK), (V, D, T) if C['shapes'] else None, brush)
     write_features(C, holes, pts if len(bi) else np.zeros((0, 3)), DV[bi], feat)
+    if C.get('_q') is not None:
+        write_quality(C, passes, counts)
     if C.get('debug'):
         np.savez(os.path.join(out, 'debug.npz'), x=pts[:, 0] if len(bi) else np.zeros(0), y=pts[:, 1] if len(bi) else np.zeros(0),
                  z=pts[:, 2] if len(bi) else np.zeros(0), depth=DV[bi], kind=kb, feature=feat, open=openp, sideways=side,
@@ -1232,6 +1239,216 @@ def write_features(C, holes, pts, depth, feat):
                             box=[round(float(v), 2) for v in (x[a:b].min(), y[a:b].min(), z[a:b].min(), x[a:b].max(), y[a:b].max(), z[a:b].max())],
                             entrance='true' if tru[a:b].any() else ('guessed' if gue[a:b].any() else 'none')))
     json.dump(dict(version=1, features=out), open(os.path.join(C['out'], 'features.json'), 'w'), separators=(',', ':'))
+
+
+# ---------------------------------------------------------------------------------------------------------
+# The LiDAR quality report (quality.json + three small rasters). It only measures: nothing above reads it.
+# ---------------------------------------------------------------------------------------------------------
+QUALITY_CELL_M = 7.2        # the coarse grid of the rasters (24 cells of 0.3 m)
+GPS_ADJUST = 1.0e9          # LAS 1.4 "adjusted standard GPS time" = GPS seconds - 1e9
+GPS_EPOCH = 315964800       # 1980-01-06 as Unix seconds
+GPS_LEAP = 18               # GPS is ahead of UTC by this many seconds since 2017
+
+
+def quality_of_read(qr, a, m, k):
+    """From one EPT read (array a, mask m of the tile's own returns): the range of GPS time and, per flight pass, a
+    histogram of the scan angle's size in whole degrees. Kept in the tile's scratch file; nothing else reads it."""
+    names = a.dtype.names
+    if 'GpsTime' in names and m.any():
+        g = a['GpsTime'][m]; g = g[np.isfinite(g) & (g != 0)]
+        if len(g):
+            qr['gt'] = [min(qr.get('gt', [np.inf])[0], float(g.min())), max(qr.get('gt', [0, -np.inf])[1], float(g.max()))]
+    sn = 'ScanAngleRank' if 'ScanAngleRank' in names else ('ScanAngle' if 'ScanAngle' in names else None)
+    if sn and 'PointSourceId' in names and m.any():
+        ang = np.clip(np.abs(np.rint(a[sn][m])).astype(np.int64), 0, 90); ps = a['PointSourceId'][m].astype(np.int64) + 100000 * k
+        u, inv = np.unique(ps, return_inverse=True)
+        H = np.bincount(inv * 91 + ang, minlength=len(u) * 91).reshape(len(u), 91)
+        for p, h in zip(u, H):
+            qr.setdefault('sa', {})[int(p)] = qr.get('sa', {}).get(int(p), 0) + h
+
+
+def quality_read_arrays(qr, tries):
+    sa = qr.get('sa') or {}
+    return dict(q_gt=np.array(qr.get('gt', [np.nan, np.nan]), 'f8'), q_ps=np.array(sorted(sa), np.int64),
+                q_sa=np.array([sa[p] for p in sorted(sa)], np.int64).reshape(len(sa), 91), q_tries=np.array([tries], np.int64))
+
+
+def w_quality(t):
+    """One tile for the quality report: per coarse cell the returns, the fine cells with a ground return, the fine cells
+    farther than 1 m and 3 m from any ground return (worked with a margin), the passes that hit it; per tile the classes,
+    the returns of each pass, and what the read kept (time, scan angles, tries)."""
+    from scipy import ndimage
+    C = _C; cell = C['cell']; QC = C['qc']; nx, ny = C['nx'], C['ny']; qnx = (nx + QC - 1) // QC
+    j0, j1, i0, i1 = tile_cells(C, t)
+    x, y, z, c, ps, la = load_tile(C, t)
+    r = dict(n=int(len(x)))
+    if not len(x):
+        return t, r
+    ci = np.clip((x / cell).astype(np.int64), i0, i1 - 1); cj = np.clip((y / cell).astype(np.int64), j0, j1 - 1)
+    qk = (cj // QC) * qnx + (ci // QC)
+    r['dens'] = np.unique(qk, return_counts=True)
+    r['pairs'] = np.unique(np.c_[qk, ps.astype(np.int64)], axis=0)
+    r['classes'] = np.bincount(c, minlength=256)
+    r['passes'] = np.unique(ps.astype(np.int64), return_counts=True)
+    g = c == 2
+    fine = np.unique(cj[g] * nx + ci[g])
+    r['gseen'] = np.unique((fine // nx // QC) * qnx + (fine % nx) // QC, return_counts=True)
+    # how far every fine cell of the tile is from a ground return (a margin, so a neighbour's ground counts)
+    M = int(math.ceil(3.3 / cell)); J0, J1, I0, I1 = max(0, j0 - M), min(ny, j1 + M), max(0, i0 - M), min(nx, i1 + M)
+    gx, gy = load_box(C, I0 * cell, J0 * cell, I1 * cell, J1 * cell, ground_only=True)[:2]
+    have = np.zeros((J1 - J0, I1 - I0), bool)
+    if len(gx):
+        have[np.clip((gy / cell).astype(np.int64) - J0, 0, J1 - J0 - 1), np.clip((gx / cell).astype(np.int64) - I0, 0, I1 - I0 - 1)] = True
+    d = (ndimage.distance_transform_edt(~have) * cell if have.any() else np.full(have.shape, 1e9))[j0 - J0:j1 - J0, i0 - I0:i1 - I0]
+    qg = (np.arange(j0, j1)[:, None] // QC) * qnx + (np.arange(i0, i1)[None, :] // QC)
+    u, inv = np.unique(qg.ravel(), return_inverse=True)
+    r['cells'] = (u, np.bincount(inv, minlength=len(u)), np.bincount(inv, weights=(d > 1.0).ravel(), minlength=len(u)).astype(np.int64),
+                  np.bincount(inv, weights=(d > 3.0).ravel(), minlength=len(u)).astype(np.int64))
+    try:
+        with np.load(pfile(C, t)) as Z:
+            if 'q_gt' in Z.files:
+                r['gt'] = Z['q_gt']; r['sa'] = (Z['q_ps'], Z['q_sa']); r['tries'] = int(Z['q_tries'][0])
+    except Exception:
+        pass
+    return t, r
+
+
+def quality_gather(C, work, failed):
+    """The tiles' numbers added up in the parent (arrays of the coarse grid only). failed: [(tile, why)] of the read, or
+    None when the tiles were not read in this run (a scratch folder reused, or points given in a file)."""
+    cell = C['cell']; QC = C['qc'] = max(1, int(round(QUALITY_CELL_M / cell))); nx, ny = C['nx'], C['ny']
+    qnx, qny = (nx + QC - 1) // QC, (ny + QC - 1) // QC; N = qnx * qny
+    A = dict(qnx=qnx, qny=qny, dens=np.zeros(N, np.int64), gseen=np.zeros(N, np.int64), tot=np.zeros(N, np.int64), far1=np.zeros(N, np.int64), far3=np.zeros(N, np.int64),
+             pairs=[], classes=np.zeros(256, np.int64), passes={}, gt=[np.inf, -np.inf], sa={}, tiles=len(work), empty=[], retried=0, tries_known=False,
+             failed=None if failed is None else [(tuple(t), str(w)) for t, w in failed])
+    for t, r in pmap(C, w_quality, work, 40, 40, 'coverage'):
+        if not r['n']:
+            A['empty'].append(tuple(t)); continue
+        A['dens'][r['dens'][0]] += r['dens'][1]; A['gseen'][r['gseen'][0]] += r['gseen'][1]
+        u, tot, f1, f3 = r['cells']; A['tot'][u] += tot; A['far1'][u] += f1; A['far3'][u] += f3
+        A['pairs'].append(r['pairs']); A['classes'] += r['classes']
+        for p, n in zip(*r['passes']):
+            A['passes'][int(p)] = A['passes'].get(int(p), 0) + int(n)
+        if 'gt' in r:
+            A['tries_known'] = True; A['retried'] += 1 if r['tries'] > len(C.get('epts') or [1]) else 0
+            if np.isfinite(r['gt']).all():
+                A['gt'] = [min(A['gt'][0], float(r['gt'][0])), max(A['gt'][1], float(r['gt'][1]))]
+            for p, h in zip(*r['sa']):
+                A['sa'][int(p)] = A['sa'].get(int(p), 0) + h
+    C['_q'] = A
+
+
+def gps_dates(gt):
+    """[first, last] GPS time of the returns as dates, or None with the reason. Assumes LAS 1.4 "adjusted standard GPS
+    time" (GPS seconds - 1e9), which USGS 3DEP data uses; week seconds (LAS 1.2) cannot be dated and are not."""
+    a, b = gt
+    if not (np.isfinite(a) and np.isfinite(b)):
+        return None, 'the time of the returns was not read'
+    if 0 <= a and b < 604800 * 1.01:
+        return None, 'the returns carry GPS week seconds, which do not say the date'
+    out = []
+    for v in (a, b):
+        u = v + GPS_ADJUST + GPS_EPOCH - GPS_LEAP
+        if not (946684800 <= u <= time.time() + 86400 * 366):          # 2000-01-01 .. a year from now
+            return None, 'the time of the returns is not a GPS time this can read'
+        out.append(time.strftime('%Y-%m-%d', time.gmtime(u)))
+    return out, 'adjusted standard GPS time (GPS seconds - 1e9), as USGS 3DEP data carries it'
+
+
+def write_quality(C, passes, counts):
+    """quality.json, passes.u8, ground_seen.u8, density.u8 and their maps.json (the layout area_tiles.js serves: one byte
+    a cell of the coarse grid, 0 = outside the area, row 0 south). Numbers and what they mean; no scores."""
+    from scipy import ndimage
+    A = C['_q']; out = C['out']; cell = C['cell']; QC = C['qc']; qnx, qny = A['qnx'], A['qny']; qm = QC * cell
+    shape = (qny, qnx)
+    tot = A['tot'].reshape(shape); inside = tot > 0
+    if C.get('ring') is not None:
+        gx, gy = np.meshgrid((np.arange(qnx) + 0.5) * qm, (np.arange(qny) + 0.5) * qm)
+        inside &= in_ring(gx.ravel(), gy.ravel(), C['ring']).reshape(shape)
+    ncell = int(inside.sum()); area = ncell * qm * qm
+    npass = np.zeros(qny * qnx, np.int64)
+    if A['pairs']:
+        pr = np.unique(np.concatenate(A['pairs']), axis=0)
+        npass += np.bincount(pr[:, 0], minlength=qny * qnx)
+    npass = npass.reshape(shape); dens = A['dens'].reshape(shape) / np.maximum(1, tot * cell * cell)
+    seen = A['gseen'].reshape(shape) / np.maximum(1, tot)
+    share = lambda m: round(float((m & inside).sum()) / max(1, ncell), 4)
+    fine = int(tot[inside].sum())
+    far1 = float(A['far1'].reshape(shape)[inside].sum()) / max(1, fine); far3 = float(A['far3'].reshape(shape)[inside].sum()) / max(1, fine)
+    lab, nl = ndimage.label(inside & (A['gseen'].reshape(shape) == 0))
+    largest = float(np.bincount(lab.ravel())[1:].max()) * qm * qm if nl else 0.0
+    nret = int(A['classes'].sum()); ngr = int(A['classes'][2])
+    CLASS = {0: 'never classified', 1: 'unclassified', 2: 'ground', 3: 'low vegetation', 4: 'medium vegetation', 5: 'high vegetation', 6: 'building', 7: 'low noise',
+             9: 'water', 17: 'bridge deck', 18: 'high noise'}
+    classes = [dict(code=int(k), name=CLASS.get(int(k), 'class %d' % k), returns=int(n), share=round(int(n) / max(1, nret), 5)) for k, n in enumerate(A['classes']) if n]
+    dates, how = gps_dates(A['gt'])
+    names = []
+    for url, _code in C.get('epts') or []:                      # by name only: the folder the cloud sits in, never the link
+        parts = [q for q in str(url).replace('\\', '/').split('/') if q]
+        names.append(parts[-2] if len(parts) >= 2 and parts[-1].lower() == 'ept.json' else os.path.splitext(parts[-1])[0] if parts else 'point cloud')
+    bypass = {int(q['id']): q for q in passes}
+    plist = []
+    for p, n in sorted(A['passes'].items()):
+        q = bypass.get(p, {}); h = A['sa'].get(p)
+        med = None
+        if h is not None and int(np.sum(h)):
+            med = int(np.searchsorted(np.cumsum(h), np.sum(h) / 2.0))
+        plist.append(dict(id=int(p % 100000), cloud=int(p // 100000), returns=int(n), share=round(n / max(1, nret), 5), median_scan_angle=med,
+                          flagged=bool(q.get('flagged', False)), blocks_flagged=int(q.get('blocks_flagged', 0)), blocks_reached=int(q.get('blocks_reached', 0)),
+                          set_aside=int(q.get('set_aside', 0)), kept_confirmed=int(q.get('kept_confirmed', 0))))
+    Tm = C['tile_c'] * cell
+
+    def box(t):
+        j0, j1, i0, i1 = tile_cells(C, t); b = [round(i0 * cell, 1), round(j0 * cell, 1), round(i1 * cell, 1), round(j1 * cell, 1)]
+        d = dict(tile=[int(t[0]), int(t[1])], box=b)
+        if C.get('zone'):
+            lo, la = utm_to_lonlat(np.array([b[0], b[2]]) + C['ox'], np.array([b[1], b[3]]) + C['oy'], C['zone'], C['south'])
+            d['lonlat'] = [round(float(lo[0]), 6), round(float(la[0]), 6), round(float(lo[1]), 6), round(float(la[1]), 6)]
+        return d
+    failed = A['failed']
+    blank = [dict(box(t), why=w) for t, w in (failed or [])]
+    empty = [box(t) for t in A['empty'] if not failed or t not in {f[0] for f in failed}]
+    reading = dict(tiles=int(A['tiles']), read_in_this_run=failed is not None, retried=int(A['retried']) if A['tries_known'] else None,
+                   left_blank=len(blank), blank=blank[:200], without_returns=len(empty), empty=empty[:200])
+    flagged = [q for q in plist if q['flagged']]
+    cov = dict(cell_m=round(qm, 3), area_m2=round(area, 1), passes_0=share(npass == 0), passes_1=share(npass == 1), passes_2=share(npass == 2), passes_3_or_more=share(npass >= 3),
+               no_ground_within_1m=round(far1, 4), no_ground_within_3m=round(far3, 4), largest_patch_without_ground_m2=round(largest, 1),
+               fine_cells_with_ground=round(float(A['gseen'].reshape(shape)[inside].sum()) / max(1, fine), 4))
+    pc = lambda v: ('%.1f' % (100 * v)).rstrip('0').rstrip('.') + ' %'
+    V = []
+    V.append(dict(key='passes', value=len(plist), text='%d flight pass%s cover the area.' % (len(plist), '' if len(plist) == 1 else 'es')))
+    for q in flagged:
+        V.append(dict(key='flagged_pass', value=q['blocks_flagged'], text='Flight pass %d shows patterned noise in %d block%s; %d of its returns along that pattern were set aside (%d kept: another pass confirms them).'
+                      % (q['id'], q['blocks_flagged'], '' if q['blocks_flagged'] == 1 else 's', q['set_aside'], q['kept_confirmed'])))
+    if not flagged:
+        V.append(dict(key='flagged_pass', value=0, text='No flight pass shows patterned noise.'))
+    V.append(dict(key='single_pass', value=cov['passes_1'], text='%s of the area is covered by a single pass (a bad return there has no second pass to contradict it).' % pc(cov['passes_1'])))
+    if cov['passes_0'] > 0:
+        V.append(dict(key='no_pass', value=cov['passes_0'], text='%s of the area has no returns at all.' % pc(cov['passes_0'])))
+    V.append(dict(key='ground_not_seen', value=cov['no_ground_within_3m'], text='%s of the ground was not seen within 3 m (dense canopy, water or shadow): the ground is interpolated there.' % pc(cov['no_ground_within_3m'])))
+    V.append(dict(key='largest_gap', value=cov['largest_patch_without_ground_m2'], text='The largest patch with no ground return is about %d m2.' % round(largest)))
+    if failed is None:
+        V.append(dict(key='tiles_blank', value=None, text='The tiles were not read in this run, so failed reads are not known here.' + (' %d tiles hold no returns.' % len(empty) if empty else '')))
+    else:
+        V.append(dict(key='tiles_blank', value=len(blank), text=('%d of %d tiles could not be read and are blank.' % (len(blank), A['tiles'])) if blank else 'Every tile was read (%d).' % A['tiles']))
+    Jq = dict(version=1,
+              cloud=dict(datasets=names, returns=nret, returns_per_m2=round(nret / max(1.0, area), 2), ground_returns=ngr, ground_returns_per_m2=round(ngr / max(1.0, area), 2),
+                         classes=classes, dates=dates, dates_how=how, has_pass_ids=len(plist) > 1 or (len(plist) == 1 and plist[0]['id'] != 0)),
+              passes=plist, coverage=cov, reading=reading, verdicts=V,
+              rasters=dict(cell_m=round(qm, 3), nx=qnx, ny=qny, files=['passes.u8', 'ground_seen.u8', 'density.u8']))
+    json.dump(Jq, open(os.path.join(out, 'quality.json'), 'w'), indent=1)
+    # the rasters: byte 0 = outside the area; b = 1.. stands for values[b - 1]
+    pv = list(range(0, 16)); gv = [round(k / 100.0, 2) for k in range(101)]
+    dv = [0.0] + [round(float(v), 3) for v in np.geomspace(0.5, 2000.0, 63)]
+    P8 = np.where(inside, np.minimum(npass, 15) + 1, 0).astype('u1')
+    G8 = np.where(inside, np.rint(np.clip(seen, 0, 1) * 100) + 1, 0).astype('u1')
+    D8 = np.where(inside, np.clip(np.searchsorted(dv, dens, side='right'), 1, len(dv)), 0).astype('u1')
+    for name, a8 in (('passes.u8', P8), ('ground_seen.u8', G8), ('density.u8', D8)):
+        a8.tofile(os.path.join(out, name))
+    mp = lambda mid, f, units, values, suggest: dict(id=mid, file=f, units=units, levels=len(values), values=values, min=values[0], max=values[-1], suggest=suggest)
+    json.dump(dict(version=2, grid=dict(x0=C.get('ox', 0.0), y0=C.get('oy', 0.0), cell=round(qm, 6), nx=qnx, ny=qny, zone=C.get('zone'), south=bool(C.get('south')), epsg=C.get('epsg'), row0='south'),
+                   maps=[mp('passes', 'passes.u8', 'flight passes that hit the cell', pv, [0, 4]), mp('groundseen', 'ground_seen.u8', 'share of 0.3 m cells with a ground return', gv, [0.0, 1.0]),
+                         mp('density', 'density.u8', 'returns per m2', dv, [0.0, 60.0])]), open(os.path.join(out, 'maps.json'), 'w'), indent=1)
 
 
 def read_points_bin(path):
@@ -1344,6 +1561,7 @@ def main(argv=None):
     ap.add_argument('--max-link', type=float, default=PARAMS['max_link'], help='m, the longest guessed link (tie or way out) a shape may rest on')
     ap.add_argument('--debug', action='store_true', help='also write debug.npz (per below return: feature, open, sideways)')
     ap.add_argument('--keep-work', action='store_true', help=argparse.SUPPRESS)
+    ap.add_argument('--no-quality', action='store_true', help='leave the LiDAR quality report (quality.json and its rasters) out')
     ap.add_argument('--work', help=argparse.SUPPRESS)        # the scratch folder; one that already holds the tiles' returns is used as it is (no reading)
     a = ap.parse_args(argv)
     t0 = time.time(); out = a.demo or a.out
@@ -1353,7 +1571,8 @@ def main(argv=None):
     cell = float(a.cell); K = PARAMS['coarse']
     C = dict(out=out, tmp=os.path.join(out, '_work'), cell=cell, coarse=K, tile_c=max(K, int(round(a.tile / cell / K)) * K),
              marg_c=max(4, int(round(a.margin / cell))), shapes=not a.no_shapes, debug=a.debug,
-             workers=a.workers or max(1, min((os.cpu_count() or 2) - 1, 20)), ox=0.0, oy=0.0, read_timeout=120, min_behind=float(a.min_behind), max_link=float(a.max_link))
+             workers=a.workers or max(1, min((os.cpu_count() or 2) - 1, 20)), ox=0.0, oy=0.0, read_timeout=120, min_behind=float(a.min_behind), max_link=float(a.max_link),
+             quality=not a.no_quality)
     if a.work:
         C['tmp'] = a.work; C['have_tiles'] = os.path.isdir(a.work) and any(f.startswith('p_') for f in os.listdir(a.work)); a.keep_work = True
         os.makedirs(C['tmp'], exist_ok=True)
