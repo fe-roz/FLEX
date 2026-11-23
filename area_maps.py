@@ -92,14 +92,14 @@ def _write_json(out_dir, grid, maps):
     os.replace(p + ".tmp", p)
 
 
-def bush_maps(veg, depth, grid_src, out_dir):
+def bush_maps(veg, depth, grid_src, out_dir, brush_units="share of returns 0.3-1.5 m"):
     """veg (share 0..1) and depth (m, negative below ground), both north-up (row 0 north), -> brush.u8, voids.u8, maps.json."""
     os.makedirs(out_dir, exist_ok=True)
     ny, nx = veg.shape
     g = _grid_meta(dict(grid_src, nx=nx, ny=ny), "north")
     s = _write_strips(os.path.join(out_dir, "brush.u8"), lambda a, b: veg[a:b], ny, 0.0, 1.0)
     hi = max(0.05, round(_block_p98(veg), 2))      # thick brush at walking scale (8 x 8 cells), not one cell's spike
-    maps = [{"id": "brush", "file": "brush.u8", "units": "share of returns 0.3-1.5 m", "min": 0.0, "max": 1.0,
+    maps = [{"id": "brush", "file": "brush.u8", "units": brush_units, "min": 0.0, "max": 1.0,
              "suggest": [0.0, hi]}]
     s = _write_strips(os.path.join(out_dir, "voids.u8"), lambda a, b: -np.asarray(depth[a:b], np.float32), ny, 0.0, 20.0,
                       zero_is_nothing=True)

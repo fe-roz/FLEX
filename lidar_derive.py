@@ -895,7 +895,7 @@ def _run_area(a, say):
 
     lo, hi = a.veg_band
     ncell = grid.nx * grid.ny
-    total = np.zeros(ncell); inband = np.zeros(ncell)
+    total = np.zeros(ncell); inband = np.zeros(ncell); below = np.zeros(ncell)
     vcount = np.zeros(ncell); depth = np.full(ncell, np.inf)
     kept = 0; n = 0; hs = []
     step = max(1, len(P) // 1_000_000)
@@ -909,12 +909,17 @@ def _run_area(a, say):
         f = grid.flat(x, y)
         total += np.bincount(f, minlength=ncell)
         inband += np.bincount(f[(hag >= lo) & (hag <= hi)], minlength=ncell)
+        below += np.bincount(f[(hag < lo) & (hag > -1.0)], minlength=ncell)     # got through the brush: ground and low growth
         b = hag <= a.void_depth
         if b.any():
             vcount += np.bincount(f[b], minlength=ncell)
             np.minimum.at(depth, f[b], hag[b])
     del P
-    veg = np.where(total >= 4, inband / np.maximum(total, 1), np.nan)
+    # Brush = of the returns that got down to brush height (in the band + below it), the share the band stopped.
+    # Returns above the band (canopy) are left out, so brush under trees reads like the same brush in the open;
+    # cells where fewer than 5 returns got that far are left blank (not known).
+    reached = inband + below
+    veg = np.where(reached >= 5, inband / np.maximum(reached, 1), np.nan)
     depth[~np.isfinite(depth)] = np.nan
     depth[vcount < a.void_min_points] = np.nan
     inside = vs.polygon_mask(ring_xy, grid)
@@ -943,7 +948,8 @@ def _run_area(a, say):
     # the value rasters the coloured map layers are drawn from (area_maps.py: brush.u8, voids.u8, maps.json)
     import area_maps
     area_maps.bush_maps(veg, depth, {"x0": grid.minx, "y0": grid.miny, "cell": grid.cell, "zone": int(zone),
-                                     "south": bool(south), "epsg": int(epsg)}, a.out_dir)
+                                     "south": bool(south), "epsg": int(epsg)}, a.out_dir,
+                        brush_units="share of the returns reaching %g-%g m that the band stopped" % (lo, hi))
 
     cx = [grid.minx, grid.maxx, grid.maxx, grid.minx]
     cy = [grid.miny, grid.miny, grid.maxy, grid.maxy]
@@ -959,7 +965,7 @@ def _run_area(a, say):
         ring_lonlat=ring, area_dir=True,
         utm_bbox=[grid.minx, grid.miny, grid.maxx, grid.maxy], epsg=epsg,
         cell=cell, grid=[grid.nx, grid.ny], geotransform=list(grid.geotransform()),
-        veg_band=list(a.veg_band), veg_range=[vlo, vhi],
+        veg_band=list(a.veg_band), veg_range=[vlo, vhi], brush_measure="reached",
         void_depth_threshold=a.void_depth, void_range=[dlo, dhi],
         cells_direct_fraction=(float(dmask.mean()) if dmask is not None else None),
         points_total=int(n), points_kept=int(kept), void_cells=nv,

@@ -249,7 +249,7 @@ try:
     code, txt = cli('lidar_derive.py', ['--area-dir', d, '--area', json.dumps(tri),
                                         '--out-dir', os.path.join(d, 'bush_tri')])
     check('lidar_derive --area triangle runs', code == 0, txt[-300:])
-    vt = read_tif(os.path.join(d, 'bush_tri', 'vegetation.tif'))
+    vt = read_tif(os.path.join(d, 'bush_tri', 'ground.tif'))      # ground: every cell inside has a value (brush is blank where too few returns reach it)
     fin = np.isfinite(vt).mean()
     check('cells outside the ring are blank (about half)', 0.4 < fin < 0.6, fin)
 except Exception as ex:
