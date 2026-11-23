@@ -253,7 +253,7 @@ print('Done in 1.5 s')
     del os.environ['FLEX_TREES_SCRIPT']
     ze = zipfile.ZipFile(oute)
     check('--trees runs the step as a child before the terrain, relays its progress under [1/7], and the trees arrive', 'trees.bin' in ze.namelist() and '[1/7] Trees 0% tile 1/1: [1/6] Reading points (stub)' in loge and
-          loge.index('[1/7] Trees:') < loge.index('[2/7]') and len(xt.unpack(ze.read('trees.bin'))) > 10, loge[:600])
+          loge.index('[1/7] Trees 100%') < loge.index('[2/7]') and len(xt.unpack(ze.read('trees.bin'))) > 10, loge[:600])
     if keep:
         keep.mkdir(parents=True, exist_ok=True)
         for f in (out, out0):

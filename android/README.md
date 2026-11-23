@@ -104,6 +104,13 @@ An export made with **Include surface features** also carries `features.json`
 🎨 Display → Surface features); `MapStore.FEATURES_FILE` keeps it and `MainActivity`
 puts its name in place of `PLACEHOLDER_FEATURES_JSON` (`null` for a map without it).
 
+An export made with **Trees and brush** also carries `trees.bin` (one 20-byte
+record a tree or bush) and `trees.json` (the count, the kinds, the detail
+level). `MapStore.kt` keeps both (`TREES_FILE`, `TREES_INFO`),
+`MainActivity.kt` hands the viewer `trees.json`'s `viewer` object as `TREES`
+(drawn by `viewer_build/libs/trees.js`: 🎨 Display → Trees and brush); a map
+without them gets `null`.
+
 An export made with **V2 - Ridgewalking** also carries `ridge_points.bin`,
 `ridge_shapes.bin`, `ridge_patches.bin`, `ridge.json` and `tex_hsb.jpg` (the
 hillshade with the brush map on it, a third Imagery choice; `tex_hsb_<c>_<r>.jpg`

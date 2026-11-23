@@ -102,7 +102,7 @@
     S.count = [0, 0, 0];
     var mats = [], geos = [], slot = [[], [], []];
     for (k = 0; k < 3; k++) {
-      mats[k] = screenDoor(new THREE.MeshLambertMaterial({ color: 0xffffff }), S.uSee);
+      mats[k] = screenDoor(new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0x0c160c }), S.uSee);
       var g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.BufferAttribute(solidFor(k, detail), 3));
       g.computeVertexNormals();

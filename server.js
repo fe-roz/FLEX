@@ -946,7 +946,9 @@ function exportPct(job) {
     let pct = 5;
     const step = /\[(\d)(b?)\/\d\]/.exec(last);
     const ridge = /^\[1\/7\] Ridgewalking (\d+)%/.exec(last);       // the ridge step's own share: 5 to 40
+    const trees = /^\[1\/7\] Trees (\d+)%/.exec(last);              // the vegetation step (trees and brush), before it: 2 to 5
     if (ridge) pct = 5 + Math.round(Math.min(100, +ridge[1]) * 0.35);
+    else if (trees) pct = 2 + Math.round(Math.min(100, +trees[1]) * 0.03);
     else if (step && PCT[step[1] + step[2]] !== undefined) pct = PCT[step[1] + step[2]];
     else if (last.includes('Building CSF')) pct = 40;
     else if (last.includes('Triangul')) pct = 55;

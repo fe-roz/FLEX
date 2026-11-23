@@ -2366,6 +2366,35 @@ def main():
     zone = utm_zone_for(bbox_center_lon)
     south = bbox_center_lat < 0
 
+    # Trees and brush: the vegetation step runs now, before this process reads
+    # any points of its own, so the two never hold the cloud at the same time.
+    # It never stops the export: without it the map is made without trees.
+    # (Before the ridgewalking step, so the job's percent only goes up.)
+    trees = None
+    if (args.trees or args.trees_dir) and not args.project_terrain:
+        import export_trees
+        trees_dir, trees_tmp = args.trees_dir, None
+        try:
+            if not trees_dir:
+                if not args.ept:
+                    raise RuntimeError("it needs a point cloud (--ept)")
+                trees_tmp = tempfile.TemporaryDirectory(prefix='flex_trees_')
+                trees_dir = trees_tmp.name
+                print("[1/7] Trees 0% starting (the returns are read once more, for the vegetation)", flush=True)
+                t_rect = utm_rect_covering(args.bbox, zone, 1.0)
+                t_poly = polygon_to_utm(poly_ll, zone) if poly_ll is not None else None
+                export_trees.run_veg_tiled(trees_dir, args.ept, t_rect, zone, south, polygon=t_poly, also=args.also_ept,
+                                           progress=lambda m: print(f"[1/7] {m}", flush=True))
+            trees = export_trees.Trees(trees_dir, zone, south)
+            trees_utm = trees.utm()
+            print(f"[1/7] Trees 100% {len(trees.recs):,} shapes from the vegetation step"
+                  + (f" ({trees.seconds:.0f} s in {trees.tiles} tile{'s' if trees.tiles != 1 else ''})" if trees.seconds else ''))
+        except (Exception, SystemExit) as e:
+            print(f"[1/7] WARNING: trees and brush left out ({e})")
+            trees = None
+        if trees_tmp is not None:
+            trees_tmp.cleanup()
+
     # V2 - Ridgewalking: the step runs first (its own read of the returns, with
     # flight-pass ids); its grid, cell and zone are then the export's.
     ridge = None
@@ -2386,34 +2415,6 @@ def main():
         print(f"[1/7] Ridge ground: {ridge.nx} x {ridge.ny} cells of {ridge.cell:g} m; "
               f"{c.get('true_cells', int((ridge.holes == 1).sum()))} true-entrance cells, "
               f"{c.get('guessed_cells', int((ridge.holes == 2).sum()))} guessed")
-
-    # Trees and brush: the vegetation step runs now, before this process reads
-    # any points of its own, so the two never hold the cloud at the same time.
-    # It never stops the export: without it the map is made without trees.
-    trees = None
-    if (args.trees or args.trees_dir) and not args.project_terrain:
-        import export_trees
-        trees_dir, trees_tmp = args.trees_dir, None
-        try:
-            if not trees_dir:
-                if not args.ept:
-                    raise RuntimeError("it needs a point cloud (--ept)")
-                trees_tmp = tempfile.TemporaryDirectory(prefix='flex_trees_')
-                trees_dir = trees_tmp.name
-                print("[1/7] Trees 0% starting (the returns are read once more, for the vegetation)", flush=True)
-                t_rect = ridge.rect if ridge is not None else utm_rect_covering(args.bbox, zone, 1.0)
-                t_poly = polygon_to_utm(poly_ll, zone) if poly_ll is not None else None
-                export_trees.run_veg_tiled(trees_dir, args.ept, t_rect, zone, south, polygon=t_poly, also=args.also_ept,
-                                           progress=lambda m: print(f"[1/7] {m}", flush=True))
-            trees = export_trees.Trees(trees_dir, zone, south)
-            trees_utm = trees.utm()
-            print(f"[1/7] Trees: {len(trees.recs):,} shapes from the vegetation step"
-                  + (f" ({trees.seconds:.0f} s in {trees.tiles} tile{'s' if trees.tiles != 1 else ''})" if trees.seconds else ''))
-        except (Exception, SystemExit) as e:
-            print(f"[1/7] WARNING: trees and brush left out ({e})")
-            trees = None
-        if trees_tmp is not None:
-            trees_tmp.cleanup()
 
     # The terrain is an upright UTM rectangle covering everything drawn. Points
     # are requested for a little more than that so every cell has real data
