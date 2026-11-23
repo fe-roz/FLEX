@@ -73,7 +73,7 @@ location itself. It declares no `INTERNET` permission, so it is offline by
 construction. ML Kit's usage-log uploader asks for `INTERNET` in its own
 manifest; the app's manifest removes it again (`tools:node="remove"`) and
 unregisters the uploader's backend. Check a new build with
-`aapt2 dump permissions app-field-debug.apk` (and `app-ridge-debug.apk`): location and `ACCESS_NETWORK_STATE`
+`aapt2 dump permissions app-debug.apk`: location and `ACCESS_NETWORK_STATE`
 only. No `CAMERA` permission either: "Photograph a page" goes through the
 phone's camera app, which needs none while the app does not declare it.
 
@@ -99,6 +99,15 @@ Only the export's data files are unpacked; the zip's big single-file
 `viewer.html` is skipped. Exports made before the sidecar files existed are
 unpacked from that `viewer.html` instead (slower, once).
 
+An export made with **V2 - Ridgewalking** also carries `ridge_points.bin`,
+`ridge_shapes.bin`, `ridge_patches.bin`, `ridge.json` and `tex_brush.png`.
+`MapStore.kt` keeps them at import (`RIDGE_FILES`), `MainActivity.kt` serves
+them and hands their names to the viewer (`RIDGE`, drawn by
+`viewer_build/libs/ridgewalk.js`: 🎨 Display → Below ground (V2)); a map
+without them gets `null` and looks as before. A map imported with an older
+build of the app has to be imported again (or updated from the same zip) to
+get those files. The build command is unchanged.
+
 The viewer is bundled in the app, not taken from each export, so a viewer fix
 reaches every map with one rebuild; it reads every older export layout.
 
@@ -106,48 +115,13 @@ reaches every map with one rebuild; it reads every older export layout.
 
 Android Studio or the SDK command-line tools, JDK 17.
 
-There are two apps in this one project, as build flavors of the same code:
-
-| Flavor | App | Package | Install |
-|---|---|---|---|
-| `field` | FLEX Field | `com.feroz.flexfield` | `.\gradlew.bat installFieldRelease` |
-| `ridge` | FLEX Ridgewalk | `com.feroz.flexridge` | `.\gradlew.bat installRidgeRelease` |
-
 ```powershell
 cd android                            # from the FLEX checkout
-.\gradlew.bat installFieldRelease     # FLEX Field: updates the one already on the phone, its maps stay
-.\gradlew.bat installRidgeRelease     # FLEX Ridgewalk: a second app beside it, with its own maps
-.\gradlew.bat assembleRelease         # both APKs, no phone needed:
-#   app\build\outputs\apk\field\release\app-field-release.apk
-#   app\build\outputs\apk\ridge\release\app-ridge-release.apk
+.\gradlew.bat installRelease          # or assembleRelease → app\build\outputs\apk\release\
 ```
-
-Plain `.\gradlew.bat installRelease` no longer exists (Gradle answers "Task
-'installRelease' not found"): name the flavor. `assembleRelease` and
-`assembleDebug` still work and build both.
 
 `release` is signed with the debug key so it sideloads with no keystore. Do not
 publish it.
-
-**FLEX Ridgewalk** is FLEX Field under a second package id, so the two install
-side by side and never share anything: each has its own maps, library and
-settings (app-private storage), its own FileProvider authority
-(`<package>.fileprovider`) and both offer themselves for "Open with" on a zip.
-Only the name and the icon colour differ (`app/src/ridge/res/`: orange instead
-of cyan); the code, the manifest (no `INTERNET` permission in either) and the
-bundled viewer are the same. The map list and the viewer's help title take the
-name from the app (`AndroidHost.appName()`). Either app opens any FLEX export.
-An export made with **V2 - Ridgewalking** also carries `ridge_points.bin`,
-`ridge_shapes.bin`, `ridge_patches.bin`, `ridge.json` and `tex_brush.png`;
-`MapStore.kt` keeps them at import (`RIDGE_FILES`), `MainActivity.kt` serves
-them and hands their names to the viewer (`RIDGE`, drawn by
-`viewer_build/libs/ridgewalk.js`; a map without them gets `null` and looks as
-before). A map imported with a build older than this one has to be imported
-again (or updated from the same zip) to get those files.
-
-`field` is exactly the app there was before the flavors: same package, name,
-signing key, version and storage, so installing it over an existing FLEX Field
-is an update.
 
 The package is `com.feroz.flexfield`, so it installs next to the old per-cave
 apps (`com.feroz.flexviewer.*`) instead of replacing them; uninstall those by
@@ -177,8 +151,8 @@ $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-34" "build-
 # every build
 cd android
 export JAVA_HOME=~/opt/jdk17 ANDROID_HOME=~/opt/android-sdk ANDROID_SDK_ROOT=~/opt/android-sdk
-./gradlew --no-daemon assembleDebug      # add --offline when the server has no route to Maven (the caches are in ~/.gradle)
-# -> app/build/outputs/apk/field/debug/app-field-debug.apk and app/build/outputs/apk/ridge/debug/app-ridge-debug.apk
+./gradlew --no-daemon assembleDebug
+# -> app/build/outputs/apk/debug/app-debug.apk
 ```
 
 The APK bundles only `viewer_build/` (viewer template and `libs/`),

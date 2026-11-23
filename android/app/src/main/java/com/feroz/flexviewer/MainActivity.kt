@@ -36,8 +36,7 @@ import java.io.FileInputStream
 import java.util.concurrent.Executors
 
 /**
- * FLEX Field (and FLEX Ridgewalk, the same code as a second build flavor with
- * its own id, name and storage): one app that opens FLEX map exports (zips), with a project
+ * FLEX Field: one app that opens FLEX map exports (zips), with a project
  * library for what people add (notes, documents, leads, field survey) and
  * sync files to share it with other phones and with FLEX.
  *
@@ -343,8 +342,6 @@ class MainActivity : AppCompatActivity() {
     /** The surface the pages call into. Every map id and file name is checked in MapStore. */
     inner class AndroidHost {
         @JavascriptInterface fun isNativeHost(): Boolean = true
-        /** "FLEX Field" or "FLEX Ridgewalk" (the build flavor's name), for the pages' titles. */
-        @JavascriptInterface fun appName(): String = try { getString(R.string.app_name) } catch (_: Exception) { "FLEX Field" }
         @JavascriptInterface fun appVersion(): String = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "" } catch (_: Exception) { "" }
 
         @JavascriptInterface

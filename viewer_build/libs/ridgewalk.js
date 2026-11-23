@@ -243,6 +243,11 @@
       if (S.ridge.shapes) chips.push(chip('🧱', 'Shapes', 'shapes'));
       if (S.ridge.brush) chips.push(chip('🌿', 'Brush', 'brush'));
       ui.chips(chips);
+      // The two long names ("Patterned noise", "Guessed openings") wrap instead of being cut short.
+      var grid = ui.sheet.lastChild;
+      if (grid && grid.querySelectorAll) Array.prototype.forEach.call(grid.querySelectorAll('.sh-chip span:last-child'), function (sp) {
+        sp.style.whiteSpace = 'normal'; sp.style.textAlign = 'left'; sp.style.lineHeight = '1.15';
+      });
       var row = ui.el('div', 'sh-sl'), lab = ui.el('label', '', 'Dot size'), val = ui.el('div', '', st.size + ' px'), inp = ui.el('input');
       inp.type = 'range'; inp.min = String(SIZE_MIN); inp.max = String(SIZE_MAX); inp.step = '1'; inp.value = String(st.size); inp.id = 'ridge-size-slider';
       inp.style.accentColor = '#00e5ff';

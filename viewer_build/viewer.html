@@ -836,7 +836,7 @@ FlexFx.init({
 
 // The name typed in FLEX's export panel titles the viewer (and the app).
 function applyMapName() {
-  if (window.FF_MAP_ID) { const ht = document.getElementById('help-title'); if (ht) ht.textContent = (window.AndroidHost && AndroidHost.appName && AndroidHost.appName()) || 'FLEX Field'; }
+  if (window.FF_MAP_ID) { const ht = document.getElementById('help-title'); if (ht) ht.textContent = 'FLEX Field'; }
   const name = (META.name || '').trim();
   if (!name) return;
   document.title = name + ' \u2014 FLEX';

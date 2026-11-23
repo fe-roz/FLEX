@@ -66,9 +66,6 @@
 // each in a project whose notes, documents, leads and field survey live in the
 // library (see MapStore.kt, LibStore.kt).
 const H = window.AndroidHost;
-// "FLEX Field" or "FLEX Ridgewalk": the same pages serve both apps.
-const APP_NAME = (() => { try { return (H && H.appName && H.appName()) || 'FLEX Field'; } catch (_) { return 'FLEX Field'; } })();
-document.title = APP_NAME;
 const $ = s => document.querySelector(s);
 const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const human = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : n < 1073741824 ? (n / 1048576).toFixed(1) + ' MB' : (n / 1073741824).toFixed(2) + ' GB';
@@ -152,7 +149,7 @@ function render() {
   const list = $('#maps');
   list.textContent = '';
   if (!maps.length) {
-    list.innerHTML = '<div class="empty"><b>No maps yet.</b><br>In FLEX, export an area (Export → portable viewer); copy the zip to this phone, then tap <b>Import map</b> — or open the zip with ' + esc(APP_NAME) + ' from Files or Drive.<br><br>Notes, documents, leads and field survey belong to the map’s <b>project</b> (an area), so every map of that area shows them, and they stay when a map is updated or deleted. Share them with sync files (in a map: ⋯ → Project & sync).</div>';
+    list.innerHTML = '<div class="empty"><b>No maps yet.</b><br>In FLEX, export an area (Export → portable viewer); copy the zip to this phone, then tap <b>Import map</b> — or open the zip with FLEX Field from Files or Drive.<br><br>Notes, documents, leads and field survey belong to the map’s <b>project</b> (an area), so every map of that area shows them, and they stay when a map is updated or deleted. Share them with sync files (in a map: ⋯ → Project & sync).</div>';
     return;
   }
   maps.forEach(m => {
@@ -230,7 +227,7 @@ window.ffImportAsk = async json => {
 
 showAuthor();
 load();
-if (H) { try { $('#ver').textContent = APP_NAME + ' ' + (H.appVersion() || ''); } catch (_) {} H.homeReady(); }
+if (H) { try { $('#ver').textContent = 'FLEX Field ' + (H.appVersion() || ''); } catch (_) {} H.homeReady(); }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
 </script>
 </body>
