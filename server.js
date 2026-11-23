@@ -778,6 +778,7 @@ function handleExportTerrain(req, res) {
             features          = null,        // { folders, items }: the open project's surface items inside the area (export-ui.js); checked again by the exporter
             slope_map         = false,       // one more map for the phone: slope-angle colours over the hillshade (export_slope.py); LiDAR terrain only
             slope_opacity     = null,        // with slope_map: 0..1
+            area              = null,        // a processed area's id (areas_api.js): what was already made for this very outline and LiDAR is reused, not read again
             ridge_shapes      = 'all',       // with ridgewalk: 'none' leaves the shapes of the features out
             brush_opacity     = null,        // with ridgewalk: 0..1, how strongly the brush lies over the hillshade
             ridgewalk         = false,       // V2 - Ridgewalking: the ridge step on the LiDAR, its ground as the terrain (export_ridge.py)
@@ -876,13 +877,33 @@ function handleExportTerrain(req, res) {
                 demFiles.push(ff);                  // (cleaned up with the other temporary files when the job ends)
             } catch (e) { _exportJobs[jobId].progress.push('⚠ Surface features left out: ' + (e.message || e)); }
         }
-        if (trees === true && !demGrid) args.push('--trees');
+        // A processed area named by the request: its ground, ridgewalking and trees are reused when they were made for this
+        // outline and this point cloud (areaGen.reuse); the log says for each one whether it was reused or is made now.
+        const said = m => _exportJobs[jobId].progress.push(m);
+        let ru = null;
+        if (!demGrid && typeof area === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(area)) {
+            try { ru = areaGen.reuse(area, { ring: poly || [[bbox[0], bbox[1]], [bbox[2], bbox[1]], [bbox[2], bbox[3]], [bbox[0], bbox[3]]], lidar: ept }); } catch (e) { ru = { ok: false, why: String(e.message || e) }; }
+            if (!ru.ok) { said(`Area: nothing reused (${ru.why})`); ru = null; }
+        }
+        const when = d => (d ? ' (made ' + String(d).slice(0, 16).replace('T', ' ') + ')' : '');
+        const wantRidge = ridgewalk === true && !demGrid, wantTrees = trees === true && !demGrid;
+        const ridgeDir = wantRidge && ru && ru.ridge.dir && (ridge_shapes === 'none' || ru.ridge.shapes) ? ru.ridge.dir : null;
+        const treesDir = wantTrees && ru && ru.trees.dir ? ru.trees.dir : null;
+        const groundDir = !wantRidge && ru && ru.ground.dir ? ru.ground.dir : null;      // (with ridgewalking the ground is the ridgewalking ground)
+        if (ru) {
+            const nm = '\u201c' + ru.area.name + '\u201d';
+            if (wantRidge) said(ridgeDir ? `Ridgewalking: reused from the area ${nm}${when(ru.ridge.date)}` : `Ridgewalking: made now (${ru.ridge.why || 'the area\u2019s result has no shapes'})`);
+            else said(groundDir ? `Ground: reused from the area ${nm}${when(ru.ground.date)}` : `Ground: made now (${ru.ground.why})`);
+            if (wantTrees) said(treesDir ? `Trees and brush: reused from the area ${nm}${when(ru.trees.date)}` : `Trees and brush: made now (${ru.trees.why})`);
+        }
+        if (groundDir) args.push('--area-dir', groundDir);
+        if (wantTrees) args.push(...(treesDir ? ['--trees-dir', treesDir] : ['--trees']));
         if (slope_map === true && !demGrid) {
             args.push('--slope-map');
             if (typeof slope_opacity === 'number' && Number.isFinite(slope_opacity)) args.push('--slope-opacity', String(Math.max(0, Math.min(1, slope_opacity))));
         }
         if (ridgewalk === true && !demGrid) {
-            args.push('--ridgewalk');
+            args.push(...(ridgeDir ? ['--ridgewalk-dir', ridgeDir] : ['--ridgewalk']));
             if (ridge_shapes === 'none') args.push('--ridge-shapes', 'none');
             if (typeof brush_opacity === 'number' && Number.isFinite(brush_opacity))
                 args.push('--brush-opacity', String(Math.max(0, Math.min(1, brush_opacity))));
