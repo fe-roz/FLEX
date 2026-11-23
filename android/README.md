@@ -90,7 +90,7 @@ On the phone (app-private storage):
 
 ```
 files/maps/<id>/map.json             name, dates
-files/maps/<id>/export/              terrain.glb, tex_sat.jpg, tex_hs.jpg, walls.bin, caves.json
+files/maps/<id>/export/              terrain.glb, tex_sat.jpg, tex_hs.jpg, walls.bin, caves.json (+ ridge_*.bin, ridge.json, tex_brush.png)
 files/maps/<id>/user/log.jsonl       the change log (notes and field surveys are rebuilt from it)
 files/maps/<id>/user/notes/<survey>/ note pages
 ```
@@ -98,6 +98,15 @@ files/maps/<id>/user/notes/<survey>/ note pages
 Only the export's data files are unpacked; the zip's big single-file
 `viewer.html` is skipped. Exports made before the sidecar files existed are
 unpacked from that `viewer.html` instead (slower, once).
+
+An export made with **V2 - Ridgewalking** also carries `ridge_points.bin`,
+`ridge_shapes.bin`, `ridge_patches.bin`, `ridge.json` and `tex_brush.png`.
+`MapStore.kt` keeps them at import (`RIDGE_FILES`), `MainActivity.kt` serves
+them and hands their names to the viewer (`RIDGE`, drawn by
+`viewer_build/libs/ridgewalk.js`: 🎨 Display → Below ground (V2)); a map
+without them gets `null` and looks as before. A map imported with an older
+build of the app has to be imported again (or updated from the same zip) to
+get those files. The build command is unchanged.
 
 The viewer is bundled in the app, not taken from each export, so a viewer fix
 reaches every map with one rebuild; it reads every older export layout.

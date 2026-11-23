@@ -687,6 +687,10 @@ catch(e) { console.error('CAVES_DATA parse error:', e); window.CAVES_DATA = {sur
 try { window.DOCS_EXPORT = PLACEHOLDER_DOCS_JSON; }
 catch(e) { window.DOCS_EXPORT = null; }
 </script>
+<!-- V2 - Ridgewalking (libs/ridgewalk.js): null in a normal export. The first line only makes a
+     template nobody filled in read as null too. -->
+<script>window['PLACEHOLDER_' + 'RIDGE_JSON'] = null;</script>
+<script>const RIDGE = PLACEHOLDER_RIDGE_JSON;</script>
 <!-- ═══ THREE.JS LIBS (injected by export_terrain.py) ══════════════════════ -->
 <script src="libs/three.min.js"></script>
 <script src="libs/OrbitControls.js"></script>
@@ -700,6 +704,7 @@ catch(e) { window.DOCS_EXPORT = null; }
 <script src="libs/viewer-inventory.js"></script>
 <script src="libs/scan-import.js"></script>
 <script src="libs/viewer-docs.js"></script>
+<script src="libs/ridgewalk.js"></script>
 
 <script>
 'use strict';
@@ -912,6 +917,7 @@ let texMode = 'sat'; // 'sat' or 'hs'
 
 function applyTerrainTexture(tex) {
   if (!terrainGroup) return;
+  if (window.FlexRidge) tex = FlexRidge.mapTexture(tex, texMode);   // the brush map over the hillshade (libs/ridgewalk.js)
   terrainGroup.traverse(obj => {
     if (!obj.isMesh) return;
     const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
@@ -2039,6 +2045,12 @@ setTimeout(() => {
 
     setP(80, 'Loading cave lines...');
     buildCaveLines();
+    // V2 - Ridgewalking: returns below ground, guessed openings, shapes, brush (nothing when RIDGE is null).
+    if (window.FlexRidge) FlexRidge.init({
+      THREE, scene, ridge: typeof RIDGE === 'undefined' ? null : RIDGE, saved: DISP.ridge, isAssetRef, b64ToArrayBuffer, textureSrc,
+      redraw: () => { requestRender(); wakeRender(); },
+      retexture: () => { const t = texMode === 'hs' ? terrainTexHs : terrainTexSat; if (t) applyTerrainTexture(t); },
+    });
     dispRestoreUi();
     setP(100, 'Ready');
     setTimeout(hideLoading, 300);
@@ -4612,6 +4624,7 @@ function renderDisplaySheet() {
   if (importGroup.children.length)
     chips.push(['📂', kmlNames.length ? kmlNames.join(', ') : 'Imported KML', importGroup.visible, on => { importGroup.visible = on; }]);
   sheetChips(chips);
+  if (window.FlexRidge && FlexRidge.active()) FlexRidge.sheet({ el, sheet: sheetEl, head: sheetHead, chips: sheetChips });   // Below ground (V2)
   const hsOk = document.getElementById('map-panel-layer').style.display === 'block';
   if (hsOk) {
     sheetHead('Imagery');
@@ -8349,7 +8362,7 @@ function dispRestoreUi() {
 }
 function dispCapture() {
   const sl = id => { const n = document.getElementById(id); return n ? +n.value : undefined; };
-  dispSave({ wallMode, colourMode, wallAlpha: wallOpacity, stationMode, annot: annotMode, tracks: fieldGroup.visible, inv: window.ViewerInv ? ViewerInv.visible() : true, fx: FlexFx.serialize(),
+  dispSave({ wallMode, colourMode, wallAlpha: wallOpacity, stationMode, annot: annotMode, tracks: fieldGroup.visible, inv: window.ViewerInv ? ViewerInv.visible() : true, fx: FlexFx.serialize(), ridge: window.FlexRidge ? FlexRidge.serialize() : undefined,
              opacity: sl('terrain-opacity-slider'), bright: sl('terrain-bright-slider'), fog: sl('terrain-fog-slider') });
 }
 let _dispTimer = null;
