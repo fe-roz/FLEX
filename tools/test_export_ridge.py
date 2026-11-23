@@ -9,7 +9,8 @@ No PDAL, no network: the ridge folder is a stand-in written here, to the contrac
   * the terrain has real holes: no triangle over a true-entrance cell (holes == 1);
   * the patches lie over the guessed cells (holes == 2), 0.08 m above the ground;
   * points and shapes are moved into the viewer's frame;
-  * the brush picture has the contract's classes on the hillshade's extent;
+  * "hillshade with brush" (tex_hsb.jpg, and tex_hsb_<c>_<r>.jpg when tiled): the brush classes at 70 % over the
+    hillshade, inlined as TERRAIN_HSB_B64; no tex_brush.png, no RIDGE.brush; --ridge-shapes none;
   * steep ground keeps its triangles, flat ground goes coarse;
   * --ridgewalk runs the step as a child and relays its progress;
   * a normal export is unchanged: RIDGE is null and no ridge file is in the zip.
@@ -81,6 +82,10 @@ def write_ridge(d, shapes=True, with_brush=True):
         (d / 'brush.json').write_text(json.dumps({'x0': 0, 'y0': 0, 'cell': BC, 'nx': NX // 3, 'ny': NY // 3, 'band': [0.3, 2.0]}))
     return d
 
+def hsb_const(html):
+    m = re.search(r'<script>const TERRAIN_HSB_B64 = "(.*?)";</script>', html, re.S)
+    return m.group(1) if m else 'MISSING'
+
 def ridge_const(html):
     m = re.search(r'<script>const RIDGE = (.*?);</script>', html, re.S)
     return json.loads(m.group(1)) if m else 'MISSING'
@@ -123,8 +128,9 @@ with tempfile.TemporaryDirectory() as tmp:
     z = zipfile.ZipFile(out)
     names = set(z.namelist())
     want = {'terrain.glb', 'tex_sat.jpg', 'tex_hs.jpg', 'caves.json', 'viewer.html', 'serve.bat', 'serve.sh',
-            'ridge.json', 'ridge_points.bin', 'ridge_shapes.bin', 'ridge_patches.bin', 'tex_brush.png'}
+            'ridge.json', 'ridge_points.bin', 'ridge_shapes.bin', 'ridge_patches.bin', 'tex_hsb.jpg'}
     check('zip: the usual files and the ridge files', want <= names, sorted(want - names))
+    check('zip: no brush overlay picture, no tiles for a small area', 'tex_brush.png' not in names and not [n for n in names if n.startswith('tex_hsb_') or n.startswith('tex_hs_')], sorted(names))
     caves = json.loads(z.read('caves.json'))
     meta = caves['meta']
     check('no caves: an empty survey list, ridgewalk marked in meta', caves['surveys'] == [] and meta.get('ridgewalk') == 1 and meta.get('hillshade') == 'lidar', meta)
@@ -135,13 +141,13 @@ with tempfile.TemporaryDirectory() as tmp:
     check('ridge.json: the step\'s own, frame viewer', side.get('frame') == 'viewer' and side['counts'] == COUNTS and side['nx'] == NX)
     slim = side.get('viewer')
     check('slim RIDGE: file names', slim == {'version': 1, 'counts': COUNTS, 'points': 'ridge_points.bin', 'patches': 'ridge_patches.bin',
-                                             'shapes': 'ridge_shapes.bin', 'brush': 'tex_brush.png', 'depthCap': 20}, slim)
+                                             'shapes': 'ridge_shapes.bin', 'depthCap': 20}, slim)
     html = z.read('viewer.html').decode('utf-8')
     R = ridge_const(html)
     check('single file RIDGE: an object, no placeholder left', isinstance(R, dict) and 'PLACEHOLDER_RIDGE_JSON' not in html, str(R)[:80])
     if isinstance(R, dict):
         check('single file RIDGE: version, counts, depthCap', R['version'] == 1 and R['counts'] == COUNTS and R['depthCap'] == 20)
-        for k, f in (('points', 'ridge_points.bin'), ('patches', 'ridge_patches.bin'), ('shapes', 'ridge_shapes.bin'), ('brush', 'tex_brush.png')):
+        for k, f in (('points', 'ridge_points.bin'), ('patches', 'ridge_patches.bin'), ('shapes', 'ridge_shapes.bin')):
             check(f'single file RIDGE.{k}: the bytes of {f}', '.' not in R[k] and base64.b64decode(R[k]) == z.read(f))
 
     # points and shapes in the viewer's frame
@@ -206,14 +212,51 @@ with tempfile.TemporaryDirectory() as tmp:
     check('hillshade: one pixel a cell on the grid', hs.size == (NX, NY) and hs.mode == 'L', hs.size)
     ha = np.asarray(hs).astype(int)
     check('hillshade: the cliff shows', abs(int(ha[:, 252:260].mean()) - int(ha[:, 100:200].mean())) > 25, (ha[:, 252:260].mean(), ha[:, 100:200].mean()))
-    br = Image.open(io.BytesIO(z.read('tex_brush.png')))
-    ba = np.asarray(br)
-    check('brush: RGBA, one pixel a block, the hillshade\'s shape', br.mode == 'RGBA' and br.size == (NX // 3, NY // 3), (br.mode, br.size))
-    row = lambda bj: NY // 3 - 1 - bj                                    # picture rows run north to south
-    check('brush classes: clear, light, medium, dense, blank',
-          tuple(ba[row(5), 5]) == (0, 0, 0, 0) and tuple(ba[row(15), 15]) == (0xb7, 0xe4, 0xa0, 140)
-          and tuple(ba[row(35), 15]) == (0x5f, 0xae, 0x4f, 204) and tuple(ba[row(55), 15]) == (0x1f, 0x5f, 0x1f, 255)
-          and tuple(ba[row(75), 15]) == (0, 0, 0, 0), [tuple(ba[row(k), 15]) for k in (5, 15, 35, 55, 75)])
+    hb = Image.open(io.BytesIO(z.read('tex_hsb.jpg')))
+    check('hillshade with brush: the hillshade\'s size, in colour', hb.size == hs.size and hb.mode == 'RGB', (hb.size, hb.mode))
+    check('hillshade with brush: inlined in the single file, brush opacity in meta', base64.b64decode(hsb_const(html)) == z.read('tex_hsb.jpg') and meta.get('hillshade_brush') == {'opacity': 0.7}, meta.get('hillshade_brush'))
+    hba = np.asarray(hb).astype(float)
+    def block(bj, bi=15):                                # mean colour of brush block (bj, bi) there, and the hillshade's grey
+        rows = slice(NY - 3 * bj - 3 + 1, NY - 3 * bj - 1); cols = slice(3 * bi + 1, 3 * bi + 2)
+        return hba[rows, cols].reshape(-1, 3).mean(axis=0), float(ha[rows, cols].mean())
+    def near(bj, col, op=0.7):
+        got, g = block(bj)
+        want = (1 - op) * g + op * np.array(col, float) if col else np.array([g, g, g])
+        return bool(np.abs(got - want).max() < 9), (got.round(), want.round())
+    for label, bj, col in (('none: the hillshade', 5, None), ('light', 15, (0xb7, 0xe4, 0xa0)), ('medium', 35, (0x5f, 0xae, 0x4f)),
+                           ('dense', 55, (0x1f, 0x5f, 0x1f)), ('blank: the hillshade', 75, None)):
+        okc, det = near(bj, col)
+        check(f'hillshade with brush: {label} at 70 %', okc, det)
+
+    # --brush-opacity and --ridge-shapes none
+    outb, logb = run('strong.zip', ['--ridgewalk-dir', str(rdir), '--brush-opacity', '0.8', '--ridge-shapes', 'none'])
+    zb = zipfile.ZipFile(outb)
+    hba = np.asarray(Image.open(io.BytesIO(zb.read('tex_hsb.jpg')))).astype(float)
+    ha = np.asarray(Image.open(io.BytesIO(zb.read('tex_hs.jpg')))).astype(int)
+    okc, det = near(55, (0x1f, 0x5f, 0x1f), 0.8)
+    check('--brush-opacity 0.8: dense brush nearly its own colour', okc and json.loads(zb.read('caves.json'))['meta']['hillshade_brush'] == {'opacity': 0.8}, det)
+    Rb = ridge_const(zb.read('viewer.html').decode('utf-8'))
+    check('--ridge-shapes none: no ridge_shapes.bin, RIDGE.shapes null, the rest there', 'ridge_shapes.bin' not in zb.namelist() and Rb['shapes'] is None and Rb['points']
+          and json.loads(zb.read('ridge.json'))['viewer']['shapes'] is None)
+
+    # tiled (a big area): every tile has its hillshade with brush, meta names it
+    real_plan = et.plan_tiles
+    et.plan_tiles = lambda w, h: (2, 2)
+    outt, logt = run('tiled.zip', ['--ridgewalk-dir', str(rdir)])
+    et.plan_tiles = real_plan
+    zt = zipfile.ZipFile(outt); nt = set(zt.namelist())
+    tiles = {f'tex_{k}_{c}_{r}.jpg' for k in ('sat', 'hs', 'hsb') for c in range(2) for r in range(2)}
+    check('tiled: sat, hs and hsb tiles, and the overviews', tiles <= nt and {'tex_hs.jpg', 'tex_hsb.jpg', 'tex_sat.jpg'} <= nt, sorted(tiles - nt))
+    tt = json.loads(zt.read('caves.json'))['meta'].get('texture_tiles')
+    check('tiled: meta texture_tiles names hsb like hs', tt == {'cols': 2, 'rows': 2, 'sat': True, 'hs': True, 'hsb': True}, tt)
+    t_hs = Image.open(io.BytesIO(zt.read('tex_hs_0_1.jpg'))); t_hb = Image.open(io.BytesIO(zt.read('tex_hsb_0_1.jpg')))   # the south-west tile holds the light and medium blocks
+    ta = np.asarray(t_hb).astype(float); tg = np.asarray(t_hs.convert('L')).astype(float)
+    r0, c0 = (NY // 2 - 3 * 15 - 2), 3 * 15 + 1                                  # brush block (15, 15) in that tile
+    want = 0.3 * tg[r0, c0] + 0.7 * np.array([0xb7, 0xe4, 0xa0], float)
+    check('tiled: the tile is the hillshade tile with the brush on it', t_hb.size == t_hs.size and t_hb.mode == 'RGB' and np.abs(ta[r0, c0] - want).max() < 12
+          and np.abs(ta[5, 5] - tg[5, 5]).max() < 6, (ta[r0, c0], want))
+    import tex_tiles
+    check('tex_tiles: hsb tile names are tiles', tex_tiles.TILE_RE.match('tex_hsb_1_0.jpg') and tex_tiles.TILE_RE.match('tex_hs_1_0.jpg').group(1) == 'hs')
 
     # rebuild_viewer keeps RIDGE
     r = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rebuild_viewer.py'), str(out), '-o', str(tmp / 'rebuilt.zip')],
@@ -221,14 +264,15 @@ with tempfile.TemporaryDirectory() as tmp:
     check('rebuild_viewer runs', r.returncode == 0, r.stderr[-300:])
     if r.returncode == 0:
         R2 = ridge_const(zipfile.ZipFile(tmp / 'rebuilt.zip').read('viewer.html').decode('utf-8'))
-        check('rebuild_viewer: the same RIDGE', R2 == R)
+        h2 = zipfile.ZipFile(tmp / 'rebuilt.zip').read('viewer.html').decode('utf-8')
+        check('rebuild_viewer: the same RIDGE and hillshade with brush', R2 == R and hsb_const(h2) == hsb_const(html))
 
     # ── 2. No shapes, no brush: null, not missing ────────────────────────────
     out2, log2 = run('bare.zip', ['--ridgewalk-dir', str(write_ridge(tmp / 'bare', shapes=False, with_brush=False))])
     z2 = zipfile.ZipFile(out2)
     R = ridge_const(z2.read('viewer.html').decode('utf-8'))
-    check('no shapes / brush: null in RIDGE, no such files', isinstance(R, dict) and R['shapes'] is None and R['brush'] is None and R['points']
-          and not ({'ridge_shapes.bin', 'tex_brush.png'} & set(z2.namelist())), log2[-300:])
+    check('no shapes / brush: null in RIDGE, no such files', isinstance(R, dict) and R['shapes'] is None and 'brush' not in R and R['points'] and hsb_const(z2.read('viewer.html').decode('utf-8')) == ''
+          and not ({'ridge_shapes.bin', 'tex_brush.png', 'tex_hsb.jpg'} & set(z2.namelist())), log2[-300:])
 
     # ── 3. A polygon: the mesh ends at its line, the holes stay ──────────────
     ring = [[BBOX[0] + 0.0002, BBOX[1] + 0.0001], [BBOX[2] - 0.0002, BBOX[1] + 0.0001], [BBOX[2] - 0.0003, BBOX[3] - 0.0001], [BBOX[0] + 0.0003, BBOX[3] - 0.0001]]
@@ -259,6 +303,10 @@ with tempfile.TemporaryDirectory() as tmp:
     out4, log4 = run('child.zip', ['--ept', 'made-up/ept.json', '--ridgewalk'])
     check('--ridgewalk: export written from the child\'s folder', out4.exists() and 'ridge_points.bin' in zipfile.ZipFile(out4).namelist(), log4[-600:])
     check('--ridgewalk: progress relayed as export steps', '[1/7] Ridgewalking 10% reading tile 1 of 2' in log4 and '[1/7] Ridgewalking 100% done' in log4, log4[:400])
+    stub.write_text(stub.read_text().replace("print('[ridge] 100% done', flush=True)", f"open({str(tmp / 'child_args.txt')!r}, 'w').write(' '.join(a))"))
+    out4b, log4b = run('child2.zip', ['--ept', 'made-up/ept.json', '--ridgewalk', '--ridge-shapes', 'none'])
+    check('--ridge-shapes none: the step is told --no-shapes, and no shapes file is carried', ' --no-shapes' in (tmp / 'child_args.txt').read_text()
+          and out4b.exists() and 'ridge_shapes.bin' not in zipfile.ZipFile(out4b).namelist(), log4b[-300:])
     stub.write_text("import sys\nprint('[ridge] 5% reading')\nprint('no such dataset')\nsys.exit(3)\n")
     out5, log5 = run('fail.zip', ['--ept', 'made-up/ept.json', '--ridgewalk'])
     check('--ridgewalk: a failed step stops the export and says why', not out5.exists() and 'EXIT' in log5 and 'no such dataset' in log5, log5[-300:])
@@ -277,7 +325,9 @@ with tempfile.TemporaryDirectory() as tmp:
         z7 = zipfile.ZipFile(out7)
         n7 = set(z7.namelist())
         h7 = z7.read('viewer.html').decode('utf-8')
-        check('normal export: RIDGE is null', ridge_const(h7) is None and 'PLACEHOLDER_RIDGE_JSON' not in h7, str(ridge_const(h7))[:60])
+        check('normal export: RIDGE is null', ridge_const(h7) is None and 'PLACEHOLDER_RIDGE_JSON' not in h7.replace("'PLACEHOLDER_' + 'RIDGE_JSON'", ''), str(ridge_const(h7))[:60])
+        check('normal export: the hillshade-with-brush placeholder is an empty string', hsb_const(h7) == '' and 'PLACEHOLDER_HSB_B64' not in h7, hsb_const(h7)[:40])
+        check('normal export: no hillshade_brush in meta', 'hillshade_brush' not in json.loads(z7.read('caves.json'))['meta'])
         check('normal export: the same file list as ever', {n for n in n7 if not n.startswith('libs/')} == {'terrain.glb', 'tex_sat.jpg', 'tex_hs.jpg', 'caves.json', 'viewer.html', 'serve.bat', 'serve.sh'}, sorted(n7))
         check('normal export: no ridgewalk in meta', 'ridgewalk' not in json.loads(z7.read('caves.json'))['meta'])
     _, log8 = run('both.zip', ['--dem-grid', str(tmp / 'dem.json'), '--ridgewalk'])

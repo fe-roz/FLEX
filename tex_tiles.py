@@ -8,6 +8,7 @@ size. The tiles are sidecar files in the export:
 
     tex_sat_<col>_<row>.jpg      row 0 = north, col 0 = west
     tex_hs_<col>_<row>.jpg       (when the export has a hillshade)
+    tex_hsb_<col>_<row>.jpg      (hillshade with brush: the ridgewalking export; meta "hsb": true)
 
 and caves.json meta says so:  "texture_tiles": {"cols": C, "rows": R,
 "sat": true, "hs": true}. The single tex_sat.jpg / tex_hs.jpg stay in the
@@ -21,7 +22,7 @@ import re
 TILE_ABOVE_M = 5000.0      # tile an export whose long side is longer than this
 TILE_TARGET_M = 5000.0     # ... into tiles about this long
 TILE_MAX_SIDE = 4          # at most this many tiles along a side
-TILE_RE = re.compile(r'^tex_(sat|hs)_(\d+)_(\d+)\.jpg$')
+TILE_RE = re.compile(r'^tex_(sat|hsb|hs)_(\d+)_(\d+)\.jpg$')
 
 
 def plan_tiles(width_m, height_m, above_m=TILE_ABOVE_M, target_m=TILE_TARGET_M, max_side=TILE_MAX_SIDE):
@@ -43,8 +44,29 @@ def sub_extent(e0, n0, e1, n1, col, row, cols, rows):
     return (e0 + col * w, n1 - (row + 1) * h, e0 + (col + 1) * w, n1 - row * h)
 
 
-def meta_entry(cols, rows, sat=True, hs=False):
-    return {'cols': int(cols), 'rows': int(rows), 'sat': bool(sat), 'hs': bool(hs)}
+def meta_entry(cols, rows, sat=True, hs=False, hsb=False):
+    """`hsb` (hillshade with brush, tex_hsb_<c>_<r>.jpg: the ridgewalking export) is only named when there."""
+    return {'cols': int(cols), 'rows': int(rows), 'sat': bool(sat), 'hs': bool(hs), **({'hsb': True} if hsb else {})}
+
+
+def derive_tiles(tiles, src, dst, cols, rows, grid, fn, quality=90):
+    """One more picture per tile, made from an existing one: for every
+    tex_<src>_<c>_<r>.jpg in `tiles`, fn(PIL image, (e0, n0, e1, n1) of the
+    tile) -> PIL image or None; returns {tex_<dst>_<c>_<r>.jpg: JPEG bytes},
+    empty unless every tile gave one."""
+    import io
+    from PIL import Image
+    out = {}
+    for r in range(rows):
+        for c in range(cols):
+            data = tiles.get(tile_name(src, c, r))
+            img = fn(Image.open(io.BytesIO(data)), sub_extent(grid.e0, grid.n0, grid.e1, grid.n1, c, r, cols, rows)) if data else None
+            if img is None:
+                return {}
+            b = io.BytesIO()
+            img.save(b, format='JPEG', quality=quality)
+            out[tile_name(dst, c, r)] = b.getvalue()
+    return out
 
 
 def make_tiles(grid, cols, rows, mk_grid, sat_fn, hs_fn=None, blank_fn=None, hs_overview=None,

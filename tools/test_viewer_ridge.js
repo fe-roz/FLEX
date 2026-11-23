@@ -114,7 +114,7 @@ const isHex = (c, hex, e = 0.004) => near(c[0], (hex >> 16 & 255) / 255, e) && n
   ok('half way between two stops is half way between their colours', near(FR.rampColour(2.5, 20)[1], (0xe8 + 0x9a) / 2 / 255) && near(FR.rampColour(5, 40)[1], (0xe8 + 0x9a) / 2 / 255));
   ok('saved choices: odd values fall back to the defaults', (() => {
     const s = FR.restore({ ret: false, lone: 'no', pattern: true, size: 99, shapes: 1, brush: false, extra: 1 });      // brush: a choice saved by the first build, ignored now
-    return s.ret === false && s.lone === true && s.pattern === true && s.size === 4 && s.shapes === false && !('brush' in s) && !('extra' in s) && FR.restore(null).size === 4 && FR.restore({ size: 7 }).size === 7;
+    return s.ret === false && s.lone === true && s.pattern === true && s.size === 3 && s.shapes === false && !('brush' in s) && !('extra' in s) && FR.restore(null).size === 3 && FR.restore({ size: 7 }).size === 7;
   })());
 
   // ── 3. With RIDGE: what is made, and the defaults ───────────────────────────
@@ -124,14 +124,14 @@ const isHex = (c, hex, e = 0.004) => near(c[0], (hex >> 16 & 255) / 255, e) && n
   ok('active; four sets of dots and the patches are in the scene; one redraw asked for', r === true && v.FR.active() && o.points.every(p => p && p.isPoints && p.parent === v.scene) && o.patches && o.patches.isMesh && o.patches.parent === v.scene && v.redraws === 1, v.redraws);
   ok('the kinds are separate objects with their own returns: 4 in groups, 2 lone, 1 likely noise, 3 patterned', o.points.map(p => p.geometry.attributes.position.count).join() === '4,2,1,3');
   ok('defaults: returns, lone, likely noise and openings on; patterned noise and shapes off; dots 4 px', o.points.map(p => p.visible).join() === 'true,true,true,false' && o.patches.visible === true && o.shapes === null &&
-    JSON.stringify(v.FR.state()) === JSON.stringify({ ret: true, lone: true, noise: true, pattern: false, patches: true, shapes: false, size: 4 }), v.FR.state());
+    JSON.stringify(v.FR.state()) === JSON.stringify({ ret: true, lone: true, noise: true, pattern: false, patches: true, shapes: false, size: 3 }), v.FR.state());
   ok('the shapes were not even decoded (loaded on first use)', v.decoded.length === 2 && v.scene.children.length === 5, v.decoded.length);
   const col = o.points[0].geometry.attributes.color;
   ok('a 0 m deep return is yellow, a 10 m one red, a 30 m one blue (cap 20), a 5 m one orange', isHex(rgb(col, 0), 0xffe85c) && isHex(rgb(col, 1), 0xe8322a) && isHex(rgb(col, 2), 0x4a2cff) && isHex(rgb(col, 3), 0xff9a2e), Array.from(col.array));
   ok('…at their own places', Array.from(o.points[0].geometry.attributes.position.array.slice(3, 6)).join() === '11,20,490' && Array.from(o.points[2].geometry.attributes.position.array).join() === '70,70,480');
   ok('lone returns white, likely noise pink, patterned noise light blue', o.points[1].material.color.getHex() === 0xffffff && o.points[2].material.color.getHex() === 0xff4dd2 && o.points[3].material.color.getHex() === 0x7fd4ff &&
     !o.points[1].material.vertexColors && o.points[0].material.vertexColors && o.points[0].material.color.getHex() === 0xffffff);
-  ok('dots are drawn through the ground, after the terrain, at a size in screen pixels', o.points.every(p => p.material.depthTest === false && p.material.depthWrite === false && p.material.sizeAttenuation === false && p.material.size === 4 && p.renderOrder > 0.5 && p.material.fog === false));
+  ok('dots are drawn through the ground, after the terrain, at a size in screen pixels', o.points.every(p => p.material.depthTest === false && p.material.depthWrite === false && p.material.sizeAttenuation === false && p.material.size === 3 && p.renderOrder > 0.5 && p.material.fog === false));
   ok('the round-dot patch finds its anchor in three’s own points shader', (() => {
     const sh = { fragmentShader: v.THREE.ShaderLib.points.fragmentShader, vertexShader: v.THREE.ShaderLib.points.vertexShader };
     o.points[0].material.onBeforeCompile(sh);
@@ -150,7 +150,7 @@ const isHex = (c, hex, e = 0.004) => near(c[0], (hex >> 16 & 255) / 255, e) && n
   n0 = v.redraws; v.FR.set('size', 7);
   ok('dot size: every kind follows, one redraw', o.points.every(p => p.material.size === 7) && v.FR.state().size === 7 && v.redraws === n0 + 1);
   v.FR.set('size', 500); ok('dot size is kept within 1 to 12 px', v.FR.state().size === 12 && o.points[0].material.size === 12);
-  v.FR.set('size', 0); ok('…and a wrong one is the default', v.FR.state().size === 4);
+  v.FR.set('size', 0); ok('…and a wrong one is the default', v.FR.state().size === 3);
   v.FR.set('nonsense', true); ok('an unknown switch is ignored', !('nonsense' in v.FR.state()));
 
   // shapes: loaded on the first switch-on

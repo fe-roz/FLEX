@@ -30,7 +30,7 @@ VIEWER_LIBS = {
 }
 
 from viewer_inline import build_inline_viewer, load_docs, docs_inline_json   # stdlib only (tools/rebuild_viewer.py)
-from tex_tiles import plan_tiles, make_tiles, meta_entry   # texture tiles for areas over ~5 km
+from tex_tiles import plan_tiles, make_tiles, meta_entry, derive_tiles   # texture tiles for areas over ~5 km
 
 import numpy as np
 from scipy.interpolate import NearestNDInterpolator
@@ -2303,6 +2303,11 @@ def main():
              'with real holes at true entrances, plus the ridge files for FLEX Field.')
     ap.add_argument('--ridgewalk-dir', default=None, metavar='DIR',
         help='With or without --ridgewalk: use this already computed ridge folder (ridgewalk.py --out DIR).')
+    ap.add_argument('--ridge-shapes', default='all', choices=['all', 'none'],
+        help='With --ridgewalk: carry the shapes of the features (ridge_shapes.bin, large for a big area) or leave them out.')
+    ap.add_argument('--brush-opacity', type=float, default=None,
+        help='With --ridgewalk: how strongly the brush classes lie over the hillshade in "hillshade with brush" '
+             '(tex_hsb.jpg); default 0.7.')
     args = ap.parse_args()
     ridge_mode = bool(args.ridgewalk or args.ridgewalk_dir)
     if ridge_mode and (args.dem_grid or args.area_dir or args.project_terrain):
@@ -2357,6 +2362,7 @@ def main():
             ridge_dir = ridge_tmp.name
             print("[1/7] Ridgewalking 0% starting (the returns are read again, with flight-pass ids)")
             export_ridge.run_ridgewalk(ridge_dir, args.ept, args.bbox, polygon=args.polygon, also=args.also_ept,
+                                       shapes=args.ridge_shapes != 'none',
                                        progress=lambda m: print(f"[1/7] {m}", flush=True))
         ridge = export_ridge.Ridge(ridge_dir)
         zone, south = ridge.zone, ridge.south
@@ -2684,6 +2690,23 @@ def main():
             hs_b64 = _hs_b64m.b64encode(hs_bytes).decode('ascii')
             print(f"[4b/7] Hillshade: {len(hs_bytes)//1024} KB "
                   f"({len(hs_b64)//1024} KB as base64)")
+        # 4b'. V2 - Ridgewalking: "hillshade with brush", the brush classes baked over the hillshade (tex_hsb.jpg)
+        hsb_bytes = hsb_b64 = None
+        brush_opacity = None
+        if ridge is not None and hs_bytes and ridge.has_brush():
+            import export_ridge
+            brush_opacity = export_ridge.BRUSH_OPACITY if args.brush_opacity is None else min(1.0, max(0.0, args.brush_opacity))
+            bake = lambda im, rect: ridge.bake_brush(im, rect, opacity=brush_opacity)
+            hsb_img = bake(Image.open(_hs_io.BytesIO(hs_bytes)), (grid.e0, grid.n0, grid.e1, grid.n1))
+            if poly_utm is not None:
+                blank_outside(hsb_img, grid, poly_utm)
+            hsb_buf = _hs_io.BytesIO()
+            hsb_img.save(hsb_buf, format='JPEG', quality=90)
+            hsb_bytes = hsb_buf.getvalue()
+            del hsb_img
+            import base64 as _hsb_b64m
+            hsb_b64 = _hsb_b64m.b64encode(hsb_bytes).decode('ascii')
+            print(f"[4b/7] Hillshade with brush: {len(hsb_bytes)//1024} KB (brush at {brush_opacity * 100:.0f}%)")
         # 4c. Past ~5 km one texture caps the detail: every tile of the area gets
         # its own satellite + hillshade at full size (tex_tiles.py). The single
         # textures above stay as the overview.
@@ -2702,6 +2725,9 @@ def main():
                 (lambda im, g: blank_outside(im, g, poly_utm)) if poly_utm is not None else None,
                 hs_overview=Image.open(_hs_io.BytesIO(hs_bytes)) if hs_bytes else None,
                 progress=lambda m: print(f"[4c/7] {m}"))
+            if hsb_bytes and tile_hs:
+                tile_hsb = derive_tiles(tile_files, 'hs', 'hsb', tcols, trows, grid, bake)
+                tile_files.update(tile_hsb)
         del x, y, z
 
         # 5. UVs + GLB (geometry only) + separate texture encoding
@@ -2735,6 +2761,9 @@ def main():
                         compress_type=zipfile.ZIP_STORED)
             if hs_bytes:
                 zf.writestr(zipfile.ZipInfo('tex_hs.jpg'), hs_bytes,
+                            compress_type=zipfile.ZIP_STORED)
+            if hsb_bytes:
+                zf.writestr(zipfile.ZipInfo('tex_hsb.jpg'), hsb_bytes,
                             compress_type=zipfile.ZIP_STORED)
             for tname, tbytes in tile_files.items():
                 zf.writestr(zipfile.ZipInfo(tname), tbytes, compress_type=zipfile.ZIP_STORED)
@@ -2777,9 +2806,10 @@ def main():
                 "terrain_patches": len(args.terrain_patch) if map_terrain else 0,
                 "satellite":    sat_used,
                 **({"ridgewalk": 1} if ridge is not None else {}),
+                **({"hillshade_brush": {"opacity": brush_opacity}} if hsb_bytes else {}),
             }
             if tile_files:
-                caves_out["meta"]["texture_tiles"] = meta_entry(tcols, trows, True, tile_hs)
+                caves_out["meta"]["texture_tiles"] = meta_entry(tcols, trows, True, tile_hs, hsb=any(k.startswith('tex_hsb_') for k in tile_files))
             if caves_out.get("_project"):
                 caves_out["meta"]["project"] = caves_out.pop("_project")
             if caves_out.get("_caves"):
@@ -2823,15 +2853,11 @@ def main():
                 import export_ridge
                 shift = ridge.shift(utm_center_e, utm_center_n, FLEX_PC_Z_OFFSET)
                 rfiles = {'ridge_points.bin': ridge.points_bin(shift), 'ridge_patches.bin': ridge.patches_bin(shift)}
-                rshapes = ridge.shapes_bin(shift)
+                rshapes = ridge.shapes_bin(shift) if args.ridge_shapes != 'none' else None
                 if rshapes:
                     rfiles['ridge_shapes.bin'] = rshapes
-                rbrush = ridge.brush_png((grid.e0, grid.n0, grid.e1, grid.n1))
-                if rbrush:
-                    rfiles['tex_brush.png'] = rbrush
                 for rname, rbytes in rfiles.items():
-                    zf.writestr(zipfile.ZipInfo(rname), rbytes,
-                                compress_type=zipfile.ZIP_STORED if rname.endswith('.png') else zipfile.ZIP_DEFLATED)
+                    zf.writestr(zipfile.ZipInfo(rname), rbytes, compress_type=zipfile.ZIP_DEFLATED)
                 rside = ridge.side_json(utm_center_e, utm_center_n, FLEX_PC_Z_OFFSET, rfiles)
                 rside['mesh'] = ridge_mesh_stats
                 zf.writestr('ridge.json', json.dumps(rside, separators=(',', ':')))
@@ -2842,7 +2868,7 @@ def main():
             inline_html = build_inline_viewer(
                 glb_path, tex_b64, caves_out, viewer_libs,
                 progress=lambda m: print(f"[6/7] {m}"),
-                hs_b64=hs_b64, walls_bytes=walls_bytes, docs_json=docs_json, ridge_json=ridge_json)
+                hs_b64=hs_b64, walls_bytes=walls_bytes, docs_json=docs_json, ridge_json=ridge_json, hsb_b64=hsb_b64)
             zf.writestr('viewer.html', inline_html.encode('utf-8'))
 
             # serve.bat (Windows) — double-click to start local HTTP server

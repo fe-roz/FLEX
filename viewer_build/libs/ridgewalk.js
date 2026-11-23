@@ -23,7 +23,7 @@
   var KINDS = ['ret', 'lone', 'noise', 'pattern'];                    // by the file's kind number
   var KIND_COLOUR = [null, 0xffffff, 0xff4dd2, 0x7fd4ff];             // kind 0 is coloured by depth
   var PATCH_COLOUR = 0x141312, PATCH_OPACITY = 0.72;
-  var DEFAULTS = { ret: true, lone: true, noise: true, pattern: false, patches: true, shapes: false, size: 4 };
+  var DEFAULTS = { ret: true, lone: true, noise: true, pattern: false, patches: true, shapes: false, size: 3 };
   var SIZE_MIN = 1, SIZE_MAX = 12;
 
   // [r, g, b] 0..1 of a depth in metres.
