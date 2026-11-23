@@ -28,6 +28,9 @@
   .map .t2 { font-size: 12px; opacity: .55; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .map .more { background: none; border: none; color: #ccc; font-size: 22px; padding: 4px 10px; cursor: pointer; }
   .empty { opacity: .6; line-height: 1.5; padding: 20px 6px; }
+  .inbox-h { font-size: 13px; font-weight: 700; color: #7dd3fc; margin: 4px 2px 6px; }
+  .inbox-row { border-color: rgba(125,211,252,.55); cursor: default; }
+  .inbox-row .inbox-import { flex: 0 0 auto; padding: 8px 14px; margin-left: 8px; }
   #import { position: fixed; left: 50%; transform: translateX(-50%); bottom: max(18px, env(safe-area-inset-bottom));
     padding: 13px 22px; font-size: 15px; border-radius: 26px; box-shadow: 0 4px 20px rgba(0,0,0,.5); }
   .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 10; }
@@ -144,7 +147,35 @@ function load() {
   }
   try { maps = JSON.parse(H.listMaps() || '[]'); } catch (_) { maps = []; }
   render();
+  renderInbox();
 }
+// ── Maps sent from the PC over the USB cable ("Send to phone" in FLEX): waiting until imported or discarded ──
+let inboxBusy = false;
+function renderInbox() {
+  let box = $('#inbox');
+  if (!box) { box = document.createElement('div'); box.id = 'inbox'; $('#maps').parentNode.insertBefore(box, $('#maps')); }
+  let items = [];
+  try { items = H.inboxList ? JSON.parse(H.inboxList() || '[]') : []; } catch (_) { items = []; }
+  box.textContent = '';
+  if (!items.length) return;
+  const head = document.createElement('div'); head.className = 'inbox-h';
+  head.textContent = items.length === 1 ? '1 map from your PC is waiting' : items.length + ' maps from your PC are waiting';
+  box.appendChild(head);
+  items.forEach(it => {
+    const row = document.createElement('div'); row.className = 'map inbox-row';
+    row.innerHTML = `<div class="ic">⇩</div><div class="tx"><div class="t1">${esc(it.name.replace(/\.zip$/i, ''))}</div><div class="t2">${esc(it.readable ? human(it.bytes || 0) : 'FLEX Field cannot read this copy on this phone: send it again from the PC')}</div></div>`;
+    if (it.readable) { const b = document.createElement('button'); b.className = 'btn primary inbox-import'; b.textContent = 'Import';
+      b.addEventListener('click', async e => { e.stopPropagation(); if (inboxBusy) return; inboxBusy = true; try { H.inboxImport(it.name, (await ensureAuthor()) || ''); } finally { setTimeout(() => { inboxBusy = false; }, 1500); } });
+      row.appendChild(b); }
+    const x = document.createElement('button'); x.className = 'more inbox-discard'; x.setAttribute('aria-label', 'Discard'); x.textContent = '✕';
+    x.addEventListener('click', async e => { e.stopPropagation();
+      const d = await dialog({ title: 'Discard ' + it.name + '?', text: 'The copy sent from the PC is deleted. Maps already imported are not touched.', buttons: [['Cancel', null], ['Discard', 'go', 'danger']] });
+      if (d) { H.inboxDiscard(it.name); renderInbox(); } });
+    row.appendChild(x);
+    box.appendChild(row);
+  });
+}
+window.ffInboxChanged = () => { if (H) renderInbox(); };
 function render() {
   const list = $('#maps');
   list.textContent = '';
