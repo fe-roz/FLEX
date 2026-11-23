@@ -44,7 +44,7 @@ class MapStore(private val ctx: Context) {
         /** Documents of the project that belong to the export: docs.json and one image per page (docs_<sha256>.<ext>), see viewer_inline.py. */
         private val DOC_RE = Regex("^docs_[0-9a-f]{64}\\.(jpg|jpeg|png|webp)$")
         /** V2 - Ridgewalking (an export made with that box ticked): returns below ground, shapes, guessed openings, the step's summary (its hillshade with brush is tex_hsb.jpg, above). */
-        val RIDGE_FILES = setOf("ridge_points.bin", "ridge_shapes.bin", "ridge_patches.bin", "ridge.json")
+        val RIDGE_FILES = setOf("ridge_points.bin", "ridge_shapes.bin", "ridge_patches.bin", "ridge.json", "ridge_features.json", "ridge_marks.json")
         /** Surface features of the project (an export made with "Include surface features"), view only: libs/viewer-features.js. */
         const val FEATURES_FILE = "features.json"
         /** Trees and brush (an export made with that box ticked): one simple solid a tree or bush, libs/trees.js; trees.json has the count and detail. */
