@@ -886,8 +886,11 @@
     if (!sec || !lab) return;
     const P = (window._pj || {}).P, FL = window.FlexLib;
     const total = (window._pj || {}).pid && P && FL && FL.liveFeatures ? FL.liveFeatures(P).length : 0;
-    sec.style.display = total ? '' : 'none';
-    if (!total) { _featKey = ''; return; }
+    // no project, or one with no surface items: the option stays, greyed, and says why
+    const pid = (window._pj || {}).pid, cbF = document.getElementById('export_features_on');
+    sec.classList.toggle('exp-off', !total);
+    if (cbF) cbF.disabled = !total;
+    if (!total) { _featKey = ''; lab.textContent = pid ? 'The open project has no points, lines or areas yet.' : 'Open a project to include its points, lines and areas.'; return; }
     const has = _bboxCorner1 && _bboxCorner2;
     const key = [(window._pj || {}).pid, total, has ? _bboxCorner1.concat(_bboxCorner2).join(',') : '', _exportPoly ? JSON.stringify(_exportPoly) : ''].join('|');
     if (key === _featKey) return;
@@ -909,7 +912,7 @@
     cb.checked = v === '1';                              // off unless it was ticked on this computer
     cb.addEventListener('change', () => { try { localStorage.setItem('flex.export.export_features_on', cb.checked ? '1' : '0'); } catch (_) {} });
     // While the Export panel is open: the project, its items and the drawn area can all change under it.
-    setInterval(() => { if (_exportCollapsible && _exportCollapsible.classList.contains('show')) _refreshFeaturesInfo(); }, 1200);
+    setInterval(() => { if (_exportCollapsible && _exportCollapsible.classList.contains('show')) { _refreshFeaturesInfo(); _exportEstimate(); } }, 1200);
   })();
 
   // ── Documents: how many the export would carry ───────────────────────────
@@ -1111,13 +1114,91 @@
     const map = document.getElementById('export_terrain_source').value === 'map';
     document.getElementById('export_map_rows').style.display = map ? 'block' : 'none';
     document.getElementById('export_lidar_rows').style.display = map ? 'none' : 'block';
-    const res = document.getElementById('export_resolution');
-    if (res && res.closest('label')) res.closest('label').style.display = map ? 'none' : 'block';
     const hs = document.getElementById('export_hillshade_mode');
     const opt = hs && hs.querySelector('option[value="lidar"]');
     if (opt) opt.disabled = map;
     if (map && hs.value === 'lidar') hs.value = 'dem';
+    _exportSyncModes();
   };
+  // An option that cannot be had with the current choices stays on the page, greyed, with the reason under its name.
+  function _exportOff(rowId, whyId, why, inputs) {
+    const row = document.getElementById(rowId), w = document.getElementById(whyId);
+    if (!row) return;
+    row.classList.toggle('exp-off', !!why);
+    if (w) w.textContent = why || '';
+    (inputs || []).forEach(id => { const e = document.getElementById(id); if (e) e.disabled = !!why; });
+  }
+  function _exportSyncModes() {
+    const map = document.getElementById('export_terrain_source').value === 'map';
+    const ridge = !map && !!(document.getElementById('export_ridgewalk') || {}).checked;
+    const needLidar = map ? 'Needs LiDAR terrain: choose "LiDAR point cloud" under Terrain and point cloud.' : '';
+    _exportOff('export_ridge_row', 'export_ridge_why', needLidar, ['export_ridgewalk', 'export_ridge_shapes']);
+    _exportOff('export_trees_row', 'export_trees_why', needLidar, ['export_trees']);
+    _exportOff('export_slope_wrap', 'export_slope_why', map ? 'Needs LiDAR terrain: map terrain is too coarse to say where it is steep.' : '', ['export_slope_map']);
+    _exportOff('export_brush_row', 'export_brush_why', map ? 'Needs LiDAR terrain and V2 - Ridgewalking.' : ridge ? '' : 'Made with V2 - Ridgewalking: tick it under What to include.', ['export_brush_strength']);
+    _exportOff('export_resolution_row', 'export_resolution_why', map ? 'Map terrain: the cell is set above, under Terrain and point cloud.' : ridge ? 'V2 - Ridgewalking builds the ground on its own 0.3 m cells.' : '', ['export_resolution']);
+    const opts = document.getElementById('export_ridge_opts');
+    if (opts) opts.style.display = ridge ? 'block' : 'none';
+    _exportEstimate();
+  }
+  window._exportSyncModes = _exportSyncModes;
+
+  // ── A rough estimate of time and file size, under the options ────────────
+  // ONE table: correct the numbers here. Measured on the FLEX server (a fast PC), November 2026.
+  const EXPORT_COSTS = {
+    fixed_s: 15,                 // starting up, packing the zip
+    lidar_s_per_km2: 90,         // reading the points, the ground, the mesh, at 0.3 m cells; scaled by (0.3 / cell)^2 for coarser cells
+    lidar_ref_cell: 0.3,
+    map_s_per_km2: 3,            // map terrain: the heights are already here
+    ridge_s_per_km2: 95,         // V2 - Ridgewalking: most of it is reading the points again
+    trees_s_per_km2: 75,         // Trees and brush
+    triangles_per_km2: 40e6,     // what the ground would take before the Max triangles cap
+    glb_bytes_per_triangle: 12,
+    aerial_bytes_per_km2: 6e6, aerial_min_bytes: 2e6, aerial_bytes_per_pixel: 0.6,     // capped by the picture size
+    hillshade_bytes_per_pixel: 0.47,   // one pixel per terrain cell
+    brush_factor: 1.2,           // "hillshade + brush" against the hillshade
+    slope_factor: 1.6,           // the slope map against the hillshade
+    shapes_bytes_per_km2: 10e6,  // ridgewalking shapes
+    trees_per_km2: 40000, tree_bytes: 24,
+    zip_factor: 1.8,             // the zip holds every part twice (the files, and the single-file viewer.html), a little compressed
+  };
+  function _exportAreaKm2() {
+    if (_exportPoly && _exportPoly.length >= 3) return _polyAreaKm2(_exportPoly);
+    if (!_bboxCorner1 || !_bboxCorner2) return 0;
+    const w = Math.min(_bboxCorner1[0], _bboxCorner2[0]), e = Math.max(_bboxCorner1[0], _bboxCorner2[0]), s = Math.min(_bboxCorner1[1], _bboxCorner2[1]), n = Math.max(_bboxCorner1[1], _bboxCorner2[1]);
+    return _polyAreaKm2([[w, s], [e, s], [e, n], [w, n]]);
+  }
+  /** → { km2, seconds, bytes } for the current ticks and area (km2 0: no area yet). `o` overrides what the dialog says (tests). */
+  function _exportEstimateOf(o) {
+    const C = EXPORT_COSTS, v = id => (document.getElementById(id) || {}).value, on = id => !!(document.getElementById(id) || {}).checked;
+    const d = Object.assign({ km2: _exportAreaKm2(), map: v('export_terrain_source') === 'map', ridge: on('export_ridgewalk'), shapes: on('export_ridge_shapes'), trees: on('export_trees'),
+      slope: on('export_slope_map'), hillshade: v('export_hillshade_mode') !== 'none', cell: parseFloat(v('export_resolution')) || 0.5, mapCell: parseFloat(v('export_map_cell')) || 5,
+      maxTri: parseInt(v('export_max_tri')) || 2e6, tex: parseInt(v('export_tex_size')) || 16384 }, o || {});
+    const km2 = d.km2;
+    if (!(km2 > 0)) return { km2: 0, seconds: 0, bytes: 0 };
+    const ridge = d.ridge && !d.map, cell = d.map ? d.mapCell : ridge ? 0.3 : d.cell;
+    let s = C.fixed_s + (d.map ? C.map_s_per_km2 * km2 : C.lidar_s_per_km2 * km2 * Math.pow(C.lidar_ref_cell / cell, 2));
+    if (ridge) s += C.ridge_s_per_km2 * km2;
+    if (d.trees && !d.map) s += C.trees_s_per_km2 * km2;
+    const tris = Math.min(d.maxTri, C.triangles_per_km2 * km2 * Math.pow(C.lidar_ref_cell / cell, 2));
+    const hsPx = km2 * 1e6 / (cell * cell), hs = d.hillshade ? Math.min(hsPx, 16384 * 16384) * C.hillshade_bytes_per_pixel : 0;
+    let b = tris * C.glb_bytes_per_triangle + Math.min(Math.max(C.aerial_min_bytes, C.aerial_bytes_per_km2 * km2), d.tex * d.tex * C.aerial_bytes_per_pixel) + hs;
+    if (ridge) b += hs * C.brush_factor + (d.shapes ? C.shapes_bytes_per_km2 * km2 : 0);
+    if (d.slope && !d.map) b += (hs || hsPx * C.hillshade_bytes_per_pixel) * C.slope_factor;
+    if (d.trees && !d.map) b += C.trees_per_km2 * km2 * C.tree_bytes;
+    return { km2, seconds: Math.round(s), bytes: Math.round(b * C.zip_factor) };
+  }
+  function _exportEstimate() {
+    const el = document.getElementById('export_estimate'); if (!el) return;
+    const e = _exportEstimateOf();
+    if (!e.km2) { el.textContent = 'Draw the area for a rough estimate of the time and the file size.'; return; }
+    const t = e.seconds < 90 ? 'about ' + Math.max(10, Math.round(e.seconds / 10) * 10) + ' s' : e.seconds < 5400 ? 'about ' + Math.round(e.seconds / 60) + ' min' : 'about ' + (e.seconds / 3600).toFixed(1) + ' h';
+    const mb = e.bytes / 1048576, sz = mb < 950 ? 'about ' + (mb < 10 ? mb.toFixed(1) : Math.round(mb / 5) * 5) + ' MB' : 'about ' + (mb / 1024).toFixed(1) + ' GB';
+    el.textContent = `Rough estimate, on a fast PC: ${t} and ${sz} for ${e.km2 < 0.1 ? e.km2.toFixed(3) : e.km2.toFixed(2)} km².`;
+    el.title = 'From what was measured on one computer: your PC, the point cloud and the ground can make it several times more or less.';
+  }
+  window._exportEstimateOf = _exportEstimateOf;      // tests
+  window._exportCosts = EXPORT_COSTS;
 
   // Heights of the map's 3D terrain on a regular lon/lat grid over the box
   // (plus a margin: the export's UTM rectangle reaches past a lat/lon box),
@@ -1195,6 +1276,24 @@
       el.addEventListener('change', () => { try { localStorage.setItem('flex.export.' + id, el.value); } catch (_) {} });
     }
     window._exportSyncTerrainSource();
+    // Advanced: folded unless it was left open
+    const advBody = document.getElementById('lp-export-settings-body'), advHead = advBody && advBody.previousElementSibling;
+    if (advBody && advHead) {
+      let was = null; try { was = localStorage.getItem('flex.export.advanced_open'); } catch (_) {}
+      if (was === '1' && !advBody.classList.contains('open') && window._lpToggle) window._lpToggle(advHead);
+      advHead.addEventListener('click', () => setTimeout(() => { try { localStorage.setItem('flex.export.advanced_open', advBody.classList.contains('open') ? '1' : '0'); } catch (_) {} }, 0));
+    }
+    // the estimate follows every choice
+    ['export_ridgewalk', 'export_ridge_shapes', 'export_trees', 'export_slope_map', 'export_hillshade_mode', 'export_resolution', 'export_map_cell', 'export_max_tri', 'export_tex_size'].forEach(id => {
+      const e = document.getElementById(id); if (e) e.addEventListener('change', () => _exportSyncModes()); });
+    // the Jobs strip lies over the bottom of the panels: leave it room under the buttons
+    const jp = document.getElementById('jobs-panel'), sp = document.getElementById('export_jobs_spacer');
+    if (jp && sp) {
+      const fit = () => { sp.style.height = (jp.hidden ? 0 : Math.ceil(jp.getBoundingClientRect().height) + 8) + 'px'; };
+      try { new ResizeObserver(fit).observe(jp); } catch (_) {}
+      new MutationObserver(fit).observe(jp, { attributes: true, attributeFilter: ['hidden'] });
+      fit();
+    }
     // "Slope map": a tick, remembered (off unless it was switched on)
     const scb = document.getElementById('export_slope_map');
     if (scb) {
@@ -1230,7 +1329,7 @@
     if (get('export_ridge_shapes') === '0') sh.checked = false;
     const saved = parseFloat(get('export_brush_strength'));
     if (Number.isFinite(saved) && saved >= 0 && saved <= 100) br.value = String(saved);
-    const show = () => { wrap.style.display = box.checked ? 'block' : 'none'; };
+    const show = () => { wrap.style.display = box.checked && !box.disabled ? 'block' : 'none'; _exportSyncModes(); };
     const label = () => { if (val) val.textContent = Math.round(parseFloat(br.value)) + ' %'; };
     box.addEventListener('change', show);
     sh.addEventListener('change', () => set('export_ridge_shapes', sh.checked ? '1' : '0'));
