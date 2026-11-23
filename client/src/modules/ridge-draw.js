@@ -168,7 +168,7 @@
   const lset = (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} };
   let S = clampSettings((() => { try { return JSON.parse(lget(KEY) || '{}'); } catch (_) { return {}; } })());
   const sets = new Map();               // area id → the loaded result
-  let prim = null, gen = 0, handler = null, proxy = null, proxySrc = null;
+  let prim = null, handler = null, proxy = null, proxySrc = null;
   const redraw = () => { const v = V(); if (v && v.scene && v.scene.requestRender) v.scene.requestRender(); };
   const fire = () => { try { w.dispatchEvent(new CustomEvent('flex-ridge-changed', { detail: { loaded: [...sets.keys()] } })); } catch (_) {} };
   const esc = t => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -295,12 +295,12 @@
 
   // ── Build ─────────────────────────────────────────────────────────────────
   async function rebuild(D) {
-    const my = ++gen, C = Ces(), draw = D.draw;
+    const my = D.gen = (D.gen || 0) + 1, C = Ces(), draw = D.draw;
     const fr = frameOf(draw);
     let shift;
     if (S.onTerrain && draw.ground && draw.ground.z) {
       const shown = await sampleShown(draw);
-      if (my !== gen || !sets.has(D.id)) return;
+      if (my !== D.gen || sets.get(D.id) !== D) return;
       const g = Float32Array.from(draw.ground.z, v => (v == null ? NaN : v));
       shift = makeShift(g, shown, draw.ground.nx, draw.ground.ny, draw.size[0], draw.size[1]);
       D.mode = 'terrain'; D.terrainProv = V() && V().terrainProvider;
@@ -359,7 +359,7 @@
   }
   function clear(id, quiet) {
     const ids = id == null ? [...sets.keys()] : [id]; let had = false;
-    ids.forEach(k => { const D = sets.get(k); if (!D) return; had = true; gen++; if (prim) prim.release(D); sets.delete(k); if (proxy && proxy.properties && proxy.properties.areaId && proxy.properties.areaId.getValue() === k) deselect(); });
+    ids.forEach(k => { const D = sets.get(k); if (!D) return; had = true; D.gen = -1; if (prim) prim.release(D); sets.delete(k); if (proxy && proxy.properties && proxy.properties.areaId && proxy.properties.areaId.getValue() === k) deselect(); });
     redraw();
     if (had && !quiet) { fire(); paintMounts(); }
   }
