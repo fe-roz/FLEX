@@ -174,7 +174,7 @@
     popup.dataset.area = id; popup.dataset.cand = p.id; popup.hidden = false;
     popup.innerHTML = `<button type="button" class="pr-x" data-pa="close" aria-label="Close">✕</button><div class="pr-pt"><span class="pr-dot" style="background:${COLOUR[p.kind] || '#fff'}"></span><b>${esc(p.title || p.id)}</b></div>
       <div class="pr-pd">${esc(p.description || '')}</div><table class="pr-tab">${attrs(p).map(a => `<tr><td>${esc(a[0])}</td><td>${esc(a[1])}</td></tr>`).join('')}</table>
-      <div class="pr-dim">A candidate to check in the field, not a finding. Position ${(+ft.geometry.coordinates[1]).toFixed(5)}, ${(+ft.geometry.coordinates[0]).toFixed(5)}.</div>`;
+      <div class="pr-dim">A prospect to check in the field, not a finding. Position ${(+ft.geometry.coordinates[1]).toFixed(5)}, ${(+ft.geometry.coordinates[0]).toFixed(5)}.</div>`;
     const e = P[id]; if (e) { if (selected) selected.pixelSize = 8; const x = e.pts.find(q => q.ft === ft); if (x) { x.pt.pixelSize = 13; selected = x.pt; } redraw(); }
   }
   function closePopup() { if (popup) popup.hidden = true; if (selected) { try { selected.pixelSize = 8; } catch (_) {} selected = null; } redraw(); }
@@ -193,7 +193,7 @@
       <div class="pr-row pr-dim">Images:</div><div class="pr-row">${im('depth', 'depth')}${im('below', 'below')}${im('steep', 'steep')}</div>
       <div class="pr-row"><a class="ar-btn" href="${base(id)}candidates.kml" download="prospects.kml" data-pa="kml">Download KML</a><a class="ar-btn" href="${base(id)}candidates.csv" download="prospects.csv" data-pa="csv">Download CSV</a>
         <button type="button" class="ar-btn" data-pa="mydata" data-area="${esc(id)}">Add shown to My data (${e.shown})</button></div>
-      <div class="pr-dim">The KML and CSV hold every candidate. Nothing here is sent to CalTopo.${r.known ? ' Known points used: ' + r.known + '.' : ''}</div></div>`;
+      <div class="pr-dim">The KML and CSV hold every prospect. Nothing here is sent to CalTopo.${r.known ? ' Known points used: ' + r.known + '.' : ''}</div></div>`;
   }
   function mountOne(id) {
     const a = areaOf(id), r = a && a.results && a.results.prospect;
@@ -212,7 +212,7 @@
   async function addToMyData(id) {
     const e = P[id], a = areaOf(id); if (!e || !e.pts.length || !w._myData || !w._myData.adopt) { toast('Switch Prospects on first.'); return { ok: false }; }
     const list = e.pts.filter(x => x.pt.show).map(x => x.ft);
-    if (!list.length) { toast('No candidates are shown.'); return { ok: false }; }
+    if (!list.length) { toast('No prospects are shown.'); return { ok: false }; }
     const day = new Date().toISOString().slice(0, 10), group = 'Prospects ' + (a ? a.name : 'area') + ' ' + day;
     const items = list.map(ft => { const p = ft.properties, c = ft.geometry.coordinates;
       return { id: 'prospect-' + id + '-' + p.id + (p.isolated ? '-i' : ''), kind: 'point', coords: [[c[0], c[1]]], name: String(p.title || p.id).slice(0, 120), desc: ((p.description || '') + '\n' + attrText(p)).slice(0, 4000),
@@ -220,7 +220,7 @@
     try {
       await w._myData.adopt(items);
       if (w._surfCols && w._surfCols.refresh) try { w._surfCols.refresh(); } catch (_) {}
-      toast(items.length + ' candidates added to My data in "' + group + '".');
+      toast(items.length + ' prospects added to My data in "' + group + '".');
       return { ok: true, count: items.length, group };
     } catch (err) { console.warn('[prospects] my data', err); toast('Could not add them: ' + (err.message || err)); return { ok: false }; }
   }

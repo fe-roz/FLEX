@@ -771,7 +771,7 @@
       </div>
       <div id="north_compass_overlay"></div>
       <div id="workflow_panel">
-        <h3>Workflow</h3>
+        <h3>LAN server: workflow</h3>
         <div id="wf_selection_section" class="workflow_section">
           <div><strong>Selected AOI:</strong> <span id="wf_selected_aoi">None</span></div>
           <div><strong>Selected Process Area:</strong> <span id="wf_selected_process_area">None</span></div>
@@ -952,25 +952,6 @@
         </div>
 
         <!-- The main nav is the icon strip (#flex-rail, flex-rail.js), outside this box. -->
-
-        <!-- ── Server controls: hidden — JS still needs these IDs ────────── -->
-        <button id="top_server_status_btn" type="button" style="display:none;">Connect to LAN Server</button>
-        <div id="serverCollapsible" style="display:none;">
-          <div id="server_connected_controls" style="display:none;">
-            <div class="workflow_btn_row">
-              <button id="top_toggle_aois_btn" class="btn btn-primary" type="button">Hide Areas Of Interest</button>
-              <button id="top_draw_aoi_btn"    class="btn btn-primary" type="button">Draw AOI</button>
-              <button id="top_upload_aoi_btn"  class="btn btn-primary" type="button">Upload AOIs</button>
-              <button id="top_queue_manager_btn" class="btn btn-primary" type="button">Queue Manager</button>
-            </div>
-            <div id="top_draw_status">AOI draw mode inactive.</div>
-            <div id="top_server_status_panel">
-              <div><strong>Connection:</strong> <span id="sv_connection_status">Not connected</span></div>
-              <div><strong>Tasks:</strong> <span id="sv_task_summary">—</span></div>
-            </div>
-            <button id="top_server_disconnect_btn" class="btn btn-secondary btn-sm" type="button">Disconnect</button>
-          </div>
-        </div>
 
         <!-- ══════════════ MAP LAYERS ══════════════════════════════════════ -->
         <div class="collapse" id="mapLayersCollapsible">
@@ -1333,7 +1314,7 @@
                   <input type="checkbox" id="lp-hag-enable"> Filter by height above ground
                 </label>
                 <label style="display:block; margin-top:3px;">
-                  <input type="checkbox" id="lp-hag-bush"> Bushwhack highlight
+                  <input type="checkbox" id="lp-hag-bush"> Brush highlight
                 </label>
                 <div id="lp-hag-controls" style="display:none; margin-top:8px;">
 
@@ -1650,10 +1631,10 @@
                     <input type="checkbox" id="export_ridgewalk">
                     V2 - Ridgewalking
                   </label>
-                  <div class="exp-why" id="export_ridge_why"></div>
                   <div style="font-size:10px; color:rgba(255,255,255,0.4);">
                     Pits, cracks and openings from the LiDAR, for FLEX Field. Needs a point cloud; reads it again with flight-pass ids, so it takes longer.
                   </div>
+                  <div class="exp-why" id="export_ridge_why"></div>
                   <!-- its option, shown while it is ticked; remembered per computer (export-ui.js) -->
                   <div id="export_ridge_opts" style="display:none; margin:6px 0 0 4px; padding-left:8px; border-left:2px solid rgba(255,255,255,0.12);">
                     <label style="display:block; margin:2px 0 3px;">
@@ -1671,10 +1652,10 @@
                     <input type="checkbox" id="export_trees">
                     Trees and brush
                   </label>
-                  <div class="exp-why" id="export_trees_why"></div>
                   <div id="export_trees_hint" style="font-size:10px; color:rgba(255,255,255,0.4);">
                     One simple shape per tree and bush, for FLEX Field. Needs a point cloud; reads it once more: about 1 to 2 minutes per km2.
                   </div>
+                  <div class="exp-why" id="export_trees_why"></div>
                 </div>
               </div>
             </div>
@@ -1723,10 +1704,10 @@
                     <input type="range" id="export_brush_strength" min="0" max="100" step="5" value="70" style="width:110px; vertical-align:middle;">
                     <span id="export_brush_strength_val" style="color:rgba(255,255,255,0.7);">70 %</span>
                   </label>
-                  <div class="exp-why" id="export_brush_why"></div>
                   <div style="font-size:10px; color:rgba(255,255,255,0.4);">
                     The hillshade with the brush on it in green, one more map to choose on the phone. It comes with V2 - Ridgewalking.
                   </div>
+                  <div class="exp-why" id="export_brush_why"></div>
                 </div>
                 <!-- The slope map (export_terrain.py --slope-map): one more map on the phone; remembered per computer (export-ui.js) -->
                 <div class="exp-row" id="export_slope_wrap">
@@ -1734,10 +1715,10 @@
                     <input type="checkbox" id="export_slope_map">
                     Slope map
                   </label>
-                  <div class="exp-why" id="export_slope_why"></div>
                   <div style="font-size:10px; color:rgba(255,255,255,0.4);" id="export_slope_hint">
                     Slope-angle colours over the hillshade (yellow from 27°, orange, red, purple, blue, black above 60°), as one more map to choose on the phone. Adds one more picture to the file, about one and a half times the size of the hillshade picture.
                   </div>
+                  <div class="exp-why" id="export_slope_why"></div>
                 </div>
               </div>
             </div>
@@ -1841,138 +1822,64 @@
             <div id="vegshapes-host"></div>
             <div id="weather-host"></div>  <!-- weather-panel.js: fallback button when Analyze by area is missing -->
 
-            <div class="lp-section" data-areas-old>
+            <!-- The Brush and Voids tools of "Tools to run in this area" read these four (analyze-area.js bushParams) -->
+            <div class="lp-section" id="brush_void_settings">
               <div class="lp-section-header" onclick="window._lpToggle(this)">
-                <span class="lp-section-arrow">▾</span> Area
+                <span class="lp-section-arrow">▸</span> Brush and voids: settings
               </div>
-              <div class="lp-section-body open">
-                <div style="padding:2px 0; font-size:11px; color:rgba(255,255,255,0.7);">
-                  Uses the same drawn rectangle as Export.
-                </div>
-                <button class="btn btn-sm btn-primary" style="margin-top:6px; width:100%;"
-                  onclick="window._exportStartDraw()"><svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-pencil"/></svg>Draw BBox</button>
-                <div id="lidar_bbox_text" style="margin-top:6px; font-size:10px; color:rgba(255,255,255,0.5);">— no area drawn —</div>
-              </div>
-            </div>
-
-            <div class="lp-section" data-areas-old>
-              <div class="lp-section-header" onclick="window._lpToggle(this)">
-                <span class="lp-section-arrow">▾</span> Point Cloud
-              </div>
-              <div class="lp-section-body open">
-                <div style="padding:2px 0; display:flex; gap:5px; align-items:center;">
-                  <select id="lidar_ept_select" style="flex:1; min-width:0; background:#222; color:#eee; border:1px solid #444; border-radius:3px; padding:4px 6px; font-size:11px;">
-                    <option value="">— open panel to load —</option>
-                  </select>
-                  <button onclick="window._refreshEptDatasets && window._refreshEptDatasets()"
-                    style="flex-shrink:0; background:#222; border:1px solid #444; border-radius:3px; color:#eee; font-size:13px; padding:3px 7px; cursor:pointer;" title="Refresh list">↺</button>
-                </div>
-              </div>
-            </div>
-
-            <div class="lp-section">
-              <div class="lp-section-header" onclick="window._lpToggle(this)">
-                <span class="lp-section-arrow">▾</span> Vegetation (bushwhack)
-              </div>
-              <div class="lp-section-body open">
-                <div style="padding:2px 0; font-size:11px; color:rgba(255,255,255,0.7);">
-                  Fraction of returns in an understory band — a proportion, not a
-                  raw count, so it does not just track flight-line density.
+              <div class="lp-section-body">
+                <div style="padding:2px 0; font-size:10px; color:rgba(255,255,255,0.4);">
+                  Used by the Brush and Voids tools above, the next time they run.
                 </div>
                 <label style="display:block; margin-top:6px;">
-                  Band:
+                  Brush band:
                   <input id="lidar_veg_lo" type="number" step="0.05" value="0.30" style="width:56px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;">
                   to
                   <input id="lidar_veg_hi" type="number" step="0.05" value="1.50" style="width:56px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;">
-                  m AGL
+                  m above ground
                 </label>
-                <div style="font-size:10px; color:rgba(255,255,255,0.35); margin-top:3px;">0.30–1.50 m ≈ 1–5 ft</div>
-              </div>
-            </div>
-
-            <div class="lp-section">
-              <div class="lp-section-header" onclick="window._lpToggle(this)">
-                <span class="lp-section-arrow">▾</span> Voids (below ground)
-              </div>
-              <div class="lp-section-body open">
-                <div style="padding:2px 0; font-size:11px; color:rgba(255,255,255,0.7);">
-                  Returns beneath the local ground surface. Classifiers call these
-                  noise; here they are candidate entrances, sinks and pits.
-                </div>
+                <div style="font-size:10px; color:rgba(255,255,255,0.35); margin-top:3px;">0.30–1.50 m ≈ 1–5 ft. Brush is the share of returns stopped in this band.</div>
                 <label style="display:block; margin-top:6px;">
-                  Counts below
-                  <input id="lidar_void_depth" type="number" step="0.5" value="-1.0" style="width:60px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;"> m
+                  A void counts from
+                  <input id="lidar_void_depth" type="number" step="0.5" value="-1.0" style="width:56px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;"> m (below the ground)
                 </label>
                 <label style="display:block; margin-top:5px;">
-                  Min returns per cell
-                  <input id="lidar_void_min" type="number" step="1" value="3" style="width:50px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;">
+                  with at least
+                  <input id="lidar_void_min" type="number" step="1" value="3" style="width:56px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;"> returns in a cell
                 </label>
-                <div style="font-size:10px; color:rgba(255,255,255,0.35); margin-top:3px;">One deep return is usually multipath; a cluster is a hole.</div>
+                <div style="font-size:10px; color:rgba(255,255,255,0.35); margin-top:3px;">One deep return is usually an echo; a cluster is a hole.</div>
+                <label style="display:block; margin-top:6px;">
+                  Throw away returns below
+                  <input id="lidar_low_cut" type="number" step="1" value="-20" style="width:56px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;"> m
+                </label>
+                <div style="font-size:10px; color:rgba(255,255,255,0.35); margin-top:3px;">Only for rubbish far under the ground; keep it generous, real voids are down there.</div>
               </div>
             </div>
 
-            <div class="lp-section">
+            <!-- LAN server: a FLEX processing server on the network. Its tools (areas of interest, downloads, the queue)
+                 are only on the page while one is connected (workflow-panel.js). -->
+            <div class="lp-section" id="lan_section">
               <div class="lp-section-header" onclick="window._lpToggle(this)">
-                <span class="lp-section-arrow">▸</span> Advanced
+                <span class="lp-section-arrow">▸</span> LAN server
               </div>
-              <div class="lp-section-body">
-                <label style="display:block; margin-bottom:5px;">
-                  Ground cell size:
-                  <select id="lidar_cell" style="margin-left:4px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;">
-                    <option value="" selected>auto (from density)</option>
-                    <option value="1.0">1.0 m</option>
-                    <option value="2.0">2.0 m</option>
-                    <option value="4.0">4.0 m</option>
-                    <option value="8.0">8.0 m</option>
-                  </select>
-                </label>
-                <div style="font-size:10px; color:rgba(255,255,255,0.35); margin-bottom:6px;">
-                  Smaller cells cut slope bias — about (cell/2)·tan(slope) — but
-                  below ~4 ground returns per cell the estimate turns to noise and
-                  error rises. Auto aims for 8 per cell.
+              <div class="lp-section-body" id="serverCollapsible">
+                <div style="font-size:10px; color:rgba(255,255,255,0.4); margin-bottom:5px;">
+                  A FLEX processing server on your network that downloads LiDAR and builds point clouds. Nothing else in FLEX needs one.
                 </div>
-                <label style="display:block; margin-bottom:5px;">
-                  Ground statistic:
-                  <select id="lidar_stat" style="margin-left:4px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;">
-                    <option value="median" selected>median (robust)</option>
-                    <option value="mean">mean (faster)</option>
-                  </select>
-                </label>
-                <label style="display:block; margin-bottom:3px;">
-                  Discard below
-                  <input id="lidar_low_cut" type="number" step="1" value="-20" style="width:60px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;"> m AGL
-                </label>
-                <div style="font-size:10px; color:#e8a33d; margin-bottom:6px;">
-                  Garbage removal only — multipath and atmospheric returns. Keep it
-                  generous: real voids live down here and must survive.
-                </div>
-              </div>
-            </div>
-
-            <div class="lp-section">
-              <div class="lp-section-body open">
-                <button id="lidar_run_btn" data-areas-old class="btn btn-primary" style="width:100%;"
-                  onclick="window._lidarRun()"><svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-leaf"/></svg>Analyze Area</button>
-                <div id="lidar_progress_wrap" style="display:none; margin-top:8px;">
-                  <div style="height:4px; background:rgba(255,255,255,.12); border-radius:2px;">
-                    <div id="lidar_progress_bar" style="height:4px; width:0; background:#00e5ff; border-radius:2px; transition:width .4s;"></div>
+                <button id="top_server_status_btn" class="btn btn-sm btn-secondary" type="button" style="width:100%;">Connect to LAN Server</button>
+                <div id="server_connected_controls" style="display:none; margin-top:8px;">
+                  <div class="workflow_btn_row">
+                    <button id="top_toggle_aois_btn" class="btn btn-primary" type="button">Hide Areas Of Interest</button>
+                    <button id="top_draw_aoi_btn"    class="btn btn-primary" type="button">Draw AOI</button>
+                    <button id="top_upload_aoi_btn"  class="btn btn-primary" type="button">Upload AOIs</button>
+                    <button id="top_queue_manager_btn" class="btn btn-primary" type="button">Queue Manager</button>
                   </div>
-                  <div id="lidar_status_text" style="font-size:10px; color:rgba(255,255,255,0.55); margin-top:4px;">Starting…</div>
-                </div>
-                <div id="lidar_results" style="display:none; margin-top:10px;">
-                  <div style="font-size:11px; color:rgba(255,255,255,0.7); margin-bottom:5px;">Overlays</div>
-                  <label style="display:block;"><input type="checkbox" id="lidar_show_veg" checked onchange="window._lidarToggleLayer('veg', this.checked)"> Vegetation density</label>
-                  <label style="display:block;"><input type="checkbox" id="lidar_show_void" checked onchange="window._lidarToggleLayer('void', this.checked)"> Voids</label>
-                  <label style="display:block; margin-top:4px;">Opacity
-                    <input id="lidar_opacity" type="range" min="0" max="100" value="75" style="width:110px; vertical-align:middle;"
-                      oninput="window._lidarSetOpacity(this.value/100)">
-                  </label>
-                  <div id="lidar_stats" style="font-size:10px; color:rgba(255,255,255,0.45); margin-top:6px; line-height:1.6;"></div>
-                  <div style="margin-top:8px; display:flex; gap:5px; flex-wrap:wrap;">
-                    <a id="lidar_dl_veg"    class="btn btn-sm btn-secondary" style="font-size:10px;" href="#" download><svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-download"/></svg>vegetation.tif</a>
-                    <a id="lidar_dl_void"   class="btn btn-sm btn-secondary" style="font-size:10px;" href="#" download><svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-download"/></svg>voids.tif</a>
-                    <a id="lidar_dl_ground" class="btn btn-sm btn-secondary" style="font-size:10px;" href="#" download><svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-download"/></svg>ground.tif</a>
+                  <div id="top_draw_status">AOI draw mode inactive.</div>
+                  <div id="top_server_status_panel">
+                    <div><strong>Connection:</strong> <span id="sv_connection_status">Not connected</span></div>
+                    <div><strong>Tasks:</strong> <span id="sv_task_summary">—</span></div>
                   </div>
+                  <button id="top_server_disconnect_btn" class="btn btn-secondary btn-sm" type="button">Disconnect</button>
                 </div>
               </div>
             </div>

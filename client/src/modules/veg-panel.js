@@ -136,7 +136,7 @@
       if (!j.ok) throw new Error(j.error || 'could not start');
     } catch (e) { S.running = false; paintRun(); bar(null); say(String(e.message || e), true); return { ok: false, error: String(e.message || e) }; }
     S.jobId = j.jobId;
-    if (w._jobs) w._jobs.add({ id: 'veg.' + j.jobId, kind: 'veg', name: 'Vegetation shapes', server: true, retry: () => build() });
+    if (w._jobs) w._jobs.add({ id: 'veg.' + j.jobId, kind: 'veg', name: 'Trees and brush', server: true, retry: () => build() });
     return new Promise(resolve => {
       const tick = async () => {
         let st;
@@ -245,7 +245,7 @@
     host = $('vegshapes-host'); if (!host) return;
     host.textContent = '';
     const sec = el('div', 'lp-section'), head = el('div', 'lp-section-header'); head.id = 'vg-head';
-    head.innerHTML = '<span class="lp-section-arrow" style="transform: rotate(-90deg)">▾</span> Vegetation shapes';
+    head.innerHTML = '<span class="lp-section-arrow" style="transform: rotate(-90deg)">▾</span> Trees and brush';
     const b = el('div', 'lp-section-body'); b.id = 'vg-body';
     head.addEventListener('click', () => {
       if (w._lpToggle) w._lpToggle(head);

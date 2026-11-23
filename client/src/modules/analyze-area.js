@@ -24,11 +24,11 @@
   // ── Pure ─────────────────────────────────────────────────────────────────
   const TOOLS = [
     { id: 'terrain', name: 'Terrain + hillshade', icon: '⛰' },
-    { id: 'veg', name: 'Vegetation shapes', icon: '🌲' },
-    { id: 'bush', name: 'Bushwhack / voids', icon: '∴' },
+    { id: 'veg', name: 'Trees and brush', icon: '🌲' },
+    { id: 'bush', name: 'Brush / voids', icon: '∴' },
     { id: 'prospect', name: 'Prospects (beta)', icon: '◎', desc: 'Possible entrances: hollows, points below the ground, cliff openings. A list to look at, not a ranking.' },
   ];
-  const RNAME = { ground: 'Ground', terrain: 'Terrain', veg: 'Vegetation', bush: 'Bushwhack', prospect: 'Prospects (beta)' };
+  const RNAME = { ground: 'Ground', terrain: 'Terrain', veg: 'Trees and brush', bush: 'Brush', prospect: 'Prospects (beta)' };
   const RKEYS = ['ground', 'terrain', 'veg', 'bush', 'prospect'];
   const SHOWABLE = ['terrain', 'veg', 'bush', 'prospect'];
   const MAPRES = ['bush', 'ground'];      // results drawn as map layers in 🗺 Layers (area-maps.js), not here

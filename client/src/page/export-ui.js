@@ -1,4 +1,4 @@
-// FLEX Export UI (bbox/polygon draw, export dialog, LiDAR analysis, progress polling).
+// FLEX Export UI (bbox/polygon draw, export dialog, progress polling).
 // Classic script (not an ES module): it ran as an inline script at parse time and
 // talks to flex.js through window.* hooks, so it keeps that timing.
 // ── FLEX Export UI ──────────────────────────────────────────────────────────
@@ -178,7 +178,7 @@
   // terrain exactly at the line, blanks the textures outside it and keeps
   // only the caves inside. The export frame is still the box around it, so
   // the bbox corners are set to the polygon's bounds and everything that
-  // reads them (LiDAR analysis too) keeps working.
+  // reads them keeps working.
   let _exportPoly = null, _exportPolyLabel = '';     // [[lon, lat], ...], open ring
   let _polyDraft = null, _polyHover = null;          // while drawing
   let _polyFill = null, _polyLine = null, _polyHandles = [], _polyEditHandler = null, _polyDrag = null;
@@ -935,177 +935,9 @@
   // ── Run export ───────────────────────────────────────────────────────────
   // ── Live HAG filter controls ─────────────────────────────────────────────
 
-  // ── LiDAR analysis ───────────────────────────────────────────────────────
-  // Vegetation density and void rasters for the drawn area. Shares the bbox
-  // and the dataset picker with Export; everything else is its own.
-  const _lidarLayers = { veg: null, void: null };
-  let   _lidarJobId  = null;
-
-  function _lidarSyncBbox() {
-    const el = document.getElementById('lidar_bbox_text');
-    if (!el) return;
-    if (!_bboxCorner1 || !_bboxCorner2) { el.textContent = '— no area drawn —'; return; }
-    const w = Math.min(_bboxCorner1[0], _bboxCorner2[0]).toFixed(5);
-    const e = Math.max(_bboxCorner1[0], _bboxCorner2[0]).toFixed(5);
-    const s2 = Math.min(_bboxCorner1[1], _bboxCorner2[1]).toFixed(5);
-    const n = Math.max(_bboxCorner1[1], _bboxCorner2[1]).toFixed(5);
-    el.textContent = `${w}, ${s2}  →  ${e}, ${n}`;
-  }
-  setInterval(_lidarSyncBbox, 1000);
-
-  // Mirror the Export dataset list rather than duplicating the discovery
-  // logic, so both panels always agree on what is loaded.
-  function _lidarMirrorDatasets() {
-    const src = document.getElementById('export_ept_select');
-    const dst = document.getElementById('lidar_ept_select');
-    if (!src || !dst) return;
-    const keep = dst.value;
-    dst.innerHTML = src.innerHTML;
-    if (keep) dst.value = keep;
-  }
-  setInterval(_lidarMirrorDatasets, 1500);
-
-  window._lidarSetOpacity = function(a) {
-    Object.values(_lidarLayers).forEach(l => { if (l) l.alpha = a; });
-  };
-  window._lidarToggleLayer = function(which, on) {
-    const l = _lidarLayers[which];
-    if (l) l.show = on;
-  };
-
-  function _lidarClearLayers() {
-    Object.keys(_lidarLayers).forEach(k => {
-      if (_lidarLayers[k]) {
-        try { cesiumViewer.imageryLayers.remove(_lidarLayers[k], true); } catch(_) {}
-        _lidarLayers[k] = null;
-      }
-    });
-  }
-
-  async function _lidarAddOverlay(which, url, rectDeg, alpha) {
-    const rect = Cesium.Rectangle.fromDegrees(rectDeg[0], rectDeg[1], rectDeg[2], rectDeg[3]);
-    let provider;
-    // Cesium deprecated the SingleTileImageryProvider constructor in favour of
-    // an async fromUrl; support both so this does not break on either side of
-    // a Cesium bump.
-    if (Cesium.SingleTileImageryProvider.fromUrl) {
-      provider = await Cesium.SingleTileImageryProvider.fromUrl(url, { rectangle: rect });
-    } else {
-      provider = new Cesium.SingleTileImageryProvider({ url, rectangle: rect });
-    }
-    const layer = cesiumViewer.imageryLayers.addImageryProvider(provider);
-    layer.alpha = alpha;
-    _lidarLayers[which] = layer;
-    return layer;
-  }
-
-  window._lidarRun = function() {
-    if (!_bboxCorner1 || !_bboxCorner2) { alert('Draw an area first.'); return; }
-    const w = Math.min(_bboxCorner1[0], _bboxCorner2[0]);
-    const e = Math.max(_bboxCorner1[0], _bboxCorner2[0]);
-    const s2 = Math.min(_bboxCorner1[1], _bboxCorner2[1]);
-    const n = Math.max(_bboxCorner1[1], _bboxCorner2[1]);
-
-    const eptPath = document.getElementById('lidar_ept_select').value;
-    if (!eptPath) { alert('Select a point cloud dataset first.'); return; }
-
-    const cellVal = document.getElementById('lidar_cell').value;
-    const body = {
-      bbox: [w, s2, e, n],
-      eptPath,
-      cell: cellVal ? parseFloat(cellVal) : null,
-      veg_band: [parseFloat(document.getElementById('lidar_veg_lo').value),
-                 parseFloat(document.getElementById('lidar_veg_hi').value)],
-      void_depth: parseFloat(document.getElementById('lidar_void_depth').value),
-      void_min_points: parseInt(document.getElementById('lidar_void_min').value),
-      low_cut: parseFloat(document.getElementById('lidar_low_cut').value),
-      stat: document.getElementById('lidar_stat').value,
-    };
-
-    const btn  = document.getElementById('lidar_run_btn');
-    const wrap = document.getElementById('lidar_progress_wrap');
-    const bar  = document.getElementById('lidar_progress_bar');
-    const txt  = document.getElementById('lidar_status_text');
-    btn.disabled = true;
-    wrap.style.display = 'block';
-    document.getElementById('lidar_results').style.display = 'none';
-    bar.style.width = '5%';
-    txt.textContent = 'Starting…';
-
-    const startDerive = () => fetch('/api/lidar/derive', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }).then(r => r.json()).then(j => {
-      if (!j.ok) throw new Error(j.error || 'failed to start');
-      _lidarJobId = j.jobId;
-      // The Jobs panel (jobs-panel.js): Cancel and Log go to the server; Retry sends the same request again
-      if (window._jobs) window._jobs.add({ id: 'analyze.' + j.jobId, kind: 'analyze', name: 'Analyze: vegetation and voids', server: true,
-        retry: () => { btn.disabled = true; wrap.style.display = 'block'; bar.style.width = '5%'; txt.textContent = 'Starting…'; startDerive(); } });
-      const poll = setInterval(() => {
-        fetch('/api/lidar/status/' + _lidarJobId).then(r => r.json()).then(st => {
-          bar.style.width = (st.progress || 5) + '%';
-          txt.textContent = st.message || st.status;
-          if (st.status === 'done') {
-            clearInterval(poll);
-            btn.disabled = false;
-            _lidarShowResults(_lidarJobId, st.meta);
-          } else if (st.status === 'error') {
-            clearInterval(poll);
-            btn.disabled = false;
-            txt.textContent = 'Error: ' + (st.error || 'see server log');
-          }
-        }).catch(err => {
-          clearInterval(poll); btn.disabled = false;
-          txt.textContent = 'Error: ' + err.message;
-        });
-      }, 1200);
-    }).catch(err => {
-      btn.disabled = false;
-      txt.textContent = 'Error: ' + err.message;
-    });
-    startDerive();
-  };
-
-  async function _lidarShowResults(jobId, meta) {
-    document.getElementById('lidar_results').style.display = 'block';
-    const base = '/api/lidar/result/' + jobId + '/';
-    ['veg','void','ground'].forEach(k => {
-      const a = document.getElementById('lidar_dl_' + k);
-      if (a) a.href = base + (k === 'veg' ? 'vegetation.tif'
-                            : k === 'void' ? 'voids.tif' : 'ground.tif');
-    });
-
-    // Place the overlays on the raster's OWN lon/lat footprint, not the
-    // requested bbox: the grid is UTM-aligned and snapped out to whole cells,
-    // so its real extent differs slightly from what was asked for.
-    const rect = (meta && meta.raster_bounds_lonlat) || null;
-    const alpha = (parseInt(document.getElementById('lidar_opacity').value) || 75) / 100;
-    _lidarClearLayers();
-    if (rect) {
-      try {
-        await _lidarAddOverlay('veg',  base + 'vegetation.png', rect, alpha);
-        await _lidarAddOverlay('void', base + 'voids.png',      rect, alpha);
-        _lidarToggleLayer('veg',  document.getElementById('lidar_show_veg').checked);
-        _lidarToggleLayer('void', document.getElementById('lidar_show_void').checked);
-      } catch (e) {
-        console.warn('[lidar] overlay failed', e);
-      }
-    }
-
-    if (meta) {
-      const pc = meta.ground_returns_per_cell;
-      const warn = (pc > 0 && pc < 4)
-        ? ` <span style="color:#e8a33d;">(thin — consider a larger cell)</span>` : '';
-      document.getElementById('lidar_stats').innerHTML =
-        `cell ${meta.cell} m · ${meta.grid[0]}×${meta.grid[1]}<br>` +
-        `ground returns/cell ${pc.toFixed(1)}${warn}<br>` +
-        `cells with direct ground ${(meta.cells_direct_fraction*100).toFixed(0)}%<br>` +
-        `points ${meta.points_total.toLocaleString()} · kept ${meta.points_kept.toLocaleString()}<br>` +
-        `<b>void cells ${meta.void_cells.toLocaleString()}</b>`;
-    }
-    document.getElementById('lidar_status_text').textContent = 'Done.';
-  }
+  // (The old "LiDAR analysis" of one drawn box lived here: its controls and page code are gone. Analyze by area
+  //  (analyze-area.js) and the ridgewalking export cover it; the server routes /api/lidar/* and lidar_derive.py stay,
+  //  Analyze by area runs them.)
 
   // ── Terrain from the map (Cesium) instead of the LiDAR ──────────────────
   // Show the rows for the chosen source. LiDAR hillshade needs the LiDAR, so
