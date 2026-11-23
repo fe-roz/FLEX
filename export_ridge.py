@@ -48,6 +48,20 @@ BRUSH_CLASSES = ((0.6, (0x1f, 0x5f, 0x1f)),             # dense
 BRUSH_OPACITY = 0.7
 
 
+def brush_classes(colours=None):
+    """BRUSH_CLASSES with other colours: 'light,medium,dense' as three RRGGBB
+    values (a leading # is fine). None or '' = the usual ones."""
+    if not colours:
+        return BRUSH_CLASSES
+    import re
+    parts = [p.strip().lstrip('#') for p in str(colours).split(',')]
+    if len(parts) != 3 or not all(re.fullmatch(r'[0-9a-fA-F]{6}', p) for p in parts):
+        sys.exit("ERROR: --brush-colours takes three RRGGBB values: light,medium,dense (e.g. b7e4a0,5fae4f,1f5f1f)")
+    rgb = [tuple(int(p[k:k + 2], 16) for k in (0, 2, 4)) for p in parts]
+    cuts = sorted(c for c, _ in BRUSH_CLASSES)                  # light, medium, dense
+    return tuple((cut, col) for cut, col in zip(reversed(cuts), reversed(rgb)))
+
+
 def run_ridgewalk(out_dir, ept, bbox, polygon=None, also=(), progress=print, python=None, script=None, shapes=True):
     """Run ridgewalk.py as a child (same interpreter) and relay its `[ridge] NN% text` lines."""
     import os

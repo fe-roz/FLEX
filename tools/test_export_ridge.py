@@ -239,6 +239,22 @@ with tempfile.TemporaryDirectory() as tmp:
     check('--ridge-shapes none: no ridge_shapes.bin, RIDGE.shapes null, the rest there', 'ridge_shapes.bin' not in zb.namelist() and Rb['shapes'] is None and Rb['points']
           and json.loads(zb.read('ridge.json'))['viewer']['shapes'] is None)
 
+    # --brush-colours light,medium,dense
+    outc, logc = run('colours.zip', ['--ridgewalk-dir', str(rdir), '--brush-colours', 'ff0000,00ff00,#0000FF', '--brush-opacity', '1'])
+    zc = zipfile.ZipFile(outc)
+    hba = np.asarray(Image.open(io.BytesIO(zc.read('tex_hsb.jpg')))).astype(float)
+    ha = np.asarray(Image.open(io.BytesIO(zc.read('tex_hs.jpg')))).astype(int)
+    dom = [int(np.argmax(block(bj)[0])) for bj in (15, 35, 55)]
+    check('--brush-colours: light, medium, dense take the three colours given', dom == [0, 1, 2] and block(55)[0][2] > 180 and block(55)[0][0] < 80, [block(bj)[0].round() for bj in (15, 35, 55)])
+    okc, det = near(5, None)
+    check('--brush-colours: ground without brush is still the hillshade', okc, det)
+    check('--brush-colours: named in meta', json.loads(zc.read('caves.json'))['meta']['hillshade_brush'] == {'opacity': 1.0, 'colours': ['ff0000', '00ff00', '0000ff']},
+          json.loads(zc.read('caves.json'))['meta']['hillshade_brush'])
+    for bad in ('ff0000,00ff00', 'red,green,blue', 'ff0000,00ff00,0000f'):
+        outx, logx = run('badcol.zip', ['--ridgewalk-dir', str(rdir), '--brush-colours', bad])
+        check(f'--brush-colours {bad}: refused', not outx.exists() and 'three RRGGBB values' in logx, logx[-200:])
+    check('brush_classes: the usual ones by default', er.brush_classes(None) == er.BRUSH_CLASSES and er.brush_classes('b7e4a0,5fae4f,1f5f1f') == er.BRUSH_CLASSES)
+
     # tiled (a big area): every tile has its hillshade with brush, meta names it
     real_plan = et.plan_tiles
     et.plan_tiles = lambda w, h: (2, 2)
