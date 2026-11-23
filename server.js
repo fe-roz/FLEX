@@ -108,6 +108,9 @@ const server = http.createServer((req, res) => {
         handleExportStatus(req, res, sanitizedPath.slice('/api/export/status/'.length));
     } else if (sanitizedPath.startsWith('/api/export/download/') && req.method === 'GET') {
         handleExportDownload(req, res, sanitizedPath.slice('/api/export/download/'.length));
+    // ── Send to phone: an export zip to FLEX Field over the USB cable (phone_api.js) ──
+    } else if (sanitizedPath.startsWith('/api/phone/')) {
+        phoneApi.handle(req, res, sanitizedPath.slice('/api/phone/'.length), parsedUrl.query);
     // ── A project's own terrain + hillshade from the LiDAR (terrain_generate.js) ──
     } else if (sanitizedPath.startsWith('/api/terrain/')) {
         terrainGen.handle(req, res, sanitizedPath.slice('/api/terrain/'.length), parsedUrl.query);
@@ -926,6 +929,8 @@ function handleExportTerrain(req, res) {
             _exportJobs[jobId].ended = Date.now(); _exportJobs[jobId].proc = null;
             if (code === 0 && fs.existsSync(outZip) && !_exportJobs[jobId].cancelled) {
                 _exportJobs[jobId].status = 'done';
+                // the map's name beside the zip, so "Send to phone" can still name it after a restart (phone_api.js)
+                try { fs.writeFileSync(path.join(EXPORT_OUT_DIR, `export_${jobId}.json`), JSON.stringify({ name: _exportJobs[jobId].name, filename })); } catch (_) {}
                 console.log('[export] done:', jobId);
             } else {
                 _exportJobs[jobId].status = 'error';
@@ -994,7 +999,9 @@ const areaGen = require('./areas_api')({ python: process.env.FLEX_AREA_PYTHON ||
     mapsScript: process.env.FLEX_AREA_MAPS_SCRIPT || path.join(__dirname, 'area_maps.py'),
     root: AREAS_ROOT, terrainGen });
 // Running and recent jobs of the three kinds, for the Jobs panel (jobs_api.js)
+const phoneApi = require('./phone_api')({ exportsDir: EXPORT_OUT_DIR, exportJobs: _exportJobs });
 const jobsApi = require('./jobs_api')({ sources: {
+    phone:   { jobs: phoneApi.jobs, pct: phoneApi.pctOf },
     export:  { jobs: _exportJobs, pct: exportPct, download: id => '/api/export/download/' + id },
     terrain: { jobs: terrainGen.jobs, pct: terrainGen.pctOf },
     analyze: { jobs: _lidarJobs, pct: lidarPct },
