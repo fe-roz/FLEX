@@ -772,6 +772,7 @@ function handleExportTerrain(req, res) {
             hillshade_layer   = null,        // a map layer as the hillshade texture (hillshade_mode 'layer')
             docs_project      = null,        // project id: carry its documents (export_docs.js), with docs_caves = the exported caves' ids
             docs_caves        = null,
+            ridgewalk         = false,       // V2 - Ridgewalking: the ridge step on the LiDAR, its ground as the terrain (export_ridge.py)
         } = params;
         const hsMode  = ['lidar', 'dem', 'url', 'none', 'layer'].includes(hillshade_mode) ? hillshade_mode : 'lidar';
         // Map terrain: heights FLEX sampled from its own 3D terrain on a lon/lat
@@ -856,6 +857,7 @@ function handleExportTerrain(req, res) {
         if (mapName) args.push('--name', mapName);
         if (cavesFilePath) args.push('--caves', cavesFilePath);
         if (polyFile) args.push('--polygon', polyFile);
+        if (ridgewalk === true && !demGrid) args.push('--ridgewalk');
         // The project's documents that belong to these caves: entries + page images
         if (typeof docs_project === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(docs_project)) {
             try {
@@ -924,7 +926,9 @@ function exportPct(job) {
     const PCT = { '0': 5, '1': 15, '2': 40, '3': 55, '4': 65, '4b': 78, '5': 85, '6': 95, '7': 98 };
     let pct = 5;
     const step = /\[(\d)(b?)\/\d\]/.exec(last);
-    if (step && PCT[step[1] + step[2]] !== undefined) pct = PCT[step[1] + step[2]];
+    const ridge = /^\[1\/7\] Ridgewalking (\d+)%/.exec(last);       // the ridge step's own share: 5 to 40
+    if (ridge) pct = 5 + Math.round(Math.min(100, +ridge[1]) * 0.35);
+    else if (step && PCT[step[1] + step[2]] !== undefined) pct = PCT[step[1] + step[2]];
     else if (last.includes('Building CSF')) pct = 40;
     else if (last.includes('Triangul')) pct = 55;
     else if (last.includes('Packaging GLB')) pct = 85;
