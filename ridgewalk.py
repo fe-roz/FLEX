@@ -59,7 +59,9 @@ PARAMS = dict(
     lone_far=5.0,        # m, a lone return farther than this from any other = likely noise
     deep=3.0,            # m, "deep" for the pass statistics
     pass_share=0.01, pass_ratio=8.0, pass_min=30, pass_confirm=1.5, pass_others=1000,
-    pass_block=96.0,     # m, the statistics are kept per block of this size and judged on a block and its 8 neighbours
+    pass_block=96.0,     # m, a pass is judged per block of this size, on the block and its 8 neighbours
+    pass_cell=24.0,      # m, the statistics are kept per cell of this size (a quarter of a block); the pattern is traced on them
+    trace_min=3, trace_share=0.002, trace_cells=5,    # the path of a flagged pass's pattern: see trace_pattern()
     max_link=12.0,       # m, the longest guessed link (a tie, or the way out to the surface) a shape may rest on
     wrap=2.0,            # m, one skin per feature
     wrap_min=4,          # returns
@@ -578,9 +580,9 @@ def w_classify(t):
     ix = np.clip((lx / cell).astype(int), 0, W - 1); iy = np.clip((ly / cell).astype(int), 0, H - 1)
     dv = bilin(L, lx, ly, cell) - z
     cand = dv * cosm[iy, ix] > P_['below']
-    BS = P_['pass_block']; bk = (y[own] // BS).astype(np.int64) * 100000 + (x[own] // BS).astype(np.int64)
+    BS = P_['pass_cell']; bk = (y[own] // BS).astype(np.int64) * 100000 + (x[own] // BS).astype(np.int64)
     uk, un = np.unique(np.c_[bk, ps[own]], axis=0, return_counts=True)
-    stats = [(int(k_), int(p), int(n)) for (k_, p), n in zip(uk, un)]          # block, pass, returns (blocks do not depend on the tile size)
+    stats = [(int(k_), int(p), int(n)) for (k_, p), n in zip(uk, un)]          # cell, pass, returns (the cells do not depend on the tile size)
     # brush: of the returns that got down to brush height, the share the band stopped (as lidar_derive.py)
     G = fill_nan_nearest(np.array(np.load(C['gfile'], mmap_mode='r')[J0:J1, I0:I1], 'f8'))
     hag = z[own] - bilin(G, lx[own], ly[own], cell); lo, hi = P_['brush_band']; S = P_['brush_block']
@@ -876,6 +878,47 @@ def shape_mesh(C, Vx, L, zc, zlo, gp, gj0, gi0, I0, J0, Lw, stree):
 # ---------------------------------------------------------------------------------------------------------
 # The run
 # ---------------------------------------------------------------------------------------------------------
+def trace_pattern(fine, p, flagged, KB):
+    """The path of a flagged pass's pattern, as a set of statistics cells (24 m). fine: {cell: {pass: [returns, deep
+    ones]}}; flagged: the blocks (KB x KB cells) in which the pass was flagged. Seen on real data the pattern is a
+    band along the edge of the pass's swath, some 40 m wide and hundreds of metres long, of returns 3 to 70 m down
+    every metre or so. A cell is on the path when, in it and its 8 neighbours (72 m), the pass has at least
+    trace_min deep returns, they are at least trace_share of its returns there (a fifth of what flagging takes) and
+    pass_ratio times the other passes' share. Cells on the path that touch are one stretch; a stretch counts when
+    it starts in a flagged block, holds at least pass_min deep returns and they lie in at least trace_cells cells
+    (a pit seen by this pass alone is a few returns in one or two cells: it stays). One cell around a stretch is
+    taken with it."""
+    from scipy import ndimage
+    P = PARAMS
+    keys = [k for k, st in fine.items() if p in st]
+    if not keys or not flagged:
+        return set()
+    j0 = min(k[0] for k in keys) - 1; i0 = min(k[1] for k in keys) - 1
+    j0 -= 1; i0 -= 1; H = max(k[0] for k in keys) - j0 + 3; W = max(k[1] for k in keys) - i0 + 3
+    nb = np.zeros((H, W)); db = np.zeros((H, W)); no = np.zeros((H, W)); do = np.zeros((H, W))
+    for (fj, fi), st in fine.items():
+        if 0 <= fj - j0 < H and 0 <= fi - i0 < W:
+            for q, (n, d) in st.items():
+                if q == p: nb[fj - j0, fi - i0] += n; db[fj - j0, fi - i0] += d
+                else: no[fj - j0, fi - i0] += n; do[fj - j0, fi - i0] += d
+    w = np.ones((3, 3)); cv = lambda A: ndimage.convolve(A, w, mode='constant')
+    Nb, Db, No, Do = cv(nb), cv(db), cv(no), cv(do)
+    share = Db / np.maximum(Nb, 1)
+    low = (Db >= P['trace_min']) & (share >= P['trace_share']) & (share >= P['pass_ratio'] * np.maximum(Do / np.maximum(No, 1), 1e-5))
+    lab, n = ndimage.label(low, structure=np.ones((3, 3)))
+    fl = np.zeros((H, W), bool)
+    for (bj, bi) in flagged:
+        a0, a1 = max(0, bj * KB - j0), min(H, (bj + 1) * KB - j0); b0, b1 = max(0, bi * KB - i0), min(W, (bi + 1) * KB - i0)
+        if a1 > a0 and b1 > b0: fl[a0:a1, b0:b1] = True
+    path = np.zeros((H, W), bool)
+    for k in range(1, n + 1):
+        m = lab == k
+        if (m & fl).any() and db[m].sum() >= P['pass_min'] and (db[m] > 0).sum() >= P['trace_cells']:
+            path |= m
+    path = ndimage.binary_dilation(path, structure=np.ones((3, 3)))        # and one cell around it: the fringe where it fades
+    return {(int(a) + j0, int(b) + i0) for a, b in zip(*np.nonzero(path))}
+
+
 def split_cluster(xy, idx, limit):
     """A cluster larger than the limit is cut at the middle of its longer side (said in the notes)."""
     ext = xy[idx].max(0) - xy[idx].min(0)
@@ -941,14 +984,14 @@ def run(C, notes):
         for _r in pmap(C, w_lid, work, 52, 60, 'lid'):
             pass
         lap('lid')
-        cand = []; stats = {}; nret = 0
+        cand = []; stats = {}; fine = {}; nret = 0
         S = P['brush_block']; by, bx = (ny + S - 1) // S, (nx + S - 1) // S
         b_in = np.zeros((by, bx), 'i4'); b_un = np.zeros((by, bx), 'i4')
         for t, r in pmap(C, w_classify, work, 60, 70, 'returns against the lid'):
             if r is None: continue
             nret += r['n']
             for k_, p, n in r['stats']:
-                a = stats.setdefault((k_ // 100000, k_ % 100000), {}).setdefault(p, [0, 0]); a[0] += n
+                a = fine.setdefault((k_ // 100000, k_ % 100000), {}).setdefault(p, [0, 0]); a[0] += n
             bj0, bi0, a, b = r['brush']; b_in[bj0:bj0 + a.shape[0], bi0:bi0 + a.shape[1]] += a; b_un[bj0:bj0 + a.shape[0], bi0:bi0 + a.shape[1]] += b
             if len(r['x']):
                 cand.append((r['x'], r['y'], r['z'], r['dv'], r['ps'], r['corner'], r['behind'], r['foot']))
@@ -959,17 +1002,22 @@ def run(C, notes):
         FIT = np.isfinite(BH); ok = ~FIT | (BH > C['min_behind'])
         ncand = len(X); nonface = int((FIT & ~ok).sum()); nofit = int((~FIT).sum())
         X, Y, Z, PS, FT, FIT, CRN = X[ok], Y[ok], Z[ok], PS[ok], FT[ok], FIT[ok], CRN[ok]
-        TK = (Y // P['pass_block']).astype(np.int64) * 100000 + (X // P['pass_block']).astype(np.int64)      # the statistics block of each
+        TK = (Y // P['pass_cell']).astype(np.int64) * 100000 + (X // P['pass_cell']).astype(np.int64)      # the statistics cell of each
         DVL = DV[ok]; DV = np.where(FIT, BH[ok], DVL)            # from here on the depth is the distance behind the face
         dk, dn = np.unique(np.c_[TK, PS][DV > P['deep']], axis=0, return_counts=True)
         for (tk, p), q in zip(dk, dn):
-            stats.setdefault((int(tk // 100000), int(tk % 100000)), {}).setdefault(int(p), [0, 0])[1] = int(q)
+            fine.setdefault((int(tk // 100000), int(tk % 100000)), {}).setdefault(int(p), [0, 0])[1] = int(q)
+        KB = int(round(P['pass_block'] / P['pass_cell']))
+        for (fj, fi), st in fine.items():                       # blocks = KB x KB cells
+            for p, (n, d) in st.items():
+                a = stats.setdefault((fj // KB, fi // KB), {}).setdefault(p, [0, 0]); a[0] += n; a[1] += d
         lap('returns')
-        # 5. patterned noise: a pass is judged per block of 96 m on the statistics of the block and its 8 neighbours;
-        # a pass flagged anywhere is a bad pass everywhere: its returns below ground are set aside over the whole
-        # area, except those a pass that is NOT flagged confirms (one of its returns within 1.5 m)
+        # 5. patterned noise: a pass is judged per block of 96 m on the statistics of the block and its 8 neighbours.
+        # A flagged pass is not set aside everywhere: the path of its pattern is traced (trace_pattern) from the
+        # flagged blocks on, and only its returns below ground along that path are set aside, except those a pass
+        # that is NOT flagged confirms (one of its returns within 1.5 m). Elsewhere its returns are ordinary returns.
         say(70, 'flight passes')
-        tot = {}; flagged_tiles = {}; trows = []
+        tot = {}; flagged_tiles = {}; trows = []; flagged_blocks = set()
         for t, st in stats.items():
             for p, (n, d) in st.items():
                 a = tot.setdefault(p, [0, 0]); a[0] += n; a[1] += d
@@ -984,17 +1032,25 @@ def run(C, notes):
                 fl = alln - n >= P['pass_others'] and d >= P['pass_min'] and share >= P['pass_share'] and share >= P['pass_ratio'] * max(others, 1e-5)
                 trows.append((t[0], t[1], p, st[p][0], st[p][1], n, d, alln - n, alld - d, int(fl)))
                 if fl:
-                    flagged_tiles[p] = flagged_tiles.get(p, 0) + 1
-        isbad = np.isin(PS, list(flagged_tiles)) if flagged_tiles else np.zeros(len(X), bool)
+                    flagged_tiles[p] = flagged_tiles.get(p, 0) + 1; flagged_blocks.add((t, p))
+        isflag = np.isin(PS, list(flagged_tiles)) if flagged_tiles else np.zeros(len(X), bool)
+        isbad = np.zeros(len(X), bool); reached = {}
+        for p in flagged_tiles:
+            cells = trace_pattern(fine, p, {t for t, _p in flagged_blocks if _p == p}, KB)
+            reached[p] = (len(cells), len({(fj // KB, fi // KB) for fj, fi in cells}))
+            if cells:
+                isbad |= (PS == p) & np.isin(TK, [fj * 100000 + fi for fj, fi in cells])
         kind = np.zeros(len(X), 'u1'); confirmed = 0; confby = np.full(len(X), -1, np.int64)
         if isbad.any():
-            ci = np.flatnonzero(isbad); gi = np.flatnonzero(~isbad)
+            ci = np.flatnonzero(isbad); gi = np.flatnonzero(~isflag)
             if len(gi):
                 d_, q_ = cKDTree(np.c_[X[gi], Y[gi], Z[gi]]).query(np.c_[X[ci], Y[ci], Z[ci]]); okc = d_ <= P['pass_confirm']
                 confirmed = int(okc.sum()); confby[ci[okc]] = PS[gi[q_[okc]]]; ci = ci[~okc]
             kind[ci] = 3
         passes = [dict(id=int(p), returns=int(n), deep=int(d), share=round(d / max(1, n), 5), flagged=p in flagged_tiles, blocks_flagged=int(flagged_tiles.get(p, 0)),
-                       tiles_flagged=int(flagged_tiles.get(p, 0)), set_aside=int(((kind == 3) & (PS == p)).sum()), kept_confirmed=int((isbad & (kind == 0) & (PS == p)).sum()))
+                       tiles_flagged=int(flagged_tiles.get(p, 0)), cells_reached=int(reached.get(p, (0, 0))[0]), blocks_reached=int(reached.get(p, (0, 0))[1]),
+                       set_aside=int(((kind == 3) & (PS == p)).sum()), kept_confirmed=int((isbad & (kind == 0) & (PS == p)).sum()),
+                       left_outside=int((isflag & ~isbad & (PS == p)).sum()))
                   for p, (n, d) in sorted(tot.items())]
         # groups, lone, likely noise: over the whole area at once
         say(72, 'groups')
@@ -1279,7 +1335,7 @@ def main(argv=None):
                  'Depends on the tile cut: the fill of ground gaps near a tile\'s margin edge; the water level of a hollow wider than the '
                  'margin whose rim is thinner than %g m (the area-wide fill is on a %g m grid); the face fits use the returns within 12 m of the tile, so a chain of '
                  'candidates joining the face from farther away is not followed. The patterned-noise decision is made on blocks of %g m that '
-                 'do not move with the tile size; a pass flagged in any block is set aside over the whole area.' % (2 * K * cell, K * cell, PARAMS['pass_block']))
+                 'do not move with the tile size; a flagged pass is set aside along the path of its pattern only.' % (2 * K * cell, K * cell, PARAMS['pass_block']))
     if not a.keep_work:
         shutil.rmtree(C['tmp'], ignore_errors=True)
     ox, oy = C['ox'], C['oy']

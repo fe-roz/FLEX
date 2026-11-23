@@ -21,8 +21,9 @@ returns far below the ground, a patch of brush. Pins down:
   * the striped pass is flagged and its returns set aside, except those another pass confirms;
   * a shape never rests on a guessed link longer than 12 m (--max-link): two returns 15 m straight down are
     likely noise, no shape, no hole; the deep group 8 m from the slanted pit's end is still part of it;
-  * a flagged pass is set aside over the whole area: its stripe is set aside also where it is too thin to be
-    flagged on its own; a real pit it shares with good passes is kept;
+  * a flagged pass is set aside along the path of its pattern: where the pattern runs on into a block in which
+    the pass is not flagged it is set aside too; a real pit on the path that good passes also see is kept; a
+    real pit far from the pattern that only the bad pass sees is kept;
   * the result does not depend on the tile cut (96 m tiles with workers against 48 m tiles in one process):
     the pit that sits on a tile line is neither cut nor doubled;
   * --npz with a polygon and --no-shapes.
@@ -242,35 +243,46 @@ Ee = os.path.join(tmp, 'e')
 run(['--npz', npz2, '--out', Ee, '--no-shapes', '--debug', '--workers', '4'])
 Re = load(Ee); wb = ((Re['dbg']['y'] > oy - 1.5) & (Re['dbg']['y'] < oy + run_ + 1.5) & (np.abs(Re['dbg']['x'] - ox) > 3)).sum()
 check('no return numbers: still runs, the wall still not a feature', wb == 0 and abs(Re['J']['counts']['below'] - ca['below']) <= 0.05 * ca['below'], '%d on the wall, %d below' % (wb, Re['J']['counts']['below']))
-# ---- a bad pass is bad everywhere: its stripes run on into ground where it is too thin to be flagged on its own
+# ---- a flagged pass is set aside along the path of its pattern only
 rng = np.random.default_rng(5); n = 400 * 96 * 3
 gx_ = rng.uniform(0, 400, n); gy_ = rng.uniform(0, 96, n)
-far = (np.hypot(gx_ - 350, gy_ - 30) < 1.6)                                   # a real pit out there, 2.5 m deep
-P = [(gx_, gy_, 50 + 0.01 * gx_ + rng.normal(0, 0.03, n) - 2.5 * far, np.full(n, 2), rng.integers(1, 4, n))]
-k = 9000; bx_ = rng.uniform(0, 95, k); by_ = rng.uniform(0, 96, k)             # the bad pass: thick in the west ...
-P.append((bx_, by_, 50 + 0.01 * bx_, np.full(k, 2), np.full(k, 9)))
-for lx in np.arange(4, 95, 4.0):                                              # ... with its stripes there,
-    ly = np.arange(5, 91, 1.0); P.append((np.full(len(ly), lx), ly, 50 + 0.01 * lx - 12 - 5 * np.sin(ly / 4), np.full(len(ly), 1), np.full(len(ly), 9)))
-k = 2000; bx_ = rng.uniform(300, 395, k); by_ = rng.uniform(0, 96, k)          # and thin in the east: 2000 returns,
-P.append((bx_, by_, 50 + 0.01 * bx_, np.full(k, 2), np.full(k, 9)))
-ly = np.arange(50, 75, 1.0); P.append((np.full(len(ly), 320.0), ly, 50 + 3.2 - 12 - 5 * np.sin(ly / 4), np.full(len(ly), 1), np.full(len(ly), 9)))     # one stripe of 25 (under the 30 it takes)
-k = 12; a_ = rng.uniform(0, 6.28, k)                                           # the bad pass also sees the pit's floor
-P.append((350 + 1.2 * np.cos(a_), 30 + 1.2 * np.sin(a_), np.full(k, 50 + 3.5 - 2.5), np.full(k, 1), np.full(k, 9)))
+inA = np.hypot(gx_ - 50, gy_ - 80) < 1.6; inB = np.hypot(gx_ - 350, gy_ - 30) < 1.6
+keep_ = ~inB                                                                   # pit B: no return of the good passes in it
+P = [(gx_[keep_], gy_[keep_], (50 + 0.01 * gx_ + rng.normal(0, 0.03, n) - 2.5 * inA)[keep_], np.full(int(keep_.sum()), 2), rng.integers(1, 4, int(keep_.sum())))]
+for x0_, k in ((0, 1500), (96, 1500), (192, 6000), (288, 1500)):              # the bad pass's ordinary returns, block by block
+    bx_ = rng.uniform(x0_, x0_ + 96, k); by_ = rng.uniform(0, 96, k); P.append((bx_, by_, 50 + 0.01 * bx_, np.full(k, 2), np.full(k, 9)))
+for ly in (20.0, 44.0, 68.0):                                                  # its pattern: three lines of deep returns in the west block,
+    lx = np.arange(6, 91, 6.0); P.append((lx, np.full(len(lx), ly), 50 + 0.01 * lx - 12 - 4 * np.sin(lx / 5), np.full(len(lx), 1), np.full(len(lx), 9)))
+lx = np.arange(96, 151, 5.0)                                                   # one of them running on into the next block,
+P.append((lx, np.full(len(lx), 44.0), 50 + 0.01 * lx - 12 - 4 * np.sin(lx / 5), np.full(len(lx), 1), np.full(len(lx), 9))); ntail = len(lx)
+k = 12; a_ = rng.uniform(0, 6.28, k)                                           # pit A (on the path): the good passes see its floor, the bad pass too
+P.append((50 + 1.2 * np.cos(a_), 80 + 1.2 * np.sin(a_), np.full(k, 50 + 0.5 - 2.5), np.full(k, 1), np.full(k, 9)))
+k = 14; a_ = rng.uniform(0, 6.28, k); r_ = rng.uniform(0, 1.2, k)              # pit B, 200 m past the end of the pattern: only the bad pass sees into it
+P.append((350 + r_ * np.cos(a_), 30 + r_ * np.sin(a_), np.full(k, 50 + 3.5 - 4.0) + rng.normal(0, 0.1, k), np.full(k, 1), np.full(k, 9)))
 cat = lambda i: np.concatenate([p[i] for p in P])
 npz3 = os.path.join(tmp, 'pts3.npz'); np.savez(npz3, x=cat(0), y=cat(1), z=cat(2), c=cat(3).astype('u1'), psid=cat(4).astype('i4'))
 Ff = os.path.join(tmp, 'f')
 run(['--npz', npz3, '--out', Ff, '--no-shapes', '--debug', '--workers', '4'])
 Rf = load(Ff); df = Rf['dbg']; Pf = {p['id']: p for p in Rf['J']['passes']}
-tp = df['tile_pass']; east = tp[(tp[:, 2] == 9) & (tp[:, 1] >= 3)]
-check('bad pass: flagged in the west, in no block of the east (too thin there)', Pf[9]['flagged'] and Pf[9]['blocks_flagged'] >= 1 and len(east) and not east[:, 9].any(), str(east[:, [1, 6, 9]].tolist()))
-st_e = (Rf['xyz'][:, 0] > 319) & (Rf['xyz'][:, 0] < 321) & (Rf['depth'] > 5)
-check('bad pass: its stripe in the east is set aside too', st_e.sum() == 25 and (Rf['kind'][st_e] == 3).all() and not ((df['x'] > 319) & (df['x'] < 321) & (df['depth'] > 5)).any(),
-      '%d, kinds %s' % (st_e.sum(), np.unique(Rf['kind'][st_e])))
-mp_ = np.hypot(df['x'] - 350, df['y'] - 30) < 1.6
-check('a real pit seen by the bad pass and by good passes: kept, the bad pass\'s returns in it too', mp_.sum() >= 20 and (df['kind'][mp_] == 0).all() and (df['psid'][mp_] == 9).sum() == 12
-      and (df['confirmed_by'][mp_ & (df['psid'] == 9)] != 9).all() and (df['confirmed_by'][mp_ & (df['psid'] == 9)] >= 0).all() and (Rf['holes'] == 1).sum() > 30, '%d, of the bad pass %d' % (mp_.sum(), (df['psid'][mp_] == 9).sum()))
-check('ridge.json says what each pass lost', Pf[9]['set_aside'] == int((Rf['kind'] == 3).sum()) and Pf[9]['kept_confirmed'] == 12 and all(p['set_aside'] == 0 for k_, p in Pf.items() if k_ != 9),
-      '%s %s' % (Pf[9]['set_aside'], Pf[9]['kept_confirmed']))
+tp = df['tile_pass']; rest = tp[(tp[:, 2] == 9) & (tp[:, 1] >= 1)]
+check('bad pass: flagged in the west block only (thinned out by its own good returns farther on)', Pf[9]['flagged'] and Pf[9]['blocks_flagged'] == 1 and len(rest) == 3 and not rest[:, 9].any(),
+      str(tp[tp[:, 2] == 9][:, [1, 5, 6, 9]].tolist()))
+tail = (Rf['xyz'][:, 0] > 95) & (Rf['xyz'][:, 0] < 152) & (Rf['depth'] > 5)
+check('bad pass: its line running on into the next block is set aside too (the path is traced)', tail.sum() == ntail and (Rf['kind'][tail] == 3).all() and Pf[9]['blocks_reached'] >= 2,
+      '%d of %d, kinds %s, blocks reached %s' % (tail.sum(), ntail, np.unique(Rf['kind'][tail]), Pf[9].get('blocks_reached')))
+check('bad pass: the whole pattern is set aside', (Rf['kind'] == 3).sum() == 45 + ntail and not (df['depth'] > 5).any(), '%d' % (Rf['kind'] == 3).sum())
+mp_ = np.hypot(df['x'] - 50, df['y'] - 80) < 1.6
+check('a real pit on the path, seen by the bad pass and by good passes: kept, the bad pass\'s returns in it too', mp_.sum() >= 20 and (df['kind'][mp_] == 0).all() and (df['psid'][mp_] == 9).sum() == 12
+      and (df['confirmed_by'][mp_ & (df['psid'] == 9)] != 9).all() and (df['confirmed_by'][mp_ & (df['psid'] == 9)] >= 0).all(), '%d, of the bad pass %d' % (mp_.sum(), (df['psid'][mp_] == 9).sum()))
+mb_ = np.hypot(df['x'] - 350, df['y'] - 30) < 1.6
+check('a real pit far from the pattern, seen by the bad pass alone: kept (a feature, a hole)', mb_.sum() == 14 and (df['kind'][mb_] == 0).all() and (df['psid'][mb_] == 9).all() and (df['feature'][mb_] >= 0).all()
+      and (Rf['holes'] == 1)[:, 1150:1185].sum() > 20, '%d, kinds %s' % (mb_.sum(), np.unique(df['kind'][mb_])))
+check('ridge.json says what the pass lost and where', Pf[9]['set_aside'] == int((Rf['kind'] == 3).sum()) and Pf[9]['kept_confirmed'] == 12 and Pf[9]['left_outside'] >= 14 and Pf[9]['cells_reached'] > 0
+      and all(p['set_aside'] == 0 for k_, p in Pf.items() if k_ != 9), '%s %s %s' % (Pf[9]['set_aside'], Pf[9]['kept_confirmed'], Pf[9].get('left_outside')))
+Gg = os.path.join(tmp, 'g')
+run(['--npz', npz3, '--out', Gg, '--no-shapes', '--workers', '4', '--tile', '48'])
+Rg = load(Gg); ka_ = np.lexsort(Rf['xyz'].T); kb_ = np.lexsort(Rg['xyz'].T)
+check('the traced path does not depend on the tile size', len(Rf['xyz']) == len(Rg['xyz']) and np.array_equal(Rf['xyz'][ka_], Rg['xyz'][kb_]) and np.array_equal(Rf['kind'][ka_], Rg['kind'][kb_]))
 check('work folder removed', not os.path.exists(os.path.join(A, '_work')))
 
 import shutil
