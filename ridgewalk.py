@@ -1075,7 +1075,8 @@ DEMO = dict(
     talus=(2.0, 1.2),                            # the ground rises 1.2 m over the last 2 m to the wall's foot
     pit=(96.0, 38.0, 2.0, 9.0),                  # x, y, radius, depth: a vertical pit (on the line between two tiles)
     slant=(37.0, 38.0, 2.2, 8.0),                # x, y, mouth radius, length: a pit going down at 45 degrees to the east
-    slant_deep=(50.0, 38.0, 10.0),               # x, y, depth: a group under a roof, joined to the slanted pit
+    slant_deep=(51.0, 38.0, 14.0),               # x, y, depth: a group under a roof, about 8 m from the pit's end: joined to it by a tie
+    deep_pair=(20.0, 60.0, 15.0),                # two returns 15 m straight down with nothing above them: no shape (max_link)
     cliff_open=(140.0, 3.3),                     # x of the opening at the foot of the wall, how far its returns run into the rock
     pit_shallow=(70.0, 20.0, 1.5, 0.8),          # x, y, radius, depth: too shallow to be found
     pit_low=(120.0, 20.0, 1.5, 1.5),             # deep enough
@@ -1130,6 +1131,7 @@ def demo_points(seed=3):
     # the crack
     k = 80; cx_ = rng.uniform(c0 + 0.3, c1 - 0.3, k)
     add(cx_, cy + rng.uniform(-0.2, 0.2, k), demo_ground(cx_, np.full(k, cy)) - rng.uniform(1.0, cd, k))
+    lx, ly, ld = D['deep_pair']; add(np.full(2, lx), ly, float(demo_ground(lx, ly)) - ld - np.array([0.0, 0.6]))
     # lone returns
     lx, ly, ld = D['lone_far']; add(lx, ly, float(demo_ground(lx, ly)) - ld)
     lx, ly, ld = D['lone_near']; add(lx, ly, float(demo_ground(lx, ly)) - ld)
