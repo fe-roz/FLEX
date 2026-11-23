@@ -182,7 +182,7 @@
     const R = RANGE[L.map] || [mi.min, mi.max], vmin = R[0] * M.scale, vmax = R[1] * M.scale, step = M.step;
     const fmt = v => (Math.round(v * M.scale / step) * step).toFixed(step < 1 ? (step < 0.1 ? 2 : 1) : 0);
     const ramps = PRESETS[L.map] || RAMPS, hasCuts = L.map === 'brush';
-    const pick = (k, label) => `<label class="am-pick">${label} <input type="color" id="am-${k}"> <span class="am-dim">see-through</span> <input type="range" id="am-${k}a" min="0" max="100" step="5" title="0 = clear, 100 = solid"></label>`;
+    const pick = (k, label) => `<label class="am-pick">${label} <input type="color" id="am-${k}"> <span class="am-dim">how solid</span> <input type="range" id="am-${k}a" min="0" max="100" step="5" title="0 = clear, 100 = solid"></label>`;
     dlg = doc.createElement('div'); dlg.className = 'pj-modal am-modal'; dlg.id = 'am-colours';
     dlg.innerHTML = `<div class="am-box" role="dialog" aria-label="Colours of ${esc(L.name)}">
       <div class="am-h"><b>Colours</b> <span class="am-dim">${esc(L.name)}</span><button type="button" class="am-x" data-a="close" aria-label="Close">×</button></div>
