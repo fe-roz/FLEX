@@ -460,6 +460,7 @@
     <div class="layer-btns">
       <button class="layer-btn active" id="btn-layer-sat">🛰️ SAT</button>
       <button class="layer-btn"        id="btn-layer-hs">🏔️ SHAD</button>
+      <button class="layer-btn"        id="btn-layer-hsb" style="display:none" title="Hillshade with the brush map on it">🌿 BRUSH</button>
     </div>
   </div>
   <div class="map-section-label">BRIGHTNESS</div>
@@ -678,6 +679,7 @@ function ffSidecarJson(name) {
 <script>const TERRAIN_GLB_B64 = "PLACEHOLDER_GLB_B64";</script>
 <script>const TERRAIN_TEX_B64 = "PLACEHOLDER_TEX_B64";</script>
 <script>const TERRAIN_HS_B64  = "PLACEHOLDER_HS_B64";</script>
+<script>const TERRAIN_HSB_B64 = "PLACEHOLDER_HSB_B64";</script>
 <script>const TERRAIN_WALLS_B64 = "PLACEHOLDER_WALLS_B64";</script>
 <script>
 try { window.CAVES_DATA = PLACEHOLDER_CAVES_JSON; }
@@ -913,18 +915,27 @@ const terrainMaterials = [];   // refs to all terrain mesh materials (for opacit
 // Two-texture system — hoisted so imagery toggle event listeners can reach them
 let terrainTexSat = null;
 let terrainTexHs  = null;
-let texMode = 'sat'; // 'sat' or 'hs'
+let terrainTexHsb = null;   // the hillshade with the brush map baked on it (V2 - Ridgewalking exports), else null
+let texMode = 'sat'; // 'sat', 'hs' or 'hsb'
+const texOfMode = k => (k === 'hsb' ? terrainTexHsb : k === 'hs' ? terrainTexHs : terrainTexSat);
+// Show one of the maps (if this export has it) and mark its button.
+function setTexMode(kind) {
+  const t = texOfMode(kind);
+  if (!t) return false;
+  texMode = kind; applyTerrainTexture(t);
+  ['sat', 'hs', 'hsb'].forEach(k => document.getElementById('btn-layer-' + k).classList.toggle('active', k === kind));
+  return true;
+}
 
 function applyTerrainTexture(tex) {
   if (!terrainGroup) return;
-  if (window.FlexRidge) tex = FlexRidge.mapTexture(tex, texMode);   // the brush map over the hillshade (libs/ridgewalk.js)
   terrainGroup.traverse(obj => {
     if (!obj.isMesh) return;
     const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
     let t = tex;
     if (obj.userData.tile) {                       // a tiled terrain: this tile's own texture
       const T = obj.userData.tile;
-      t = tex && tex._tiled ? (tex._tiled === 'hs' ? TT.hs : TT.sat).get(T.c + '_' + T.r) || null
+      t = tex && tex._tiled ? TT[tex._tiled].get(T.c + '_' + T.r) || null
         : tex ? tileOfOverview(tex, T.c, T.r) : null;
     }
     mats.forEach(m => { m.map = t; m.color.set(0xffffff); m.needsUpdate = true; });
@@ -997,7 +1008,7 @@ function textureSrc(src) {
 // texture and UVs remapped to it. If the tile files can't be loaded (a
 // single-file viewer opened from disk) the overview texture is drawn over the
 // tiles instead, by a per-tile offset and repeat.
-const TT = { cols: 1, rows: 1, on: false, sat: new Map(), hs: new Map(), failed: false };
+const TT = { cols: 1, rows: 1, on: false, sat: new Map(), hs: new Map(), hsb: new Map(), failed: false };
 function tileOfOverview(tex, c, r) {
   tex._tileClones = tex._tileClones || {};
   const k = c + '_' + r;
@@ -1955,6 +1966,17 @@ setTimeout(() => {
       const layerSection = document.getElementById('map-panel-layer');
       if (layerSection) layerSection.style.display = 'block';
     };
+    // The hillshade with brush: the third Imagery choice, only on a map that has it.
+    const hsbReady = () => {
+      document.getElementById('btn-layer-hsb').style.display = '';
+      const layerSection = document.getElementById('map-panel-layer');
+      if (layerSection) layerSection.style.display = 'block';
+    };
+    // A map picked before (remembered with the display choices) is shown again as soon as it has loaded.
+    const texArrived = (kind, tex) => {
+      if (texMode === kind) applyTerrainTexture(tex);
+      else if (DISP.tex === kind && !texArrived.done) { texArrived.done = true; setTexMode(kind); }
+    };
     const loadOverview = () => {
       if (TERRAIN_TEX_B64 && TERRAIN_TEX_B64 !== 'PLACEHOLDER_TEX_B64') {
         loadB64Texture(TERRAIN_TEX_B64, tex => {
@@ -1965,8 +1987,15 @@ setTimeout(() => {
       if (TERRAIN_HS_B64 && TERRAIN_HS_B64 !== 'PLACEHOLDER_HS_B64') {
         loadB64Texture(TERRAIN_HS_B64, tex => {
           terrainTexHs = tex;
-          if (texMode === 'hs') applyTerrainTexture(tex);
           hsReady();
+          texArrived('hs', tex);
+        });
+      }
+      if (TERRAIN_HSB_B64 && TERRAIN_HSB_B64 !== 'PLACEHOLDER_HSB_B64') {
+        loadB64Texture(TERRAIN_HSB_B64, tex => {
+          terrainTexHsb = tex;
+          hsbReady();
+          texArrived('hsb', tex);
         });
       }
     };
@@ -1974,21 +2003,22 @@ setTimeout(() => {
     if (tt && tt.cols * tt.rows > 1) {
       // Big export: cut the terrain along the tiles, load each tile's texture.
       splitTerrainIntoTiles(terrainGroup, tt.cols, tt.rows);
-      const kinds = tt.hs ? ['sat', 'hs'] : ['sat'];
+      const kinds = ['sat'].concat(tt.hs ? ['hs'] : [], tt.hsb ? ['hsb'] : []);
       let pending = 0;
       kinds.forEach(kind => {
         const sentinel = { _tiled: kind };
         for (let r = 0; r < tt.rows; r++) for (let c = 0; c < tt.cols; c++) {
           pending++;
           loadB64Texture('tex_' + kind + '_' + c + '_' + r + '.jpg', tex => {
-            (kind === 'hs' ? TT.hs : TT.sat).set(c + '_' + r, tex);
-            if (kind === 'sat') terrainTexSat = sentinel; else { terrainTexHs = sentinel; hsReady(); }
+            TT[kind].set(c + '_' + r, tex);
+            if (kind === 'sat') terrainTexSat = sentinel; else if (kind === 'hs') { terrainTexHs = sentinel; hsReady(); } else { terrainTexHsb = sentinel; hsbReady(); }
             if (texMode === kind) applyTerrainTexture(sentinel);
+            else if (DISP.tex === kind && !texArrived.done) { texArrived.done = true; setTexMode(kind); }
           }, () => {
             // A tile file that won't load: draw the overview over the tiles.
             if (TT.failed) return;
-            TT.failed = true; TT.sat.clear(); TT.hs.clear();
-            terrainTexSat = terrainTexHs = null;
+            TT.failed = true; TT.sat.clear(); TT.hs.clear(); TT.hsb.clear();
+            terrainTexSat = terrainTexHs = terrainTexHsb = null;
             loadOverview();
           });
         }
@@ -2047,9 +2077,8 @@ setTimeout(() => {
     buildCaveLines();
     // V2 - Ridgewalking: returns below ground, guessed openings, shapes, brush (nothing when RIDGE is null).
     if (window.FlexRidge) FlexRidge.init({
-      THREE, scene, ridge: typeof RIDGE === 'undefined' ? null : RIDGE, saved: DISP.ridge, isAssetRef, b64ToArrayBuffer, textureSrc,
+      THREE, scene, ridge: typeof RIDGE === 'undefined' ? null : RIDGE, saved: DISP.ridge, isAssetRef, b64ToArrayBuffer,
       redraw: () => { requestRender(); wakeRender(); },
-      retexture: () => { const t = texMode === 'hs' ? terrainTexHs : terrainTexSat; if (t) applyTerrainTexture(t); },
     });
     dispRestoreUi();
     setP(100, 'Ready');
@@ -4628,10 +4657,11 @@ function renderDisplaySheet() {
   const hsOk = document.getElementById('map-panel-layer').style.display === 'block';
   if (hsOk) {
     sheetHead('Imagery');
-    const satOn = document.getElementById('btn-layer-sat').classList.contains('active');
-    sheetSeg(['Satellite', document.getElementById('btn-layer-hs').textContent.includes('LIDAR') ? 'LiDAR shade' : 'Shade'], satOn ? 0 : 1, i => {
-      document.getElementById(i === 0 ? 'btn-layer-sat' : 'btn-layer-hs').click(); rerenderSheet();
-    });
+    // A map with the brush picture (V2 - Ridgewalking): Aerial, Hillshade, Hillshade + brush; else as always.
+    const kinds = ['sat'].concat(terrainTexHs ? ['hs'] : [], terrainTexHsb ? ['hsb'] : []);
+    const names = terrainTexHsb ? { sat: 'Aerial', hs: 'Hillshade', hsb: 'Hillshade + brush' }
+      : { sat: 'Satellite', hs: document.getElementById('btn-layer-hs').textContent.includes('LIDAR') ? 'LiDAR shade' : 'Shade' };
+    sheetSeg(kinds.map(k => names[k]), kinds.indexOf(texMode), i => { setTexMode(kinds[i]); rerenderSheet(); });
   }
   sheetHead('Terrain');
   [['Opacity', 'terrain-opacity-slider', 'terrain-opacity-label'], ['Brightness', 'terrain-bright-slider', 'terrain-bright-label'],
@@ -7869,18 +7899,7 @@ fogSlider.addEventListener('input', () => applyFog(parseInt(fogSlider.value)));
 
 
 // Imagery layer buttons (revealed when hillshade loads)
-document.getElementById('btn-layer-sat').addEventListener('click', function() {
-  if (!terrainTexSat) return;
-  texMode = 'sat'; applyTerrainTexture(terrainTexSat);
-  document.getElementById('btn-layer-sat').classList.add('active');
-  document.getElementById('btn-layer-hs').classList.remove('active');
-});
-document.getElementById('btn-layer-hs').addEventListener('click', function() {
-  if (!terrainTexHs) return;
-  texMode = 'hs'; applyTerrainTexture(terrainTexHs);
-  document.getElementById('btn-layer-hs').classList.add('active');
-  document.getElementById('btn-layer-sat').classList.remove('active');
-});
+['sat', 'hs', 'hsb'].forEach(k => document.getElementById('btn-layer-' + k).addEventListener('click', () => { setTexMode(k); }));
 
 // ── Help overlay ─────────────────────────────────────────────────────────────
 // A card that scrolls. It closes with ✕, Close, a tap on the dark backdrop or Esc; a tap inside the card only scrolls or opens
@@ -8362,7 +8381,7 @@ function dispRestoreUi() {
 }
 function dispCapture() {
   const sl = id => { const n = document.getElementById(id); return n ? +n.value : undefined; };
-  dispSave({ wallMode, colourMode, wallAlpha: wallOpacity, stationMode, annot: annotMode, tracks: fieldGroup.visible, inv: window.ViewerInv ? ViewerInv.visible() : true, fx: FlexFx.serialize(), ridge: window.FlexRidge ? FlexRidge.serialize() : undefined,
+  dispSave({ wallMode, colourMode, wallAlpha: wallOpacity, stationMode, annot: annotMode, tracks: fieldGroup.visible, inv: window.ViewerInv ? ViewerInv.visible() : true, fx: FlexFx.serialize(), ridge: window.FlexRidge ? FlexRidge.serialize() : undefined, tex: texMode,
              opacity: sl('terrain-opacity-slider'), bright: sl('terrain-bright-slider'), fog: sl('terrain-fog-slider') });
 }
 let _dispTimer = null;

@@ -90,7 +90,7 @@ On the phone (app-private storage):
 
 ```
 files/maps/<id>/map.json             name, dates
-files/maps/<id>/export/              terrain.glb, tex_sat.jpg, tex_hs.jpg, walls.bin, caves.json (+ ridge_*.bin, ridge.json, tex_brush.png)
+files/maps/<id>/export/              terrain.glb, tex_sat.jpg, tex_hs.jpg, walls.bin, caves.json (+ ridge_*.bin, ridge.json, tex_hsb.jpg)
 files/maps/<id>/user/log.jsonl       the change log (notes and field surveys are rebuilt from it)
 files/maps/<id>/user/notes/<survey>/ note pages
 ```
@@ -100,7 +100,9 @@ Only the export's data files are unpacked; the zip's big single-file
 unpacked from that `viewer.html` instead (slower, once).
 
 An export made with **V2 - Ridgewalking** also carries `ridge_points.bin`,
-`ridge_shapes.bin`, `ridge_patches.bin`, `ridge.json` and `tex_brush.png`.
+`ridge_shapes.bin`, `ridge_patches.bin`, `ridge.json` and `tex_hsb.jpg` (the
+hillshade with the brush map on it, a third Imagery choice; `tex_hsb_<c>_<r>.jpg`
+tiles on a big export).
 `MapStore.kt` keeps them at import (`RIDGE_FILES`), `MainActivity.kt` serves
 them and hands their names to the viewer (`RIDGE`, drawn by
 `viewer_build/libs/ridgewalk.js`: 🎨 Display → Below ground (V2)); a map

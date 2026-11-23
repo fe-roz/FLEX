@@ -293,6 +293,7 @@ def viewer_for(i):
     return (t.replace('"PLACEHOLDER_GLB_B64"', '"terrain.glb"')
              .replace('"PLACEHOLDER_TEX_B64"', '"tex_sat.jpg"' if has('tex_sat.jpg') else '"PLACEHOLDER_TEX_B64"')
              .replace('"PLACEHOLDER_HS_B64"', '"tex_hs.jpg"' if has('tex_hs.jpg') else '"PLACEHOLDER_HS_B64"')
+             .replace('"PLACEHOLDER_HSB_B64"', '"tex_hsb.jpg"' if has('tex_hsb.jpg') else '""')
              .replace('"PLACEHOLDER_WALLS_B64"', '"walls.bin"' if has('walls.bin') else '"PLACEHOLDER_WALLS_B64"')
              .replace('PLACEHOLDER_CAVES_JSON', 'ffSidecarJson("caves.json")')
              .replace('PLACEHOLDER_RIDGE_JSON', ridge_for(has)))
@@ -302,8 +303,8 @@ def ridge_for(has):
     if not has('ridge_points.bin'): return 'null'
     ref = lambda f: '"%s"' % f if has(f) else 'null'
     counts = '(ffSidecarJson("ridge.json").counts || {})' if has('ridge.json') else '{}'
-    return ('{ version: 1, counts: %s, points: "ridge_points.bin", patches: %s, shapes: %s, brush: %s, depthCap: 20 }'
-            % (counts, ref('ridge_patches.bin'), ref('ridge_shapes.bin'), ref('tex_brush.png')))
+    return ('{ version: 1, counts: %s, points: "ridge_points.bin", patches: %s, shapes: %s, depthCap: 20 }'
+            % (counts, ref('ridge_patches.bin'), ref('ridge_shapes.bin')))
 
 MIME = {'.html': 'text/html', '.js': 'application/javascript', '.json': 'application/json', '.glb': 'model/gltf-binary',
         '.jpg': 'image/jpeg', '.png': 'image/png', '.bin': 'application/octet-stream', '.tif': 'image/tiff'}
