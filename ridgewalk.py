@@ -50,12 +50,12 @@ PARAMS = dict(
     link=1.5,            # m, returns closer than this are one group
     lone_far=5.0,        # m, a lone return farther than this from any other = likely noise
     deep=3.0,            # m, "deep" for the pass statistics
-    pass_share=0.01, pass_ratio=8.0, pass_min=30, pass_confirm=1.5,
+    pass_share=0.01, pass_ratio=8.0, pass_min=30, pass_confirm=1.5, pass_others=1000,
     wrap=2.0,            # m, one skin per feature
     wrap_min=4,          # returns
     hug=0.9, pull=0.5,   # wall vertices within hug of a return go half-way to it
     cluster=6.0,         # m on the map, grouped returns farther apart are worked separately
-    cluster_max=150.0,   # m, a larger cluster is split
+    cluster_max=64.0,     # m, a larger cluster is split (memory)
     coarse=4,            # cells, the area-wide water fill
     brush_band=[0.3, 2.0], brush_block=3, brush_min=5,
     simplify_error=0.05, # m
@@ -244,21 +244,66 @@ def _init(C):
     _cache.clear()
 
 
-def pmap(C, fn, items, lo, hi, text):
-    """fn over items in the worker processes (unordered), with progress lines from lo to hi per cent."""
-    items = list(items); n = len(items); t0 = time.time(); last = [0.0]
+def _one(args):
+    """One item in a process of its own (a retry after a worker died)."""
+    from concurrent.futures import ProcessPoolExecutor
+    C, fn, it = args
+    try:
+        with ProcessPoolExecutor(1, initializer=_init, initargs=(C,)) as ex:
+            return True, ex.submit(fn, it).result()
+    except Exception as e:
+        return False, '%s' % (str(e)[:120] or type(e).__name__)
+
+
+def pmap(C, fn, items, lo, hi, text, lost=None, own=False):
+    """fn over items in the worker processes (unordered), with progress lines from lo to hi per cent.
+    A worker that dies (PDAL can take the process down when the network drops) does not stop the run:
+    what was not finished is tried again, each item in a process of its own, up to 3 times; an item
+    still failing gives lost(item, why) when that is given, else the run stops. own: every item in a
+    process of its own from the start (the reads: a second EPT read in one process has taken it down)."""
+    from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+    items = list(items); n = len(items); last = [0.0]; k = 0
 
     def tick(k):
         if time.time() - last[0] > 1.0 or k == n:
             last[0] = time.time(); say(lo + (hi - lo) * k / max(1, n), '%s %d / %d' % (text, k, n))
     if C['workers'] <= 1 or n <= 1:
         _init(C)
-        for k, it in enumerate(items):
-            yield fn(it); tick(k + 1)
+        for it in items:
+            k += 1; r = fn(it); tick(k); yield r
         return
-    pool = C.get('_pool')
-    for k, r in enumerate(pool.imap_unordered(fn, items, chunksize=1)):
-        yield r; tick(k + 1)
+    Cw = {q: v for q, v in C.items() if not q.startswith('_')}
+    if C.get('_pool') is None:
+        C['_pool'] = ProcessPoolExecutor(C['workers'], initializer=_init, initargs=(Cw,))
+    futs = {} if own else {C['_pool'].submit(fn, it): it for it in items}; left = [(it, '') for it in items] if own else []
+    for f in as_completed(futs):
+        try:
+            r = f.result()
+        except Exception as e:
+            left.append((futs[f], '%s' % (str(e)[:120] or type(e).__name__))); continue
+        k += 1; tick(k); yield r
+    if not left:
+        return
+    if not own:
+        try: C['_pool'].shutdown(wait=False, cancel_futures=True)
+        except Exception: pass
+        C['_pool'] = None
+        say(lo + (hi - lo) * k / max(1, n), '%s: %d not finished (%s), trying them again' % (text, len(left), left[0][1]))
+    left = [it for it, _w in left]; why = {}
+    for attempt in range(3):
+        if not left: break
+        nxt = []
+        with ThreadPoolExecutor(min(C['workers'], len(left))) as th:
+            for it, (ok, r) in zip(left, th.map(_one, [(Cw, fn, it) for it in left])):
+                if ok:
+                    k += 1; tick(k); yield r
+                else:
+                    nxt.append(it); why[id(it)] = r
+        left = nxt
+    for it in left:
+        if lost is None:
+            raise SystemExit('[ridge] %s failed: %s' % (text, why.get(id(it))))
+        k += 1; tick(k); yield lost(it, why.get(id(it)))
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -395,7 +440,7 @@ def w_classify(t):
     G = fill_nan_nearest(np.array(np.load(C['gfile'], mmap_mode='r')[J0:J1, I0:I1], 'f8'))
     hag = z - bilin(G, lx, ly, cell); lo, hi = PARAMS['brush_band']; S = PARAMS['brush_block']
     bj0, bi0 = j0 // S, i0 // S; bh, bw = (j1 - 1) // S - bj0 + 1, (i1 - 1) // S - bi0 + 1
-    f = ((iy + J0) // S - bj0) * bw + ((ix + I0) // S - bi0)
+    f = (np.clip(iy + J0, j0, j1 - 1) // S - bj0) * bw + (np.clip(ix + I0, i0, i1 - 1) // S - bi0)
     inband = np.bincount(f[(hag >= lo) & (hag <= hi)], minlength=bh * bw).reshape(bh, bw)
     under = np.bincount(f[(hag < lo) & (hag > -1.0)], minlength=bh * bw).reshape(bh, bw)
     return t, dict(n=len(x), stats=stats, x=x[b0], y=y[b0], z=z[b0], dv=dv[b0], ps=ps[b0],
@@ -577,7 +622,7 @@ def shape_mesh(C, Vx, L, zc, zlo, gp, gj0, gi0, I0, J0, Lw):
     import veg_mesh
     from scipy.spatial import cKDTree
     VOX = cell = C['cell']; P = PARAMS; nj, ni, nz = Vx.shape
-    F = np.minimum(np.clip((L[:, :, None] - zc[None, None, :]) / VOX, -1, 1), np.where(Vx, -1.0, 1.0)).astype('f4')
+    F = np.clip((L.astype('f4')[:, :, None] - zc.astype('f4')[None, None, :]) / np.float32(VOX), -1, 1); F[Vx] = -1.0
     vv, tt = veg_mesh.surface_nets(np.pad(F, 1, constant_values=-1.0), 0.0)[:2]
     vv = np.asarray(vv, 'f8') - 1.0; tt = np.asarray(tt)
     if not len(tt):
@@ -628,7 +673,10 @@ def run(C, notes):
     from scipy.sparse import csgraph
     from scipy.spatial import cKDTree
     P = PARAMS; cell = C['cell']; nx, ny = C['nx'], C['ny']; out = C['out']; K = P['coarse']
-    tiles = tile_list(C)
+    tiles = tile_list(C); stages = C['stages'] = {}; tt = [time.time()]
+
+    def lap(name):
+        stages[name] = round(time.time() - tt[0], 1); tt[0] = time.time()
     if C.get('ring') is not None:               # tiles the polygon does not reach are not worked
         keep = []
         for t in tiles:
@@ -642,16 +690,12 @@ def run(C, notes):
     C['gfile'] = os.path.join(C['tmp'], 'ground.npy'); C['cfile'] = os.path.join(C['tmp'], 'coarse.npy'); C['lfile'] = os.path.join(out, 'lid.npy')
     for f in (C['gfile'], C['lfile']):
         m = np.lib.format.open_memmap(f, mode='w+', dtype='<f4', shape=(ny, nx)); m[:] = np.nan; del m
-    pool = None
-    if C['workers'] > 1:
-        import multiprocessing as mp
-        pool = mp.get_context().Pool(C['workers'], initializer=_init, initargs=({k: v for k, v in C.items() if k != '_pool'},))
-    C['_pool'] = pool
+    C['_pool'] = None
     try:
         # 1. read
         if C.get('epts'):
             failed = []; npts = 0
-            for t, n, err in pmap(C, w_read, work, 1, 40, 'reading tiles'):
+            for t, n, err in pmap(C, w_read, work, 1, 40, 'reading tiles', lost=lambda t, why: (t, 0, 'the reader stopped: %s' % why), own=True):
                 npts += n
                 if err: failed.append((t, err))
             if failed:
@@ -659,6 +703,7 @@ def run(C, notes):
                 say(40, '%d tiles could not be read: left blank' % len(failed))
             if len(failed) == len(work):
                 raise SystemExit('[ridge] no tile could be read: %s' % failed[0][1])
+        lap('read')
         # 2. fine ground + the coarse lows
         ch, cw = (ny + K - 1) // K, (nx + K - 1) // K
         coarse = np.full((ch, cw), np.nan, 'f4'); cover = []
@@ -666,6 +711,7 @@ def run(C, notes):
             j0, j1, i0, i1 = tile_cells(C, t)
             coarse[j0 // K:j0 // K + cm.shape[0], i0 // K:i0 // K + cm.shape[1]] = cm
             if share: cover.append(share)
+        lap('ground')
         # 3. the area's coarse water fill (blank cells are outlets)
         say(50, 'water fill of the area')
         blank = ~np.isfinite(coarse)
@@ -673,9 +719,11 @@ def run(C, notes):
             raise SystemExit('[ridge] no ground returns (class 2) in the area')
         cz = np.where(blank, -1e9, coarse).astype('f8')
         np.save(C['cfile'], np.where(blank, np.nan, water_fill(np.pad(cz, 1, constant_values=-1e9))[1:-1, 1:-1]).astype('f4'))
+        lap('area_fill')
         # 4. lid, then the returns against it
         for _r in pmap(C, w_lid, work, 52, 60, 'lid'):
             pass
+        lap('lid')
         cand = []; stats = {}; nret = 0
         S = P['brush_block']; by, bx = (ny + S - 1) // S, (nx + S - 1) // S
         b_in = np.zeros((by, bx), 'i4'); b_un = np.zeros((by, bx), 'i4')
@@ -687,6 +735,7 @@ def run(C, notes):
                 cand.append((r['x'], r['y'], r['z'], r['dv'], r['ps'], np.full(len(r['x']), t[0] * 100000 + t[1], np.int64)))
         cat = lambda k, dt: np.concatenate([c[k] for c in cand]).astype(dt) if cand else np.zeros(0, dt)
         X, Y, Z, DV, PS, TK = cat(0, 'f8'), cat(1, 'f8'), cat(2, 'f8'), cat(3, 'f8'), cat(4, 'i8'), cat(5, 'i8')
+        lap('returns')
         # 5. patterned noise: per tile, on the statistics of the tile and its 8 neighbours
         say(70, 'flight passes')
         tot = {}; flagged_tiles = {}; isbad = np.zeros(len(X), bool)
@@ -701,6 +750,8 @@ def run(C, notes):
             alln = sum(v[0] for v in blk.values()); alld = sum(v[1] for v in blk.values()); bad = []
             for p in st:
                 n, d = blk[p]; others = (alld - d) / max(1, alln - n); share = d / max(1, n)
+                if alln - n < P['pass_others']:     # nothing to compare the pass with
+                    continue
                 if d >= P['pass_min'] and share >= P['pass_share'] and share >= P['pass_ratio'] * max(others, 1e-5):
                     bad.append(p); flagged_tiles[p] = flagged_tiles.get(p, 0) + 1
             if bad:
@@ -727,6 +778,7 @@ def run(C, notes):
                 kb[lone] = 2
         keep = np.r_[bi, np.flatnonzero(kind == 3)]
         pX, pY, pZ, pD = X[keep], Y[keep], Z[keep], DV[keep]; pK = np.r_[kb, np.full(int((kind == 3).sum()), 3, 'u1')]
+        lap('noise_groups')
         # 6. clusters of grouped returns, each worked in its own box
         gi = np.flatnonzero(kb == 0); res = []; nsplit = 0
         if len(gi):
@@ -747,9 +799,10 @@ def run(C, notes):
             if nsplit:
                 notes.append('%d clusters of returns were wider than %g m and were worked in parts (ties across the cut are not made)' % (nsplit, P['cluster_max']))
     finally:
-        if pool is not None:
-            pool.close(); pool.join()
+        if C.get('_pool') is not None:
+            C['_pool'].shutdown()
         C.pop('_pool', None)
+    lap('features')
     say(96, 'writing')
     holes = np.zeros(ny * nx, 'u1'); V = []; D = []; T = []; nv = 0
     feat = np.full(len(bi), -1, np.int64); openp = np.zeros(len(bi), bool); side = np.zeros(len(bi), bool)
@@ -948,10 +1001,6 @@ def main(argv=None):
         if ring is not None:
             rx, ry = lonlat_to_utm(ring[:, 0], ring[:, 1], zone); C['ring'] = np.c_[rx - C['ox'], ry - C['oy']]
         meta = dict(epsg=C['epsg'], zone=zone, south=bool(south), bbox_lonlat=[W_, S_, E_, N_])
-        if not (ring is None or a.bbox):
-            pass
-        elif ring is None:                       # the box asked for, as a ring in the grid (the UTM rectangle around it is larger)
-            bx, by = lonlat_to_utm([W_, E_, E_, W_], [S_, S_, N_, N_], zone); C['ring'] = np.c_[bx - C['ox'], by - C['oy']]
     else:
         if a.demo:
             x, y, z, c, ps = demo_points()
@@ -977,7 +1026,7 @@ def main(argv=None):
     J = dict(version=1, epsg=meta['epsg'], zone=meta['zone'], south=meta['south'], origin=[ox, oy],
              bbox_utm=[ox, oy, ox + C['nx'] * cell, oy + C['ny'] * cell], bbox_lonlat=meta['bbox_lonlat'], cell=cell, nx=C['nx'], ny=C['ny'],
              params=dict(PARAMS, cell=cell, tile=C['tile_c'] * cell, margin=C['marg_c'] * cell, workers=C['workers'], shapes=C['shapes']),
-             counts=counts, passes=passes, ground_cover=round(cover, 3), seconds=round(time.time() - t0, 1), notes=notes)
+             counts=counts, passes=passes, ground_cover=round(cover, 3), stages=C.get('stages'), seconds=round(time.time() - t0, 1), notes=notes)
     json.dump(J, open(os.path.join(out, 'ridge.json'), 'w'), indent=1)
     say(100, 'done in %.0f s: %d returns, %d below the ground in %d groups, %d lone, %d likely noise, %d patterned noise; %d features' % (
         J['seconds'], counts['returns'], counts['below'], counts['groups'], counts['lone'], counts['likely_noise'], counts['pattern_noise'], counts['features']))
