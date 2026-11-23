@@ -294,7 +294,15 @@ print('Done in 1.5 s')
     h = z.read('viewer.html').decode('utf-8')
     tc = trees_const(h)
     check('the single-file viewer: TREES with the file inline (the same bytes), trees.js inlined', isinstance(tc, dict) and tc['count'] == len(A) and tc['detail'] == 0 and base64.b64decode(tc['file']) == tb and 'root.FlexTrees = R' in h and 'src="libs/trees.js"' not in h)
-    check('the rest of the viewer is the plain one', h.replace(json.dumps(tc, separators=(',', ':')), 'null') == h0)
+    def no_about(t):                                   # the "About this map" facts differ (they count the trees): leave them out of the comparison
+        i = t.find('"about":')
+        if i < 0: return t
+        d, j = 0, t.index('{', i)
+        while True:
+            d += (t[j] == '{') - (t[j] == '}'); j += 1
+            if d == 0: break
+        return t[:i] + t[j:]
+    check('the rest of the viewer is the plain one', no_about(h.replace(json.dumps(tc, separators=(',', ':')), 'null')) == no_about(h0))
     reb = tmp / 'rebuilt.zip'
     r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'rebuild_viewer.py'), str(out), '-o', str(reb)], capture_output=True, text=True)
     check('tools/rebuild_viewer.py keeps the trees', r.returncode == 0 and trees_const(zipfile.ZipFile(reb).read('viewer.html').decode('utf-8')) == tc and zipfile.ZipFile(reb).read('trees.bin') == tb, r.stderr[-300:])

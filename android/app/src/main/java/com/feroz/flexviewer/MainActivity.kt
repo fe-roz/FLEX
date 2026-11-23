@@ -541,6 +541,7 @@ class MainActivity : AppCompatActivity() {
                 .replace("\"PLACEHOLDER_TEX_B64\"", if (has("tex_sat.jpg")) "\"tex_sat.jpg\"" else "\"PLACEHOLDER_TEX_B64\"")
                 .replace("\"PLACEHOLDER_HS_B64\"", if (has("tex_hs.jpg")) "\"tex_hs.jpg\"" else "\"PLACEHOLDER_HS_B64\"")
                 .replace("\"PLACEHOLDER_HSB_B64\"", if (has("tex_hsb.jpg")) "\"tex_hsb.jpg\"" else "\"\"")
+                .replace("\"PLACEHOLDER_SLOPE_B64\"", if (has("tex_slope.jpg")) "\"tex_slope.jpg\"" else "\"\"")
                 .replace("\"PLACEHOLDER_WALLS_B64\"", if (has("walls.bin")) "\"walls.bin\"" else "\"PLACEHOLDER_WALLS_B64\"")
                 .replace("PLACEHOLDER_CAVES_JSON", "ffSidecarJson(\"caves.json\")")
                 .replace("PLACEHOLDER_RIDGE_JSON", ridgeFor(has))

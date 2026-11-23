@@ -26,6 +26,7 @@ import export_terrain as et
 import export_ridge as er
 import viewer_inline
 
+os.environ['SOURCE_DATE_EPOCH'] = '1795000000'       # a fixed export time, so two exports of the same thing are the same bytes
 T0 = time.time()
 fails = passes = 0
 def check(label, ok, detail=''):

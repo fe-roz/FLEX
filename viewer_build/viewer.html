@@ -331,6 +331,12 @@
   #rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #fff; margin-right: 6px; animation: gpsPulse 1.2s infinite; }
   .tb-btn.fly-active { background: rgba(255,160,0,.35); border-color: #ffa000; }
   /* ── FLEX Field: dialogs, notes, survey note pages, field survey panel ── */
+  /* the slope map's legend: top left under the map's name, clear of the buttons on the right and the toolbar below */
+  #slope-legend { position: fixed; left: 12px; top: calc(env(safe-area-inset-top, 0px) + 46px); z-index: 12; display: none; flex-wrap: wrap; gap: 2px 8px; align-items: center;
+    max-width: min(300px, calc(100vw - 96px)); padding: 5px 8px; border-radius: 9px; background: rgba(10,10,20,.72); color: #e8e8f0; font: 600 11px system-ui, sans-serif; pointer-events: none; }
+  #slope-legend .sl-t { opacity: .75; margin-right: 2px; }
+  #slope-legend .sl-c { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+  #slope-legend .sl-c i { width: 12px; height: 12px; border-radius: 3px; border: 1px solid rgba(255,255,255,.55); display: inline-block; }
   .ff-modal { position: fixed; inset: 0; z-index: 80; background: rgba(0,0,0,.55); display: flex;
     align-items: center; justify-content: center; padding: 16px; pointer-events: all; }
   .ff-modal-box { width: min(380px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; background: rgba(14,14,26,.98);
@@ -461,6 +467,7 @@
       <button class="layer-btn active" id="btn-layer-sat">🛰️ SAT</button>
       <button class="layer-btn"        id="btn-layer-hs">🏔️ SHAD</button>
       <button class="layer-btn"        id="btn-layer-hsb" style="display:none" title="Hillshade with the brush map on it">🌿 BRUSH</button>
+      <button class="layer-btn"        id="btn-layer-slope" style="display:none" title="Slope angle colours on the hillshade">📐 SLOPE</button>
     </div>
   </div>
   <div class="map-section-label">BRIGHTNESS</div>
@@ -680,6 +687,7 @@ function ffSidecarJson(name) {
 <script>const TERRAIN_TEX_B64 = "PLACEHOLDER_TEX_B64";</script>
 <script>const TERRAIN_HS_B64  = "PLACEHOLDER_HS_B64";</script>
 <script>const TERRAIN_HSB_B64 = "PLACEHOLDER_HSB_B64";</script>
+<script>const TERRAIN_SLOPE_B64 = "PLACEHOLDER_SLOPE_B64";</script>
 <script>const TERRAIN_WALLS_B64 = "PLACEHOLDER_WALLS_B64";</script>
 <script>
 try { window.CAVES_DATA = PLACEHOLDER_CAVES_JSON; }
@@ -925,15 +933,41 @@ const terrainMaterials = [];   // refs to all terrain mesh materials (for opacit
 let terrainTexSat = null;
 let terrainTexHs  = null;
 let terrainTexHsb = null;   // the hillshade with the brush map baked on it (V2 - Ridgewalking exports), else null
-let texMode = 'sat'; // 'sat', 'hs' or 'hsb'
-const texOfMode = k => (k === 'hsb' ? terrainTexHsb : k === 'hs' ? terrainTexHs : terrainTexSat);
+let terrainTexSlope = null; // the slope map: slope-angle colours on the hillshade (an export made with "Slope map"), else null
+let texMode = 'sat'; // 'sat', 'hs', 'hsb' or 'slope'
+const texOfMode = k => (k === 'slope' ? terrainTexSlope : k === 'hsb' ? terrainTexHsb : k === 'hs' ? terrainTexHs : terrainTexSat);
 // Show one of the maps (if this export has it) and mark its button.
 function setTexMode(kind) {
   const t = texOfMode(kind);
   if (!t) return false;
   texMode = kind; applyTerrainTexture(t);
-  ['sat', 'hs', 'hsb'].forEach(k => document.getElementById('btn-layer-' + k).classList.toggle('active', k === kind));
+  ['sat', 'hs', 'hsb', 'slope'].forEach(k => document.getElementById('btn-layer-' + k).classList.toggle('active', k === kind));
+  slopeLegend();
   return true;
+}
+
+// The slope map's legend: a small strip, only while that map is the one shown (built once, then shown or hidden).
+// The classes and their colours come with the export (meta.slope_map); an export that does not say has the usual ones.
+const SLOPE_LEGEND_DEFAULT = [[27, 'ffe600'], [30, 'ff9900'], [35, 'ff1a00'], [45, 'a020f0'], [50, '1f4fff'], [60, '000000']];
+function slopeLegend() {
+  let box = document.getElementById('slope-legend');
+  const on = texMode === 'slope' && !!terrainTexSlope;
+  if (!on) { if (box) box.style.display = 'none'; return; }
+  if (!box) {
+    box = document.createElement('div'); box.id = 'slope-legend';
+    const cls = (META.slope_map && Array.isArray(META.slope_map.classes) && META.slope_map.classes.length ? META.slope_map.classes : SLOPE_LEGEND_DEFAULT)
+      .filter(c => Array.isArray(c) && isFinite(+c[0]) && /^[0-9a-f]{6}$/i.test(String(c[1])));
+    const t = document.createElement('span'); t.className = 'sl-t'; t.textContent = 'Slope'; box.appendChild(t);
+    cls.forEach((c, i) => {
+      const s = document.createElement('span'); s.className = 'sl-c';
+      const sw = document.createElement('i'); sw.style.background = '#' + c[1];
+      s.appendChild(sw);
+      s.appendChild(document.createTextNode(i + 1 < cls.length ? (+c[0]) + '\u2013' + (+cls[i + 1][0]) + '\u00b0' : (+c[0]) + '\u00b0+'));
+      box.appendChild(s);
+    });
+    document.body.appendChild(box);
+  }
+  box.style.display = 'flex';
 }
 
 function applyTerrainTexture(tex) {
@@ -1017,7 +1051,7 @@ function textureSrc(src) {
 // texture and UVs remapped to it. If the tile files can't be loaded (a
 // single-file viewer opened from disk) the overview texture is drawn over the
 // tiles instead, by a per-tile offset and repeat.
-const TT = { cols: 1, rows: 1, on: false, sat: new Map(), hs: new Map(), hsb: new Map(), failed: false };
+const TT = { cols: 1, rows: 1, on: false, sat: new Map(), hs: new Map(), hsb: new Map(), slope: new Map(), failed: false };
 function tileOfOverview(tex, c, r) {
   tex._tileClones = tex._tileClones || {};
   const k = c + '_' + r;
@@ -1981,6 +2015,12 @@ setTimeout(() => {
       const layerSection = document.getElementById('map-panel-layer');
       if (layerSection) layerSection.style.display = 'block';
     };
+    // The slope map: a further Imagery choice, only on a map that has it.
+    const slopeReady = () => {
+      document.getElementById('btn-layer-slope').style.display = '';
+      const layerSection = document.getElementById('map-panel-layer');
+      if (layerSection) layerSection.style.display = 'block';
+    };
     // A map picked before (remembered with the display choices) is shown again as soon as it has loaded.
     const texArrived = (kind, tex) => {
       if (texMode === kind) applyTerrainTexture(tex);
@@ -2007,12 +2047,19 @@ setTimeout(() => {
           texArrived('hsb', tex);
         });
       }
+      if (TERRAIN_SLOPE_B64 && TERRAIN_SLOPE_B64 !== 'PLACEHOLDER_SLOPE_B64') {
+        loadB64Texture(TERRAIN_SLOPE_B64, tex => {
+          terrainTexSlope = tex;
+          slopeReady();
+          texArrived('slope', tex);
+        });
+      }
     };
     const tt = META.texture_tiles;
     if (tt && tt.cols * tt.rows > 1) {
       // Big export: cut the terrain along the tiles, load each tile's texture.
       splitTerrainIntoTiles(terrainGroup, tt.cols, tt.rows);
-      const kinds = ['sat'].concat(tt.hs ? ['hs'] : [], tt.hsb ? ['hsb'] : []);
+      const kinds = ['sat'].concat(tt.hs ? ['hs'] : [], tt.hsb ? ['hsb'] : [], tt.slope ? ['slope'] : []);
       let pending = 0;
       kinds.forEach(kind => {
         const sentinel = { _tiled: kind };
@@ -2020,14 +2067,14 @@ setTimeout(() => {
           pending++;
           loadB64Texture('tex_' + kind + '_' + c + '_' + r + '.jpg', tex => {
             TT[kind].set(c + '_' + r, tex);
-            if (kind === 'sat') terrainTexSat = sentinel; else if (kind === 'hs') { terrainTexHs = sentinel; hsReady(); } else { terrainTexHsb = sentinel; hsbReady(); }
+            if (kind === 'sat') terrainTexSat = sentinel; else if (kind === 'hs') { terrainTexHs = sentinel; hsReady(); } else if (kind === 'slope') { terrainTexSlope = sentinel; slopeReady(); } else { terrainTexHsb = sentinel; hsbReady(); }
             if (texMode === kind) applyTerrainTexture(sentinel);
             else if (DISP.tex === kind && !texArrived.done) { texArrived.done = true; setTexMode(kind); }
           }, () => {
             // A tile file that won't load: draw the overview over the tiles.
             if (TT.failed) return;
-            TT.failed = true; TT.sat.clear(); TT.hs.clear(); TT.hsb.clear();
-            terrainTexSat = terrainTexHs = terrainTexHsb = null;
+            TT.failed = true; TT.sat.clear(); TT.hs.clear(); TT.hsb.clear(); TT.slope.clear();
+            terrainTexSat = terrainTexHs = terrainTexHsb = terrainTexSlope = null;
             loadOverview();
           });
         }
@@ -4688,8 +4735,8 @@ function renderDisplaySheet() {
   if (hsOk) {
     sheetHead('Imagery');
     // A map with the brush picture (V2 - Ridgewalking): Aerial, Hillshade, Hillshade + brush; else as always.
-    const kinds = ['sat'].concat(terrainTexHs ? ['hs'] : [], terrainTexHsb ? ['hsb'] : []);
-    const names = terrainTexHsb ? { sat: 'Aerial', hs: 'Hillshade', hsb: 'Hillshade + brush' }
+    const kinds = ['sat'].concat(terrainTexHs ? ['hs'] : [], terrainTexHsb ? ['hsb'] : [], terrainTexSlope ? ['slope'] : []);
+    const names = terrainTexHsb || terrainTexSlope ? { sat: 'Aerial', hs: 'Hillshade', hsb: 'Hillshade + brush', slope: 'Slope' }
       : { sat: 'Satellite', hs: document.getElementById('btn-layer-hs').textContent.includes('LIDAR') ? 'LiDAR shade' : 'Shade' };
     sheetSeg(kinds.map(k => names[k]), kinds.indexOf(texMode), i => { setTexMode(kinds[i]); rerenderSheet(); });
   }
@@ -7948,7 +7995,7 @@ fogSlider.addEventListener('input', () => applyFog(parseInt(fogSlider.value)));
 
 
 // Imagery layer buttons (revealed when hillshade loads)
-['sat', 'hs', 'hsb'].forEach(k => document.getElementById('btn-layer-' + k).addEventListener('click', () => { setTexMode(k); }));
+['sat', 'hs', 'hsb', 'slope'].forEach(k => document.getElementById('btn-layer-' + k).addEventListener('click', () => { setTexMode(k); }));
 
 // ── Help overlay ─────────────────────────────────────────────────────────────
 // A card that scrolls. It closes with ✕, Close, a tap on the dark backdrop or Esc; a tap inside the card only scrolls or opens

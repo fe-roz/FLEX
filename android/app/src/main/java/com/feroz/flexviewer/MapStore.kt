@@ -38,9 +38,9 @@ class MapStore(private val ctx: Context) {
 
     companion object {
         /** The data files an export carries. Nothing else is extracted. */
-        val DATA_FILES = setOf("terrain.glb", "tex_sat.jpg", "tex_hs.jpg", "tex_hsb.jpg", "walls.bin", "caves.json")
+        val DATA_FILES = setOf("terrain.glb", "tex_sat.jpg", "tex_hs.jpg", "tex_hsb.jpg", "tex_slope.jpg", "walls.bin", "caves.json")
         /** Texture tiles of a big export (tex_sat_<col>_<row>.jpg, tex_hs_…), see tex_tiles.py. */
-        private val TILE_RE = Regex("^tex_(sat|hs|hsb)_[0-9]{1,2}_[0-9]{1,2}\\.jpg$")
+        private val TILE_RE = Regex("^tex_(sat|hs|hsb|slope)_[0-9]{1,2}_[0-9]{1,2}\\.jpg$")
         /** Documents of the project that belong to the export: docs.json and one image per page (docs_<sha256>.<ext>), see viewer_inline.py. */
         private val DOC_RE = Regex("^docs_[0-9a-f]{64}\\.(jpg|jpeg|png|webp)$")
         /** V2 - Ridgewalking (an export made with that box ticked): returns below ground, shapes, guessed openings, the step's summary (its hillshade with brush is tex_hsb.jpg, above). */
