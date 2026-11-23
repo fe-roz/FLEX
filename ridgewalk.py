@@ -1003,7 +1003,7 @@ def run(C, notes):
                 raise SystemExit('[ridge] no tile could be read: %s' % failed[0][1])
         lap('read')
         if C.get('quality', True):                  # the LiDAR quality report: measured here, written at the end; changes nothing below
-            quality_gather(C, work, failed if (C.get('epts') and not C.get('have_tiles')) else None)
+            quality_gather(C, work, failed if (C.get('epts') and not C.get('have_tiles')) else C.get('blanked'))
             lap('quality')
         # 2. fine ground + the coarse lows
         ch, cw = (ny + K - 1) // K, (nx + K - 1) // K
@@ -1282,8 +1282,6 @@ def w_quality(t):
     j0, j1, i0, i1 = tile_cells(C, t)
     x, y, z, c, ps, la = load_tile(C, t)
     r = dict(n=int(len(x)))
-    if not len(x):
-        return t, r
     ci = np.clip((x / cell).astype(np.int64), i0, i1 - 1); cj = np.clip((y / cell).astype(np.int64), j0, j1 - 1)
     qk = (cj // QC) * qnx + (ci // QC)
     r['dens'] = np.unique(qk, return_counts=True)
@@ -1304,6 +1302,8 @@ def w_quality(t):
     u, inv = np.unique(qg.ravel(), return_inverse=True)
     r['cells'] = (u, np.bincount(inv, minlength=len(u)), np.bincount(inv, weights=(d > 1.0).ravel(), minlength=len(u)).astype(np.int64),
                   np.bincount(inv, weights=(d > 3.0).ravel(), minlength=len(u)).astype(np.int64))
+    if not len(x):                              # a tile with no returns (a failed read, or nothing there) is still part of the area
+        return t, r
     try:
         with np.load(pfile(C, t)) as Z:
             if 'q_gt' in Z.files:
@@ -1322,10 +1322,10 @@ def quality_gather(C, work, failed):
              pairs=[], classes=np.zeros(256, np.int64), passes={}, gt=[np.inf, -np.inf], sa={}, tiles=len(work), empty=[], retried=0, tries_known=False,
              failed=None if failed is None else [(tuple(t), str(w)) for t, w in failed])
     for t, r in pmap(C, w_quality, work, 40, 40, 'coverage'):
+        u, tot, f1, f3 = r['cells']; A['tot'][u] += tot; A['far1'][u] += f1; A['far3'][u] += f3
         if not r['n']:
             A['empty'].append(tuple(t)); continue
         A['dens'][r['dens'][0]] += r['dens'][1]; A['gseen'][r['gseen'][0]] += r['gseen'][1]
-        u, tot, f1, f3 = r['cells']; A['tot'][u] += tot; A['far1'][u] += f1; A['far3'][u] += f3
         A['pairs'].append(r['pairs']); A['classes'] += r['classes']
         for p, n in zip(*r['passes']):
             A['passes'][int(p)] = A['passes'].get(int(p), 0) + int(n)
@@ -1561,6 +1561,7 @@ def main(argv=None):
     ap.add_argument('--max-link', type=float, default=PARAMS['max_link'], help='m, the longest guessed link (tie or way out) a shape may rest on')
     ap.add_argument('--debug', action='store_true', help='also write debug.npz (per below return: feature, open, sideways)')
     ap.add_argument('--keep-work', action='store_true', help=argparse.SUPPRESS)
+    ap.add_argument('--blank-tile', nargs=2, type=int, action='append', default=[], help=argparse.SUPPRESS)      # tests: a tile (row, column) as if its read had failed
     ap.add_argument('--no-quality', action='store_true', help='leave the LiDAR quality report (quality.json and its rasters) out')
     ap.add_argument('--work', help=argparse.SUPPRESS)        # the scratch folder; one that already holds the tiles' returns is used as it is (no reading)
     a = ap.parse_args(argv)
@@ -1623,6 +1624,9 @@ def main(argv=None):
         C['nx'] = int(math.ceil((x.max() + 1e-6) / cell)); C['ny'] = int(math.ceil((y.max() + 1e-6) / cell))
         if ring is not None: C['ring'] = ring - [C['ox'], C['oy']]
         split_points(C, x, y, z, c, ps, last); del x, y, z, c, ps, last
+        for tj, ti in a.blank_tile:
+            if os.path.exists(pfile(C, (tj, ti))): os.remove(pfile(C, (tj, ti)))
+            C.setdefault('blanked', []).append(((tj, ti), 'left blank on purpose (a test)'))
     say(1, 'area %.0f x %.0f m, %d tiles, %d workers' % (C['nx'] * cell, C['ny'] * cell, len(tile_list(C)), C['workers']))
     counts, passes, cover = run(C, notes)
     notes.append('Tile-independent: groups, lone returns, noise and features (worked over the whole area, each cluster in its own box). '

@@ -300,6 +300,60 @@ t1 = time.time(); dense = rng.uniform(0, 110, (300000, 2)); ld = rw.cluster_labe
 check('a hollow full of returns (300,000 on a hectare) is one cluster, quickly', len(np.unique(ld)) == 1 and time.time() - t1 < 6, '%.1f s' % (time.time() - t1))
 check('work folder removed', not os.path.exists(os.path.join(A, '_work')))
 
+# ---- the LiDAR quality report: it measures and reports, and changes nothing
+import filecmp
+Qa = json.load(open(os.path.join(A, 'quality.json'))); Qm = json.load(open(os.path.join(A, 'maps.json')))
+N0 = os.path.join(tmp, 'noq')
+run(['--demo', N0, '--debug', '--workers', '1', '--tile', '48', '--no-quality'])       # as run B: one process, so the order of the returns is fixed
+RES = ['lid.npy', 'holes.npy', 'points.bin', 'shapes.bin', 'features.json', 'brush.npy', 'brush.json']
+check('the results are byte for byte the same with and without the report', os.path.exists(os.path.join(B, 'quality.json')) and all(filecmp.cmp(os.path.join(B, f), os.path.join(N0, f), shallow=False) for f in RES),
+      ' '.join(f for f in RES if not filecmp.cmp(os.path.join(B, f), os.path.join(N0, f), shallow=False)))
+Jn = json.load(open(os.path.join(N0, 'ridge.json')))
+Jb_ = json.load(open(os.path.join(B, 'ridge.json')))
+check('ridge.json counts and passes too', Jn['counts'] == Jb_['counts'] and Jn['passes'] == Jb_['passes'] and Jn['counts'] == J['counts'])
+check('--no-quality writes no report', not any(os.path.exists(os.path.join(N0, f)) for f in ('quality.json', 'maps.json', 'passes.u8', 'ground_seen.u8', 'density.u8')))
+qp = {q['id']: q for q in Qa['passes']}; rp = {q['id']: q for q in J['passes']}
+check('the cloud: returns, ground returns, classes', Qa['cloud']['returns'] == J['counts']['returns'] and Qa['cloud']['ground_returns'] == [c_['returns'] for c_ in Qa['cloud']['classes'] if c_['code'] == 2][0]
+      and sum(c_['returns'] for c_ in Qa['cloud']['classes']) == Qa['cloud']['returns'] and 8 < Qa['cloud']['returns_per_m2'] < 12, str(Qa['cloud'])[:200])
+check('no date is made up: unknown, with the reason', Qa['cloud']['dates'] is None and 'not read' in Qa['cloud']['dates_how'])
+check('every pass with its returns; they add up', sorted(qp) == [1, 2, 3, 4, 9] and sum(q['returns'] for q in Qa['passes']) == Qa['cloud']['returns'] and abs(sum(q['share'] for q in Qa['passes']) - 1) < 1e-3)
+check('the striped pass is reported flagged with the numbers of ridge.json', qp[9]['flagged'] and not any(qp[k]['flagged'] for k in (1, 2, 3, 4)) and qp[9]['set_aside'] == rp[9]['set_aside'] > 0
+      and qp[9]['kept_confirmed'] == rp[9]['kept_confirmed'] and qp[9]['blocks_flagged'] == rp[9]['blocks_flagged'] > 0 and qp[9]['blocks_reached'] == rp[9]['blocks_reached'], str(qp[9]))
+vd = {v['key']: v for v in Qa['verdicts']}
+check('the verdicts are sentences with their number', vd['passes']['value'] == 5 and vd['flagged_pass']['value'] == qp[9]['blocks_flagged'] and str(qp[9]['set_aside']) in vd['flagged_pass']['text']
+      and vd['single_pass']['value'] == Qa['coverage']['passes_1'] and vd['ground_not_seen']['value'] == Qa['coverage']['no_ground_within_3m'] and vd['tiles_blank']['value'] is None, str(vd)[:300])
+cv = Qa['coverage']
+check('coverage of the whole scene: every cell seen by 3 or more passes, ground everywhere', cv['passes_3_or_more'] > 0.99 and cv['passes_0'] == 0 and cv['no_ground_within_3m'] < 0.001 and cv['largest_patch_without_ground_m2'] == 0
+      and abs(cv['passes_0'] + cv['passes_1'] + cv['passes_2'] + cv['passes_3_or_more'] - 1) < 1e-3, str(cv))
+G_ = Qm['grid']; nq = G_['nx'] * G_['ny']
+check('the rasters: a coarse grid of 6 to 10 m, one byte a cell, listed the way the tile server reads them', 6 <= G_['cell'] <= 10 and G_['row0'] == 'south' and [m_['id'] for m_ in Qm['maps']] == ['passes', 'groundseen', 'density']
+      and all(os.path.getsize(os.path.join(A, m_['file'])) == nq and len(m_['values']) == m_['levels'] and m_['min'] == m_['values'][0] for m_ in Qm['maps']), str(G_))
+P8 = np.fromfile(os.path.join(A, 'passes.u8'), 'u1').reshape(G_['ny'], G_['nx']); D8 = np.fromfile(os.path.join(A, 'density.u8'), 'u1').reshape(G_['ny'], G_['nx'])
+dvals = np.array(Qm['maps'][2]['values'])
+check('passes.u8 holds the count, density.u8 the returns per m2', int(P8.min()) >= 4 and int(P8[2, G_['nx'] - 3]) == 6 and 5 < float(np.median(dvals[D8[D8 > 0] - 1])) < 15, '%s %s' % (P8.min(), P8[2, G_['nx'] - 3]))
+# a gap: no returns at all in a 30 m square; three of the four passes missing over another; a tile left blank
+x_, y_, z_, c_, p_, l_ = rw.demo_points()
+gap = (x_ > 60) & (x_ < 90) & (y_ > 68) & (y_ < 98); thin = (x_ > 10) & (x_ < 50) & (y_ > 115) & (y_ < 140) & (p_ != 1)
+kq = ~(gap | thin); npzq = os.path.join(tmp, 'q.npz')
+np.savez(npzq, x=x_[kq], y=y_[kq], z=z_[kq], c=c_[kq], psid=p_[kq])
+Qd = os.path.join(tmp, 'q')
+run(['--npz', npzq, '--out', Qd, '--no-shapes', '--workers', '4', '--tile', '48', '--blank-tile', '0', '3'])
+Qg = json.load(open(os.path.join(Qd, 'quality.json'))); cg = Qg['coverage']; Gq = json.load(open(os.path.join(Qd, 'maps.json')))['grid']
+tile_share = 48.0 * 48.0 / (192.0 * 144.0); gap_share = 900.0 / (192.0 * 144.0)
+check('the gap and the blank tile are area with no pass', 0.08 < cg['passes_0'] < tile_share + gap_share + 0.005, str(cg['passes_0']))
+check('where one pass is left it is counted as one', 0.02 < cg['passes_1'] < 0.06, str(cg['passes_1']))
+check('ground not seen within 3 m: the gap (less its rim) and the tile', tile_share + 0.6 * gap_share - 0.02 < cg['no_ground_within_3m'] < tile_share + gap_share + 0.01 and cg['no_ground_within_1m'] >= cg['no_ground_within_3m'], str(cg))
+check('the largest patch without ground is the blank tile', 0.8 * 48 * 48 < cg['largest_patch_without_ground_m2'] < 1.3 * 48 * 48, str(cg['largest_patch_without_ground_m2']))
+rd = Qg['reading']
+check('the blank tile is reported with its box', rd['left_blank'] == 1 and rd['blank'][0]['tile'] == [0, 3] and rd['blank'][0]['box'] == [144.0, 0.0, 192.0, 48.0] and rd['blank'][0]['why'] and rd['tiles'] == 12, str(rd)[:300])
+vq = {v['key']: v for v in Qg['verdicts']}
+check('and said in the verdicts', vq['tiles_blank']['value'] == 1 and '1 of 12 tiles' in vq['tiles_blank']['text'] and 'no_pass' in vq and vq['no_pass']['value'] == cg['passes_0'], str(vq.get('tiles_blank')))
+Pq = np.fromfile(os.path.join(Qd, 'passes.u8'), 'u1').reshape(Gq['ny'], Gq['nx']); Sq = np.fromfile(os.path.join(Qd, 'ground_seen.u8'), 'u1').reshape(Gq['ny'], Gq['nx'])
+qc = Gq['cell']; at = lambda a8, x, y: int(a8[int(y / qc), int(x / qc)])
+check('passes.u8: 0 passes in the gap and the tile, 1 where thin, 4 or 5 elsewhere', at(Pq, 75, 83) == 1 and at(Pq, 170, 20) == 1 and at(Pq, 30, 128) == 2 and at(Pq, 30, 60) >= 5, '%d %d %d %d' % (at(Pq, 75, 83), at(Pq, 170, 20), at(Pq, 30, 128), at(Pq, 30, 60)))
+check('ground_seen.u8: nothing in the gap, a good share elsewhere', at(Sq, 75, 83) == 1 and at(Sq, 30, 60) > 30, '%d %d' % (at(Sq, 75, 83), at(Sq, 30, 60)))
+check('dates only when they are honest', rw.gps_dates([np.nan, np.nan])[0] is None and rw.gps_dates([1000.0, 500000.0])[0] is None and rw.gps_dates([3.0e8, 3.0e8 + 86400 * 3])[0] == ['2021-03-17', '2021-03-20']
+      and rw.gps_dates([-9.0e8, 3.0e8])[0] is None, str(rw.gps_dates([3.0e8, 3.0e8 + 86400 * 3])))
 import shutil
 shutil.rmtree(tmp, ignore_errors=True)
 dt = time.time() - T0
