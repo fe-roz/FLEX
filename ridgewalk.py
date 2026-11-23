@@ -11,9 +11,13 @@ The method (numbers in PARAMS):
   * fine ground: the median of the ground returns (class 2) per cell, gaps filled;
   * the lid: the ground closed over everything narrower than 2 m, and never under the level water would
     stand at in a closed hollow. It is the ground as you would walk it; it is also the display ground;
-  * a return is BELOW when it is more than 0.5 m under the lid at right angles to it (so steep ground does
-    not count) and at most 35 m deep;
-  * patterned noise: a flight pass whose returns go deep (> 3 m) far more often than the other passes' do
+  * candidates: the returns more than 0.5 m under the lid at right angles to it;
+  * a candidate is BELOW GROUND when it lies more than --min-behind (1 m) BEHIND THE LOCAL FACE: a plane fitted
+    in 3D to the last returns around it that are not candidates (2.5 m around, then 1.5, then 4; at least 12
+    returns; the outer sheet only), so returns lying on a wall under an overhanging lid are the wall, not a
+    cave. Candidates found to lie on the face join it and the fit is repeated. Its depth is that distance (at
+    most 35 m). No face can be fitted (too deep, nothing around): the lid's measure stands and it is kept;
+  * patterned noise: a flight pass whose returns are deep below ground (> 3 m) far more often than the other passes'
     (>= 1 % of its returns, >= 8 x the others' share, >= 30 such returns) has its below returns set aside,
     except those another pass confirms (one within 1.5 m);
   * groups: below returns within 1.5 m of each other (2 or more); the rest are lone, and a lone return
@@ -1171,7 +1175,8 @@ def main(argv=None):
     notes.append('Tile-independent: groups, lone returns, noise and features (worked over the whole area, each cluster in its own box). '
                  'Depends on the tile cut: the fill of ground gaps near a tile\'s margin edge; the water level of a hollow wider than the '
                  'margin whose rim is thinner than %g m (the area-wide fill is on a %g m grid); the patterned-noise decision '
-                 '(per tile, on the tile and its 8 neighbours).' % (2 * K * cell, K * cell))
+                 '(per tile, on the tile and its 8 neighbours); the face fits use the returns within 12 m of the tile, so a chain of '
+                 'candidates joining the face from farther away is not followed.' % (2 * K * cell, K * cell))
     if not a.keep_work:
         shutil.rmtree(C['tmp'], ignore_errors=True)
     ox, oy = C['ox'], C['oy']
