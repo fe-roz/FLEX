@@ -397,7 +397,7 @@
   const TRIP_LISTS = ['people', 'caves', 'links'];
   function emptyProject(pid) {
     return { id: pid, name: '', desc: '', lists: {}, caves: {}, aliases: {}, notes: {}, leads: {},
-             surveys: {}, order: [], caveUpdates: {}, surveyVersions: {}, segments: {}, cavefiles: {}, systems: {}, layers: {}, features: {}, groups: {}, arealabels: {}, trips: {}, proposals: {}, archived: null, footprint: null, moves: {}, log: [], byId: new Map() };
+             surveys: {}, order: [], caveUpdates: {}, surveyVersions: {}, segments: {}, cavefiles: {}, systems: {}, layers: {}, features: {}, groups: {}, arealabels: {}, rmarks: {}, trips: {}, proposals: {}, archived: null, footprint: null, moves: {}, log: [], byId: new Map() };
   }
   // Field-survey entries name their survey in `sid`. survey.set and survey.delete once wrote it in `id`, over
   // the entry's own id ("<dev>.<seq>"), so every later change to a survey looked like a copy of its first and was
@@ -615,6 +615,9 @@
           t.updated = { t: e.t, who: e.who };
           break;
         }
+        // Marks on ridgewalking features (the section "Ridgewalking marks" at the end). Older readers fall
+        // through to `default` and ignore the op.
+        case 'rmark.set': applyRmark(S, e); break;
         case 'note.set': (recs.note[e.note] || (recs.note[e.note] = { id: e.note, entries: [] })).entries.push(e); break;
         case 'lead.set': case 'lead.del': case 'lead.restore':
           (recs.lead[e.lead] || (recs.lead[e.lead] = { id: e.lead, entries: [] })).entries.push(e); break;
@@ -2124,7 +2127,171 @@
     };
   }
 
+  // ── Ridgewalking marks: what somebody found at a ridgewalking feature ─────
+  // On the phone a feature of a "V2 - Ridgewalking" export (a pit, a crack, an opening the LiDAR saw) is marked
+  // cave, pit, nothing or not reached. Features are worked out again at every export and their numbers change, so
+  // A MARK BELONGS TO A PLACE: it keeps its own position and what was known about the feature then, and is tied
+  // to a feature by nearness when it is shown (rmarkMatch), never by a feature id (kept as a hint only).
+  //   rmark.set { mark, kind: 'cave' | 'pit' | 'nothing' | 'unreached', note, lon, lat, h,
+  //               feat: { id, depth, returns, entrance: 'true' | 'guessed' | 'none', size: [dx, dy, dz] },
+  //               removed, prev (what it was before: for undo; null = new), base }
+  // Each field: the last writer in replay order, so changing a mark is a new record and the latest wins; every
+  // record stays in `history` (who said what, when). `removed` takes the mark away, removed: false brings it back.
+  // Two phones that mark the same feature without knowing of each other make two marks (two ids) a few metres
+  // apart at most: both are kept, the later one speaks for the feature and the other shows in its history.
+  const RMARK_KINDS = ['cave', 'pit', 'nothing', 'unreached'];
+  const RMARK_LABELS = { cave: 'Cave', pit: 'Pit', nothing: 'Nothing', unreached: 'Not reached' };
+  const RMARK_COLOURS = { cave: '#43c463', pit: '#3d8bff', nothing: '#9aa0a6', unreached: '#ffb020' };
+  const RMARK_MATCH_M = 6;             // a mark speaks for the nearest feature whose anchor is within this (horizontal), or whose box it is in
+  const RMARK_BOX_PAD_M = 2;           // … a feature's box counts this much wider
+  const RMARK_UP_M = 25;               // … and never one this far above or below it (features stacked in a cliff)
+  const rmarkKind = k => (RMARK_KINDS.includes(k) ? k : null);
+  const rmNum = v => (v != null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
+  function rmarkFeat(f) {
+    if (!f || typeof f !== 'object') return null;
+    const o = {};
+    if (f.id != null && f.id !== '') o.id = String(f.id).slice(0, 40);
+    ['depth', 'returns'].forEach(k => { const v = rmNum(f[k]); if (v !== null && v >= 0) o[k] = k === 'returns' ? Math.round(v) : Math.round(v * 100) / 100; });
+    if (['true', 'guessed', 'none'].includes(f.entrance)) o.entrance = f.entrance;
+    if (Array.isArray(f.size) && f.size.length === 3 && f.size.every(v => rmNum(v) !== null)) o.size = f.size.map(v => Math.round(Number(v) * 10) / 10);
+    return Object.keys(o).length ? o : null;
+  }
+  function applyRmark(S, e) {
+    if (e.mark == null || e.mark === '') return;
+    const id = String(e.mark);
+    let m = S.rmarks[id];
+    if (!m) {
+      if (rmNum(e.lon) === null || rmNum(e.lat) === null) return;                 // a mark needs a place
+      m = S.rmarks[id] = { id, kind: '', note: '', lon: 0, lat: 0, h: null, feat: null, removed: false, created: { t: e.t, who: e.who }, history: [], heads: [] };
+    }
+    if (e.kind != null && rmarkKind(e.kind)) m.kind = e.kind;                     // (a kind this reader does not know leaves the mark as it was)
+    if (e.note != null) m.note = String(e.note).slice(0, 2000);
+    if (rmNum(e.lon) !== null && rmNum(e.lat) !== null && Math.abs(Number(e.lat)) <= 90 && Math.abs(Number(e.lon)) <= 180) { m.lon = Number(e.lon); m.lat = Number(e.lat); }
+    if (e.h !== undefined) m.h = rmNum(e.h);
+    if (e.feat !== undefined) m.feat = rmarkFeat(e.feat);
+    if (e.removed != null) m.removed = !!e.removed;
+    m.history.push({ id: e.id, t: e.t, who: e.who, kind: e.kind != null ? String(e.kind) : undefined, note: e.note != null ? String(e.note) : undefined, removed: e.removed != null ? !!e.removed : undefined });
+    m.updated = { t: e.t, who: e.who };
+    m.heads = [e.id];                  // a change names the record it was made on (`base`), so it is replayed after it whatever the clocks say
+  }
+  // Live marks (placed, with a kind, not removed), the latest change first.
+  const liveRmarks = S => Object.values((S && S.rmarks) || {}).filter(m => !m.removed && m.kind)
+    .sort((a, b) => String(b.updated.t).localeCompare(String(a.updated.t)) || a.id.localeCompare(b.id));
+  // Metres between two lon/lat places (flat-earth at their latitude: good to a centimetre over a few hundred metres).
+  function rmarkMetres(a, b) {
+    const k = Math.PI / 180, R = 6371008.8, la = (Number(a.lat) + Number(b.lat)) / 2 * k;
+    return Math.hypot((Number(b.lon) - Number(a.lon)) * k * Math.cos(la) * R, (Number(b.lat) - Number(a.lat)) * k * R);
+  }
+  // The body of the rmark.set that turns mark `cur` (null: a new one at next.lon / lat / h) into `next`
+  // ({ kind, note, lon, lat, h, feat, removed }: only what is given changes), or null when nothing would change.
+  function rmarkBody(cur, next) {
+    next = next || {};
+    const body = { op: 'rmark.set', mark: cur ? cur.id : (next.id != null && next.id !== '' ? String(next.id) : uid(12)) }, was = {};
+    if (!cur) {
+      if (!rmarkKind(next.kind) || rmNum(next.lon) === null || rmNum(next.lat) === null) return null;
+      Object.assign(body, { kind: next.kind, note: String(next.note || '').trim(), lon: Math.round(Number(next.lon) * 1e7) / 1e7, lat: Math.round(Number(next.lat) * 1e7) / 1e7 });
+      if (rmNum(next.h) !== null) body.h = Math.round(Number(next.h) * 100) / 100;
+      const f = rmarkFeat(next.feat); if (f) body.feat = f;
+      body.prev = null;
+      return body;
+    }
+    if (next.kind != null && rmarkKind(next.kind) && next.kind !== cur.kind) { body.kind = next.kind; was.kind = cur.kind; }
+    if (next.note != null && String(next.note).trim() !== cur.note) { body.note = String(next.note).trim(); was.note = cur.note; }
+    if (next.removed != null && !!next.removed !== !!cur.removed) { body.removed = !!next.removed; was.removed = !!cur.removed; }
+    if (next.feat !== undefined) { const f = rmarkFeat(next.feat); if (JSON.stringify(f) !== JSON.stringify(cur.feat)) { body.feat = f; was.feat = clone(cur.feat); } }
+    if (rmNum(next.lon) !== null && rmNum(next.lat) !== null && (Math.abs(next.lon - cur.lon) > 1e-8 || Math.abs(next.lat - cur.lat) > 1e-8)) {
+      body.lon = Math.round(Number(next.lon) * 1e7) / 1e7; body.lat = Math.round(Number(next.lat) * 1e7) / 1e7; was.lon = cur.lon; was.lat = cur.lat;
+      if (rmNum(next.h) !== null) { body.h = Math.round(Number(next.h) * 100) / 100; was.h = cur.h; }
+    }
+    if (!Object.keys(was).length) return null;
+    body.prev = was;
+    if (cur.heads && cur.heads.length) body.base = cur.heads.slice();
+    return body;
+  }
+  // The entry that undoes an rmark.set (a body, like tripUndo), or null.
+  function rmarkUndo(e) {
+    if (!e || e.op !== 'rmark.set' || e.prev === undefined) return null;
+    const out = { op: 'rmark.set', mark: e.mark, base: [e.id] };
+    if (e.prev === null) return Object.assign(out, { removed: true, prev: { removed: false } });
+    const now = {};
+    Object.keys(e.prev).forEach(k => { out[k] = clone(e.prev[k]); now[k] = e[k] === undefined ? null : clone(e[k]); });
+    out.prev = now;
+    return out;
+  }
+  /**
+   * Which mark speaks for which feature. marks: [{ id, lon, lat, h?, updated: { t } … }] (liveRmarks, or an export's);
+   * features: [{ id, lon, lat, h?, box?: [west m, south m, east m, north m] round its anchor … }].
+   * A mark goes to the NEAREST feature whose anchor is within o.match metres (RMARK_MATCH_M) of it, or inside whose box
+   * (+ o.pad) it lies, and not more than o.up metres above or below it when both heights are known. A feature takes
+   * the latest of its marks (by updated.t, then id); its other marks are `also`. A mark no feature takes is `alone`:
+   * still shown, at its own place.
+   * → { byFeature: { <feature id>: { mark, also: [marks], d (metres) } }, alone: [marks], ofMark: { <mark id>: <feature id> } }
+   */
+  function rmarkMatch(marks, features, o) {
+    o = o || {};
+    const match = o.match != null ? o.match : RMARK_MATCH_M, pad = o.pad != null ? o.pad : RMARK_BOX_PAD_M, up = o.up != null ? o.up : RMARK_UP_M;
+    const k = Math.PI / 180, R = 6371008.8;
+    const feats = (features || []).filter(f => f && rmNum(f.lon) !== null && rmNum(f.lat) !== null);
+    // features in cells of about 30 m, so a mark looks at the few around it, not at all of them
+    const lat0 = feats.length ? Number(feats[0].lat) : 0, mx = k * R * Math.cos(lat0 * k), my = k * R, CELL = 30;
+    const cells = new Map(), key = (i, j) => i + ':' + j;
+    feats.forEach(f => {
+      f._x = Number(f.lon) * mx; f._y = Number(f.lat) * my;
+      const b = Array.isArray(f.box) && f.box.length === 4 ? f.box : [0, 0, 0, 0];
+      for (let i = Math.floor((f._x + b[0] - pad - match) / CELL); i <= Math.floor((f._x + b[2] + pad + match) / CELL); i++)
+        for (let j = Math.floor((f._y + b[1] - pad - match) / CELL); j <= Math.floor((f._y + b[3] + pad + match) / CELL); j++) {
+          const c = cells.get(key(i, j)); if (c) c.push(f); else cells.set(key(i, j), [f]);
+        }
+    });
+    const out = { byFeature: {}, alone: [], ofMark: {} };
+    const later = (a, b) => { const c = String((a.updated && a.updated.t) || '').localeCompare(String((b.updated && b.updated.t) || '')); return c !== 0 ? c > 0 : String(a.id) > String(b.id); };
+    (marks || []).forEach(m => {
+      if (!m || rmNum(m.lon) === null || rmNum(m.lat) === null) return;
+      const x = Number(m.lon) * mx, y = Number(m.lat) * my;
+      let best = null, bd = Infinity;
+      (cells.get(key(Math.floor(x / CELL), Math.floor(y / CELL))) || []).forEach(f => {
+        if (rmNum(m.h) !== null && rmNum(f.h) !== null && Math.abs(m.h - f.h) > up) return;
+        const d = Math.hypot(x - f._x, y - f._y), b = Array.isArray(f.box) && f.box.length === 4 ? f.box : null;
+        const inBox = !!b && x - f._x >= b[0] - pad && x - f._x <= b[2] + pad && y - f._y >= b[1] - pad && y - f._y <= b[3] + pad;
+        if ((d <= match || inBox) && d < bd) { bd = d; best = f; }
+      });
+      if (!best) { out.alone.push(m); return; }
+      out.ofMark[m.id] = best.id;
+      const cur = out.byFeature[best.id];
+      if (!cur) out.byFeature[best.id] = { mark: m, also: [], d: bd };
+      else if (later(m, cur.mark)) { cur.also.push(cur.mark); cur.mark = m; cur.d = bd; }
+      else cur.also.push(m);
+    });
+    feats.forEach(f => { delete f._x; delete f._y; });
+    return out;
+  }
+  // The mark a new mark at this place would change: the latest of the live marks within `within` metres (RMARK_MATCH_M), or null.
+  function rmarkNear(marks, place, within) {
+    const w = within != null ? within : RMARK_MATCH_M;
+    let best = null;
+    (marks || []).forEach(m => { if (rmarkMetres(m, place) <= w && (!best || String((m.updated && m.updated.t) || '') > String((best.updated && best.updated.t) || ''))) best = m; });
+    return best;
+  }
+  // The marks as an export carries them (ridge_marks.json): the live ones inside a lon/lat box [w, s, e, n] (and a
+  // polygon ring [[lon, lat], …] when given), each with who and when and how often it was changed.
+  function rmarksPayload(S, bbox, ring) {
+    const inRing = (lon, lat) => { if (!ring || ring.length < 3) return true; let ins = false;
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) { const a = ring[i], b = ring[j];
+        if ((a[1] > lat) !== (b[1] > lat) && lon < (b[0] - a[0]) * (lat - a[1]) / (b[1] - a[1]) + a[0]) ins = !ins; }
+      return ins; };
+    return liveRmarks(S).filter(m => (!bbox || (m.lon >= bbox[0] && m.lon <= bbox[2] && m.lat >= bbox[1] && m.lat <= bbox[3])) && inRing(m.lon, m.lat))
+      .map(m => { const o = { id: m.id, kind: m.kind, note: m.note, lon: m.lon, lat: m.lat, who: m.updated.who || '', t: m.updated.t || '', changes: m.history.length };
+        if (m.h !== null) o.h = m.h; if (m.feat) o.feat = clone(m.feat); return o; });
+  }
+  // An export's mark as the viewer and the matcher read it (the same shape as a replayed one), or null.
+  function rmarkFromExport(x) {
+    if (!x || x.id == null || !rmarkKind(x.kind) || rmNum(x.lon) === null || rmNum(x.lat) === null) return null;
+    return { id: String(x.id), kind: x.kind, note: String(x.note || ''), lon: Number(x.lon), lat: Number(x.lat), h: rmNum(x.h), feat: rmarkFeat(x.feat), removed: false,
+             created: { t: String(x.t || ''), who: String(x.who || '') }, updated: { t: String(x.t || ''), who: String(x.who || '') }, history: [], heads: [], exported: true };
+  }
+
   return {
+    RMARK_KINDS, RMARK_LABELS, RMARK_COLOURS, RMARK_MATCH_M, RMARK_BOX_PAD_M, RMARK_UP_M, liveRmarks, rmarkBody, rmarkUndo, rmarkMatch, rmarkNear, rmarkMetres, rmarksPayload, rmarkFromExport,   // ridgewalking marks (the section above)
     INV, invKey, invQty, invItems, invPhotos, invDate, invAge, invMark, replayInventories, liveInventories, invsOn, invSetBody, invLogBody, invLogRemoveBody, invUndo, invAdoptBodies, invMoveEntries, invMoveClear, invPhotoBlobs, featureInvMove, invLine, invPayload,   // inventories (the section above)
     FORMAT, FT, DOCS, projScope, scopeProject, sha256, uid, clone, nowIso, same, cmp, sortEntries, surveyCode,
     T, parseTarget, areaHas, DOC_KINDS, DOC_KIND_LABELS, docMedia, dateKey, resolveProposals, reviewQueue, causalOrder, LEAD, LEAD_FIELDS, leadLists, statusLabel, leadActive, heads,

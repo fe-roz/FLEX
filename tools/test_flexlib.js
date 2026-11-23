@@ -974,5 +974,117 @@ const pid = 'proj1', cid = 'cave1', cid2 = 'cave2';
   ok('exifCamera: Make present → camera; no Make or not a JPEG → not', L.exifCamera(jpeg(true)) === true && L.exifCamera(jpeg(false)) === false && L.exifCamera(Uint8Array.from([1, 2, 3])) === false && L.exifCamera(null) === false);
 }
 
+// Ridgewalking marks: a mark belongs to a place; the latest wins; tied to features by nearness
+{
+  const LAT = 45.1234, LON = -100.5678, MX = 111320 * Math.cos(LAT * Math.PI / 180), MY = 110574;
+  const at = (x, y) => ({ lon: LON + x / MX, lat: LAT + y / MY });                       // metres east / north of the example place
+  const first = L.rmarkBody(null, Object.assign({ kind: 'pit', note: ' 8 m free drop ', h: 512.345, feat: { id: 'f12', depth: 9.87654, returns: 41.2, entrance: 'true', size: [3, 2.44, 9.9], junk: 1 } }, at(0, 0)));
+  ok('rmark: a new mark: its own id, kind, trimmed note, place to 1e-7 degrees, height, what was known of the feature; prev null',
+    first.op === 'rmark.set' && /^[0-9a-z]{12}$/i.test(first.mark) && first.kind === 'pit' && first.note === '8 m free drop' && near(first.lon, LON, 1e-7) && first.h === 512.35 &&
+    JSON.stringify(first.feat) === JSON.stringify({ id: 'f12', depth: 9.88, returns: 41, entrance: 'true', size: [3, 2.4, 9.9] }) && first.prev === null, first);
+  ok('rmark: no kind, an unknown kind or no place: no record', L.rmarkBody(null, at(0, 0)) === null && L.rmarkBody(null, Object.assign({ kind: 'dragon' }, at(0, 0))) === null && L.rmarkBody(null, { kind: 'cave' }) === null);
+  const { op: _o, ...b1 } = first;
+  const log = [A('rmark.set', b1)];
+  let S = L.replayProject(log, pid);
+  let m = S.rmarks[first.mark];
+  ok('rmark: replayed: kind, note, place, who and when; one line of history', m && m.kind === 'pit' && m.note === '8 m free drop' && near(m.lat, LAT, 1e-7) && m.h === 512.35 && m.feat.returns === 41 && m.created.who === 'Ana' && m.history.length === 1 && L.liveRmarks(S).length === 1, m);
+  // changing it is a new record; the latest wins; the history keeps both
+  const ch = L.rmarkBody(m, { kind: 'cave', note: 'goes: 30 m of passage' });
+  ok('rmark: a change names only what changed, what it was, and the record it was made on (so a phone whose clock is behind still comes after)', ch.base[0] === log[0].id && ch.mark === m.id && ch.kind === 'cave' && ch.note === 'goes: 30 m of passage' && ch.prev.kind === 'pit' && ch.prev.note === '8 m free drop' && !('lon' in ch) && !('feat' in ch), ch);
+  ok('rmark: no change, no record', L.rmarkBody(m, { kind: 'pit', note: '8 m free drop' }) === null && L.rmarkBody(m, {}) === null);
+  const { op: _o2, ...b2 } = ch;
+  log.push(B('rmark.set', b2));
+  S = L.replayProject(log, pid); m = S.rmarks[first.mark];
+  ok('rmark: the latest wins, history kept (Ana: pit, then Bo: cave)', m.kind === 'cave' && m.note === 'goes: 30 m of passage' && m.updated.who === 'Bo' && m.created.who === 'Ana' && m.history.map(h => h.who + ':' + h.kind).join() === 'Ana:pit,Bo:cave' && near(m.lat, LAT, 1e-7), m.history);
+  // undo, remove, bring back
+  const un = L.rmarkUndo(log[1]);
+  ok('rmark: undo of a change goes back (and can itself be undone)', un.op === 'rmark.set' && un.kind === 'pit' && un.note === '8 m free drop' && un.prev.kind === 'cave' && un.base[0] === log[1].id, un);
+  const { op: _o3, ...b3 } = un;
+  ok('rmark: …replayed: a pit again', L.replayProject(log.concat([A('rmark.set', b3)]), pid).rmarks[first.mark].kind === 'pit');
+  const un0 = L.rmarkUndo(log[0]);
+  ok('rmark: undo of a new mark removes it', un0.removed === true && un0.mark === first.mark && L.rmarkUndo({ op: 'rmark.set', mark: 'x' }) === null && L.rmarkUndo({ op: 'note.set' }) === null);
+  const { op: _o4, ...b4 } = L.rmarkBody(m, { removed: true });
+  let S2 = L.replayProject(log.concat([A('rmark.set', b4)]), pid);
+  ok('rmark: removed: not among the live ones, still in the project with its history', L.liveRmarks(S2).length === 0 && S2.rmarks[first.mark].removed === true && S2.rmarks[first.mark].history.length === 3);
+  const { op: _o5, ...b5 } = L.rmarkBody(S2.rmarks[first.mark], { removed: false });
+  ok('rmark: …and back', L.liveRmarks(L.replayProject(log.concat([A('rmark.set', b4), A('rmark.set', b5)]), pid)).length === 1);
+  ok('rmark: a record with no place makes no mark; a kind a reader does not know leaves the mark as it was', (() => {
+    const made = A('rmark.set', b1); const S3 = L.replayProject([A('rmark.set', { mark: 'x1', kind: 'cave' }), made, B('rmark.set', { mark: first.mark, kind: 'sump', note: 'wet', base: [made.id] })], pid);
+    return !S3.rmarks.x1 && S3.rmarks[first.mark].kind === 'pit' && S3.rmarks[first.mark].note === 'wet' && S3.rmarks[first.mark].history.length === 2;
+  })());
+  // the same log merged twice and in another order: the same marks
+  ok('rmark: merging is a union: a sync file read twice, entries in any order, give the same marks', (() => {
+    const a = L.replayProject(log, pid), b = L.replayProject(log.slice().reverse().concat(log), pid);
+    return JSON.stringify(a.rmarks) === JSON.stringify(b.rmarks);
+  })());
+  // a reader that does not know the kind of record: everything else is as it was, nothing throws
+  ok('an entry of a kind this reader does not know is kept in the log and changes nothing else (how an older FLEX reads rmark.set)', (() => {
+    const base = [PC('project.set', { name: 'Cave Ridge area' }), PC('cave.set', { cave: cid, name: 'Cave Ridge' })];
+    const S0 = L.replayProject(base, pid), S1 = L.replayProject(base.concat([A('zz.future', { thing: 1, lon: 3 }), A('rmark.set', b1)]), pid);
+    const strip = x => { const o = Object.assign({}, x); delete o.rmarks; delete o.log; delete o.byId; return JSON.stringify(o); };
+    return strip(S0) === strip(S1) && S1.log.length === 4 && S1.byId.has(A('x', {}).id.replace(/\d+$/, '') + '6') === false;
+  })());
+  ok('rmark records travel in a sync file like any project entry (no new format)', (() => {
+    const D = L.replayDocs([]); const sel = L.selectForSync(log, [], L.replayProject(log, pid), D, null, 'all');
+    return sel.entries[L.projScope(pid)].filter(e => e.op === 'rmark.set').length === 2 && sel.blobs.length === 0;
+  })());
+
+  // two phones mark the same feature differently, not knowing of each other: two marks, the later speaks for it
+  const fa = L.rmarkBody(null, Object.assign({ kind: 'nothing', note: 'a dip, no hole' }, at(1.5, -1)));
+  const fb = L.rmarkBody(null, Object.assign({ kind: 'cave', note: 'small entrance under the ledge' }, at(-1, 2)));
+  const ea = A('rmark.set', (({ op, ...r }) => r)(fa), Date.parse('2026-11-01T10:00:00Z')), eb = B('rmark.set', (({ op, ...r }) => r)(fb), Date.parse('2026-11-02T09:00:00Z'));
+  const SA = L.replayProject([ea, eb], pid), SB = L.replayProject([eb, ea], pid);
+  ok('two phones, one feature: both marks are kept, on either phone, whatever the order of merging', L.liveRmarks(SA).length === 2 && JSON.stringify(SA.rmarks) === JSON.stringify(SB.rmarks) && L.liveRmarks(SA)[0].kind === 'cave');
+  const feats = [Object.assign({ id: 'f1', h: 500, box: [-2, -2, 2, 2] }, at(0, 0)), Object.assign({ id: 'f2', h: 500 }, at(40, 0)), Object.assign({ id: 'f3', h: 500 }, at(9, 0))];
+  let M = L.rmarkMatch(L.liveRmarks(SA), feats);
+  ok('…the later one (Bo: cave) speaks for the feature, the other (Ana: nothing) is listed with it', M.byFeature.f1 && M.byFeature.f1.mark.kind === 'cave' && M.byFeature.f1.also.length === 1 && M.byFeature.f1.also[0].kind === 'nothing' && !M.byFeature.f2 && !M.byFeature.f3 && M.alone.length === 0 &&
+    M.ofMark[fa.mark] === 'f1' && M.ofMark[fb.mark] === 'f1', M);
+  ok('…and a phone that already has a mark there changes that mark instead of making a third', L.rmarkNear(L.liveRmarks(SA), at(0, 0)).id === fb.mark && L.rmarkNear(L.liveRmarks(SA), at(30, 0)) === null);
+
+  // nearness: the distances
+  const mk = (id, x, y, t, h) => Object.assign({ id, kind: 'pit', updated: { t: t || '2026-11-01T00:00:00Z' }, h: h === undefined ? 500 : h }, at(x, y));
+  const one = (x, y, fs, h) => { const r = L.rmarkMatch([mk('m', x, y, null, h)], fs || feats); return r.ofMark.m || (r.alone.length ? 'alone' : '?'); };
+  ok('a mark 5 m from a feature’s anchor is that feature’s; 7 m away it stands alone (the distance is 6 m)', L.RMARK_MATCH_M === 6 && one(45, 0) === 'f2' && one(40, 5.9) === 'f2' && one(47, 0) === 'alone' && one(40, -6.2) === 'alone');
+  ok('a metre is a metre: the same east and north, at this latitude', near(L.rmarkMetres(at(0, 0), at(6, 0)), 6, 0.05) && near(L.rmarkMetres(at(0, 0), at(0, 6)), 6, 0.05) && near(L.rmarkMetres(at(3, 4), at(0, 0)), 5, 0.05));
+  ok('between two features the nearer one takes it', one(5, 0) === 'f3' && one(4, 0) === 'f1' && one(4.4, 0) === 'f1' && one(4.6, 0) === 'f3');
+  ok('a long feature takes a mark anywhere over it: inside its box (+ 2 m), however far from its anchor', (() => {
+    const long = [Object.assign({ id: 'crack', h: 500, box: [-1, -30, 1, 2] }, at(100, 0))];
+    return one(100, -28, long) === 'crack' && one(102.5, -20, long) === 'crack' && one(104, -20, long) === 'alone' && one(100, -33, long) === 'alone' && one(100, 7.5, long) === 'alone';
+  })());
+  ok('a feature far above or below (a cliff: over 25 m) does not take it; without heights the plan distance decides', (() => {
+    const hi = [Object.assign({ id: 'top', h: 560 }, at(0, 0))];
+    return one(1, 0, hi) === 'alone' && one(1, 0, hi, 540) === 'top' && one(1, 0, hi, null) === 'top' && one(1, 0, [Object.assign({ id: 'top' }, at(0, 0))]) === 'top';
+  })());
+  ok('a mark whose feature is gone in a new export is still there: alone, at its own place', (() => {
+    const r = L.rmarkMatch([mk('old', 200, 200)], feats); return r.alone.length === 1 && r.alone[0].id === 'old' && Object.keys(r.byFeature).length === 0;
+  })());
+  ok('a feature renumbered and moved 3 m in a new export keeps its mark (the id is only a hint)', (() => {
+    const before = [Object.assign({ id: 'f7' }, at(0, 0))], after = [Object.assign({ id: 'f91' }, at(2, 2.2)), Object.assign({ id: 'f7' }, at(300, 300))];
+    const mark = Object.assign(mk('k', 0, 0), { feat: { id: 'f7' } });
+    return L.rmarkMatch([mark], before).ofMark.k === 'f7' && L.rmarkMatch([mark], after).ofMark.k === 'f91';
+  })());
+  ok('no features, no marks, marks without a place: nothing breaks', (() => {
+    const r = L.rmarkMatch([mk('a', 0, 0), { id: 'bad' }, null], []), r2 = L.rmarkMatch([], feats), r3 = L.rmarkMatch(null, null);
+    return r.alone.length === 1 && Object.keys(r2.byFeature).length === 0 && r3.alone.length === 0;
+  })());
+  ok('20,000 features and 500 marks are matched quickly (a grid, not every pair)', (() => {
+    const fs = [], ms = []; let sd = 3; const rnd = () => (sd = (sd * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    for (let i = 0; i < 20000; i++) fs.push(Object.assign({ id: 'f' + i }, at(rnd() * 4000, rnd() * 4000)));
+    for (let i = 0; i < 500; i++) { const f = fs[i * 37]; ms.push(Object.assign({ id: 'm' + i, kind: 'cave', updated: { t: '' } }, { lon: f.lon + 1 / MX, lat: f.lat })); }
+    const t0 = Date.now(), r = L.rmarkMatch(ms, fs), ms_ = Date.now() - t0;
+    return Object.keys(r.ofMark).length === 500 && ms_ < 400 && fs.every(f => !('_x' in f));
+  })());
+
+  // what an export carries
+  const pay = L.rmarksPayload(SA, [LON - 0.001, LAT - 0.001, LON + 0.001, LAT + 0.001]);
+  ok('an export carries the live marks inside its area, with who and when', pay.length === 2 && pay[0].kind === 'cave' && pay[0].who === 'Bo' && pay[0].t === eb.t && pay[0].changes === 1 && pay[0].note === 'small entrance under the ledge' && !('history' in pay[0]), pay);
+  ok('…not the ones outside the box or the polygon, nor removed ones', L.rmarksPayload(SA, [LON + 0.01, LAT, LON + 0.02, LAT + 0.01]).length === 0 &&
+    L.rmarksPayload(SA, null, [[LON - 0.001, LAT + 0.00001], [LON + 0.001, LAT + 0.00001], [LON, LAT + 0.002]]).length === 1 && L.rmarksPayload(S2, null).length === 0);
+  const back = L.rmarkFromExport(pay[0]);
+  ok('…and reads back as a mark the matcher takes (flagged as the export’s); nonsense reads as nothing', back.id === fb.mark && back.kind === 'cave' && back.exported === true && back.updated.who === 'Bo' && L.rmarkMatch([back], feats).ofMark[fb.mark] === 'f1' &&
+    L.rmarkFromExport({ id: 'x', kind: 'cave' }) === null && L.rmarkFromExport(null) === null && L.rmarkFromExport({ id: 'x', kind: 'what', lon: 1, lat: 2 }) === null);
+  ok('the four kinds, their names and colours', L.RMARK_KINDS.join() === 'cave,pit,nothing,unreached' && L.RMARK_LABELS.unreached === 'Not reached' && L.RMARK_KINDS.every(k => /^#[0-9a-f]{6}$/.test(L.RMARK_COLOURS[k])));
+}
+
 console.log((fail ? 'FAILED ' : 'ok ') + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
