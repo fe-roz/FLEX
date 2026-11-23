@@ -16,6 +16,7 @@ Pins down:
   * a page that is not there or is a PDF is left out without stopping the export.
 """
 import base64, hashlib, io, json, math, os, sys, tempfile, zipfile
+os.environ['SOURCE_DATE_EPOCH'] = '1795000000'       # a fixed export time, so two exports of the same thing are the same bytes
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import numpy as np
 import export_terrain as et

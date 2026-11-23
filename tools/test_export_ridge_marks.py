@@ -13,6 +13,7 @@ Marks on ridgewalking features, the export's side. No PDAL, no network.
     python tools/test_export_ridge_marks.py
 """
 import io, json, math, os, re, subprocess, sys, tempfile, time, zipfile
+os.environ['SOURCE_DATE_EPOCH'] = '1795000000'       # a fixed export time, so two exports of the same thing are the same bytes
 from pathlib import Path
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.insert(0, ROOT)
