@@ -140,8 +140,40 @@ const B = path.join(root, 'old1', 'bush'); fs.mkdirSync(B, { recursive: true });
 fs.writeFileSync(path.join(B, 'derived.json'), JSON.stringify({ raster_bounds_lonlat: [-100.57, 45.12, -100.56, 45.13] })); fs.writeFileSync(path.join(B, 'vegetation.png'), 'x');
 const O = JSON.parse(call(tiles.maps, 'old1').b);
 ok('old area: no maps, the vegetation png as legacy brush', O.ok && O.maps.length === 0 && O.legacy.length === 1 && O.legacy[0].id === 'brush');
+// the LiDAR quality report's rasters: made by ridgewalk.py on its made-up scene, put on the map (a zone and a corner), drawn as tiles
+{
+  const Q = path.join(root, 'q1', 'ridge'); fs.mkdirSync(Q, { recursive: true });
+  execFileSync('python3', [path.join(__dirname, '..', 'ridgewalk.py'), '--demo', Q, '--no-shapes', '--workers', '1'], { stdio: 'ignore' });
+  const mf = path.join(Q, 'maps.json'), mj = JSON.parse(fs.readFileSync(mf));
+  ok('ridgewalk.py writes its three quality maps in the tile server\'s layout', mj.version === 2 && mj.maps.map(m => m.id).join() === 'passes,groundseen,density' && mj.grid.row0 === 'south' && mj.grid.cell > 6 && mj.grid.cell < 10
+    && mj.maps.every(m => fs.statSync(path.join(Q, m.file)).size === mj.grid.nx * mj.grid.ny), mj.grid);
+  ok('without a place on the map (the made-up scene has no zone) nothing is listed', JSON.parse(call(tiles.maps, 'q1').b).maps.length === 0);
+  Object.assign(mj.grid, { x0: Math.floor(u[0]) - 96, y0: Math.floor(u[1]) - 72, zone: 14, south: false, epsg: 32614 }); fs.writeFileSync(mf, JSON.stringify(mj));
+  const tq = T({ root }), Mq = JSON.parse(call(tq.maps, 'q1').b);
+  ok('maps: LiDAR passes, ground seen, return density, in the ridge folder', Mq.ok && Mq.maps.map(m => m.id + ':' + m.folder).join() === 'passes:ridge,groundseen:ridge,density:ridge' && Mq.bounds && Mq.maps[0].levels === 16 && Mq.maps[1].levels === 101, Mq.maps.map(m => [m.id, m.levels]));
+  const at = (map, dx, dy, q) => { const ll = T.lonlatOf(mj.grid.x0 + dx, mj.grid.y0 + dy, 14, false), [qx, qy] = tileOf(ll[0], ll[1], 18), r = call(tq.tile, `q1/${map}/18/${qx}/${qy}.png`, q);
+    if (r.s !== 200) return [r.s]; const d = decode(r.b), n = 2 ** 18, fx = (ll[0] + 180) / 360 * n - qx, fy = (1 - Math.log(Math.tan(ll[1] * Math.PI / 180) + 1 / Math.cos(ll[1] * Math.PI / 180)) / Math.PI) / 2 * n - qy;
+    const o = (Math.floor(fy * 256) * 256 + Math.floor(fx * 256)) * 4; return [...d.px.subarray(o, o + 4)]; };
+  const bw = { ramp: '0:000000ff_1:ffffffff', lo: '0', hi: '10' };
+  const p4 = at('passes', 40, 60, bw), p5 = at('passes', 170, 50, bw);
+  ok('passes: 4 where the four passes fly, 5 under the striped one (grey = count / 10)', Math.abs(p4[0] - 102) <= 2 && Math.abs(p5[0] - 128) <= 2 && p4[3] === 255, [p4, p5]);
+  const dflt = c => ({ ramp: AM.rampOf(AM.stopsOf(c, AM.defaults(c))), lo: String(AM.defaults(c).lo), hi: String(AM.defaults(c).hi) });
+  const pd = at('passes', 40, 60, dflt('passes'));
+  ok('passes in its default colours: 3 or more = faint green', pd[1] > pd[0] && pd[1] > pd[2] && pd[3] > 30 && pd[3] < 100, pd);
+  const gs = at('groundseen', 40, 60, { ramp: '0:000000ff_1:ffffffff', lo: '0', hi: '1' });
+  ok('ground seen: the share of 0.3 m cells with a ground return (about half at 9 returns per m2)', gs[0] > 90 && gs[0] < 190, gs);
+  ok('ground seen in its default colours: plenty = clear (an all-clear tile is the 1 x 1 blank)', !(at('groundseen', 40, 60, dflt('groundseen'))[3] > 0));
+  const dn = at('density', 40, 60, { ramp: '0:000000ff_1:ffffffff', lo: '0', hi: '20' });
+  ok('density: about 9 returns per m2 (grey = density / 20)', dn[0] > 85 && dn[0] < 150, dn);
+  ok('outside the grid: nothing', !(at('passes', -30, 60, bw)[3] > 0));
+  ok('the defaults: passes in steps over 0-4, ground seen red where little, density Viridis; all off until switched on', AM.defaults('passes').preset === 'passes' && AM.defaults('passes').hi === 4 && AM.defaults('groundseen').preset === 'thin' && AM.defaults('density').preset === 'viridis'
+    && ['passes', 'groundseen', 'density'].every(id => { const m = AM.MAPS.find(x => x.id === id); return m && m.show === false && m.result === 'ridge'; }));
+  const ps = T.parseRamp(AM.rampOf(AM.stopsOf('passes', AM.defaults('passes'))));
+  ok('the passes ramp steps at half counts: 0, 1, 2 differ, 3 = 4', [0, 1, 2, 3].map(v => T.rampAt(ps, v / 4).slice(0, 3).join()).filter((v, i, a) => a.indexOf(v) === i).length === 4 && T.rampAt(ps, 3 / 4).join() === T.rampAt(ps, 1).join());
+}
 // allow-list
 const F = require('../areas_api.js').FILES;
+ok('allow-list: the quality report and its rasters travel, the big grids do not', ['quality.json', 'maps.json', 'passes.u8', 'ground_seen.u8', 'density.u8'].every(f => F.ridge.test(f)) && !F.ridge.test('lid.npy') && !F.ridge.test('x.u8'));
 ok('allow-list: the rasters and maps.json travel', F.bush.test('brush.u8') && F.bush.test('maps.json') && F.ground.test('slope.u8') && F.ground.test('hillshade.u8') && F.ground.test('maps.json') && !F.ground.test('direct.npy'));
 fs.rmSync(root, { recursive: true, force: true });
 console.log(`test_area_maps: ${pass} passed, ${fail} failed`);

@@ -3025,7 +3025,8 @@ def main():
                         **({'tiles': [int(tcols), int(trows)]} if tile_files else {})},
                 ridge_meta=ridge.meta if ridge is not None else None, ridge_shapes=about_facts.get('ridge_shapes'),
                 brush_opacity=brush_opacity if hsb_bytes else None, slope_opacity=slope_meta['opacity'] if slope_bytes else None,
-                trees=about_facts.get('trees'), features=about_facts.get('features'), marks=about_facts.get('marks'), docs=about_facts.get('docs'))
+                trees=about_facts.get('trees'), features=about_facts.get('features'), marks=about_facts.get('marks'), docs=about_facts.get('docs'),
+                quality=getattr(ridge, 'quality', None) if ridge is not None else None)
             zf.writestr('caves.json', json.dumps(caves_out))
 
             # Viewer HTML: fully self-contained (Three.js + GLB + textures + caves all inline)

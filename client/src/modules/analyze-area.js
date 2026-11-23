@@ -540,7 +540,7 @@
         ? `<button type="button" class="ar-btn ar-danger" data-act="delresyes" data-id="${esc(a.id)}" data-res="${k}">Yes, delete</button><button type="button" class="ar-btn" data-act="delresno">No</button>`
         : `<button type="button" class="ar-x" data-act="delres" data-id="${esc(a.id)}" data-res="${k}" title="Delete this result">✕</button>`;
       const pros = k === 'prospect' ? `<div class="ar-prospect" data-area="${esc(a.id)}"></div>`
-        : k === 'ridge' ? `<span class="ar-dim ar-small"> · ${(r.counts && r.counts.features || 0).toLocaleString()} features</span><div class="ar-ridge" data-area="${esc(a.id)}"></div>` : '';      // its switches (ridge-draw.js mounts them while it is drawn)
+        : k === 'ridge' ? `<span class="ar-dim ar-small"> · ${(r.counts && r.counts.features || 0).toLocaleString()} features</span>${r.quality ? `<div><button type="button" class="ar-qual" data-act="quality" data-id="${esc(a.id)}" title="How many passes cover the area, which were flagged, how much ground the LiDAR saw, whether a read failed">LiDAR quality</button><span class="ar-dim ar-small"> · ${r.quality.passes} passes${r.quality.flagged ? ', ' + r.quality.flagged + ' flagged' : ''}${r.quality.tiles_blank ? ', ' + r.quality.tiles_blank + ' tiles blank' : ''}</span></div>` : ''}<div class="ar-ridge" data-area="${esc(a.id)}"></div>` : '';      // its switches (ridge-draw.js mounts them while it is drawn)
       return `<div class="ar-rr" data-res="${k}"><span class="ar-grow">${RNAME[k]}${r.coarse ? ' <span class="ar-coarse" title="Made with a coarser setting">coarse</span>' : ''}<br><span class="ar-dim">${fmtMB(r.bytes)} · ${shortDate(r.date)}${extra}</span>${vegNote}${notes}${pros}</span>${showable ? eyeBtn(st, 'ressw', a.id, k, 'Show ' + RNAME[k] + ' of ' + a.name, true) : '<span class="ar-dim">kept</span>'}${del}</div>`;
     }).join('');
   }
@@ -619,6 +619,7 @@
     else if (act === 'unfix') { delete S.fix[id]; paint(); await check(); }
     else if (act === 'procsw') show(id, eyeOf(SHOW, id) !== 'on');
     else if (act === 'remaps') { run(['maps']); }
+    else if (act === 'quality') { const a = areaById(id); if (w._lidarQuality) w._lidarQuality.open(id, a ? a.name : ''); }
     else if (act === 'ressw' && MAPRES.includes(b.dataset.res) && w._areaMaps) {      // bushwhack / ground: their map layers in 🗺 Layers (area-maps.js)
       const r = b.dataset.res, on = mapEye(id, r) !== 'on';
       if (on && eyeOf(SHOW, id) !== 'on') { show(id, true); await w._areaMaps.refresh(); }
@@ -671,6 +672,7 @@
   .ar-row.sel .ar-radio { border-color: #ff9a62; box-shadow: inset 0 0 0 3px #1b1d22, inset 0 0 0 6px #ff9a62; }
   .ar-grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   .ar-nm { font-weight: 600; }
+  .ar-qual { background: none; border: 0; padding: 0; color: #7fd3a3; font-size: 11px; cursor: pointer; text-decoration: underline; }
   .ar-dim { color: rgba(255,255,255,.58); font-size: 11px; } .ar-small { font-size: 10.5px; }
   .ar-none { color: rgba(255,255,255,.45); font-size: 11px; padding: 6px 9px; }
   .ar-tag { font-size: 10px; color: rgba(255,255,255,.6); border: 1px solid rgba(255,255,255,.15); border-radius: 9px; padding: 0 6px; white-space: nowrap; }

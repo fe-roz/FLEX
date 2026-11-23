@@ -53,8 +53,27 @@ def dataset_name(ept):
     return name[:80]
 
 
+def lidar_quality(q):
+    """The few numbers of the LiDAR quality report (ridgewalk.py quality.json) the phone shows: passes, flagged passes,
+    the share seen by one pass only, the share of ground not seen, tiles left blank (None = not known). {} without one."""
+    if not isinstance(q, dict) or not isinstance(q.get('coverage'), dict):
+        return {}
+    c = q['coverage']; r = q.get('reading') or {}; passes = [p for p in q.get('passes') or [] if isinstance(p, dict)]
+    num = lambda v: float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+    out = {'passes': len(passes), 'flagged': [str(p.get('id')) for p in passes if p.get('flagged')][:40],
+           'set_aside': int(sum(int(p.get('set_aside') or 0) for p in passes if p.get('flagged'))),
+           'single_pass': num(c.get('passes_1')), 'no_pass': num(c.get('passes_0')),
+           'ground_not_seen': num(c.get('no_ground_within_3m')), 'ground_not_seen_1m': num(c.get('no_ground_within_1m')),
+           'tiles': int(r['tiles']) if isinstance(r.get('tiles'), int) else None,
+           'tiles_blank': int(r['left_blank']) if r.get('read_in_this_run') and isinstance(r.get('left_blank'), int) else None}
+    d = (q.get('cloud') or {}).get('dates')
+    if isinstance(d, list) and len(d) == 2 and all(isinstance(x, str) and len(x) == 10 for x in d):
+        out['dates'] = d
+    return out
+
+
 def about(root, width_m, height_m, area_m2, polygon, terrain, cell_m, lidar=(), layers=None, ridge_meta=None,
-          ridge_shapes=None, brush_opacity=None, slope_opacity=None, trees=None, features=None, marks=None, docs=None, now=None):
+          ridge_shapes=None, brush_opacity=None, slope_opacity=None, trees=None, features=None, marks=None, docs=None, now=None, quality=None):
     """The dict for caves.json meta `about`. Everything optional is left out when there is nothing to say."""
     if now is None and os.environ.get('SOURCE_DATE_EPOCH', '').isdigit():      # a fixed clock, for builds that must repeat (the tests)
         now = int(os.environ['SOURCE_DATE_EPOCH'])
@@ -78,6 +97,9 @@ def about(root, width_m, height_m, area_m2, polygon, terrain, cell_m, lidar=(), 
                         'passes': len(passes), 'flagged': [str(x.get('id')) for x in passes if isinstance(x, dict) and x.get('flagged')][:40],
                         'params': {k: p[k] for k in ('min_behind', 'max_link', 'link', 'cell') if isinstance(p.get(k), (int, float))},
                         **({'shapes': bool(ridge_shapes)} if ridge_shapes is not None else {})}
+    q = lidar_quality(quality)
+    if q:
+        out['quality'] = q
     if brush_opacity is not None:
         out['brush'] = {'opacity': float(brush_opacity)}
     if slope_opacity is not None:

@@ -106,6 +106,12 @@ class Ridge:
         if not (d / 'ridge.json').exists():
             sys.exit(f"ERROR: no ridge.json in the ridge folder")
         self.meta = m = json.loads((d / 'ridge.json').read_text())
+        self.quality = None                         # the LiDAR quality report (ridgewalk.py), when the folder has one: for "About this map"
+        try:
+            q = json.loads((d / 'quality.json').read_text())
+            self.quality = q if isinstance(q, dict) and isinstance(q.get('coverage'), dict) else None
+        except Exception:
+            pass
         self.cell = float(m['cell'])
         self.nx, self.ny = int(m['nx']), int(m['ny'])
         self.ox, self.oy = float(m['origin'][0]), float(m['origin'][1])
