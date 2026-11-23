@@ -99,6 +99,11 @@ Only the export's data files are unpacked; the zip's big single-file
 `viewer.html` is skipped. Exports made before the sidecar files existed are
 unpacked from that `viewer.html` instead (slower, once).
 
+An export made with **Include surface features** also carries `features.json`
+(the project's points, lines and areas, view only: `viewer_build/libs/viewer-features.js`,
+🎨 Display → Surface features); `MapStore.FEATURES_FILE` keeps it and `MainActivity`
+puts its name in place of `PLACEHOLDER_FEATURES_JSON` (`null` for a map without it).
+
 An export made with **V2 - Ridgewalking** also carries `ridge_points.bin`,
 `ridge_shapes.bin`, `ridge_patches.bin`, `ridge.json` and `tex_hsb.jpg` (the
 hillshade with the brush map on it, a third Imagery choice; `tex_hsb_<c>_<r>.jpg`

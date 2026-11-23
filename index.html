@@ -1625,6 +1625,23 @@
               </div>
             </div>
 
+            <!-- Surface features of the open project (export-ui.js shows this only when the project has some) -->
+            <div class="lp-section" id="export_features_section" style="display:none;">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▾</span> Surface features
+              </div>
+              <div class="lp-section-body open" id="lp-export-features-body">
+                <label style="display:block; margin:2px 0 3px;">
+                  <input type="checkbox" id="export_features_on">
+                  Include surface features
+                </label>
+                <div id="export_features_count" style="font-size:11px; color:rgba(255,255,255,0.7); margin:0 0 3px;"></div>
+                <div style="font-size:10px; color:rgba(255,255,255,0.4);">
+                  The open project's points, lines and areas, with their colours, symbols and folders, to look at on the phone (they can't be changed there). Points inside the area; lines and areas that touch it go whole. My data and CalTopo are not included.
+                </div>
+              </div>
+            </div>
+
             <!-- Documents: always on show (it used to sit in the collapsed Settings); the choice is remembered (export-ui.js) -->
             <div class="lp-section">
               <div class="lp-section-header" onclick="window._lpToggle(this)">

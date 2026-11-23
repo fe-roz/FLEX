@@ -529,6 +529,7 @@ class MainActivity : AppCompatActivity() {
                 .replace("\"PLACEHOLDER_WALLS_B64\"", if (has("walls.bin")) "\"walls.bin\"" else "\"PLACEHOLDER_WALLS_B64\"")
                 .replace("PLACEHOLDER_CAVES_JSON", "ffSidecarJson(\"caves.json\")")
                 .replace("PLACEHOLDER_RIDGE_JSON", ridgeFor(has))
+                .replace("PLACEHOLDER_FEATURES_JSON", if (has(MapStore.FEATURES_FILE)) "\"features.json\"" else "null")
         }
 
         /** RIDGE for the viewer (libs/ridgewalk.js): the map's ridgewalking files by
