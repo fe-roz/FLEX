@@ -851,8 +851,7 @@
         <button type="button" data-target="#leadsCollapsible" title="Leads and inventories: the project's, or My data's without a project"><svg class="ico"><use href="#i-help"/></svg><small>Leads</small></button>
         <button type="button" data-target="#reviewCollapsible" data-pj-only title="Suggestions to review, segments"><svg class="ico"><use href="#i-check"/></svg><small>Review</small><span class="rail-dot" id="rail-review-dot" hidden></span></button>
         <div class="rail-sep"></div>
-        <button type="button" data-target="#exportCollapsible" title="Export an offline map"><svg class="ico"><use href="#i-pack"/></svg><small>Export</small></button>
-        <button type="button" data-target="#lidarDeriveCollapsible" title="Analyze the point clouds"><svg class="ico"><use href="#i-leaf"/></svg><small>Analyze</small></button>
+        <button type="button" data-target="#processCollapsible" title="Process an area: make its ground, brush, trees, ridgewalking, prospects; show them on the map; make a map for the phone"><svg class="ico"><use href="#i-process"/></svg><small>Process</small></button>
         <div class="rail-grow"></div>
         <button type="button" id="rail-perf" data-dock="perf" aria-pressed="false" title="Performance: frame rate, where the time goes, what to turn off"><svg class="ico"><use href="#i-gauge"/></svg><small>Speed</small></button>
         <button type="button" id="rail-settings" data-dock="settings" aria-pressed="false" title="Settings"><svg class="ico"><use href="#i-sliders"/></svg><small>Settings</small></button>
@@ -1495,7 +1494,93 @@
           <div class="lp-panel-wrap" id="areas-terrain-host" hidden></div>
         </div>
 
-        <div class="collapse" id="exportCollapsible">
+        <!-- ══════════════ PROCESS: one flow ═══════════════════════════════
+             1 Area · 2 LiDAR · 3 What to make (what was the Analyze pane: analyze-area.js fills #areas-host) and
+             4 Send to phone (what was the Export pane: export-ui.js). The two parts keep their old ids
+             (#lidarDeriveCollapsible, #exportCollapsible) and get the class "show" with the pane (process-panel.js),
+             so everything that asks "is Analyze / Export open" still gets its answer. -->
+        <div class="collapse" id="processCollapsible">
+          <div id="process-wrap">
+            <div id="process-presets"></div>   <!-- named sets of ticks and settings (process-panel.js) -->
+        <!-- ══════════════ LiDAR ANALYSIS ══════════════════════════════════ -->
+        <div class="process-part" id="lidarDeriveCollapsible">
+          <div class="lp-panel-wrap">
+
+            <!-- Analyze by area: area, LiDAR, tools, Run ticked, processed areas (analyze-area.js; hidden when /api/areas is missing) -->
+            <div id="areas-host" hidden></div>
+            <!-- Surface route: filled by surface-route.js -->
+            <div id="surfroute-host"></div>
+            <!-- Vegetation shapes: filled by veg-panel.js -->
+            <div id="vegshapes-host"></div>
+            <div id="weather-host"></div>  <!-- weather-panel.js: fallback button when Analyze by area is missing -->
+
+            <!-- The Brush and Voids tools of "Tools to run in this area" read these four (analyze-area.js bushParams) -->
+            <div class="lp-section" id="brush_void_settings">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▸</span> Settings
+              </div>
+              <div class="lp-section-body">
+                <div style="padding:2px 0; font-size:10px; color:rgba(255,255,255,0.4);">
+                  Used by Brush the next time it is made.
+                </div>
+                <label style="display:block; margin-top:6px;">
+                  Brush band:
+                  <input id="lidar_veg_lo" type="number" step="0.05" value="0.30" style="width:56px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;">
+                  to
+                  <input id="lidar_veg_hi" type="number" step="0.05" value="1.50" style="width:56px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;">
+                  m above ground
+                </label>
+                <div style="font-size:10px; color:rgba(255,255,255,0.35); margin-top:3px;">0.30–1.50 m ≈ 1–5 ft. Brush is the share of returns stopped in this band.</div>
+                <label style="display:block; margin-top:6px;">
+                  A void counts from
+                  <input id="lidar_void_depth" type="number" step="0.5" value="-1.0" style="width:56px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;"> m (below the ground)
+                </label>
+                <label style="display:block; margin-top:5px;">
+                  with at least
+                  <input id="lidar_void_min" type="number" step="1" value="3" style="width:56px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;"> returns in a cell
+                </label>
+                <div style="font-size:10px; color:rgba(255,255,255,0.35); margin-top:3px;">One deep return is usually an echo; a cluster is a hole.</div>
+                <label style="display:block; margin-top:6px;">
+                  Throw away returns below
+                  <input id="lidar_low_cut" type="number" step="1" value="-20" style="width:56px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;"> m
+                </label>
+                <div style="font-size:10px; color:rgba(255,255,255,0.35); margin-top:3px;">Only for rubbish far under the ground; keep it generous, real voids are down there.</div>
+              </div>
+            </div>
+
+            <!-- LAN server: a FLEX processing server on the network. Its tools (areas of interest, downloads, the queue)
+                 are only on the page while one is connected (workflow-panel.js). -->
+            <div class="lp-section" id="lan_section">
+              <div class="lp-section-header" onclick="window._lpToggle(this)">
+                <span class="lp-section-arrow">▸</span> LAN server
+              </div>
+              <div class="lp-section-body" id="serverCollapsible">
+                <div style="font-size:10px; color:rgba(255,255,255,0.4); margin-bottom:5px;">
+                  A FLEX processing server on your network that downloads LiDAR and builds point clouds. Nothing else in FLEX needs one.
+                </div>
+                <button id="top_server_status_btn" class="btn btn-sm btn-secondary" type="button" style="width:100%;">Connect to LAN Server</button>
+                <div id="server_connected_controls" style="display:none; margin-top:8px;">
+                  <div class="workflow_btn_row">
+                    <button id="top_toggle_aois_btn" class="btn btn-primary" type="button">Hide Areas Of Interest</button>
+                    <button id="top_draw_aoi_btn"    class="btn btn-primary" type="button">Draw AOI</button>
+                    <button id="top_upload_aoi_btn"  class="btn btn-primary" type="button">Upload AOIs</button>
+                    <button id="top_queue_manager_btn" class="btn btn-primary" type="button">Queue Manager</button>
+                  </div>
+                  <div id="top_draw_status">AOI draw mode inactive.</div>
+                  <div id="top_server_status_panel">
+                    <div><strong>Connection:</strong> <span id="sv_connection_status">Not connected</span></div>
+                    <div><strong>Tasks:</strong> <span id="sv_task_summary">—</span></div>
+                  </div>
+                  <button id="top_server_disconnect_btn" class="btn btn-secondary btn-sm" type="button">Disconnect</button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+            <div class="process-step" id="process-step4"><b>4 · Send to phone</b> <span>a map of this area for FLEX Field</span></div>
+        <div class="process-part" id="exportCollapsible">
           <div class="lp-panel-wrap">
 
             <!-- Map name: titles the viewer, names the ZIP and the Android app -->
@@ -1784,7 +1869,7 @@
             <div style="padding:6px 0;">
               <button id="export_run_btn" class="btn btn-primary" style="width:100%; font-size:13px;"
                 onclick="window._exportRun()" disabled>
-                <svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-pack"/></svg>Export ZIP
+                <svg class="ico ico-l" width="1.15em" height="1.15em"><use href="#i-pack"/></svg>Make the map
               </button>
               <div id="export_progress_wrap" style="display:none; margin-top:8px;">
                 <div style="height:4px; background:rgba(255,255,255,.12); border-radius:2px;">
@@ -1817,81 +1902,6 @@
 
           </div>
         </div>
-
-        <!-- ══════════════ LiDAR ANALYSIS ══════════════════════════════════ -->
-        <div class="collapse" id="lidarDeriveCollapsible">
-          <div class="lp-panel-wrap">
-
-            <!-- Analyze by area: area, LiDAR, tools, Run ticked, processed areas (analyze-area.js; hidden when /api/areas is missing) -->
-            <div id="areas-host" hidden></div>
-            <!-- Surface route: filled by surface-route.js -->
-            <div id="surfroute-host"></div>
-            <!-- Vegetation shapes: filled by veg-panel.js -->
-            <div id="vegshapes-host"></div>
-            <div id="weather-host"></div>  <!-- weather-panel.js: fallback button when Analyze by area is missing -->
-
-            <!-- The Brush and Voids tools of "Tools to run in this area" read these four (analyze-area.js bushParams) -->
-            <div class="lp-section" id="brush_void_settings">
-              <div class="lp-section-header" onclick="window._lpToggle(this)">
-                <span class="lp-section-arrow">▸</span> Brush and voids: settings
-              </div>
-              <div class="lp-section-body">
-                <div style="padding:2px 0; font-size:10px; color:rgba(255,255,255,0.4);">
-                  Used by the Brush and Voids tools above, the next time they run.
-                </div>
-                <label style="display:block; margin-top:6px;">
-                  Brush band:
-                  <input id="lidar_veg_lo" type="number" step="0.05" value="0.30" style="width:56px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;">
-                  to
-                  <input id="lidar_veg_hi" type="number" step="0.05" value="1.50" style="width:56px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;">
-                  m above ground
-                </label>
-                <div style="font-size:10px; color:rgba(255,255,255,0.35); margin-top:3px;">0.30–1.50 m ≈ 1–5 ft. Brush is the share of returns stopped in this band.</div>
-                <label style="display:block; margin-top:6px;">
-                  A void counts from
-                  <input id="lidar_void_depth" type="number" step="0.5" value="-1.0" style="width:56px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;"> m (below the ground)
-                </label>
-                <label style="display:block; margin-top:5px;">
-                  with at least
-                  <input id="lidar_void_min" type="number" step="1" value="3" style="width:56px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;"> returns in a cell
-                </label>
-                <div style="font-size:10px; color:rgba(255,255,255,0.35); margin-top:3px;">One deep return is usually an echo; a cluster is a hole.</div>
-                <label style="display:block; margin-top:6px;">
-                  Throw away returns below
-                  <input id="lidar_low_cut" type="number" step="1" value="-20" style="width:56px; background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:2px 4px;"> m
-                </label>
-                <div style="font-size:10px; color:rgba(255,255,255,0.35); margin-top:3px;">Only for rubbish far under the ground; keep it generous, real voids are down there.</div>
-              </div>
-            </div>
-
-            <!-- LAN server: a FLEX processing server on the network. Its tools (areas of interest, downloads, the queue)
-                 are only on the page while one is connected (workflow-panel.js). -->
-            <div class="lp-section" id="lan_section">
-              <div class="lp-section-header" onclick="window._lpToggle(this)">
-                <span class="lp-section-arrow">▸</span> LAN server
-              </div>
-              <div class="lp-section-body" id="serverCollapsible">
-                <div style="font-size:10px; color:rgba(255,255,255,0.4); margin-bottom:5px;">
-                  A FLEX processing server on your network that downloads LiDAR and builds point clouds. Nothing else in FLEX needs one.
-                </div>
-                <button id="top_server_status_btn" class="btn btn-sm btn-secondary" type="button" style="width:100%;">Connect to LAN Server</button>
-                <div id="server_connected_controls" style="display:none; margin-top:8px;">
-                  <div class="workflow_btn_row">
-                    <button id="top_toggle_aois_btn" class="btn btn-primary" type="button">Hide Areas Of Interest</button>
-                    <button id="top_draw_aoi_btn"    class="btn btn-primary" type="button">Draw AOI</button>
-                    <button id="top_upload_aoi_btn"  class="btn btn-primary" type="button">Upload AOIs</button>
-                    <button id="top_queue_manager_btn" class="btn btn-primary" type="button">Queue Manager</button>
-                  </div>
-                  <div id="top_draw_status">AOI draw mode inactive.</div>
-                  <div id="top_server_status_panel">
-                    <div><strong>Connection:</strong> <span id="sv_connection_status">Not connected</span></div>
-                    <div><strong>Tasks:</strong> <span id="sv_task_summary">—</span></div>
-                  </div>
-                  <button id="top_server_disconnect_btn" class="btn btn-secondary btn-sm" type="button">Disconnect</button>
-                </div>
-              </div>
-            </div>
-
           </div>
         </div>
 
@@ -2163,6 +2173,17 @@
 <!-- 📍 Surface: project | My data -->
 <style>
   /* the Export dialog's rows: an option that cannot be had right now is greyed, with the reason under its name */
+  /* Process: its two parts are always there inside the pane */
+  #processCollapsible .process-part { display: block; }
+  #processCollapsible #lidarDeriveCollapsible > .lp-panel-wrap { padding-bottom: 0; }
+  .process-step { margin: 12px 6px 2px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.14); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: #e8eaf0; }
+  .process-step span { text-transform: none; letter-spacing: 0; font-size: 10px; color: rgba(255,255,255,0.5); margin-left: 6px; }
+  #exportCollapsible.process-has-lidar #export_lidar_rows > * { display: none !important; }
+  #exportCollapsible.process-has-lidar #export_lidar_rows::before { content: "The point cloud ticked in 2 \00b7 LiDAR, above."; font-size: 11px; color: rgba(255,255,255,0.7); }
+  /* an explanation waits behind its "?" (process-panel.js) */
+  #processCollapsible .exp-hint-off { display: none; }
+  #processCollapsible .exp-q { display: inline-block; width: 16px; height: 16px; line-height: 14px; margin-left: 6px; padding: 0; border-radius: 50%; border: 1px solid rgba(255,255,255,0.35); background: none; color: rgba(255,255,255,0.75); font-size: 10px; cursor: pointer; vertical-align: middle; }
+  #processCollapsible .exp-q.on { background: rgba(255,255,255,0.18); }
   /* the Jobs strip lies over the bottom of the panels: every panel gets that much room under its last control (export-ui.js sets the height) */
   #toolbar .lp-panel-wrap { padding-bottom: var(--flex-jobs-h, 0px); }
   #exportCollapsible .exp-row { padding: 4px 0 6px; border-bottom: 1px solid rgba(255,255,255,0.05); }
@@ -2172,6 +2193,7 @@
   #exportCollapsible .exp-off .exp-why { display: block; }
 </style>
 <div id="jobs-panel" class="jobs-panel" hidden></div>  <!-- filled by jobs-panel.js -->
+<script src="client/src/modules/process-panel.js"></script>  <!-- Process: Analyze and Export as one flow (the pane's two parts, the area handed to the map, "?" explanations, presets) -->
 <script src="client/src/modules/phone-send.js"></script>  <!-- Send to phone over USB: the box under the export's download button (window._phone) -->
 <script src="client/src/modules/jobs-panel.js"></script>  <!-- the Jobs panel along the bottom of the map: running, waiting and failed jobs (window._jobs) -->
 <script src="client/src/modules/surface-route.js"></script>  <!-- 🔬 Analyze → Surface route: picks, weights, Find routes (route_cost.py on the server), cards, graph, save as line, overlays (window._surfRoute) -->

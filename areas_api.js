@@ -7,6 +7,7 @@
 //   GET  /api/areas?project=<pid>             { ok, areas }   (that project's and My data's, newest first; no project param: all)
 //   POST /api/areas/save    { id?, name, ring, project? }   → { ok, area }
 //   POST /api/areas/rename  { id, name }    POST /api/areas/delete { id }    POST /api/areas/delete-result { id, result }
+//   GET  /api/areas/reuse?id=&lidar=   { ok, ground, ridge, trees, shapes, why }: what an export of the area can reuse (reuse())
 //   POST /api/areas/link    { id, project, feature, name? }   an earlier area becomes the area of a project item ("Move into this project")
 //   area.json `feature`: the id of the project's area feature (flexlib processAreas) this area was made for; save / run take it too
 //   POST /api/areas/check   { ring, lidar, tools, options } → { ok, km2, tools: { <tool>: { status, why, offers, minutes } }, ground }
@@ -696,6 +697,10 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
       if (req.method === 'POST' && rest === 'save') return void post(save);
       if (req.method === 'POST' && rest === 'rename') return void post(rename);
       if (req.method === 'POST' && rest === 'link') return void post(link);
+      // what a map of this area can take from it, for its own outline and this point cloud (the Process pane's estimate)
+      if (req.method === 'GET' && rest === 'reuse') { const a = readArea(query && query.id); if (!a) return json(res, { ok: false, error: 'Unknown area' }, 404);
+        const r = reuse(a.id, { ring: a.ring, lidar: query.lidar }); return json(res, { ok: true, ground: !!r.ground.dir, ridge: !!r.ridge.dir, trees: !!r.trees.dir, shapes: !!(r.ridge.dir && r.ridge.shapes),
+          why: { ground: r.ground.why || '', ridge: r.ridge.why || '', trees: r.trees.why || '' } }); }
       if (req.method === 'POST' && rest === 'delete') return void post(del);
       if (req.method === 'POST' && rest === 'delete-result') return void post(delResult);
       if (req.method === 'POST' && rest === 'check') return void post(check);

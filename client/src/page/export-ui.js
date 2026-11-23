@@ -20,6 +20,7 @@
         hint.textContent = 'Load a point cloud in the LiDAR panel first.';
         return;
       }
+      const was = sel.value;
       sel.innerHTML = '';
       pcs.forEach(pc => {
         const name = pc.name || '';
@@ -32,6 +33,7 @@
         opt.textContent = name || url;
         sel.appendChild(opt);
       });
+      if (was && [...sel.options].some(o => o.value === was)) sel.value = was;      // the list is read again by others: the choice stays
       hint.textContent = pcs.length === 1 ? 'Auto-selected.' : pcs.length + ' datasets loaded.';
     } catch(e) {
       sel.innerHTML = '<option value="">— error reading viewer —</option>';
@@ -981,6 +983,7 @@
     fixed_s: 15,                 // starting up, packing the zip
     lidar_s_per_km2: 90,         // reading the points, the ground, the mesh, at 0.3 m cells; scaled by (0.3 / cell)^2 for coarser cells
     lidar_ref_cell: 0.3,
+    reuse_share: 0.45,           // of that, what is left when the ground comes from the area (no reading: the mesh and the pictures remain); cliff box: 11 s against 27 s
     map_s_per_km2: 3,            // map terrain: the heights are already here
     ridge_s_per_km2: 95,         // V2 - Ridgewalking: most of it is reading the points again
     trees_s_per_km2: 75,         // Trees and brush
@@ -1009,16 +1012,20 @@
     const km2 = d.km2;
     if (!(km2 > 0)) return { km2: 0, seconds: 0, bytes: 0 };
     const ridge = d.ridge && !d.map, cell = d.map ? d.mapCell : ridge ? 0.3 : d.cell;
-    let s = C.fixed_s + (d.map ? C.map_s_per_km2 * km2 : C.lidar_s_per_km2 * km2 * Math.pow(C.lidar_ref_cell / cell, 2));
-    if (ridge) s += C.ridge_s_per_km2 * km2;
-    if (d.trees && !d.map) s += C.trees_s_per_km2 * km2;
+    // what the chosen area already has for this outline and point cloud is not made again (areas_api.js reuse)
+    const ru = d.reuse !== undefined ? d.reuse : (window._process && window._process.reuse ? window._process.reuse() : null), reused = [];
+    const ruRidge = !!(ridge && ru && ru.ridge && (ru.shapes || !d.shapes)), ruTrees = !!(d.trees && !d.map && ru && ru.trees), ruGround = !!(!ridge && !d.map && ru && ru.ground);
+    let s = C.fixed_s + (d.map ? C.map_s_per_km2 * km2 : C.lidar_s_per_km2 * km2 * Math.pow(C.lidar_ref_cell / cell, 2) * (ruGround || ruRidge ? C.reuse_share : 1));
+    if (ridge && !ruRidge) s += C.ridge_s_per_km2 * km2;
+    if (d.trees && !d.map && !ruTrees) s += C.trees_s_per_km2 * km2;
+    if (ruRidge) reused.push('ridgewalking'); if (ruGround) reused.push('ground'); if (ruTrees) reused.push('trees');
     const tris = Math.min(d.maxTri, C.triangles_per_km2 * km2 * Math.pow(C.lidar_ref_cell / cell, 2));
     const hsPx = km2 * 1e6 / (cell * cell), hs = d.hillshade ? Math.min(hsPx, 16384 * 16384) * C.hillshade_bytes_per_pixel : 0;
     let b = tris * C.glb_bytes_per_triangle + Math.min(Math.max(C.aerial_min_bytes, C.aerial_bytes_per_km2 * km2), d.tex * d.tex * C.aerial_bytes_per_pixel) + hs;
     if (ridge) b += hs * C.brush_factor + (d.shapes ? C.shapes_bytes_per_km2 * km2 : 0);
     if (d.slope && !d.map) b += (hs || hsPx * C.hillshade_bytes_per_pixel) * C.slope_factor;
     if (d.trees && !d.map) b += C.trees_per_km2 * km2 * C.tree_bytes;
-    return { km2, seconds: Math.round(s), bytes: Math.round(b * C.zip_factor) };
+    return { km2, seconds: Math.round(s), bytes: Math.round(b * C.zip_factor), reused };
   }
   function _exportEstimate() {
     const el = document.getElementById('export_estimate'); if (!el) return;
@@ -1026,7 +1033,7 @@
     if (!e.km2) { el.textContent = 'Draw the area for a rough estimate of the time and the file size.'; return; }
     const t = e.seconds < 90 ? 'about ' + Math.max(10, Math.round(e.seconds / 10) * 10) + ' s' : e.seconds < 5400 ? 'about ' + Math.round(e.seconds / 60) + ' min' : 'about ' + (e.seconds / 3600).toFixed(1) + ' h';
     const mb = e.bytes / 1048576, sz = mb < 950 ? 'about ' + (mb < 10 ? mb.toFixed(1) : Math.round(mb / 5) * 5) + ' MB' : 'about ' + (mb / 1024).toFixed(1) + ' GB';
-    el.textContent = `Rough estimate, on a fast PC: ${t} and ${sz} for ${e.km2 < 0.1 ? e.km2.toFixed(3) : e.km2.toFixed(2)} km².`;
+    el.textContent = `Rough estimate, on a fast PC: ${t} and ${sz} for ${e.km2 < 0.1 ? e.km2.toFixed(3) : e.km2.toFixed(2)} km².` + (e.reused && e.reused.length ? ` Reusing the area's ${e.reused.join(' and ')}.` : '');
     el.title = 'From what was measured on one computer: your PC, the point cloud and the ground can make it several times more or less.';
   }
   window._exportEstimateOf = _exportEstimateOf;      // tests
@@ -1192,7 +1199,9 @@
 
     const mapTerrain       = document.getElementById('export_terrain_source').value === 'map';
     const mapCell          = document.getElementById('export_map_cell').value;
-    const eptPath          = mapTerrain ? '' : document.getElementById('export_ept_select').value;
+    // Process: the area and the point cloud chosen in 1 and 2 (process-panel.js); the Dataset list is the fallback
+    const proc             = window._process && window._process.pick ? window._process.pick() : {};
+    const eptPath          = mapTerrain ? '' : (proc.lidar || document.getElementById('export_ept_select').value);
     const resolution       = parseFloat(document.getElementById('export_resolution').value);
     const maxTri           = parseInt(document.getElementById('export_max_tri').value);
     const texSize          = parseInt(document.getElementById('export_tex_size').value);
@@ -1240,6 +1249,7 @@
 
     const body = {
       ...docsBody,
+      ...(proc.area && !mapTerrain ? { area: proc.area } : {}),     // the server reuses what was made for this very outline and point cloud
       ...(slopeMap ? { slope_map: true } : {}),
       ...(trees ? { trees: true } : {}),
       ...(feats && feats.items.length ? { features: { version: 1, folders: feats.folders, items: feats.items } } : {}),
