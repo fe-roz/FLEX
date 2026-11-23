@@ -41,7 +41,8 @@ How the area is worked (what depends on the tile cut is said in ridge.json "note
      just around it, against the stitched lid: features are never cut or doubled, and a tile with nothing
      below ground costs almost nothing.
 
-Outputs: see the header of write_outputs(). numpy + scipy; PDAL only for --ept.
+Outputs: see the header of write_outputs(); plus the LiDAR quality report (write_quality(): quality.json, maps.json,
+passes.u8, ground_seen.u8, density.u8; --no-quality leaves it out; it only measures). numpy + scipy; PDAL only for --ept.
 """
 import argparse, heapq, json, math, os, shutil, sys, time
 import numpy as np

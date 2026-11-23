@@ -64,7 +64,7 @@
     if (doc.getElementById('lq-css')) return;
     const st = doc.createElement('style'); st.id = 'lq-css';
     st.textContent = `
-  #lq-card { position: fixed; top: 64px; right: 16px; z-index: 4000; width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 96px); overflow: auto; background: rgba(24,27,32,.97); color: #e8ece9;
+  #lq-card { position: fixed; top: 64px; right: 16px; z-index: 9000; width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 96px); overflow: auto; background: rgb(24,27,32); color: #e8ece9;
     border: 1px solid rgba(255,255,255,.18); border-radius: 8px; padding: 12px 14px; font-size: 12px; line-height: 1.45; box-shadow: 0 8px 28px rgba(0,0,0,.5); }
   #lq-card h3 { margin: 0 0 2px; font-size: 14px; font-weight: 600; display: flex; gap: 8px; align-items: baseline; } #lq-card h3 span { flex: 1; }
   #lq-card h4 { margin: 12px 0 4px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: rgba(255,255,255,.6); }
