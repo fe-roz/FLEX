@@ -957,7 +957,7 @@ def main(argv=None):
             x, y, z, c, ps = demo_points()
         else:
             with np.load(a.npz) as Zf:
-                x, y, z, c = (np.asarray(Zf[k], 'f8') for k in ('x', 'y', 'z')) + (np.asarray(Zf['c']),)
+                x, y, z = (np.asarray(Zf[k], 'f8') for k in ('x', 'y', 'z')); c = np.asarray(Zf['c'])
                 ps = np.asarray(Zf['psid']) if 'psid' in Zf.files else np.zeros(len(x), 'i4')
                 if 'psid' not in Zf.files: notes.append('the file has no flight pass ids: no patterned-noise check')
         C['ox'] = float(math.floor(x.min())); C['oy'] = float(math.floor(y.min()))
