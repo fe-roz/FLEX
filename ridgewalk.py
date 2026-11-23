@@ -244,20 +244,31 @@ def _init(C):
     _cache.clear()
 
 
-def _one(args):
-    """One item in a process of its own (a retry after a worker died)."""
-    from concurrent.futures import ProcessPoolExecutor
-    C, fn, it = args
+def _child(conn, C, fn, it):
     try:
-        with ProcessPoolExecutor(1, initializer=_init, initargs=(C,)) as ex:
-            return True, ex.submit(fn, it).result()
-    except Exception as e:
-        return False, '%s' % (str(e)[:120] or type(e).__name__)
+        _init(C); conn.send((True, fn(it)))
+    except BaseException as e:
+        conn.send((False, '%s' % (str(e)[:120] or type(e).__name__)))
+
+
+def _one(args):
+    """One item in a process of its own, stopped when it gives no answer in time (a stalled download)."""
+    import multiprocessing as mp
+    C, fn, it, timeout = args
+    a, b = mp.Pipe(False); p = mp.Process(target=_child, args=(b, C, fn, it), daemon=True); p.start(); b.close()
+    try:
+        r = a.recv() if a.poll(timeout) else (False, 'no answer in %d s' % timeout)
+    except (EOFError, OSError):
+        r = (False, 'the process stopped')
+    if p.is_alive():
+        p.terminate()
+    p.join(5)
+    return r
 
 
 def pmap(C, fn, items, lo, hi, text, lost=None, own=False):
     """fn over items in the worker processes (unordered), with progress lines from lo to hi per cent.
-    A worker that dies (PDAL can take the process down when the network drops) does not stop the run:
+    A worker that dies (PDAL can take the process down) or a read that stalls (120 s) does not stop the run:
     what was not finished is tried again, each item in a process of its own, up to 3 times; an item
     still failing gives lost(item, why) when that is given, else the run stops. own: every item in a
     process of its own from the start (the reads: a second EPT read in one process has taken it down)."""
@@ -294,7 +305,7 @@ def pmap(C, fn, items, lo, hi, text, lost=None, own=False):
         if not left: break
         nxt = []
         with ThreadPoolExecutor(min(C['workers'], len(left))) as th:
-            for it, (ok, r) in zip(left, th.map(_one, [(Cw, fn, it) for it in left])):
+            for it, (ok, r) in zip(left, th.map(_one, [(Cw, fn, it, C.get('read_timeout') if own else None) for it in left])):
                 if ok:
                     k += 1; tick(k); yield r
                 else:
@@ -881,12 +892,12 @@ def read_shapes_bin(path):
 # ---------------------------------------------------------------------------------------------------------
 DEMO = dict(
     size=(192.0, 144.0), cliff_y=110.1, cliff_h=10.0,
-    pit=(96.0, 40.0, 2.0, 9.0),                  # x, y, radius, depth: a vertical pit (on the line between two tiles)
-    slant=(40.0, 40.0, 2.2, 8.0),                # x, y, mouth radius, length: a pit going down at 45 degrees to the east
-    slant_deep=(53.0, 40.0, 10.0),               # x, y, depth: a group under a roof, joined to the slanted pit
+    pit=(96.0, 38.0, 2.0, 9.0),                  # x, y, radius, depth: a vertical pit (on the line between two tiles)
+    slant=(37.0, 38.0, 2.2, 8.0),                # x, y, mouth radius, length: a pit going down at 45 degrees to the east
+    slant_deep=(50.0, 38.0, 10.0),               # x, y, depth: a group under a roof, joined to the slanted pit
     cliff_open=(140.0, 110.1, 6.0),              # x, y of the opening at the foot of the cliff, how far it goes in (north)
-    crack=(130.0, 146.0, 40.0, 0.6, 4.0),        # x from, x to, y, width, depth
-    lone_far=(20.0, 100.0, 7.0), lone_near=(42.0, 36.5, 3.0),
+    crack=(130.0, 146.0, 38.0, 0.6, 4.0),        # x from, x to, y, width, depth
+    lone_far=(20.0, 100.0, 7.0), lone_near=(39.0, 34.5, 3.0),
     stripes=(150.0, 190.0, 10.0, 100.0), stripe_pass=9, confirmed=(164.0, 60.0, 5.0),
     brush=(60.0, 90.0, 60.0, 90.0),
 )
@@ -968,7 +979,7 @@ def main(argv=None):
     cell = float(a.cell); K = PARAMS['coarse']
     C = dict(out=out, tmp=os.path.join(out, '_work'), cell=cell, coarse=K, tile_c=max(K, int(round(a.tile / cell / K)) * K),
              marg_c=max(4, int(round(a.margin / cell))), shapes=not a.no_shapes, debug=a.debug,
-             workers=a.workers or max(1, min((os.cpu_count() or 2) - 1, 20)), ox=0.0, oy=0.0)
+             workers=a.workers or max(1, min((os.cpu_count() or 2) - 1, 20)), ox=0.0, oy=0.0, read_timeout=120)
     shutil.rmtree(C['tmp'], ignore_errors=True); os.makedirs(C['tmp'])
     notes = []; ring = None
     if a.polygon:
