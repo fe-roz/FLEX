@@ -554,6 +554,7 @@
     if (prop(ent, 'isCaveSurvey') || prop(ent, 'isFieldStation') || prop(ent, 'isProjectFootprint') || ent._caveLazy) return null;
     if (prop(ent, 'isProjectFeature')) { if (window._pjfState && window._pjfState.draw) return null; return featureSubject(prop(ent, 'featureId')); }
     if (prop(ent, 'isFeatureLead')) return leadSubject(prop(ent, 'leadId'));
+    if (prop(ent, 'isRidgeMark')) return window._ridgeMarks ? window._ridgeMarks.subject(prop(ent, 'markId')) : null;     // ridge-marks.js: a mark on a ridgewalking feature
     if (prop(ent, 'isInventory')) return window._inventory ? window._inventory.subject(prop(ent, 'invId')) : null;     // inventory.js: its card (contents, log) is s.card
     if (!ent.name && !ent.description && !prop(ent, 'myFeature') && !prop(ent, 'isUserLabel')) return null;
     return entitySubject(ent);
@@ -996,11 +997,11 @@
       let fresh;
       if (s.kind === 'feature') fresh = featureSubject(s.key.slice(8));
       else if (s.kind === 'lead') fresh = leadSubject(s.key.slice(5));
-      else if (s.kind === 'inventory') fresh = s.refresh ? s.refresh() : null;
+      else if (s.kind === 'inventory' || s.kind === 'rmark') fresh = s.refresh ? s.refresh() : null;
       else if (s.kind === 'entity') { const e = entityNow(s); fresh = e && (!s.ref || (FE() && FE().refOf(e))) ? entitySubject(e) : null; }
       else fresh = cardSubject();
       if (!fresh) { clear(); return; }
-      if (s.kind === 'feature' || s.kind === 'lead' || s.kind === 'entity' || s.kind === 'inventory') show(fresh);
+      if (s.kind === 'feature' || s.kind === 'lead' || s.kind === 'entity' || s.kind === 'inventory' || s.kind === 'rmark') show(fresh);
       else { I.subject = fresh; if (I.x && !I.x.querySelector('.inf-player video')) render(); }
     }, 150);
   }

@@ -247,6 +247,34 @@ class Ridge:
             out[m] = (1 - a) * base[m] + a * np.array(col[:3], np.float32)
         return Image.fromarray(np.clip(out + 0.5, 0, 255).astype(np.uint8), 'RGB')
 
+    def features_json(self, shift, to_lonlat=None):
+        """The step's features.json (one entry a feature: anchor, returns,
+        deepest, box, entrance) in the viewer's frame, each with the lon / lat
+        of its anchor (`to_lonlat(e, n)` -> (lat, lon), arrays), so a mark made
+        on the phone has a place. None when the step wrote no list."""
+        p = self.dir / 'features.json'
+        if not p.exists():
+            return None
+        try:
+            feats = json.loads(p.read_text()).get('features') or []
+        except Exception:
+            return None
+        out = []
+        sx, sy, sz = (float(v) for v in shift)
+        if feats and to_lonlat is not None:
+            lat, lon = to_lonlat(np.array([self.ox + float(f['x']) for f in feats]), np.array([self.oy + float(f['y']) for f in feats]))
+        for i, f in enumerate(feats):
+            b = f.get('box') or [f['x'], f['y'], f['z'], f['x'], f['y'], f['z']]
+            o = {'id': str(f.get('id', i)), 'x': round(float(f['x']) + sx, 2), 'y': round(float(f['y']) + sy, 2), 'z': round(float(f['z']) + sz, 2),
+                 'n': int(f.get('n', 0)), 'deepest': round(float(f.get('deepest', 0)), 2),
+                 'box': [round(float(b[0]) + sx, 2), round(float(b[1]) + sy, 2), round(float(b[2]) + sz, 2),
+                         round(float(b[3]) + sx, 2), round(float(b[4]) + sy, 2), round(float(b[5]) + sz, 2)],
+                 'entrance': f.get('entrance') if f.get('entrance') in ('true', 'guessed') else 'none'}
+            if to_lonlat is not None:
+                o['lon'] = round(float(lon[i]), 7); o['lat'] = round(float(lat[i]), 7)
+            out.append(o)
+        return {'version': 1, 'features': out}
+
     def side_json(self, center_e, center_n, z_offset, files):
         """ridge.json for the zip: the step's own, plus the frame and the
         RIDGE object with file names (what a slim shell / the app puts in
@@ -259,16 +287,30 @@ class Ridge:
         return out
 
 
+FEATURES_FILE, MARKS_FILE = 'ridge_features.json', 'ridge_marks.json'
+
+
 def ridge_object(meta, files, data=None):
-    """The viewer's RIDGE: file names, or inline base64 when `data` {name: bytes} is given."""
+    """The viewer's RIDGE: file names, or inline (base64 for the binaries, the
+    list itself for the two JSON files) when `data` {name: bytes} is given.
+    `features`: the list of features (marks in the field need it); `marks`:
+    the marks the project already had inside the area. Left out when absent."""
     import base64
     def ref(name):
         if name not in files:
             return None
         return base64.b64encode(data[name]).decode('ascii') if data is not None else name
-    return {'version': 1, 'counts': meta.get('counts') or {},
-            'points': ref('ridge_points.bin'), 'patches': ref('ridge_patches.bin'),
-            'shapes': ref('ridge_shapes.bin'), 'depthCap': DEPTH_CAP}
+    def jref(name, key):
+        if name not in files:
+            return None
+        return json.loads(data[name]).get(key) if data is not None else name
+    out = {'version': 1, 'counts': meta.get('counts') or {},
+           'points': ref('ridge_points.bin'), 'patches': ref('ridge_patches.bin'),
+           'shapes': ref('ridge_shapes.bin'), 'depthCap': DEPTH_CAP}
+    for key, name in (('features', FEATURES_FILE), ('marks', MARKS_FILE)):      # (absent: the key is left out, as before these existed)
+        if name in files:
+            out[key] = jref(name, key)
+    return out
 
 
 def fill_nearest(a, blank):

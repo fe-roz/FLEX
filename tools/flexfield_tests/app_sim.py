@@ -307,8 +307,8 @@ def ridge_for(has):
     if not has('ridge_points.bin'): return 'null'
     ref = lambda f: '"%s"' % f if has(f) else 'null'
     counts = '(ffSidecarJson("ridge.json").counts || {})' if has('ridge.json') else '{}'
-    return ('{ version: 1, counts: %s, points: "ridge_points.bin", patches: %s, shapes: %s, depthCap: 20 }'
-            % (counts, ref('ridge_patches.bin'), ref('ridge_shapes.bin')))
+    return ('{ version: 1, counts: %s, points: "ridge_points.bin", patches: %s, shapes: %s, depthCap: 20, features: %s, marks: %s }'
+            % (counts, ref('ridge_patches.bin'), ref('ridge_shapes.bin'), ref('ridge_features.json'), ref('ridge_marks.json')))
 
 MIME = {'.html': 'text/html', '.js': 'application/javascript', '.json': 'application/json', '.glb': 'model/gltf-binary',
         '.jpg': 'image/jpeg', '.png': 'image/png', '.bin': 'application/octet-stream', '.tif': 'image/tiff'}

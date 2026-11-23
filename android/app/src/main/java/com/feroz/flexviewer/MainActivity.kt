@@ -555,7 +555,7 @@ class MainActivity : AppCompatActivity() {
             val ref = { f: String -> if (has(f)) "\"$f\"" else "null" }
             val counts = if (has("ridge.json")) "(ffSidecarJson(\"ridge.json\").counts || {})" else "{}"
             return "{ version: 1, counts: $counts, points: \"ridge_points.bin\", patches: ${ref("ridge_patches.bin")}, " +
-                "shapes: ${ref("ridge_shapes.bin")}, depthCap: 20 }"
+                "shapes: ${ref("ridge_shapes.bin")}, depthCap: 20, features: ${ref("ridge_features.json")}, marks: ${ref("ridge_marks.json")} }"
         }
 
         private fun html(s: String) = WebResourceResponse("text/html", "utf-8", ByteArrayInputStream(s.toByteArray(Charsets.UTF_8))).apply {

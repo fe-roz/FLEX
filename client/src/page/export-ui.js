@@ -1292,11 +1292,15 @@
     const treesBox = document.getElementById('export_trees');
     const trees = !mapTerrain && !!(treesBox && treesBox.checked);
 
+    // The open project's marks on ridgewalking features inside the area travel with a ridgewalking export (ridge-marks.js)
+    const rmarks = ridgewalk && window._ridgeMarks ? window._ridgeMarks.exportIn([w, s, e, n], poly) : [];
+
     const body = {
       ...docsBody,
       ...(trees ? { trees: true } : {}),
       ...(feats && feats.items.length ? { features: { version: 1, folders: feats.folders, items: feats.items } } : {}),
       ...(ridgewalk ? { ridgewalk: true, ..._ridgeOptions() } : {}),
+      ...(ridgewalk && rmarks.length ? { ridge_marks: rmarks } : {}),
       bbox: [w, s, e, n],
       polygon: poly,                 // null: the whole box
       eptPath,

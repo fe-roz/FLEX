@@ -1163,6 +1163,7 @@ def run(C, notes):
                   true_cells=int((holes == 1).sum()), guessed_cells=int((holes == 2).sum()),
                   deepest=round(float(pD[pK < 3].max()), 2) if (pK < 3).any() else 0.0, shape_triangles=int(sum(len(t) for t in T)))
     write_outputs(C, holes, (pX, pY, pZ, pD, pK), (V, D, T) if C['shapes'] else None, brush)
+    write_features(C, holes, pts if len(bi) else np.zeros((0, 3)), DV[bi], feat)
     if C.get('debug'):
         np.savez(os.path.join(out, 'debug.npz'), x=pts[:, 0] if len(bi) else np.zeros(0), y=pts[:, 1] if len(bi) else np.zeros(0),
                  z=pts[:, 2] if len(bi) else np.zeros(0), depth=DV[bi], kind=kb, feature=feat, open=openp, sideways=side,
@@ -1197,6 +1198,40 @@ def write_outputs(C, holes, pts, shapes, brush):
     S = PARAMS['brush_block']
     json.dump(dict(x0=0.0, y0=0.0, cell=round(C['cell'] * S, 6), nx=int(brush.shape[1]), ny=int(brush.shape[0]), band=PARAMS['brush_band']),
               open(os.path.join(out, 'brush.json'), 'w'))
+
+
+def write_features(C, holes, pts, depth, feat):
+    """features.json: the list of features, so a place on the phone can say which feature it is (marks in the field).
+    { version: 1, features: [{ id, x, y, z, n, deepest, box: [x0, y0, z0, x1, y1, z1], entrance }] }: x, y, z = the
+    anchor (the feature's shallowest return: where it comes nearest the surface), n = its returns, deepest = the depth
+    of its deepest return below the lid, box = the extent of its returns, entrance = 'true' | 'guessed' | 'none'
+    (a true-entrance or guessed-opening cell within a metre of one of its returns). Metres from the origin, z
+    absolute, as the other files. `id` is made from the anchor's place (2 m squares): the same after a re-run when the
+    feature has not moved, a hint only."""
+    pts = np.asarray(pts, 'f8').reshape(-1, 3); depth = np.asarray(depth, 'f8'); feat = np.asarray(feat, np.int64)
+    out = []
+    k = np.nonzero(feat >= 0)[0]
+    if len(k):
+        k = k[np.lexsort((depth[k], feat[k]))]                      # by feature, the shallowest return first
+        f = feat[k]; st = np.r_[0, np.nonzero(np.diff(f))[0] + 1]; en = np.r_[st[1:], len(k)]
+        x, y, z, d = pts[k, 0], pts[k, 1], pts[k, 2], depth[k]
+        cell = C['cell']; ny, nx = holes.shape
+        ci = np.clip((x / cell).astype(np.int64), 0, nx - 1); cj = np.clip((y / cell).astype(np.int64), 0, ny - 1)
+        r = max(1, int(round(1.0 / cell)))
+        tru = np.zeros(len(k), bool); gue = np.zeros(len(k), bool)
+        for dj in (-r, 0, r):
+            for di in (-r, 0, r):
+                h = holes[np.clip(cj + dj, 0, ny - 1), np.clip(ci + di, 0, nx - 1)]
+                tru |= h == 1; gue |= h == 2
+        seen = {}
+        for a, b in zip(st, en):
+            e, n = C.get('ox', 0.0) + x[a], C.get('oy', 0.0) + y[a]
+            fid = 'r%x-%x' % (int(e // 2), int(n // 2)); c = seen.get(fid, 0); seen[fid] = c + 1
+            out.append(dict(id=fid if not c else '%s.%d' % (fid, c), x=round(float(x[a]), 2), y=round(float(y[a]), 2), z=round(float(z[a]), 2),
+                            n=int(b - a), deepest=round(float(d[a:b].max()), 2),
+                            box=[round(float(v), 2) for v in (x[a:b].min(), y[a:b].min(), z[a:b].min(), x[a:b].max(), y[a:b].max(), z[a:b].max())],
+                            entrance='true' if tru[a:b].any() else ('guessed' if gue[a:b].any() else 'none')))
+    json.dump(dict(version=1, features=out), open(os.path.join(C['out'], 'features.json'), 'w'), separators=(',', ':'))
 
 
 def read_points_bin(path):

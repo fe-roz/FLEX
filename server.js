@@ -779,6 +779,7 @@ function handleExportTerrain(req, res) {
             ridge_shapes      = 'all',       // with ridgewalk: 'none' leaves the shapes of the features out
             brush_opacity     = null,        // with ridgewalk: 0..1, how strongly the brush lies over the hillshade
             ridgewalk         = false,       // V2 - Ridgewalking: the ridge step on the LiDAR, its ground as the terrain (export_ridge.py)
+            ridge_marks       = null,        // with ridgewalk: the project's marks on ridgewalking features inside the area ([{ id, kind, note, lon, lat, … }]); checked again by the exporter
             trees             = false,       // Trees and brush: the vegetation step on the LiDAR, one simple solid a tree (export_trees.py)
         } = params;
         const hsMode  = ['lidar', 'dem', 'url', 'none', 'layer'].includes(hillshade_mode) ? hillshade_mode : 'lidar';
@@ -879,6 +880,15 @@ function handleExportTerrain(req, res) {
             if (ridge_shapes === 'none') args.push('--ridge-shapes', 'none');
             if (typeof brush_opacity === 'number' && Number.isFinite(brush_opacity))
                 args.push('--brush-opacity', String(Math.max(0, Math.min(1, brush_opacity))));
+            // Marks made in the field: handed over as a file; the exporter keeps only the known fields (viewer_inline.clean_ridge_marks)
+            if (Array.isArray(ridge_marks) && ridge_marks.length && ridge_marks.length <= 5000) {
+                try {
+                    const mf = path.join(EXPORT_OUT_DIR, `ridge_marks_${jobId}.json`);
+                    fs.writeFileSync(mf, JSON.stringify({ marks: ridge_marks }));
+                    args.push('--ridge-marks', mf);
+                    demFiles.push(mf);              // (cleaned up with the other temporary files when the job ends)
+                } catch (e) { _exportJobs[jobId].progress.push('⚠ Marks left out: ' + (e.message || e)); }
+            }
         }
         // The project's documents that belong to these caves: entries + page images
         if (typeof docs_project === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(docs_project)) {

@@ -102,6 +102,7 @@
       if (window._flexLeads) window._flexLeads.panel(b, false);        // My data's leads (caves outside the project)
     });
     if (window._inventory) window._inventory.paneSection(leadsRoot, section);
+    if (window._ridgeMarks) window._ridgeMarks.paneSection(leadsRoot, section);        // marks on ridgewalking features, from the field (ridge-marks.js)
     if (window._pjDocs && docsRoot !== root) window._pjDocs.tree(docsRoot, section);
     section(docsRoot, 'Documents', true, b => {
       const all = FL.docsOf(pj.D, pj.P);

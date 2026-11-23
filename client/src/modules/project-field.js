@@ -92,6 +92,7 @@
     leadSrc.entities.removeAll();
     if (window._flexLeads) window._flexLeads.syncFile();
     if (window._inventory) window._inventory.redraw();          // the chests (inventory.js) follow the same events: project opened / changed, caves loaded
+    if (window._ridgeMarks) window._ridgeMarks.redraw();        // marks on ridgewalking features (ridge-marks.js): the same events
     if (!pj.pid) return;
     const FX = window._flexLeads;
     const showClosed = !!(FX && FX.closed());

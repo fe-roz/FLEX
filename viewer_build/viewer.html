@@ -715,6 +715,7 @@ catch(e) { window.DOCS_EXPORT = null; }
 <script src="libs/ridgewalk.js"></script>
 <script src="libs/viewer-features.js"></script>
 <script src="libs/trees.js"></script>
+<script src="libs/ridge-marks.js"></script>
 
 <script>
 'use strict';
@@ -2087,6 +2088,13 @@ setTimeout(() => {
     if (window.FlexRidge) FlexRidge.init({
       THREE, scene, ridge: typeof RIDGE === 'undefined' ? null : RIDGE, saved: DISP.ridge, isAssetRef, b64ToArrayBuffer,
       redraw: () => { requestRender(); wakeRender(); },
+    });
+    // Marks on ridgewalking features (libs/ridge-marks.js): nothing unless the export lists its features.
+    if (window.RidgeMarks && typeof RIDGE !== 'undefined' && RIDGE) RidgeMarks.init({
+      THREE, scene, camera, features: RIDGE.features, marks: RIDGE.marks, saved: DISP.rmarks, ridge: window.FlexRidge,
+      project: () => (ffPid ? ffP : null), hasProject: () => !!ffPid, ensureProject: ffEnsureProject, ensureAuthor: ffEnsureAuthor,
+      record: (op, data) => ffRecord(op, data), toScene: gpsToScene, toLonLat: sceneToLatLon, groundZ: gridZAt,
+      toast: m => showToast(m), redraw: () => { requestRender(); wakeRender(); },
     });
     // Surface features of the project, view only (nothing when FEATURES is null).
     if (window.ViewerFeatures) ViewerFeatures.init({
@@ -4673,6 +4681,7 @@ function renderDisplaySheet() {
     chips.push(['📂', kmlNames.length ? kmlNames.join(', ') : 'Imported KML', importGroup.visible, on => { importGroup.visible = on; }]);
   sheetChips(chips);
   if (window.FlexRidge && FlexRidge.active()) FlexRidge.sheet({ el, sheet: sheetEl, head: sheetHead, chips: sheetChips });   // Below ground (V2)
+  if (window.RidgeMarks && RidgeMarks.active()) RidgeMarks.sheet({ head: sheetHead, chips: sheetChips });   // marks on ridgewalking features
   if (window.FlexTrees && FlexTrees.active()) FlexTrees.sheet({ head: sheetHead, chips: sheetChips });   // Trees and brush
   if (window.ViewerFeatures && ViewerFeatures.active()) ViewerFeatures.sheet({ el, sheet: sheetEl, head: sheetHead, chips: sheetChips, close: closeSheet });   // the project's surface features
   const hsOk = document.getElementById('map-panel-layer').style.display === 'block';
@@ -5293,6 +5302,7 @@ function ffReplay() {
 function ffInverse(e) {
   if (e.proposed) return null;                    // a suggestion changed nothing: turn it down instead
   if (/^inv\./.test(e.op)) return window.ViewerInv ? ViewerInv.inverse(e) : null;
+  if (e.op === 'rmark.set') return FL.rmarkUndo(e);
   switch (e.op) {
     case 'note.set':     return { op: 'note.set', note: e.note, text: e.prev || '', prev: e.text || '', base: [e.id] };
     case 'lead.set': {
@@ -5360,6 +5370,7 @@ function ffDescribeOp(e) {
   const noteAt = id => { const n = ffP.notes[id]; return n && n.target ? ffTargetLabel(n.target) : 'a station'; };
   const leadAt = id => { const L = ffP.leads[id]; return L && L.target ? ffTargetLabel(L.target) : 'a station'; };
   if (/^inv\./.test(e.op) && window.ViewerInv) return ViewerInv.describe(e);
+  if (e.op === 'rmark.set' && window.RidgeMarks) return RidgeMarks.describe(e);
   switch (e.op) {
     case 'project.set':  return `Project ${e.name != null ? '“' + e.name + '”' : 'details'}`;
     case 'project.lists': return `Added to lists: ${Object.values(e.add || {}).flat().join(', ')}`;
@@ -5404,6 +5415,7 @@ function ffAfterChange(e) {
   if (ffDocsOpen) ffRenderDocs();
   if (/^(note|lead|doc)\./.test(e.op)) ffRefreshCard();
   if (/^inv\./.test(e.op) && window.ViewerInv) ViewerInv.changed(e);      // the chests, the inventory card, the station card
+  if (e.op === 'rmark.set' && window.RidgeMarks) RidgeMarks.refresh();   // the badges and the card
 }
 function ffRefreshCard() {
   const sel = _selMesh && _selMesh._station;
@@ -5669,6 +5681,7 @@ function ffDecorateLeads() {
   });
   if (typeof requestRender === 'function') { requestRender(); wakeRender(); }
   if (window.ViewerInv) ViewerInv.refresh();      // the inventories' chests (libs/viewer-inventory.js)
+  if (window.RidgeMarks) RidgeMarks.refresh();    // marks on ridgewalking features (libs/ridge-marks.js)
 }
 
 // ── Documents ─────────────────────────────────────────────────────────────────
@@ -5956,16 +5969,20 @@ function ffStationCard(st) {
 // Sync files: this device's changes (and what it got from others) for one
 // project, to import on another phone or in FLEX — "since my last sync file"
 // by default, or everything.
+// A change needs a project: on a map that has none yet, ask which (as Project & sync does). → true when there is one.
+async function ffEnsureProject() {
+  if (ffPid) return true;
+  ffPid = await ffPickProject();
+  if (!ffPid) return false;
+  await ffLoadAll();
+  if (ffPendingProjectName) { ffRecord('project.set', { name: ffPendingProjectName }); ffPendingProjectName = null; }
+  await ffLinkCaves();
+  ffAfterLink();
+  return true;
+}
 async function ffOpenProject() {
   closeSheet();
-  if (!ffPid) {
-    ffPid = await ffPickProject();
-    if (!ffPid) return;
-    await ffLoadAll();
-    if (ffPendingProjectName) { ffRecord('project.set', { name: ffPendingProjectName }); ffPendingProjectName = null; }
-    await ffLinkCaves();
-    ffAfterLink();
-  }
+  if (!(await ffEnsureProject())) return;
   const sentRaw = await ffHost.kvGet('sync-sent|' + ffPid);
   const sent = sentRaw ? JSON.parse(sentRaw) : null;
   const last = await ffHost.kvGet('sync-last|' + ffPid);
@@ -7645,6 +7662,12 @@ function onPointerTap(e) {
     const q = fh && hits.length ? hits[0].object._station.pos.clone().project(camera) : null;
     if (fh && (!q || fh.d <= Math.hypot((q.x - ndc.x) * rect.width / 2, (q.y - ndc.y) * rect.height / 2))) { clearStationHighlight(); ViewerFeatures.open(fh.id); return; }
   }
+  if (window.RidgeMarks && RidgeMarks.active()) {     // a ridgewalking feature, or a mark on its own: its card (the station under the tap wins when nearer)
+    const rh = onRoute ? null : RidgeMarks.pick(clientX - rect.left, clientY - rect.top, rect);
+    const q = rh && hits.length ? hits[0].object._station.pos.clone().project(camera) : null;
+    if (rh && (!q || rh.d <= Math.hypot((q.x - ndc.x) * rect.width / 2, (q.y - ndc.y) * rect.height / 2))) { clearStationHighlight(); RidgeMarks.open(rh); return; }
+    RidgeMarks.closeCard();
+  }
   if (window.ViewerInv) {                    // a chest (libs/viewer-inventory.js): the nearer of it and the station beside it; any other tap closes its card
     const ivh = onRoute ? null : ViewerInv.pick(clientX - rect.left, clientY - rect.top, rect);
     const q = ivh && hits.length ? hits[0].object._station.pos.clone().project(camera) : null;
@@ -8407,7 +8430,7 @@ function dispRestoreUi() {
 }
 function dispCapture() {
   const sl = id => { const n = document.getElementById(id); return n ? +n.value : undefined; };
-  dispSave({ wallMode, colourMode, wallAlpha: wallOpacity, stationMode, annot: annotMode, tracks: fieldGroup.visible, inv: window.ViewerInv ? ViewerInv.visible() : true, fx: FlexFx.serialize(), trees: window.FlexTrees ? FlexTrees.serialize() : undefined, features: window.ViewerFeatures ? ViewerFeatures.serialize() : undefined, ridge: window.FlexRidge ? FlexRidge.serialize() : undefined, tex: texMode,
+  dispSave({ wallMode, colourMode, wallAlpha: wallOpacity, stationMode, annot: annotMode, tracks: fieldGroup.visible, inv: window.ViewerInv ? ViewerInv.visible() : true, fx: FlexFx.serialize(), rmarks: window.RidgeMarks ? RidgeMarks.serialize() : undefined, trees: window.FlexTrees ? FlexTrees.serialize() : undefined, features: window.ViewerFeatures ? ViewerFeatures.serialize() : undefined, ridge: window.FlexRidge ? FlexRidge.serialize() : undefined, tex: texMode,
              opacity: sl('terrain-opacity-slider'), bright: sl('terrain-bright-slider'), fog: sl('terrain-fog-slider') });
 }
 let _dispTimer = null;

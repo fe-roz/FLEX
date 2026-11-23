@@ -2303,6 +2303,10 @@ def main():
              'with real holes at true entrances, plus the ridge files for FLEX Field.')
     ap.add_argument('--ridgewalk-dir', default=None, metavar='DIR',
         help='With or without --ridgewalk: use this already computed ridge folder (ridgewalk.py --out DIR).')
+    ap.add_argument('--ridge-marks', default=None, metavar='FILE',
+        help='With --ridgewalk: the marks the project already has on ridgewalking features inside the area (cave / pit / '
+             'nothing / not reached, as the Export dialog gathers them): JSON { marks: [...] }; written as ridge_marks.json, '
+             'so the phone shows them from the start. They change nothing in what is computed.')
     ap.add_argument('--features', default=None, metavar='FILE',
         help='Surface features to carry (the open project\'s points, lines and areas inside the area, as the Export '
              'dialog gathers them): JSON { folders, items }; written as features.json, view only in the viewer.')
@@ -2925,12 +2929,25 @@ def main():
                 rshapes = ridge.shapes_bin(shift) if args.ridge_shapes != 'none' else None
                 if rshapes:
                     rfiles['ridge_shapes.bin'] = rshapes
+                # the list of features (what a mark in the field is tied to) and the project's marks inside the area
+                rfeat = ridge.features_json(shift, to_lonlat=lambda e, n: utm_to_latlon(e, n, zone, south))
+                if rfeat is not None:
+                    rfiles[export_ridge.FEATURES_FILE] = json.dumps(rfeat, separators=(',', ':')).encode('utf-8')
+                if args.ridge_marks and os.path.exists(args.ridge_marks):
+                    try:
+                        from viewer_inline import clean_ridge_marks
+                        rmarks = clean_ridge_marks(json.loads(Path(args.ridge_marks).read_text(encoding='utf-8')))
+                        if rmarks:
+                            rfiles[export_ridge.MARKS_FILE] = json.dumps(rmarks, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
+                            print(f"[6/7] Marks on ridgewalking features: {len(rmarks['marks'])} carried along")
+                    except Exception as e:
+                        print(f"[6/7] WARNING: the marks could not be read ({e}); left out")
                 for rname, rbytes in rfiles.items():
                     zf.writestr(zipfile.ZipInfo(rname), rbytes, compress_type=zipfile.ZIP_DEFLATED)
                 rside = ridge.side_json(utm_center_e, utm_center_n, FLEX_PC_Z_OFFSET, rfiles)
                 rside['mesh'] = ridge_mesh_stats
                 zf.writestr('ridge.json', json.dumps(rside, separators=(',', ':')))
-                ridge_json = json.dumps(export_ridge.ridge_object(ridge.meta, rfiles, data=rfiles), separators=(',', ':'))
+                ridge_json = json.dumps(export_ridge.ridge_object(ridge.meta, rfiles, data=rfiles), separators=(',', ':'), ensure_ascii=False).replace('</', '<\\/')
                 print(f"[6/7] Ridge files: " + ', '.join(f"{n} {len(b) // 1024} KB" for n, b in rfiles.items()))
 
             # Trees and brush (export_trees.py): trees.bin, one simple solid a tree or bush
