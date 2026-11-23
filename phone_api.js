@@ -24,7 +24,7 @@
 //   3 'download'  the phone's Download folder, where adb can always write: open it there with FLEX Field.
 // With FLEX Field not installed only 3 is done. Afterwards FLEX Field is brought to the front.
 //
-// Env: FLEX_ADB (the adb to use), ANDROID_HOME / ANDROID_SDK_ROOT. Tests: tools/test_phone_api.js (a fake adb).
+// Env: FLEX_ADB (the adb to use; "off" = never look for one), ANDROID_HOME / ANDROID_SDK_ROOT. Tests: tools/test_phone_api.js (a fake adb).
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -47,6 +47,7 @@ function findAdb(env = process.env, platform = process.platform, exists = fs.exi
   const exe = platform === 'win32' ? 'adb.exe' : 'adb', P = platform === 'win32' ? path.win32 : path.posix;
   const looked = [];
   const tryOne = p => { if (!p) return null; looked.push(p); return exists(p) ? p : null; };
+  if (env.FLEX_ADB === 'off') return { adb: null, looked: ['FLEX_ADB=off'] };          // never start adb (the test kit)
   if (env.FLEX_ADB) { const p = tryOne(env.FLEX_ADB); if (p) return { adb: p, looked }; }
   for (const k of ['ANDROID_HOME', 'ANDROID_SDK_ROOT']) if (env[k]) { const p = tryOne(P.join(env[k], 'platform-tools', exe)); if (p) return { adb: p, looked }; }
   const usual = platform === 'win32' ? [env.LOCALAPPDATA && P.join(env.LOCALAPPDATA, 'Android', 'Sdk'), P.join(home, 'AppData', 'Local', 'Android', 'Sdk')]

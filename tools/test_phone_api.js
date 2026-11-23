@@ -37,6 +37,8 @@ const FAKE = path.join(__dirname, 'fake_adb.js');
   ok('then PATH', r.adb === '/opt/pt/adb', r);
   r = F({ Path: 'C:\\a;C:\\pt' }, 'win32', has(['C:\\pt\\adb.exe']), 'C:\\Users\\me');
   ok('PATH on Windows (adb.exe, ; between folders)', r.adb === 'C:\\pt\\adb.exe', r);
+  r = F({ FLEX_ADB: 'off', ANDROID_HOME: '/sdk' }, 'linux', () => true, '/home/me');
+  ok('FLEX_ADB=off: no adb is looked for at all', r.adb === null && r.looked.join() === 'FLEX_ADB=off', r);
   r = F({ PATH: '/usr/bin' }, 'linux', () => false, '/home/me');
   ok('nowhere: null, and the places looked in', r.adb === null && r.looked.length >= 3 && r.looked.includes('PATH'), r);
   const D = phoneApi.parseDevices('List of devices attached\nABC123\tdevice usb:1-1 product:shiba model:Pixel_8 device:shiba transport_id:3\nXYZ\tunauthorized usb:1-2 transport_id:4\nemulator-5554\toffline\n\n');
