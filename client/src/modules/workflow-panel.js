@@ -398,7 +398,7 @@ export function setupWorkflowPanel({
     const aoiOps = document.getElementById("wf_aoi_ops_section");
     const paOps = document.getElementById("wf_pa_ops_section");
     const activity = document.getElementById("wf_activity_section");
-    panel.style.display = hasAoi || hasPa ? "block" : "none";
+    panel.style.display = workflowState.serverConnected && (hasAoi || hasPa) ? "block" : "none";
     if (aoiOps) {
       aoiOps.style.display = hasAoi && !hasPa ? "block" : "none";
     }
@@ -499,6 +499,8 @@ export function setupWorkflowPanel({
     workflowState.serverConnected = true;
     if (controlsEl) {
       controlsEl.style.display = "block";
+      const body = controlsEl.closest(".lp-section-body");                 // the LAN server section of the Analyze pane opens
+      if (body && !body.classList.contains("open") && window._lpToggle) window._lpToggle(body.previousElementSibling);
     }
     if (statusEl) {
       statusEl.textContent = "Server: Online";
@@ -557,6 +559,12 @@ export function setupWorkflowPanel({
     if (controlsEl) {
       controlsEl.style.display = "none";
     }
+    // With no LAN server its tools are not on the page at all: the workflow panel and the queue window go too.
+    const wfPanel = document.getElementById("workflow_panel");
+    if (wfPanel) wfPanel.style.display = "none";
+    const qmWin = document.getElementById("queue_manager_window");
+    if (qmWin) qmWin.style.display = "none";
+    workflowState.queuePanelOpen = false;
     appendWorkflowLog("Disconnected from LAN server.");
   }
 
