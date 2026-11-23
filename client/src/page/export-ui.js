@@ -1195,6 +1195,14 @@
       el.addEventListener('change', () => { try { localStorage.setItem('flex.export.' + id, el.value); } catch (_) {} });
     }
     window._exportSyncTerrainSource();
+    // "Slope map": a tick, remembered (off unless it was switched on)
+    const scb = document.getElementById('export_slope_map');
+    if (scb) {
+      let v = null;
+      try { v = localStorage.getItem('flex.export.export_slope_map'); } catch (_) {}
+      scb.checked = v === '1';
+      scb.addEventListener('change', () => { try { localStorage.setItem('flex.export.export_slope_map', scb.checked ? '1' : '0'); } catch (_) {} });
+    }
     // "Include documents": a tick, remembered the same way (on unless it was switched off)
     const dcb = document.getElementById('export_docs_on');
     if (dcb) {
@@ -1295,8 +1303,13 @@
     // The open project's marks on ridgewalking features inside the area travel with a ridgewalking export (ridge-marks.js)
     const rmarks = ridgewalk && window._ridgeMarks ? window._ridgeMarks.exportIn([w, s, e, n], poly) : [];
 
+    // The slope map: from the LiDAR ground only (the tick box sits in the LiDAR rows; remembered below)
+    const slopeBox = document.getElementById('export_slope_map');
+    const slopeMap = !mapTerrain && !!(slopeBox && slopeBox.checked);
+
     const body = {
       ...docsBody,
+      ...(slopeMap ? { slope_map: true } : {}),
       ...(trees ? { trees: true } : {}),
       ...(feats && feats.items.length ? { features: { version: 1, folders: feats.folders, items: feats.items } } : {}),
       ...(ridgewalk ? { ridgewalk: true, ..._ridgeOptions() } : {}),

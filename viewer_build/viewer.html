@@ -396,6 +396,12 @@
   #ff-gallery.editing .ffg-ed { display: inline-block; }
   .ffg-tags { padding: 3px 10px 6px; font-size: 11px; opacity: .7; background: rgba(20,20,30,.95); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; z-index: 2; }
   .ff-modal-box.wide { width: min(520px, 100%); }
+  /* About this map (libs/about-map.js) */
+  .am-card { font-size: 13px; line-height: 1.35; }
+  .am-h { margin: 10px 0 3px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; opacity: .55; }
+  .am-r { display: flex; gap: 10px; padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+  .am-k { flex: 0 0 34%; opacity: .7; }
+  .am-v { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   .ff-choices { display: flex; flex-direction: column; gap: 6px; }
   .ff-choices .fp-btn { text-align: left; padding: 8px 10px; font-size: 13px; }
   .ff-choice-sub { font-size: 11px; opacity: .6; }
@@ -722,6 +728,7 @@ catch(e) { window.DOCS_EXPORT = null; }
 <script src="libs/viewer-docs.js"></script>
 <script src="libs/ridgewalk.js"></script>
 <script src="libs/viewer-features.js"></script>
+<script src="libs/about-map.js"></script>
 <script src="libs/trees.js"></script>
 <script src="libs/ridge-marks.js"></script>
 
@@ -4774,6 +4781,13 @@ function renderMoreSheet() {
   if (window.FF_MAP_ID) sheetRow('🗂', 'Maps', 'back to the list of maps', () => { location.href = '../../assets/flexfield/index.html'; });
   sheetRow('⛶', 'Fullscreen', null, () => { closeSheet(); document.getElementById('btn-fullscreen').click(); });
   sheetRow('?', 'Help', null, () => { closeSheet(); document.getElementById('btn-help').click(); });
+  if (window.AboutMap) sheetRow('ⓘ', 'About this map', 'when it was exported, the area, what it carries', () => { closeSheet(); aboutMapOpen(); });
+}
+// What the map is and what it carries (libs/about-map.js): the exporter's facts and what was loaded here.
+function aboutMapOpen() {
+  return AboutMap.open({ el, dialog: ffDialog, meta: META, caves: CAVES_DATA, ridge: typeof RIDGE === 'undefined' ? null : RIDGE, trees: typeof TREES === 'undefined' ? null : TREES,
+    features: typeof FEATURES === 'undefined' || typeof FEATURES === 'string' ? null : FEATURES,
+    has: { sat: !!terrainTexSat, hs: !!terrainTexHs, hsb: !!terrainTexHsb, slope: !!terrainTexSlope } });
 }
 
 // Everything that shows a length re-renders in the new unit.

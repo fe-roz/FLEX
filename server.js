@@ -776,6 +776,8 @@ function handleExportTerrain(req, res) {
             docs_project      = null,        // project id: carry its documents (export_docs.js), with docs_caves = the exported caves' ids
             docs_caves        = null,
             features          = null,        // { folders, items }: the open project's surface items inside the area (export-ui.js); checked again by the exporter
+            slope_map         = false,       // one more map for the phone: slope-angle colours over the hillshade (export_slope.py); LiDAR terrain only
+            slope_opacity     = null,        // with slope_map: 0..1
             ridge_shapes      = 'all',       // with ridgewalk: 'none' leaves the shapes of the features out
             brush_opacity     = null,        // with ridgewalk: 0..1, how strongly the brush lies over the hillshade
             ridgewalk         = false,       // V2 - Ridgewalking: the ridge step on the LiDAR, its ground as the terrain (export_ridge.py)
@@ -875,6 +877,10 @@ function handleExportTerrain(req, res) {
             } catch (e) { _exportJobs[jobId].progress.push('⚠ Surface features left out: ' + (e.message || e)); }
         }
         if (trees === true && !demGrid) args.push('--trees');
+        if (slope_map === true && !demGrid) {
+            args.push('--slope-map');
+            if (typeof slope_opacity === 'number' && Number.isFinite(slope_opacity)) args.push('--slope-opacity', String(Math.max(0, Math.min(1, slope_opacity))));
+        }
         if (ridgewalk === true && !demGrid) {
             args.push('--ridgewalk');
             if (ridge_shapes === 'none') args.push('--ridge-shapes', 'none');
