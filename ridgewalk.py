@@ -1245,6 +1245,7 @@ def write_features(C, holes, pts, depth, feat):
 # The LiDAR quality report (quality.json + three small rasters). It only measures: nothing above reads it.
 # ---------------------------------------------------------------------------------------------------------
 QUALITY_CELL_M = 7.2        # the coarse grid of the rasters (24 cells of 0.3 m)
+QUALITY_PASS_MIN = 5        # returns of one flight pass in a coarse cell for the pass to count as covering it
 GPS_ADJUST = 1.0e9          # LAS 1.4 "adjusted standard GPS time" = GPS seconds - 1e9
 GPS_EPOCH = 315964800       # 1980-01-06 as Unix seconds
 GPS_LEAP = 18               # GPS is ahead of UTC by this many seconds since 2017
@@ -1281,11 +1282,14 @@ def w_quality(t):
     C = _C; cell = C['cell']; QC = C['qc']; nx, ny = C['nx'], C['ny']; qnx = (nx + QC - 1) // QC
     j0, j1, i0, i1 = tile_cells(C, t)
     x, y, z, c, ps, la = load_tile(C, t)
+    ring = C.get('ring')
+    if ring is not None and len(x):             # only what lies inside the area's outline is counted
+        m = in_ring(x.astype('f8'), y.astype('f8'), np.asarray(ring)); x, y, c, ps = x[m], y[m], c[m], ps[m]
     r = dict(n=int(len(x)))
     ci = np.clip((x / cell).astype(np.int64), i0, i1 - 1); cj = np.clip((y / cell).astype(np.int64), j0, j1 - 1)
     qk = (cj // QC) * qnx + (ci // QC)
     r['dens'] = np.unique(qk, return_counts=True)
-    r['pairs'] = np.unique(np.c_[qk, ps.astype(np.int64)], axis=0)
+    r['pairs'] = np.unique(np.c_[qk, ps.astype(np.int64)], axis=0, return_counts=True)
     r['classes'] = np.bincount(c, minlength=256)
     r['passes'] = np.unique(ps.astype(np.int64), return_counts=True)
     g = c == 2
@@ -1299,9 +1303,13 @@ def w_quality(t):
         have[np.clip((gy / cell).astype(np.int64) - J0, 0, J1 - J0 - 1), np.clip((gx / cell).astype(np.int64) - I0, 0, I1 - I0 - 1)] = True
     d = (ndimage.distance_transform_edt(~have) * cell if have.any() else np.full(have.shape, 1e9))[j0 - J0:j1 - J0, i0 - I0:i1 - I0]
     qg = (np.arange(j0, j1)[:, None] // QC) * qnx + (np.arange(i0, i1)[None, :] // QC)
-    u, inv = np.unique(qg.ravel(), return_inverse=True)
-    r['cells'] = (u, np.bincount(inv, minlength=len(u)), np.bincount(inv, weights=(d > 1.0).ravel(), minlength=len(u)).astype(np.int64),
-                  np.bincount(inv, weights=(d > 3.0).ravel(), minlength=len(u)).astype(np.int64))
+    u, inv = np.unique(qg.ravel(), return_inverse=True); inv = inv.ravel()
+    own = np.ones(inv.shape, bool)
+    if ring is not None:
+        gx2, gy2 = np.meshgrid((np.arange(i0, i1) + 0.5) * cell, (np.arange(j0, j1) + 0.5) * cell)
+        own = in_ring(gx2.ravel(), gy2.ravel(), np.asarray(ring))
+    r['cells'] = (u, np.bincount(inv, weights=own, minlength=len(u)).astype(np.int64), np.bincount(inv, weights=(d > 1.0).ravel() & own, minlength=len(u)).astype(np.int64),
+                  np.bincount(inv, weights=(d > 3.0).ravel() & own, minlength=len(u)).astype(np.int64))
     if not len(x):                              # a tile with no returns (a failed read, or nothing there) is still part of the area
         return t, r
     try:
@@ -1361,15 +1369,13 @@ def write_quality(C, passes, counts):
     from scipy import ndimage
     A = C['_q']; out = C['out']; cell = C['cell']; QC = C['qc']; qnx, qny = A['qnx'], A['qny']; qm = QC * cell
     shape = (qny, qnx)
-    tot = A['tot'].reshape(shape); inside = tot > 0
-    if C.get('ring') is not None:
-        gx, gy = np.meshgrid((np.arange(qnx) + 0.5) * qm, (np.arange(qny) + 0.5) * qm)
-        inside &= in_ring(gx.ravel(), gy.ravel(), C['ring']).reshape(shape)
-    ncell = int(inside.sum()); area = ncell * qm * qm
+    tot = A['tot'].reshape(shape); inside = tot >= max(1, QC * QC // 2)       # a coarse cell is the area's when at least half of it is
+    ncell = int(inside.sum()); area = float(tot.sum()) * cell * cell
     npass = np.zeros(qny * qnx, np.int64)
-    if A['pairs']:
-        pr = np.unique(np.concatenate(A['pairs']), axis=0)
-        npass += np.bincount(pr[:, 0], minlength=qny * qnx)
+    if A['pairs']:                              # a pass counts in a cell from QUALITY_PASS_MIN of its returns on (one stray return is no second look)
+        pr = np.concatenate([q[0] for q in A['pairs']]); pn = np.concatenate([q[1] for q in A['pairs']])
+        up, inv = np.unique(pr, axis=0, return_inverse=True); n_ = np.bincount(inv.ravel(), weights=pn, minlength=len(up))
+        npass += np.bincount(up[n_ >= QUALITY_PASS_MIN, 0], minlength=qny * qnx)
     npass = npass.reshape(shape); dens = A['dens'].reshape(shape) / np.maximum(1, tot * cell * cell)
     seen = A['gseen'].reshape(shape) / np.maximum(1, tot)
     share = lambda m: round(float((m & inside).sum()) / max(1, ncell), 4)
@@ -1411,7 +1417,8 @@ def write_quality(C, passes, counts):
     reading = dict(tiles=int(A['tiles']), read_in_this_run=failed is not None, retried=int(A['retried']) if A['tries_known'] else None,
                    left_blank=len(blank), blank=blank[:200], without_returns=len(empty), empty=empty[:200])
     flagged = [q for q in plist if q['flagged']]
-    cov = dict(cell_m=round(qm, 3), area_m2=round(area, 1), passes_0=share(npass == 0), passes_1=share(npass == 1), passes_2=share(npass == 2), passes_3_or_more=share(npass >= 3),
+    pin = npass[inside] if ncell else np.zeros(1, np.int64)
+    cov = dict(cell_m=round(qm, 3), area_m2=round(area, 1), pass_counts_from_returns=QUALITY_PASS_MIN, passes_per_cell=dict(least=int(pin.min()), median=int(np.median(pin)), most=int(pin.max())), passes_0=share(npass == 0), passes_1=share(npass == 1), passes_2=share(npass == 2), passes_3_or_more=share(npass >= 3),
                no_ground_within_1m=round(far1, 4), no_ground_within_3m=round(far3, 4), largest_patch_without_ground_m2=round(largest, 1),
                fine_cells_with_ground=round(float(A['gseen'].reshape(shape)[inside].sum()) / max(1, fine), 4))
     pc = lambda v: ('%.1f' % (100 * v)).rstrip('0').rstrip('.') + ' %'
@@ -1422,9 +1429,11 @@ def write_quality(C, passes, counts):
                       % (q['id'], q['blocks_flagged'], '' if q['blocks_flagged'] == 1 else 's', q['set_aside'], q['kept_confirmed'])))
     if not flagged:
         V.append(dict(key='flagged_pass', value=0, text='No flight pass shows patterned noise.'))
+    if len(plist) > 1:
+        V.append(dict(key='passes_per_cell', value=cov['passes_per_cell']['median'], text='A spot is typically covered by %d passes (least %d, most %d).' % (cov['passes_per_cell']['median'], cov['passes_per_cell']['least'], cov['passes_per_cell']['most'])))
     V.append(dict(key='single_pass', value=cov['passes_1'], text='%s of the area is covered by a single pass (a bad return there has no second pass to contradict it).' % pc(cov['passes_1'])))
     if cov['passes_0'] > 0:
-        V.append(dict(key='no_pass', value=cov['passes_0'], text='%s of the area has no returns at all.' % pc(cov['passes_0'])))
+        V.append(dict(key='no_pass', value=cov['passes_0'], text='%s of the area is covered by no pass (fewer than %d returns of any one pass in a %s m cell).' % (pc(cov['passes_0']), QUALITY_PASS_MIN, ('%.1f' % qm).rstrip('0').rstrip('.'))))
     V.append(dict(key='ground_not_seen', value=cov['no_ground_within_3m'], text='%s of the ground was not seen within 3 m (dense canopy, water or shadow): the ground is interpolated there.' % pc(cov['no_ground_within_3m'])))
     V.append(dict(key='largest_gap', value=cov['largest_patch_without_ground_m2'], text='The largest patch with no ground return is about %d m2.' % round(largest)))
     if failed is None:

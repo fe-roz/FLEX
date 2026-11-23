@@ -6,7 +6,8 @@
 //                                                                  refreshed map is a new URL; not read here)
 //
 // The maps are the area's saved value rasters (area_maps.py): bush/brush.u8, bush/voids.u8, ground/slope.u8,
-// ground/hillshade.u8, each listed in its folder's maps.json (each folder its own grid). One byte per cell: 0 = no data,
+// ground/hillshade.u8, and the LiDAR quality report's ridge/passes.u8, ridge/ground_seen.u8, ridge/density.u8 (ridgewalk.py;
+// a coarse grid, up to 101 levels), each listed in its folder's maps.json (each folder its own grid). One byte per cell: 0 = no data,
 // 1..16 = the level whose value maps.json lists (`values`); files without `values` (version 1): 1..255 over min..max.
 // Only the colours are made here, per request: `ramp` is up to MAX_STOPS stops "<pos>:<RRGGBBAA>" joined by "_"
 // (pos 0..1, increasing), linear between stops; lo / hi = the values put at 0 and 1 (default: the map's suggest).
@@ -22,7 +23,7 @@ const path = require('path');
 const zlib = require('zlib');
 
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
-const MAPS = { brush: 'bush', voids: 'bush', slope: 'ground', hillshade: 'ground' };
+const MAPS = { brush: 'bush', voids: 'bush', slope: 'ground', hillshade: 'ground', passes: 'ridge', groundseen: 'ridge', density: 'ridge' };
 const MAX_STOPS = 16, T = 256;
 const MIN_ZOOM = 11;
 const SMOOTH = new Set(['slope', 'hillshade']);     // drawn bilinear when zoomed in past the cell
@@ -148,7 +149,7 @@ module.exports = function areaTiles({ root, cacheTiles = 400, openFiles = 12 }) 
   function mapInfo(id, map) {
     if (!ID_RE.test(String(id)) || !MAPS[map]) return null;
     const j = mapsOf(id, MAPS[map]); if (!j) return null;
-    const m = j.maps.find(x => x && x.id === map && /^[a-z]+\.u8$/.test(String(x.file)));
+    const m = j.maps.find(x => x && x.id === map && /^[a-z_]+\.u8$/.test(String(x.file)));
     if (!m || !Number.isFinite(m.min) || !Number.isFinite(m.max) || m.max <= m.min) return null;
     return { G: j.grid, m, V: valuesOf(m), file: path.join(root, id, MAPS[map], m.file) };
   }
