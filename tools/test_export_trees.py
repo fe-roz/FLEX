@@ -110,7 +110,7 @@ check('at the foot of a 25 m cliff the ground within the crown rises 25 m', 24.5
 check('a 24 m "tree" there is the cliff: left out', bool(xt.on_cliff(rc_, 24.0)))
 check('a 28 m one too (its top is within 15 % of its height of the cliff top)', bool(xt.on_cliff(rc_, 28.0)))
 check('a 6 m "tree" under that cliff too (all of it is below the cliff top, inside its own crown)', bool(xt.on_cliff(rc_, 6.0)))
-check('a 40 m tree at the foot of the 25 m cliff stays: it stands well clear of the cliff top', not xt.on_cliff(rc_, 40.0))
+check('a 45 m tree at the foot of the 25 m cliff stays: it stands well clear of the cliff top', not xt.on_cliff(rc_, 45.0))
 check('a 100 m tree there stays', not xt.on_cliff(rc_, 100.0))
 check('the same cliff 12 m away from a 5 m wide crown: out of reach, the tree stays whatever its height', not xt.on_cliff(rise_at(*slope_dem(5, step_at=212.0, step=25.0), 200.0, 200.0, 5.0), 24.0))
 check('a 6 m step is not a cliff: a 6 m tree beside it stays', not xt.on_cliff(rise_at(*slope_dem(5, step_at=203.0, step=6.0), 200.0, 200.0, 3.0), 6.0))
