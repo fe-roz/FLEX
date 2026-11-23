@@ -27,7 +27,7 @@
     const lines = ['Update: ' + mb(u.package_bytes) + ' · the full map is ' + mb(u.full_bytes) + (pct ? ' (' + pct + ' % of it)' : ''),
       n + (n === 1 ? ' file' : ' files') + ' changed since the map of ' + when(u.from) + ': ' + shown + ((u.remove || []).length ? '; removed: ' + u.remove.join(', ') : ''),
       'For FLEX Field: it brings that map up to date and keeps everything added on the phone. It has no viewer.html for a desktop browser (the full map below has).'];
-    if (u.mostly) lines.splice(1, 0, 'More than 80 % of the map changed: sending the full map is as good.');
+    if (u.mostly) lines.splice(1, 0, 'Most of the map changed (' + Math.round(100 * (u.share || 0)) + ' % of its data): a full map is as good' + (u.package_bytes < 0.8 * u.full_bytes ? ', though the update is still the smaller one to send.' : '.'));
     return { kind: u.mostly ? 'mostly' : 'update', lines };
   }
   const pure = { mb, when, baseLabel, describe };
