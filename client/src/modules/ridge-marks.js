@@ -94,6 +94,13 @@
   function card(id) {
     const m = lookup(id), box = el('div', 'rm-card');
     if (!m) return box;
+    // who, when and what the feature was: here, not only behind More
+    const f = m.feat || {}, lines = [byLine(m.updated)];
+    if (f.depth != null || f.returns != null) lines.push([f.depth != null ? both(f.depth) + ' deep' : '', f.returns != null ? f.returns + ' returns' : '', f.entrance ? (ENTRANCE[f.entrance] || '').toLowerCase() : ''].filter(Boolean).join(' \u00b7 ') + ' (when marked)');
+    const before = m.history.filter(h => h.kind).slice(0, -1).map(h => FL.RMARK_LABELS[h.kind] + ' (' + byLine(h) + ')');
+    if (before.length) lines.push('Before: ' + before.slice(-4).join(', '));
+    lines.push(`${m.lat.toFixed(6)}, ${m.lon.toFixed(6)}`);
+    lines.filter(Boolean).forEach(t => box.appendChild(el('div', 'pj-sub rm-fact', t)));
     const row = el('div', 'pj-row rm-kinds');
     FL.RMARK_KINDS.forEach(k => {
       const b = btn(FL.RMARK_LABELS[k], () => set(id, { kind: k }), 'small');

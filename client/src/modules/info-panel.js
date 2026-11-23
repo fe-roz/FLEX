@@ -997,11 +997,11 @@
       let fresh;
       if (s.kind === 'feature') fresh = featureSubject(s.key.slice(8));
       else if (s.kind === 'lead') fresh = leadSubject(s.key.slice(5));
-      else if (s.kind === 'inventory') fresh = s.refresh ? s.refresh() : null;
+      else if (s.kind === 'inventory' || s.kind === 'rmark') fresh = s.refresh ? s.refresh() : null;
       else if (s.kind === 'entity') { const e = entityNow(s); fresh = e && (!s.ref || (FE() && FE().refOf(e))) ? entitySubject(e) : null; }
       else fresh = cardSubject();
       if (!fresh) { clear(); return; }
-      if (s.kind === 'feature' || s.kind === 'lead' || s.kind === 'entity' || s.kind === 'inventory') show(fresh);
+      if (s.kind === 'feature' || s.kind === 'lead' || s.kind === 'entity' || s.kind === 'inventory' || s.kind === 'rmark') show(fresh);
       else { I.subject = fresh; if (I.x && !I.x.querySelector('.inf-player video')) render(); }
     }, 150);
   }
