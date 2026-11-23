@@ -7,6 +7,8 @@
 //   GET  /api/areas?project=<pid>             { ok, areas }   (that project's and My data's, newest first; no project param: all)
 //   POST /api/areas/save    { id?, name, ring, project? }   → { ok, area }
 //   POST /api/areas/rename  { id, name }    POST /api/areas/delete { id }    POST /api/areas/delete-result { id, result }
+//   POST /api/areas/link    { id, project, feature, name? }   an earlier area becomes the area of a project item ("Move into this project")
+//   area.json `feature`: the id of the project's area feature (flexlib processAreas) this area was made for; save / run take it too
 //   POST /api/areas/check   { ring, lidar, tools, options } → { ok, km2, tools: { <tool>: { status, why, offers, minutes } }, ground }
 //   POST /api/areas/run     { id? | name+ring, project?, lidar, tools, options } → { ok, runId, areaId }
 //   GET  /api/areas/status/<runId>            { ok, status, step, steps, progress, message, notes, error, areaId }
@@ -338,6 +340,21 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
     a.name = cleanName(o.name, a.name || 'Area');
     a.ring = r.ring; a.km2 = r.km2;
     if (o.project !== undefined || !('project' in a)) a.project = project;
+    // the project item this area belongs to (a feature of the project's "Process areas" folder): the link is by its id
+    if (o.feature !== undefined) { const f = o.feature == null || o.feature === '' ? '' : String(o.feature); if (f && !ID_RE.test(f)) return { code: 400, error: 'bad feature id' }; if (f) a.feature = f; else delete a.feature; }
+    writeArea(a);
+    return { ok: true, area: a };
+  }
+  /** "Move into this project": an earlier area (no project) becomes the area of a project item. { id, project, feature, name? } */
+  function link(o) {
+    const a = readArea(o.id);
+    if (!a) return { code: ID_RE.test(String(o.id || '')) ? 404 : 400, error: ID_RE.test(String(o.id || '')) ? 'Unknown area' : 'bad id' };
+    const project = cleanProject(o.project);
+    if (!project) return { code: 400, error: 'a project is needed' };
+    if (!ID_RE.test(String(o.feature || ''))) return { code: 400, error: 'bad feature id' };
+    if (listAll().some(x => x.id !== a.id && x.project === project && x.feature === String(o.feature))) return { code: 409, error: 'That project area already has processed results on this computer.' };
+    a.project = project; a.feature = String(o.feature);
+    if (o.name != null) a.name = cleanName(o.name, a.name);
     writeArea(a);
     return { ok: true, area: a };
   }
@@ -594,9 +611,9 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
       if (!ID_RE.test(String(o.id))) return { code: 400, error: 'bad id' };
       area = readArea(o.id);
       if (!area) return { code: 404, error: 'Unknown area' };
-      if (o.ring != null) { const s = save({ id: o.id, name: o.name || area.name, ring: o.ring, project: o.project }); if (!s.ok) return s; area = s.area; }
+      if (o.ring != null) { const s = save({ id: o.id, name: o.name || area.name, ring: o.ring, project: o.project, feature: o.feature }); if (!s.ok) return s; area = s.area; }
     } else {
-      const s = save({ name: o.name, ring: o.ring, project: o.project });
+      const s = save({ name: o.name, ring: o.ring, project: o.project, feature: o.feature });
       if (!s.ok) return s;
       area = s.area;
     }
@@ -678,6 +695,7 @@ module.exports = function areasApi({ python, groundScript, vegScript, lidarScrip
       if (req.method === 'GET' && rest === '') return json(res, list(query));
       if (req.method === 'POST' && rest === 'save') return void post(save);
       if (req.method === 'POST' && rest === 'rename') return void post(rename);
+      if (req.method === 'POST' && rest === 'link') return void post(link);
       if (req.method === 'POST' && rest === 'delete') return void post(del);
       if (req.method === 'POST' && rest === 'delete-result') return void post(delResult);
       if (req.method === 'POST' && rest === 'check') return void post(check);

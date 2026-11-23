@@ -1283,6 +1283,34 @@
       .filter(f => group === undefined || (f.group || '') === group)
       .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
   }
+  // ── Process areas: the project's saved areas for processing (desktop Process panel) ──
+  // An ordinary area feature kept in the project's folder of kind "process" ("Process areas", made when first needed),
+  // so it travels in sync files, shows on the map and in Surface, and goes to CalTopo like any other area. The results
+  // of processing stay on the computer that made them (user_files/areas/<id>/), linked by the feature's id.
+  const PROCESS_GROUP_KIND = 'process', PROCESS_GROUP_NAME = 'Process areas';
+  function processGroup(S) { return liveGroups(S).find(g => g.kind === PROCESS_GROUP_KIND) || null; }
+  function processAreas(S) {
+    const g = processGroup(S); if (!g) return [];
+    return liveFeatures(S).filter(f => f.kind === 'area' && f.coords.length >= 3 && groupPath(S, f.group).some(x => x.id === g.id));
+  }
+  /** A feature's outline as a closed ring of [lon, lat] (six decimals: what the processing keeps). */
+  function areaRing(f) {
+    const r = ((f && f.coords) || []).map(c => [+(+c[0]).toFixed(6), +(+c[1]).toFixed(6)]).filter(c => isFinite(c[0]) && isFinite(c[1]));
+    if (r.length >= 2 && r[0][0] === r[r.length - 1][0] && r[0][1] === r[r.length - 1][1]) r.pop();
+    return r.length >= 3 ? r.concat([r[0].slice()]) : [];
+  }
+  /** One text for an outline: the same for the same corners in the same order. */
+  function areaRingKey(ring) { return (ring || []).map(p => (+p[0]).toFixed(6) + ',' + (+p[1]).toFixed(6)).join(';'); }
+  /** How a project area stands against what this computer made for it (area.json of areas_api.js, or null):
+   *  'new' nothing made; 'made' results for this outline; 'outofdate' the outline was changed since (results are for the old one). */
+  function processAreaState(f, area) {
+    const res = area && area.results ? Object.keys(area.results).filter(k => area.results[k]) : [];
+    if (!res.length) return 'new';
+    const k = areaRingKey(areaRing(f));
+    if (areaRingKey(area.ring) !== k) return 'outofdate';
+    return res.some(r => area.results[r].ringKey && area.results[r].ringKey !== k) ? 'outofdate' : 'made';
+  }
+
   // A group and everything under it.
   function groupPath(S, id) { const out = [], seen = new Set(); while (id && S.groups[id] && !seen.has(id)) { seen.add(id); out.unshift(S.groups[id]); id = S.groups[id].parent; } return out; }
   function underGroup(S, gid) {
@@ -2309,7 +2337,7 @@
     segmentsOf, segmentIndex, segmentsAt, proposalTarget, segmentStates, liveCavefiles, liveLayers, areaLabelsOf, areaLabelId, areaLabelState, areaLabelUndo,
     tripState, tripEdit, tripUndo, tripsOf, tripsFor, tripGroups, tripMoves, tripDays, fullDay, TRIP_NONE,
     snapshotTime, entriesAt, replayProjectAt, replayDocsAt, changeDays, caveBundle, moveRenames, caveMoveEntries, caveMoveClear, moveRecord, movesOf,
-    liveFeatures, liveGroups, groupPath, featuresGeoJSON, featuresKML, featuresGPX, flexTag, makeFlexTag,
+    liveFeatures, liveGroups, groupPath, PROCESS_GROUP_KIND, PROCESS_GROUP_NAME, processGroup, processAreas, areaRing, areaRingKey, processAreaState, featuresGeoJSON, featuresKML, featuresGPX, flexTag, makeFlexTag,
     selectForSync, syncManifest, newEntries,
     parseNum, shotFlags, shotReading, computeSurvey, stationLruds, nextStationName, fmtDecl, parseDecl, fixLegacy, suggestCaves,
     liveSystems, systemsOf, systemTotals, fileGroups, planMulti, systemUndo, multiUndo, entrancesOf, entranceFit,
