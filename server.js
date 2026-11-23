@@ -104,6 +104,8 @@ const server = http.createServer((req, res) => {
             const c = require('./export_docs').collect(library, pid, caves);
             jsonResponse(res, { ok: true, docs: c.docs, pages: c.pages.length, bytes: c.bytes, skipped: c.skipped });
         } catch (e) { jsonResponse(res, { ok: false, error: String(e.message || e) }, 500); }
+    } else if ((sanitizedPath === '/api/export/bases' && req.method === 'GET') || (sanitizedPath === '/api/export/update' && req.method === 'POST')) {
+        exportUpdates.handle(req, res, sanitizedPath.slice('/api/export/'.length), parsedUrl.query);       // updates with only what changed (export_updates.js)
     } else if (sanitizedPath.startsWith('/api/export/status/') && req.method === 'GET') {
         handleExportStatus(req, res, sanitizedPath.slice('/api/export/status/'.length));
     } else if (sanitizedPath.startsWith('/api/export/download/') && req.method === 'GET') {
@@ -736,6 +738,7 @@ const CONDA_PYTHON = process.env.FLEX_PYTHON || (process.platform === 'win32'
   ? path.join(os.homedir(), 'miniconda3', 'envs', 'entwine', 'python.exe')
   : path.join(os.homedir(), 'miniconda3', 'envs', 'entwine', 'bin', 'python'));
 const EXPORT_SCRIPT = path.join(__dirname, 'export_terrain.py');
+const exportUpdates = require('./export_updates')({ exportsDir: path.join(__dirname, 'user_files', 'exports'), python: process.env.FLEX_UPDATE_PYTHON || CONDA_PYTHON, script: path.join(__dirname, 'export_update.py') });
 const EXPORT_OUT_DIR = path.join(__dirname, 'user_files', 'exports');
 // The same pipeline run for a project: its DEM as a terrain patch, its hillshade as map tiles.
 const AREAS_ROOT = process.env.FLEX_AREAS_DIR || path.join(__dirname, 'user_files', 'areas');
@@ -782,6 +785,7 @@ function handleExportTerrain(req, res) {
             ridge_shapes      = 'all',       // with ridgewalk: 'none' leaves the shapes of the features out
             brush_opacity     = null,        // with ridgewalk: 0..1, how strongly the brush lies over the hillshade
             ridgewalk         = false,       // V2 - Ridgewalking: the ridge step on the LiDAR, its ground as the terrain (export_ridge.py)
+            update_base       = null,        // an earlier export's id (or 'auto'): also make an update package against it (export_updates.js)
             ridge_marks       = null,        // with ridgewalk: the project's marks on ridgewalking features inside the area ([{ id, kind, note, lon, lat, … }]); checked again by the exporter
             trees             = false,       // Trees and brush: the vegetation step on the LiDAR, one simple solid a tree (export_trees.py)
         } = params;
@@ -939,6 +943,10 @@ function handleExportTerrain(req, res) {
         if (typeof z_offset === 'number' && Number.isFinite(z_offset) && Math.abs(z_offset) < 200)
             args.push('--z-offset', String(z_offset));
 
+        // The map's id across exports and its manifest (export_updates.js); update_base: also make an update package against that earlier export
+        const mapId = exportUpdates.mapIdOf({ area: typeof area === 'string' ? area : null, name: mapName });
+        args.push('--map-id', mapId, '--manifest-out', exportUpdates.manifestOut(jobId));
+        const updateBase = update_base === 'auto' || (typeof update_base === 'string' && /^[A-Za-z0-9]{4,24}$/.test(update_base)) ? update_base : null;
         const proc = spawn(CONDA_PYTHON, args);
         _exportJobs[jobId].proc = proc;
         proc.on('error', e => { _exportJobs[jobId].progress.push(`⚠ Could not start Python (${e.code || e.message})`); });
@@ -965,10 +973,20 @@ function handleExportTerrain(req, res) {
             }
             _exportJobs[jobId].ended = Date.now(); _exportJobs[jobId].proc = null;
             if (code === 0 && fs.existsSync(outZip) && !_exportJobs[jobId].cancelled) {
-                _exportJobs[jobId].status = 'done';
-                // the map's name beside the zip, so "Send to phone" can still name it after a restart (phone_api.js)
-                try { fs.writeFileSync(path.join(EXPORT_OUT_DIR, `export_${jobId}.json`), JSON.stringify({ name: _exportJobs[jobId].name, filename })); } catch (_) {}
-                console.log('[export] done:', jobId);
+                // the map's name and manifest beside the zip: "Send to phone" names it after a restart (phone_api.js), a later
+                // export can be sent as an update against it (export_updates.js)
+                const job = _exportJobs[jobId];
+                try { exportUpdates.record(jobId, { name: job.name, filename }); } catch (e) { console.warn('[export] manifest not kept:', e.message); }
+                const finish = () => { job.status = 'done'; console.log('[export] done:', jobId); };
+                if (updateBase) {
+                    job.progress.push('[7/7] Making the update (only what changed)…');
+                    Promise.resolve().then(() => {
+                        const base = updateBase === 'auto' ? (exportUpdates.bases(mapId, jobId)[0] || {}).id : updateBase;
+                        if (!base) throw new Error('no earlier map of this area to update from');
+                        return exportUpdates.makeUpdate(jobId, base);
+                    }).then(u => { job.update = u; job.progress.push(u.same ? 'Nothing changed since that map: no update is needed.' : `Update: ${(u.package_bytes / 1048576).toFixed(1)} MB (the full map is ${(u.full_bytes / 1048576).toFixed(1)} MB)`); },
+                            e => { job.update = { error: String(e.message || e) }; job.progress.push('⚠ No update was made: ' + (e.message || e) + '. The full map is ready.'); }).then(finish);
+                } else finish();
             } else {
                 _exportJobs[jobId].status = 'error';
                 _exportJobs[jobId].error = _exportJobs[jobId].cancelled ? 'Cancelled' : `Process exited with code ${code}`;
@@ -1003,7 +1021,7 @@ function handleExportStatus(req, res, jobId) {
     if (!job) return jsonResponse(res, { ok: false, error: 'Unknown job' }, 404);
     const last = job.progress[job.progress.length - 1] || '';
     jsonResponse(res, { status: job.status, progress: exportPct(job), message: last, error: job.error,
-                        filename: job.filename });
+                        filename: job.filename, update: job.update || null });
 }
 
 function handleExportDownload(req, res, jobId) {
@@ -1038,7 +1056,7 @@ const areaGen = require('./areas_api')({ python: process.env.FLEX_AREA_PYTHON ||
     mapsScript: process.env.FLEX_AREA_MAPS_SCRIPT || path.join(__dirname, 'area_maps.py'),
     root: AREAS_ROOT, terrainGen });
 // Running and recent jobs of the three kinds, for the Jobs panel (jobs_api.js)
-const phoneApi = require('./phone_api')({ exportsDir: EXPORT_OUT_DIR, exportJobs: _exportJobs });
+const phoneApi = require('./phone_api')({ exportsDir: EXPORT_OUT_DIR, exportJobs: _exportJobs, onSent: id => { try { exportUpdates.markSent(id); } catch (_) {} } });
 const jobsApi = require('./jobs_api')({ sources: {
     phone:   { jobs: phoneApi.jobs, pct: phoneApi.pctOf },
     export:  { jobs: _exportJobs, pct: exportPct, download: id => '/api/export/download/' + id },

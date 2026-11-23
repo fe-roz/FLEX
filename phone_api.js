@@ -10,7 +10,8 @@
 //          'unauthorized'  a phone is there but has not accepted this PC: accept the prompt on the phone
 //          'choose'        more than one phone is ready: `devices` lists them, ask again with ?serial=
 //          'ready'         { serial, model, android, app: { installed, version } }
-//   GET  /api/phone/exports             the zips that can be sent, newest first: [{ id, name, file, bytes, time }]
+//   GET  /api/phone/exports             the zips that can be sent, newest first: [{ id, name, file, bytes, time, kind, full_bytes }]
+//                                       kind 'update' = an update package (export_updates.js): only what changed, for FLEX Field; sent like a map
 //   POST /api/phone/send { export, serial? }   → { ok, jobId }; the job is in the Jobs list as phone.<jobId>
 //   GET  /api/phone/job/<jobId>         { status, pct, message, how, result, error }
 //
@@ -76,7 +77,7 @@ function phoneName(name) {
   return (base || 'FLEX-map') + '.zip';
 }
 
-module.exports = function phoneApi({ exportsDir, exportJobs = {}, env = process.env, waits = {} }) {
+module.exports = function phoneApi({ exportsDir, exportJobs = {}, env = process.env, waits = {}, onSent = null }) {
   const W = Object.assign({ cmd: 15000, appSeen: 12000, appPoll: 1000, start: 1200, direct: 4000 }, waits);
   const jobs = {};
   const json = (res, d, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(d)); };
@@ -126,13 +127,14 @@ module.exports = function phoneApi({ exportsDir, exportJobs = {}, env = process.
     let side = null; try { side = JSON.parse(fs.readFileSync(path.join(exportsDir, `export_${id}.json`), 'utf8')); } catch (_) {}
     const name = (job && job.name) || (side && side.name) || '';
     return { id, path: file, bytes: st.size, time: Math.round(st.mtimeMs), name: name || 'Export of ' + new Date(st.mtimeMs).toISOString().slice(0, 16).replace('T', ' '),
+      kind: side && side.kind === 'update' ? 'update' : 'map', full_bytes: side && side.kind === 'update' && side.summary ? side.summary.full_bytes || 0 : 0,
       file: phoneName((job && job.filename) || (side && side.filename) || 'FLEX-map-' + id), running: !!(job && job.status === 'running'), failed: !!(job && job.status === 'error') };
   }
   function listExports() {
     let names = []; try { names = fs.readdirSync(exportsDir); } catch (_) {}
     return names.map(n => (/^export_([A-Za-z0-9]{4,24})\.zip$/.exec(n) || [])[1]).filter(Boolean).map(exportInfo)
       .filter(e => e && !e.running && !e.failed && e.bytes > 0).sort((a, b) => b.time - a.time)
-      .map(e => ({ id: e.id, name: e.name, file: e.file, bytes: e.bytes, time: e.time }));
+      .map(e => ({ id: e.id, name: e.name, file: e.file, bytes: e.bytes, time: e.time, kind: e.kind, full_bytes: e.full_bytes }));
   }
 
   // ── Sending ─────────────────────────────────────────────────────────────────
@@ -210,7 +212,7 @@ module.exports = function phoneApi({ exportsDir, exportJobs = {}, env = process.
       let d = await sendDirect(adb, serial, exp, job);
       if (!d.ok && !d.cancelled && !d.partial && !d.refused && !d.fatal && /not listening|did not answer/.test(d.why || '')) { await sleep(W.start); cancelled(job); d = await sendDirect(adb, serial, exp, job); }   // the app may still be starting
       cancelled(job);
-      if (d.ok) { await front(); return result('direct', `"${exp.name}" is in FLEX Field on the ${st.model}: tap Import there.`); }
+      if (d.ok) { await front(); return result('direct', `"${exp.name}" is in FLEX Field on the ${st.model}: tap ${exp.kind === 'update' ? 'Update' : 'Import'} there.`); }
       if (d.fatal) throw new Error(d.why);
       say(job, 'Not straight into the app (' + d.why + '); copying it to the app\'s folder instead…');
       // 2. the app's inbox folder
@@ -228,7 +230,7 @@ module.exports = function phoneApi({ exportsDir, exportJobs = {}, env = process.
           const s = await appStatus(adb, serial);
           seen = s && ((s.files || []).find(f => f.name === exp.file) || ((s.imported || []).includes(exp.file) ? { name: exp.file, readable: true } : null));
         }
-        if (seen && seen.readable) return result('inbox', `"${exp.name}" is waiting in FLEX Field on the ${st.model}: tap Import there.`);
+        if (seen && seen.readable) return result('inbox', `"${exp.name}" is waiting in FLEX Field on the ${st.model}: tap ${exp.kind === 'update' ? 'Update' : 'Import'} there.`);
         say(job, seen ? 'FLEX Field cannot read the copy in its folder on this phone; moving it to Download…' : 'FLEX Field did not pick it up (an older build of the app?); moving it to Download…');
         const mv = await run(adb, on(serial, 'shell', 'mv', remote, DOWNLOAD + '/' + exp.file), 60000);
         if (mv.code === 0) { job.pct = 96; return result('download', `"${exp.name}" is in the phone's Download folder as ${exp.file}: open it there and choose FLEX Field.` + (seen ? '' : ' Rebuild FLEX Field once and it will arrive in the app by itself.'), { rebuild: !seen }); }
@@ -258,7 +260,7 @@ module.exports = function phoneApi({ exportsDir, exportJobs = {}, env = process.
     const jobId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const job = jobs[jobId] = { status: 'running', progress: [], pct: 2, error: null, name: 'To phone: ' + exp.name, started: Date.now(), ended: null, cancelled: false, proc: { kill() {} }, how: null, result: null, export: exp.id };
     say(job, `Sending ${exp.file} (${(exp.bytes / 1048576).toFixed(1)} MB) to the ${st.model}…`);
-    send(job, exp, st).then(() => { job.status = 'done'; job.pct = 100; }, e => {
+    send(job, exp, st).then(() => { job.status = 'done'; job.pct = 100; if (onSent) try { onSent(exp.id); } catch (_) {} }, e => {
       job.status = 'error'; job.error = e && e.cancel ? 'Cancelled' : String((e && e.message) || e);
       if (!(e && e.cancel)) say(job, '⚠ ' + job.error);
     }).then(() => { job.ended = Date.now(); job.proc = null; });

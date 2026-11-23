@@ -4784,8 +4784,10 @@ function renderMoreSheet() {
   if (window.AboutMap) sheetRow('ⓘ', 'About this map', 'when it was exported, the area, what it carries', () => { closeSheet(); aboutMapOpen(); });
 }
 // What the map is and what it carries (libs/about-map.js): the exporter's facts and what was loaded here.
-function aboutMapOpen() {
-  return AboutMap.open({ el, dialog: ffDialog, meta: META, caves: CAVES_DATA, ridge: typeof RIDGE === 'undefined' ? null : RIDGE, trees: typeof TREES === 'undefined' ? null : TREES,
+async function aboutMapOpen() {
+  let version = null;            // FLEX Field: what the last update package did (map_version.json beside the data; absent on a map never updated that way)
+  if (window.FF_MAP_ID) { try { const r = await fetch('map_version.json', { cache: 'no-store' }); if (r.ok) version = await r.json(); } catch (_) {} }
+  return AboutMap.open({ el, dialog: ffDialog, version, meta: META, caves: CAVES_DATA, ridge: typeof RIDGE === 'undefined' ? null : RIDGE, trees: typeof TREES === 'undefined' ? null : TREES,
     features: typeof FEATURES === 'undefined' || typeof FEATURES === 'string' ? null : FEATURES,
     has: { sat: !!terrainTexSat, hs: !!terrainTexHs, hsb: !!terrainTexHsb, slope: !!terrainTexSlope } });
 }
@@ -5463,7 +5465,8 @@ function ffDescribeOp(e) {
     case 'reject':       return `Turned down ${[].concat(e.ref != null ? [e.ref] : [], e.refs || []).length} suggestion(s)${e.why ? ': ' + e.why : ''}`;
     case 'survey.version': return `New version of survey ${e.code} (${e.version || 'transcribed'}), kept beside the original`;
     case 'map.import':   return `Imported map ${e.name ? '“' + e.name + '”' : ''}${e.export ? ' (' + e.export + ')' : ''}`;
-    case 'map.update':   return `Updated the map from a newer export${e.export ? ' (' + e.export + ')' : ''}`;
+    case 'map.update':   return e.partial ? `Updated the map with what changed${e.from && e.to ? ' (from the ' + String(e.from).slice(0, 16).replace('T', ' ') + ' map to the ' + String(e.to).slice(0, 16).replace('T', ' ') + ' one)' : ''}`
+                                         : `Updated the map from a newer export${e.export ? ' (' + e.export + ')' : ''}`;
     case 'cave.update':  return `Updated cave “${(ffP.caves[e.cave] && ffP.caves[e.cave].name) || ffCaveName(e.cave) || ''}” from ${e.file || 'a file'} on the phone (approximate)`;
     case 'cave.revert':  return `Put cave “${(ffP.caves[e.cave] && ffP.caves[e.cave].name) || ffCaveName(e.cave) || ''}” back as exported`;
     default:             return e.op;

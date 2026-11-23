@@ -2251,6 +2251,10 @@ def main():
                          '(terrain ends exactly at the line); the frame is the box around it, '
                          'and --bbox is replaced by the polygon\'s bounds.')
     ap.add_argument('--out',         default='export.zip')
+    ap.add_argument('--map-id',      default='',
+                    help='The id this map keeps across exports (a Process area); default: made from the name. For updates: export_update.py')
+    ap.add_argument('--manifest-out', default=None, metavar='FILE',
+                    help='Also write the zip\'s manifest (its data files with size and sha256) to this file')
     ap.add_argument('--name',        default='',
                     help='Map name, shown in the viewer title bar and used for the app label')
     ap.add_argument('--z-offset',    type=float, default=None,
@@ -3055,6 +3059,11 @@ def main():
 
     if ridge is not None and ridge_tmp is not None:
         ridge_tmp.cleanup()
+    # The manifest: what the map's data files are (size, sha256), so a later export can be sent as an update (export_update.py)
+    import export_update
+    man = export_update.add_manifest(args.out, caves_out["meta"].get("name") or map_name, args.map_id, (caves_out["meta"].get("about") or {}).get("exported", ""))
+    if args.manifest_out:
+        Path(args.manifest_out).write_text(json.dumps(man, separators=(',', ':')), encoding='utf-8')
     sz = os.path.getsize(args.out) / 1e6
     print(f"[7/7] Done.")
     print(f"[done] {args.out} ({sz:.1f} MB)")

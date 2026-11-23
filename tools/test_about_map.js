@@ -71,6 +71,12 @@ r = A.facts({ meta: Object.assign({}, meta, { about: aq }), caves, ridge: { coun
 ok('none flagged; a small share is not rounded to nothing; no date = no line; blank tiles not known is said', get(r, 'Flight passes') === '4, none flagged' && get(r, 'Flown') === undefined && get(r, 'Seen by one pass only') === 'under 0.1 % of the area; by none 1 %'
   && /^0 %/.test(get(r, 'Ground not seen')) && get(r, 'Tiles left blank') === 'not known', r.filter(x => x.k).map(x => x.k + '=' + x.v).slice(-12));
 ok('no report (an export made before it): no LiDAR block', !heads(A.facts({ meta, caves, ridge: { counts: about.ridge.counts }, has: {} })).includes('LiDAR'));
+// a map brought up to date by update packages (FLEX Field's map_version.json)
+r = A.facts({ meta, caves, has: {}, version: { exported: '2026-11-23T10:30:00Z', updated_from: '2026-11-20T08:00:00Z', updates: 1, first: '2026-11-20T08:00:00Z' } });
+ok('updated by an update package: "from <time> to <time>", right under Exported', /^from 2026-11-20 \d\d:00 to 2026-11-23 \d\d:30$/.test(get(r, 'Updated')) && r.findIndex(x => x.k === 'Updated') === r.findIndex(x => x.k === 'Exported') + 1, get(r, 'Updated'));
+r = A.facts({ meta, caves, has: {}, version: { exported: '2026-11-23T10:30:00Z', updated_from: '2026-11-22T08:00:00Z', updates: 3, first: '2026-11-20T08:00:00Z' } });
+ok('…several updates: how many since which full map', /\(3 updates since the full map of 2026-11-20 \d\d:00\)$/.test(get(r, 'Updated')), get(r, 'Updated'));
+ok('a map never updated that way, or junk: no such line', get(A.facts({ meta, caves, has: {} }), 'Updated') === undefined && get(A.facts({ meta, caves, has: {}, version: { updated_from: 'x' } }), 'Updated') === undefined && get(A.facts({ meta, caves, has: {}, version: 7 }), 'Updated') === undefined);
 let threw = null; try { r = A.facts({}); A.facts(null); A.facts({ meta: { about: 'junk', extent_utm: 'x' }, caves: { surveys: [null, {}] }, ridge: 5, trees: 'x', features: 7 }); } catch (e) { threw = e; }
 ok('no data, or junk: no error', !threw && get(r, 'Map') === 'No name', threw && threw.stack);
 ok('helpers', A.areaText(0.005) === '5000 m²' && A.areaText(12.34) === '12.3 km²' && A.sizeText(12500, 300) === '12.5 km × 300 m' && A.when('nonsense') === '');

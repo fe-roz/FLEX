@@ -268,7 +268,7 @@ print('Done in 1.5 s')
     out0, log0 = run('plain.zip', [])
     z0 = zipfile.ZipFile(out0); h0 = z0.read('viewer.html').decode('utf-8')
     check('plain export: TREES is null, nothing left of the placeholder', trees_const(h0) is None and 'PLACEHOLDER_TREES_JSON' not in h0.replace("'PLACEHOLDER_' + 'TREES_JSON'", ''), str(trees_const(h0))[:80])
-    check('plain export: the same file list as ever', {n for n in z0.namelist() if not n.startswith('libs/')} == {'terrain.glb', 'tex_sat.jpg', 'tex_hs.jpg', 'caves.json', 'viewer.html', 'serve.bat', 'serve.sh'}, sorted(z0.namelist()))
+    check('plain export: the same file list as ever', {n for n in z0.namelist() if not n.startswith('libs/')} == {'terrain.glb', 'tex_sat.jpg', 'tex_hs.jpg', 'caves.json', 'viewer.html', 'serve.bat', 'serve.sh', 'manifest.json'}, sorted(z0.namelist()))
     check('plain export: the log does not mention trees; the module travels in libs/', 'Trees' not in log0 and 'libs/trees.js' in z0.namelist())
     outn, logn = run('plain2.zip', ['--trees'])                                 # no point cloud given
     check('--trees without a point cloud: a warning, the export made without them, the viewer byte for byte the plain one', outn.exists() and 'trees and brush left out' in logn and 'trees.bin' not in zipfile.ZipFile(outn).namelist() and

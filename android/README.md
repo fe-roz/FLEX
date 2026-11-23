@@ -15,6 +15,22 @@ note pages and new survey added on the phone, all in a change log.
   or import it separately. Updating replaces the terrain, imagery and caves and
   keeps everything added on the phone. ⋯ → *Update from a newer export…* does
   the same for a map whose name changed.
+- **Updating a map with only what changed.** Every export carries `manifest.json` (each data
+  file with its size and sha256, a map id that stays the same across exports, a hash over the
+  list). "Make an update" on the PC (`export_update.py`, `export_updates.js`) writes an update
+  package: `update.json` first (the hash of the map it was made against, the whole new manifest,
+  what to add / replace / remove), then only the changed files; no `viewer.html`. The app
+  (`MapUpdate.kt`, plain Kotlin; `MapStore.findForUpdate` / `applyUpdate`) finds the map by its
+  id (else by name), refuses unless that map's own manifest is the update's base (a map imported
+  before manifests: "needs the full map once"), builds the new set in `export.new` (changed
+  files from the package, the rest as hard links to the files already there), checks every
+  sha256, then swaps the folders; `MapStore` puts a map back whole at the next start if the phone
+  went off in between. What was added on the phone is untouched, the map's log gets a
+  `map.update` entry with `partial: true`, and `export/map_version.json` (exported, updated
+  from, how many updates) is what "About this map" shows. The inbox banner names an update
+  ("An update for <map> from your PC"): `Inbox.list()` reads the zip's first entry.
+  `tools/test_export_update.py` compiles `MapUpdate.kt` on the PC (the Kotlin compiler inside
+  Gradle) and runs the same cases against it as against the reference rules.
 - **On a station's card:** ✏️ a note · 📄 its documents (the export's scanned
   notes, sketches and photos, and what was added on the phone; opened full
   screen, pinch to zoom), in Survey notes / Sketches / Media / Other with counts,

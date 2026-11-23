@@ -1294,7 +1294,7 @@
     const submit = b => fetch('/api/export/terrain', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(b)
+      body: JSON.stringify(window._mapUpdate ? window._mapUpdate.stamp(b) : b)       // "Make an update" adds the earlier map to update from (map-update.js)
     })
     .then(r => r.json())
     .then(data => {
@@ -1331,7 +1331,8 @@
         dl.href = '/api/export/download/' + _exportJobId;
         dl.download = data.filename || 'flex_export.zip';
         document.getElementById('export_download_wrap').style.display = 'block';
-        if (window._phone) window._phone.refresh(_exportJobId);          // Send to phone: this export first in its list
+        const first = window._mapUpdate ? window._mapUpdate.done(_exportJobId, data) : _exportJobId;      // an update package, when one was made (map-update.js)
+        if (window._phone) window._phone.refresh(first);          // Send to phone: this export (or its update) first in its list
         document.getElementById('export_run_btn').disabled = false;
       } else if (data.status === 'error') {
         _setProgress(0, '✗ ' + (data.error || 'Export failed'));

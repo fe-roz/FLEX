@@ -48,14 +48,22 @@ class Inbox(private val ctx: Context) {
     /** What is waiting: [{ name, bytes, readable }]; a name in both places is listed once (the app's own copy). */
     @Synchronized fun list(): JSONArray {
         val out = JSONArray(); val seen = HashSet<String>(); val forPc = JSONArray()
-        for (f in zips(own)) { seen.add(f.name); out.put(JSONObject().put("name", f.name).put("bytes", f.length()).put("readable", true)) }
+        for (f in zips(own)) { seen.add(f.name); out.put(kind(f, JSONObject().put("name", f.name).put("bytes", f.length()).put("readable", true))) }
         for (f in zips(shared)) {
             val ok = readable(f)
             forPc.put(JSONObject().put("name", f.name).put("readable", ok))
-            if (seen.add(f.name)) out.put(JSONObject().put("name", f.name).put("bytes", f.length()).put("readable", ok))
+            if (seen.add(f.name)) out.put(JSONObject().put("name", f.name).put("bytes", f.length()).put("readable", ok).also { if (ok) kind(f, it) })
         }
         writeStatus(forPc)
         return out
+    }
+    /** An update package says so in its first entry (update.json): then `update` = the map's name, for the banner. Looked at once per file. */
+    private val kinds = HashMap<String, String>()
+    private fun kind(f: File, o: JSONObject): JSONObject {
+        val key = f.path + "|" + f.length() + "|" + f.lastModified()
+        val name = kinds.getOrPut(key) { try { FileInputStream(f).use { MapUpdate.peek(it) }?.name ?: "" } catch (_: Exception) { "" } }
+        if (name.isNotEmpty()) o.put("update", name)
+        return o
     }
     private fun writeStatus(files: JSONArray) {
         try {
