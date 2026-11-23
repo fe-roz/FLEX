@@ -58,6 +58,8 @@ PARAMS = dict(
     lone_far=5.0,        # m, a lone return farther than this from any other = likely noise
     deep=3.0,            # m, "deep" for the pass statistics
     pass_share=0.01, pass_ratio=8.0, pass_min=30, pass_confirm=1.5, pass_others=1000,
+    pass_block=96.0,     # m, the statistics are kept per block of this size and judged on a block and its 8 neighbours
+    max_link=12.0,       # m, the longest guessed link (a tie, or the way out to the surface) a shape may rest on
     wrap=2.0,            # m, one skin per feature
     wrap_min=4,          # returns
     hug=0.9, pull=0.5,   # wall vertices within hug of a return go half-way to it
@@ -524,8 +526,9 @@ def w_classify(t):
     ix = np.clip((lx / cell).astype(int), 0, W - 1); iy = np.clip((ly / cell).astype(int), 0, H - 1)
     dv = bilin(L, lx, ly, cell) - z
     cand = dv * cosm[iy, ix] > P_['below']
-    ids, nall = np.unique(ps[own], return_counts=True)
-    stats = {int(p): [int(n), 0] for p, n in zip(ids, nall)}        # [returns, deep ones: counted once the measure is known]
+    BS = P_['pass_block']; bk = (y[own] // BS).astype(np.int64) * 100000 + (x[own] // BS).astype(np.int64)
+    uk, un = np.unique(np.c_[bk, ps[own]], axis=0, return_counts=True)
+    stats = [(int(k_), int(p), int(n)) for (k_, p), n in zip(uk, un)]          # block, pass, returns (blocks do not depend on the tile size)
     # brush: of the returns that got down to brush height, the share the band stopped (as lidar_derive.py)
     G = fill_nan_nearest(np.array(np.load(C['gfile'], mmap_mode='r')[J0:J1, I0:I1], 'f8'))
     hag = z[own] - bilin(G, lx[own], ly[own], cell); lo, hi = P_['brush_band']; S = P_['brush_block']
@@ -621,6 +624,54 @@ def w_cluster(job):
             if near.any():
                 cnt[~fit] = cKDTree(np.c_[px[near], py[near], pz[near]]).query_ball_point(T[~fit], 0.6, return_length=True)
     openp = cnt < 3
+    ML = C['max_link']; tg = cKDTree(gp)
+    openp &= ds <= ML                   # a way out longer than max_link is a guess no shape may rest on
+
+    def links(gp, ds, E, openp, tg):
+        """Roofed returns: each tied to the nearest return that is nearer the surface, never farther than its own way
+        out or max_link; else to an open return close by; else straight out through the roof when that is no longer
+        than max_link; else it hangs on nothing of its own (none)."""
+        ri = np.flatnonzero(~openp); z0 = np.zeros(0, bool)
+        if not len(ri):
+            return ri, np.zeros(0, int), z0, z0, z0, np.zeros(0, int), np.zeros((0, 3)), np.zeros((0, 3))
+        K = min(64, len(gp))
+        dd, jj = tg.query(gp[ri], k=K); dd = dd.reshape(len(ri), -1); jj = jj.reshape(len(ri), -1)
+        dd2 = np.where(ds[jj] < ds[ri][:, None] - 0.10, dd, np.inf); pick = dd2.argmin(1)
+        dist = dd2[np.arange(len(ri)), pick]; par = jj[np.arange(len(ri)), pick]
+        for q in np.flatnonzero(~np.isfinite(dist)):
+            hi_ = np.flatnonzero(ds < ds[ri[q]] - 0.10)
+            if len(hi_):
+                d_ = np.linalg.norm(gp[hi_] - gp[ri[q]], axis=1); k_ = d_.argmin(); dist[q] = d_[k_]; par[q] = hi_[k_]
+        up = ~np.isfinite(dist) | (dist > np.minimum(ML, ds[ri]))
+        A_ = gp[ri]; B_ = np.where(up[:, None], E[ri], gp[par]); toent = np.zeros(len(ri), bool); ok2 = np.zeros(len(ri), int)
+        if openp.any():
+            opts_ = gp[openp]; od, ok2 = cKDTree(opts_).query(A_)
+            toent = up & (od <= np.minimum(6.0, 1.5 * ds[ri] + 1.0)); B_[toent] = opts_[ok2[toent]]
+        none = up & ~toent & (ds[ri] > ML)
+        return ri, par, up, toent, none, ok2, A_, B_
+
+    def features(gp, openp, tg, ri, par, up, toent, none, ok2):
+        pr_ = tg.query_pairs(P['link'], output_type='ndarray')
+        ea = [pr_[:, 0]]; eb = [pr_[:, 1]]
+        if len(ri):
+            tie_ = ~up & ~toent
+            ea.append(ri[tie_]); eb.append(par[tie_])
+            if toent.any():
+                ea.append(ri[toent]); eb.append(np.flatnonzero(openp)[ok2[toent]])
+        ea = np.concatenate(ea); eb = np.concatenate(eb)
+        return csgraph.connected_components(sparse.coo_matrix((np.ones(len(ea)), (ea, eb)), shape=(len(gp), len(gp))), directed=False)
+    # a feature must reach the surface by links no longer than max_link: one of its returns has to have a way out
+    # (open, or straight through the roof) that short. The returns of a feature that has none make no shape, no hole.
+    L_ = links(gp, ds, E, openp, tg); nf, flab = features(gp, openp, tg, *L_[:6])
+    anch = openp.copy(); anch[L_[0][L_[2] & ~L_[3] & ~L_[4]]] = True
+    keepf = np.isin(flab, np.unique(flab[anch])); dropped = idx[~keepf]
+    if not keepf.all():
+        idx, g4, gp, E, ds, horiz, vertd, openp = idx[keepf], g4[keepf], gp[keepf], E[keepf], ds[keepf], horiz[keepf], vertd[keepf], openp[keepf]
+        if not len(idx):
+            z = np.zeros(0, np.int64)
+            return dict(idx=idx, flab=z, openp=z.astype(bool), side=z.astype(bool), ltype=z.astype('u1'), llen=np.zeros(0), wayout=np.zeros(0), dropped=dropped,
+                        nf=0, wrapped=0, shapes=0, left=0, joined=0, true=z, guess=z, mesh=None)
+        tg = cKDTree(gp)
     # the voxel box: just around the returns and their ways out
     bp = 3.0
     vi0 = max(0, int((min(gp[:, 0].min(), E[:, 0].min()) - bp) / cell)); vi1 = min(W, int((max(gp[:, 0].max(), E[:, 0].max()) + bp) / cell) + 1)
@@ -655,33 +706,14 @@ def w_cluster(job):
         Vent |= np.isfinite(Fz)[:, :, None] & (zc[None, None, :] >= Fz[:, :, None] - VOX / 2) & (zc[None, None, :] <= L[:, :, None] + 0.2)
     Vx = Vent.copy()
     # roofed returns: tied to the nearest return that is nearer the surface, never farther than their own way out
-    ri = np.flatnonzero(~openp); tie_ = np.zeros(0, bool); toent = np.zeros(0, bool); par = np.zeros(0, int); ok2 = np.zeros(0, int)
-    tg = cKDTree(gp)
+    ltype = np.zeros(len(gp), 'u1'); llen = ds.copy()          # the link each return hangs on: 0 its way out (open), 1 a tie, 2 to an entrance, 3 out through the roof, 4 none of its own
+    ri, par, up, toent, none, ok2, A_, B_ = links(gp, ds, E, openp, tg)
     if len(ri):
-        K = min(64, len(gp))
-        dd, jj = tg.query(gp[ri], k=K); dd = dd.reshape(len(ri), -1); jj = jj.reshape(len(ri), -1)
-        dd2 = np.where(ds[jj] < ds[ri][:, None] - 0.10, dd, np.inf); pick = dd2.argmin(1)
-        dist = dd2[np.arange(len(ri)), pick]; par = jj[np.arange(len(ri)), pick]
-        for q in np.flatnonzero(~np.isfinite(dist)):
-            hi_ = np.flatnonzero(ds < ds[ri[q]] - 0.10)
-            if len(hi_):
-                d_ = np.linalg.norm(gp[hi_] - gp[ri[q]], axis=1); k_ = d_.argmin(); dist[q] = d_[k_]; par[q] = hi_[k_]
-        up = ~np.isfinite(dist) | (dist > np.minimum(15.0, ds[ri]))
-        A_ = gp[ri]; B_ = np.where(up[:, None], E[ri], gp[par]); toent = np.zeros(len(ri), bool)
-        if openp.any():
-            opts_ = gp[openp]; od, ok2 = cKDTree(opts_).query(A_)
-            toent = up & (od <= np.minimum(6.0, 1.5 * ds[ri] + 1.0)); B_[toent] = opts_[ok2[toent]]
-        Vx |= tubes(A_, B_, 1.0)
-        tie_ = ~up & ~toent
+        A_, B_ = np.where(none[:, None], A_, A_), np.where(none[:, None], A_, B_)       # (none: no tube)
+        Vx |= tubes(A_[~none], B_[~none], 1.0)
+        ltype[ri] = np.where(none, 4, np.where(toent, 2, np.where(up, 3, 1))); llen[ri] = np.linalg.norm(B_ - A_, axis=1)
     # one skin around each feature: its returns (joined by nearness, ties and entrance links) wrapped together
-    pr_ = tg.query_pairs(P['link'], output_type='ndarray')
-    ea = [pr_[:, 0]]; eb = [pr_[:, 1]]
-    if len(ri):
-        ea.append(ri[tie_]); eb.append(par[tie_])
-        if openp.any() and toent.any():
-            ea.append(ri[toent]); eb.append(np.flatnonzero(openp)[ok2[toent]])
-    ea = np.concatenate(ea); eb = np.concatenate(eb)
-    nf, flab = csgraph.connected_components(sparse.coo_matrix((np.ones(len(ea)), (ea, eb)), shape=(len(gp), len(gp))), directed=False)
+    nf, flab = features(gp, openp, tg, ri, par, up, toent, none, ok2)
     pv = np.c_[gv[0], gv[1], gv[2]]; WRAP = P['wrap']
     pad_ = int(np.ceil(WRAP / VOX)) + 2; fsz = np.bincount(flab, minlength=nf); wrapped = []
     for f_ in np.flatnonzero(fsz >= P['wrap_min']):
@@ -696,7 +728,7 @@ def w_cluster(job):
     for lo, hi, w_ in wrapped:
         Vent[lo[0]:hi[0], lo[1]:hi[1], lo[2]:hi[2]] |= w_
     if len(ri):
-        bigr = fsz[flab[ri]] >= P['wrap_min']
+        bigr = (fsz[flab[ri]] >= P['wrap_min']) & ~none
         Vent |= tubes(A_[bigr], B_[bigr], 1.0)
     Vent = closing(Vent, 2.0) & underlid
     Vx = closing(Vx, 2.0)
@@ -718,9 +750,12 @@ def w_cluster(job):
             dS, kS = stree.query(np.c_[(vs[:, 1] + vi0 + 0.5) * VOX, (vs[:, 0] + vj0 + 0.5) * VOX, zc[vs[:, 2]]]); mS = dS.argmin()
             a_ = vs[mS].astype(float); pS = SP[kS[mS]]; dep = float(dS[mS])
             b_ = np.array([pS[1] / VOX - vj0, pS[0] / VOX - vi0, (pS[2] - zlo) / VOX + 1])
+            far_ = dep > ML
             if tr_ok is not None:
                 d_, q_ = tr_ok.query(vs); m_ = d_.argmin()
-                if d_[m_] * VOX <= min(8.0, max(2.0, dep)): a_ = vs[m_].astype(float); b_ = tr_ok.data[q_[m_]]
+                if d_[m_] * VOX <= min(8.0, max(2.0, dep)): a_ = vs[m_].astype(float); b_ = tr_ok.data[q_[m_]]; far_ = False
+            if far_:                    # only a link longer than max_link would join it: no shape
+                Vx[lab3 == bl] = False; continue
             ns_ = int(np.ceil(np.linalg.norm(b_ - a_) * 2)) + 2; ln = (a_ + (b_ - a_) * np.linspace(0, 1, ns_)[:, None]).round().astype(int)
             ln = ln[(ln[:, 0] >= 0) & (ln[:, 0] < nj) & (ln[:, 1] >= 0) & (ln[:, 1] < ni) & (ln[:, 2] >= 0) & (ln[:, 2] < nz)]
             T_[ln[:, 0], ln[:, 1], ln[:, 2]] = True; nfix += 1
@@ -734,7 +769,7 @@ def w_cluster(job):
     guess &= ~ndimage.binary_dilation(truem, iterations=2)
     gj0, gi0 = J0 + vj0, I0 + vi0
     tj, ti = np.nonzero(truem); qj, qi = np.nonzero(guess)
-    out = dict(idx=idx, flab=flab, openp=openp, side=horiz > vertd, nf=int(nf), wrapped=len(wrapped), shapes=int(nb), left=int(left), joined=nfix,
+    out = dict(idx=idx, flab=flab, openp=openp, side=horiz > vertd, ltype=ltype, llen=llen, wayout=ds, dropped=dropped, nf=int(nf), wrapped=len(wrapped), shapes=int(nb), left=int(left), joined=nfix,
                true=((tj + gj0) * C['nx'] + ti + gi0).astype(np.int64), guess=((qj + gj0) * C['nx'] + qi + gi0).astype(np.int64), mesh=None)
     if C['shapes'] and Vx.any():
         out['mesh'] = shape_mesh(C, Vx, L, zc, zlo, gp, gj0, gi0, I0, J0, Lw, stree)
@@ -859,25 +894,30 @@ def run(C, notes):
         b_in = np.zeros((by, bx), 'i4'); b_un = np.zeros((by, bx), 'i4')
         for t, r in pmap(C, w_classify, work, 60, 70, 'returns against the lid'):
             if r is None: continue
-            nret += r['n']; stats[t] = r['stats']
+            nret += r['n']
+            for k_, p, n in r['stats']:
+                a = stats.setdefault((k_ // 100000, k_ % 100000), {}).setdefault(p, [0, 0]); a[0] += n
             bj0, bi0, a, b = r['brush']; b_in[bj0:bj0 + a.shape[0], bi0:bi0 + a.shape[1]] += a; b_un[bj0:bj0 + a.shape[0], bi0:bi0 + a.shape[1]] += b
             if len(r['x']):
-                cand.append((r['x'], r['y'], r['z'], r['dv'], r['ps'], np.full(len(r['x']), t[0] * 100000 + t[1], np.int64), r['behind'], r['foot']))
+                cand.append((r['x'], r['y'], r['z'], r['dv'], r['ps'], np.zeros(len(r['x']), np.int64), r['behind'], r['foot']))
         cat = lambda k, dt: np.concatenate([c[k] for c in cand]).astype(dt) if cand else np.zeros(0, dt)
-        X, Y, Z, DV, PS, TK, BH = cat(0, 'f8'), cat(1, 'f8'), cat(2, 'f8'), cat(3, 'f8'), cat(4, 'i8'), cat(5, 'i8'), cat(6, 'f8')
+        X, Y, Z, DV, PS, _u, BH = cat(0, 'f8'), cat(1, 'f8'), cat(2, 'f8'), cat(3, 'f8'), cat(4, 'i8'), cat(5, 'i8'), cat(6, 'f8')
         FT = np.concatenate([c[7] for c in cand]) if cand else np.zeros((0, 3))
         # below ground = behind the local face by more than min_behind; no face could be fitted: the lid's measure stands
         FIT = np.isfinite(BH); ok = ~FIT | (BH > C['min_behind'])
         ncand = len(X); nonface = int((FIT & ~ok).sum()); nofit = int((~FIT).sum())
-        X, Y, Z, PS, TK, FT, FIT = X[ok], Y[ok], Z[ok], PS[ok], TK[ok], FT[ok], FIT[ok]
+        X, Y, Z, PS, FT, FIT = X[ok], Y[ok], Z[ok], PS[ok], FT[ok], FIT[ok]
+        TK = (Y // P['pass_block']).astype(np.int64) * 100000 + (X // P['pass_block']).astype(np.int64)      # the statistics block of each
         DVL = DV[ok]; DV = np.where(FIT, BH[ok], DVL)            # from here on the depth is the distance behind the face
         dk, dn = np.unique(np.c_[TK, PS][DV > P['deep']], axis=0, return_counts=True)
         for (tk, p), q in zip(dk, dn):
-            stats[(int(tk // 100000), int(tk % 100000))][int(p)][1] = int(q)
+            stats.setdefault((int(tk // 100000), int(tk % 100000)), {}).setdefault(int(p), [0, 0])[1] = int(q)
         lap('returns')
-        # 5. patterned noise: per tile, on the statistics of the tile and its 8 neighbours
+        # 5. patterned noise: a pass is judged per block of 96 m on the statistics of the block and its 8 neighbours;
+        # a pass flagged anywhere is a bad pass everywhere: its returns below ground are set aside over the whole
+        # area, except those a pass that is NOT flagged confirms (one of its returns within 1.5 m)
         say(70, 'flight passes')
-        tot = {}; flagged_tiles = {}; isbad = np.zeros(len(X), bool)
+        tot = {}; flagged_tiles = {}; trows = []
         for t, st in stats.items():
             for p, (n, d) in st.items():
                 a = tot.setdefault(p, [0, 0]); a[0] += n; a[1] += d
@@ -886,22 +926,23 @@ def run(C, notes):
                 for di in (-1, 0, 1):
                     for p, (n, d) in stats.get((t[0] + dj, t[1] + di), {}).items():
                         a = blk.setdefault(p, [0, 0]); a[0] += n; a[1] += d
-            alln = sum(v[0] for v in blk.values()); alld = sum(v[1] for v in blk.values()); bad = []
+            alln = sum(v[0] for v in blk.values()); alld = sum(v[1] for v in blk.values())
             for p in st:
                 n, d = blk[p]; others = (alld - d) / max(1, alln - n); share = d / max(1, n)
-                if alln - n < P['pass_others']:     # nothing to compare the pass with
-                    continue
-                if d >= P['pass_min'] and share >= P['pass_share'] and share >= P['pass_ratio'] * max(others, 1e-5):
-                    bad.append(p); flagged_tiles[p] = flagged_tiles.get(p, 0) + 1
-            if bad:
-                isbad |= (TK == t[0] * 100000 + t[1]) & np.isin(PS, bad)
-        kind = np.zeros(len(X), 'u1'); confirmed = 0
+                fl = alln - n >= P['pass_others'] and d >= P['pass_min'] and share >= P['pass_share'] and share >= P['pass_ratio'] * max(others, 1e-5)
+                trows.append((t[0], t[1], p, st[p][0], st[p][1], n, d, alln - n, alld - d, int(fl)))
+                if fl:
+                    flagged_tiles[p] = flagged_tiles.get(p, 0) + 1
+        isbad = np.isin(PS, list(flagged_tiles)) if flagged_tiles else np.zeros(len(X), bool)
+        kind = np.zeros(len(X), 'u1'); confirmed = 0; confby = np.full(len(X), -1, np.int64)
         if isbad.any():
             ci = np.flatnonzero(isbad); gi = np.flatnonzero(~isbad)
             if len(gi):
-                d_, _ = cKDTree(np.c_[X[gi], Y[gi], Z[gi]]).query(np.c_[X[ci], Y[ci], Z[ci]]); confirmed = int((d_ <= P['pass_confirm']).sum()); ci = ci[d_ > P['pass_confirm']]
+                d_, q_ = cKDTree(np.c_[X[gi], Y[gi], Z[gi]]).query(np.c_[X[ci], Y[ci], Z[ci]]); okc = d_ <= P['pass_confirm']
+                confirmed = int(okc.sum()); confby[ci[okc]] = PS[gi[q_[okc]]]; ci = ci[~okc]
             kind[ci] = 3
-        passes = [dict(id=int(p), returns=int(n), deep=int(d), share=round(d / max(1, n), 5), flagged=p in flagged_tiles, tiles_flagged=int(flagged_tiles.get(p, 0)))
+        passes = [dict(id=int(p), returns=int(n), deep=int(d), share=round(d / max(1, n), 5), flagged=p in flagged_tiles, blocks_flagged=int(flagged_tiles.get(p, 0)),
+                       tiles_flagged=int(flagged_tiles.get(p, 0)), set_aside=int(((kind == 3) & (PS == p)).sum()), kept_confirmed=int((isbad & (kind == 0) & (PS == p)).sum()))
                   for p, (n, d) in sorted(tot.items())]
         # groups, lone, likely noise: over the whole area at once
         say(72, 'groups')
@@ -945,14 +986,21 @@ def run(C, notes):
     say(96, 'writing')
     holes = np.zeros(ny * nx, 'u1'); V = []; D = []; T = []; nv = 0
     feat = np.full(len(bi), -1, np.int64); openp = np.zeros(len(bi), bool); side = np.zeros(len(bi), bool)
+    ltype = np.full(len(bi), 255, 'u1'); llen = np.zeros(len(bi), 'f4'); wayout = np.zeros(len(bi), 'f4')
     cnt = dict(features=0, wrapped=0, shapes=0, not_reaching=0); fo = 0
     for r in res: holes[r['guess']] = 2
+    nolink = 0
     for r in res:
         holes[r['true']] = 1
+        if len(r['dropped']):           # only a link longer than max_link would hold them: likely noise, no shape
+            kb[r['dropped']] = 2; nolink += len(r['dropped'])
         feat[r['idx']] = r['flab'] + fo; fo += r['nf']; openp[r['idx']] = r['openp']; side[r['idx']] = r['side']
+        ltype[r['idx']] = r['ltype']; llen[r['idx']] = r['llen']; wayout[r['idx']] = r['wayout']
         cnt['features'] += r['nf']; cnt['wrapped'] += r['wrapped']; cnt['shapes'] += r['shapes']; cnt['not_reaching'] += r['left']
         if r['mesh'] is not None:
             v, d, t = r['mesh']; V.append(v); D.append(d); T.append(t + nv); nv += len(v)
+    if nolink:
+        pK[:len(bi)] = kb; ngroups = len(np.unique(lab[kb == 0]))
     holes = holes.reshape(ny, nx)
     lid = np.load(C['lfile'], mmap_mode='r+')
     if C.get('ring') is not None:               # nothing outside the polygon
@@ -967,14 +1015,16 @@ def run(C, notes):
     brush = np.where(reach >= P['brush_min'], b_in / np.maximum(reach, 1), np.nan).astype('f4')
     counts = dict(returns=int(nret), below=int(len(bi)), groups=ngroups, lone=int((kb == 1).sum()), likely_noise=int((kb == 2).sum()),
                   pattern_noise=int((kind == 3).sum()), pattern_confirmed=confirmed, deeper_than_max=too_deep,
-                  candidates=int(ncand), on_face=nonface, no_face=nofit,
+                  candidates=int(ncand), on_face=nonface, no_face=nofit, no_link=int(nolink),
                   features=cnt['features'], wrapped=cnt['wrapped'], shapes=cnt['shapes'], not_reaching=cnt['not_reaching'],
                   true_cells=int((holes == 1).sum()), guessed_cells=int((holes == 2).sum()),
                   deepest=round(float(pD[pK < 3].max()), 2) if (pK < 3).any() else 0.0, shape_triangles=int(sum(len(t) for t in T)))
     write_outputs(C, holes, (pX, pY, pZ, pD, pK), (V, D, T) if C['shapes'] else None, brush)
     if C.get('debug'):
         np.savez(os.path.join(out, 'debug.npz'), x=pts[:, 0] if len(bi) else np.zeros(0), y=pts[:, 1] if len(bi) else np.zeros(0),
-                 z=pts[:, 2] if len(bi) else np.zeros(0), depth=DV[bi], kind=kb, feature=feat, open=openp, sideways=side)
+                 z=pts[:, 2] if len(bi) else np.zeros(0), depth=DV[bi], kind=kb, feature=feat, open=openp, sideways=side,
+                 link=ltype, link_len=llen, way_out=wayout, psid=PS[bi], confirmed_by=confby[bi], tile=TK[bi],
+                 noise=np.c_[X, Y, Z, DV, PS][kind == 3], tile_pass=np.array(trows, np.int64).reshape(-1, 10))
     return counts, passes, (float(np.mean(cover)) if cover else 0.0)
 
 
@@ -1113,6 +1163,7 @@ def main(argv=None):
     ap.add_argument('--workers', type=int, default=0); ap.add_argument('--no-shapes', action='store_true')
     ap.add_argument('--cell', type=float, default=PARAMS['cell'])
     ap.add_argument('--min-behind', type=float, default=PARAMS['min_behind'], help='m behind the local face for a return to count as below ground')
+    ap.add_argument('--max-link', type=float, default=PARAMS['max_link'], help='m, the longest guessed link (tie or way out) a shape may rest on')
     ap.add_argument('--debug', action='store_true', help='also write debug.npz (per below return: feature, open, sideways)')
     ap.add_argument('--keep-work', action='store_true', help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
@@ -1123,7 +1174,7 @@ def main(argv=None):
     cell = float(a.cell); K = PARAMS['coarse']
     C = dict(out=out, tmp=os.path.join(out, '_work'), cell=cell, coarse=K, tile_c=max(K, int(round(a.tile / cell / K)) * K),
              marg_c=max(4, int(round(a.margin / cell))), shapes=not a.no_shapes, debug=a.debug,
-             workers=a.workers or max(1, min((os.cpu_count() or 2) - 1, 20)), ox=0.0, oy=0.0, read_timeout=120, min_behind=float(a.min_behind))
+             workers=a.workers or max(1, min((os.cpu_count() or 2) - 1, 20)), ox=0.0, oy=0.0, read_timeout=120, min_behind=float(a.min_behind), max_link=float(a.max_link))
     shutil.rmtree(C['tmp'], ignore_errors=True); os.makedirs(C['tmp'])
     notes = []; ring = None
     if a.polygon:
@@ -1174,15 +1225,15 @@ def main(argv=None):
     counts, passes, cover = run(C, notes)
     notes.append('Tile-independent: groups, lone returns, noise and features (worked over the whole area, each cluster in its own box). '
                  'Depends on the tile cut: the fill of ground gaps near a tile\'s margin edge; the water level of a hollow wider than the '
-                 'margin whose rim is thinner than %g m (the area-wide fill is on a %g m grid); the patterned-noise decision '
-                 '(per tile, on the tile and its 8 neighbours); the face fits use the returns within 12 m of the tile, so a chain of '
-                 'candidates joining the face from farther away is not followed.' % (2 * K * cell, K * cell))
+                 'margin whose rim is thinner than %g m (the area-wide fill is on a %g m grid); the face fits use the returns within 12 m of the tile, so a chain of '
+                 'candidates joining the face from farther away is not followed. The patterned-noise decision is made on blocks of %g m that '
+                 'do not move with the tile size; a pass flagged in any block is set aside over the whole area.' % (2 * K * cell, K * cell, PARAMS['pass_block']))
     if not a.keep_work:
         shutil.rmtree(C['tmp'], ignore_errors=True)
     ox, oy = C['ox'], C['oy']
     J = dict(version=1, epsg=meta['epsg'], zone=meta['zone'], south=meta['south'], origin=[ox, oy],
              bbox_utm=[ox, oy, ox + C['nx'] * cell, oy + C['ny'] * cell], bbox_lonlat=meta['bbox_lonlat'], cell=cell, nx=C['nx'], ny=C['ny'],
-             params=dict(PARAMS, cell=cell, min_behind=C['min_behind'], tile=C['tile_c'] * cell, margin=C['marg_c'] * cell, workers=C['workers'], shapes=C['shapes']),
+             params=dict(PARAMS, cell=cell, min_behind=C['min_behind'], max_link=C['max_link'], tile=C['tile_c'] * cell, margin=C['marg_c'] * cell, workers=C['workers'], shapes=C['shapes']),
              counts=counts, passes=passes, ground_cover=round(cover, 3), stages=C.get('stages'), seconds=round(time.time() - t0, 1), notes=notes)
     json.dump(J, open(os.path.join(out, 'ridge.json'), 'w'), indent=1)
     say(100, 'done in %.0f s: %d returns, %d below the ground in %d groups, %d lone, %d likely noise, %d patterned noise; %d features' % (
