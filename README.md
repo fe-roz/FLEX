@@ -94,7 +94,7 @@ in PowerShell (it needs the Android SDK):
 
 ```powershell
 cd android
-.\gradlew.bat installRelease
+.\gradlew.bat installFieldRelease     # FLEX Field; installRidgeRelease = FLEX Ridgewalk (see android/README.md)
 ```
 
 On the phone: **Import map** (or Open with / Share a zip from Files or Drive).

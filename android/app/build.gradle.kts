@@ -21,6 +21,24 @@ android {
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
+    // Two apps from the same code, installed side by side:
+    //   field = FLEX Field, com.feroz.flexfield, exactly the app there was before the
+    //           flavors (same id, name, signing and storage: it updates in place);
+    //   ridge = FLEX Ridgewalk, com.feroz.flexridge, its own storage; only its name and
+    //           icon colour differ (src/ridge/res).
+    // Neither declares INTERNET (one manifest, src/main). The FileProvider authority is
+    // ${applicationId}.fileprovider, so the two never clash.
+    flavorDimensions += "app"
+    productFlavors {
+        create("field") {
+            dimension = "app"
+        }
+        create("ridge") {
+            dimension = "app"
+            applicationId = "com.feroz.flexridge"
+        }
+    }
+
     // The viewer is not copied into the app: viewer_build/ itself is an asset
     // folder, so viewer.html and libs/ ship exactly as they are in the repo and
     // a viewer fix needs nothing but a rebuild. The map list lives in

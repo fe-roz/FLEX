@@ -36,7 +36,8 @@ import java.io.FileInputStream
 import java.util.concurrent.Executors
 
 /**
- * FLEX Field: one app that opens FLEX map exports (zips), with a project
+ * FLEX Field (and FLEX Ridgewalk, the same code as a second build flavor with
+ * its own id, name and storage): one app that opens FLEX map exports (zips), with a project
  * library for what people add (notes, documents, leads, field survey) and
  * sync files to share it with other phones and with FLEX.
  *
@@ -342,6 +343,8 @@ class MainActivity : AppCompatActivity() {
     /** The surface the pages call into. Every map id and file name is checked in MapStore. */
     inner class AndroidHost {
         @JavascriptInterface fun isNativeHost(): Boolean = true
+        /** "FLEX Field" or "FLEX Ridgewalk" (the build flavor's name), for the pages' titles. */
+        @JavascriptInterface fun appName(): String = try { getString(R.string.app_name) } catch (_: Exception) { "FLEX Field" }
         @JavascriptInterface fun appVersion(): String = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "" } catch (_: Exception) { "" }
 
         @JavascriptInterface
@@ -527,6 +530,17 @@ class MainActivity : AppCompatActivity() {
                 .replace("\"PLACEHOLDER_HS_B64\"", if (has("tex_hs.jpg")) "\"tex_hs.jpg\"" else "\"PLACEHOLDER_HS_B64\"")
                 .replace("\"PLACEHOLDER_WALLS_B64\"", if (has("walls.bin")) "\"walls.bin\"" else "\"PLACEHOLDER_WALLS_B64\"")
                 .replace("PLACEHOLDER_CAVES_JSON", "ffSidecarJson(\"caves.json\")")
+                .replace("PLACEHOLDER_RIDGE_JSON", ridgeFor(has))
+        }
+
+        /** RIDGE for the viewer (libs/ridgewalk.js): the map's ridgewalking files by
+         *  name, or null for a map without them (every normal export). */
+        private fun ridgeFor(has: (String) -> Boolean): String {
+            if (!has("ridge_points.bin")) return "null"
+            val ref = { f: String -> if (has(f)) "\"$f\"" else "null" }
+            val counts = if (has("ridge.json")) "(ffSidecarJson(\"ridge.json\").counts || {})" else "{}"
+            return "{ version: 1, counts: $counts, points: \"ridge_points.bin\", patches: ${ref("ridge_patches.bin")}, " +
+                "shapes: ${ref("ridge_shapes.bin")}, brush: ${ref("tex_brush.png")}, depthCap: 20 }"
         }
 
         private fun html(s: String) = WebResourceResponse("text/html", "utf-8", ByteArrayInputStream(s.toByteArray(Charsets.UTF_8))).apply {

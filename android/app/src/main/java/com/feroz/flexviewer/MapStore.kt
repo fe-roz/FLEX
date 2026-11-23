@@ -43,7 +43,9 @@ class MapStore(private val ctx: Context) {
         private val TILE_RE = Regex("^tex_(sat|hs)_[0-9]{1,2}_[0-9]{1,2}\\.jpg$")
         /** Documents of the project that belong to the export: docs.json and one image per page (docs_<sha256>.<ext>), see viewer_inline.py. */
         private val DOC_RE = Regex("^docs_[0-9a-f]{64}\\.(jpg|jpeg|png|webp)$")
-        fun isDataFile(name: String): Boolean = name in DATA_FILES || name == "docs.json" || TILE_RE.matches(name) || DOC_RE.matches(name)
+        /** V2 - Ridgewalking (an export made with that box ticked): returns below ground, shapes, guessed openings, the step's summary, the brush map. */
+        val RIDGE_FILES = setOf("ridge_points.bin", "ridge_shapes.bin", "ridge_patches.bin", "ridge.json", "tex_brush.png")
+        fun isDataFile(name: String): Boolean = name in DATA_FILES || name in RIDGE_FILES || name == "docs.json" || TILE_RE.matches(name) || DOC_RE.matches(name)
         private val ID_RE = Regex("^[A-Za-z0-9_-]{1,64}$")
         private val SAFE_RE = Regex("^[A-Za-z0-9._ -]{1,120}$")
         fun validId(id: String?): Boolean = id != null && ID_RE.matches(id)

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The ridge flavor (com.feroz.flexridge): only the name differs from FLEX Field. -->
+<resources>
+    <string name="app_name">FLEX Ridgewalk</string>
+    <string name="loc_rationale">Location is used to show your position on the map. Nothing leaves the device.</string>
+</resources>
