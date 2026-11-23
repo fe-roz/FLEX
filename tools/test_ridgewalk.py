@@ -19,6 +19,10 @@ returns far below the ground, a patch of brush. Pins down:
     lone, the far one likely noise;
   * every shape reaches the surface;
   * the striped pass is flagged and its returns set aside, except those another pass confirms;
+  * a shape never rests on a guessed link longer than 12 m (--max-link): two returns 15 m straight down are
+    likely noise, no shape, no hole; the deep group 8 m from the slanted pit's end is still part of it;
+  * a flagged pass is set aside over the whole area: its stripe is set aside also where it is too thin to be
+    flagged on its own; a real pit it shares with good passes is kept;
   * the result does not depend on the tile cut (96 m tiles with workers against 48 m tiles in one process):
     the pit that sits on a tile line is neither cut nor doubled;
   * --npz with a polygon and --no-shapes.
@@ -128,6 +132,15 @@ fs = np.unique(dbg['feature'][ms]); fd = np.unique(dbg['feature'][md])
 check('deep group: joined to the slanted pit (one feature)', len(fd) == 1 and fd[0] >= 0 and fd[0] in fs, '%s %s' % (fs, fd))
 check('slanted pit: a true-entrance hole at its mouth', h1[at(sx + 1, sy, sr)].sum() >= 10, '%d' % h1[at(sx + 1, sy, sr)].sum())
 check('deep group: no hole cut above it', not h1[at(ex, ey, 1.5)].any())
+tl = dbg['link_len'][md & (dbg['link'] == 1)]
+check('deep group: it hangs on a tie of about 8 m (under max_link), not on a way out of 14 m', len(tl) and 6.0 < tl.max() <= 12.0 and not (dbg['link'][md] == 3).any()
+      and dbg['way_out'][md].min() > 12.0, '%s' % (np.round(tl.max(), 1) if len(tl) else None))
+# ---- two returns 15 m straight down, nothing between them and the surface: no shape, no hole, likely noise
+qx, qy, qd = D['deep_pair']; m = near(qx, qy, 0.5)
+check('deep pair: written as likely noise, in no feature', m.sum() == 2 and (dbg['kind'][m] == 2).all() and (dbg['feature'][m] == -1).all() and R['J']['counts']['no_link'] == 2,
+      '%s %s' % (dbg['kind'][m], R['J']['counts'].get('no_link')))
+check('deep pair: no hole, no patch', not (R['holes'] > 0)[at(qx, qy, 4)].any())
+check('params say max_link', R['J']['params'].get('max_link') == 12.0)
 # ---- the wall: its face returns are under the lid but on the face; the opening at its foot is a feature
 ox, ol = D['cliff_open']; oy = D['cliff_y']; run_ = D['cliff_run']
 check('wall: thousands of its face returns are candidates (under the lid)', R['J']['counts']['on_face'] > 5000, str(R['J']['counts']['on_face']))
@@ -176,6 +189,7 @@ lab, nc = veg_mesh.components(nv, st.astype(np.int64))
 used = np.zeros(nv, bool); used[st.ravel()] = True
 top = np.full(nc, np.inf); np.minimum.at(top, lab[used], sd[used]); top = top[np.isfinite(top)]
 check('every shape reaches the surface', R['J']['counts']['not_reaching'] == 0 and len(top) > 0 and top.max() < 0.75, '%d pieces, highest vertex of the worst %.2f m down' % (len(top), top.max()))
+check('deep pair: no shape', not (np.hypot(sv[:, 0] - D['deep_pair'][0], sv[:, 1] - D['deep_pair'][1]) < 4).any())
 for name, (x, y, r) in dict(pit=(px, py, 3.5), slant=(sx + 4, sy, 5), deep=(ex, ey, 3), cliff=(ox, oy + 2, 4), crack=((c0 + c1) / 2, cy, 9)).items():
     check('a shape at the ' + name, (np.hypot(sv[:, 0] - x, sv[:, 1] - y) < r).sum() > 10)
 flatg = np.abs(sv[:, 1] - D['cliff_y']) > 1.5          # (the lid between two cells of a cliff is not a height)
@@ -228,6 +242,35 @@ Ee = os.path.join(tmp, 'e')
 run(['--npz', npz2, '--out', Ee, '--no-shapes', '--debug', '--workers', '4'])
 Re = load(Ee); wb = ((Re['dbg']['y'] > oy - 1.5) & (Re['dbg']['y'] < oy + run_ + 1.5) & (np.abs(Re['dbg']['x'] - ox) > 3)).sum()
 check('no return numbers: still runs, the wall still not a feature', wb == 0 and abs(Re['J']['counts']['below'] - ca['below']) <= 0.05 * ca['below'], '%d on the wall, %d below' % (wb, Re['J']['counts']['below']))
+# ---- a bad pass is bad everywhere: its stripes run on into ground where it is too thin to be flagged on its own
+rng = np.random.default_rng(5); n = 400 * 96 * 3
+gx_ = rng.uniform(0, 400, n); gy_ = rng.uniform(0, 96, n)
+far = (np.hypot(gx_ - 350, gy_ - 30) < 1.6)                                   # a real pit out there, 2.5 m deep
+P = [(gx_, gy_, 50 + 0.01 * gx_ + rng.normal(0, 0.03, n) - 2.5 * far, np.full(n, 2), rng.integers(1, 4, n))]
+k = 9000; bx_ = rng.uniform(0, 95, k); by_ = rng.uniform(0, 96, k)             # the bad pass: thick in the west ...
+P.append((bx_, by_, 50 + 0.01 * bx_, np.full(k, 2), np.full(k, 9)))
+for lx in np.arange(4, 95, 4.0):                                              # ... with its stripes there,
+    ly = np.arange(5, 91, 1.0); P.append((np.full(len(ly), lx), ly, 50 + 0.01 * lx - 12 - 5 * np.sin(ly / 4), np.full(len(ly), 1), np.full(len(ly), 9)))
+k = 2000; bx_ = rng.uniform(300, 395, k); by_ = rng.uniform(0, 96, k)          # and thin in the east: 2000 returns,
+P.append((bx_, by_, 50 + 0.01 * bx_, np.full(k, 2), np.full(k, 9)))
+ly = np.arange(50, 75, 1.0); P.append((np.full(len(ly), 320.0), ly, 50 + 3.2 - 12 - 5 * np.sin(ly / 4), np.full(len(ly), 1), np.full(len(ly), 9)))     # one stripe of 25 (under the 30 it takes)
+k = 12; a_ = rng.uniform(0, 6.28, k)                                           # the bad pass also sees the pit's floor
+P.append((350 + 1.2 * np.cos(a_), 30 + 1.2 * np.sin(a_), np.full(k, 50 + 3.5 - 2.5), np.full(k, 1), np.full(k, 9)))
+cat = lambda i: np.concatenate([p[i] for p in P])
+npz3 = os.path.join(tmp, 'pts3.npz'); np.savez(npz3, x=cat(0), y=cat(1), z=cat(2), c=cat(3).astype('u1'), psid=cat(4).astype('i4'))
+Ff = os.path.join(tmp, 'f')
+run(['--npz', npz3, '--out', Ff, '--no-shapes', '--debug', '--workers', '4'])
+Rf = load(Ff); df = Rf['dbg']; Pf = {p['id']: p for p in Rf['J']['passes']}
+tp = df['tile_pass']; east = tp[(tp[:, 2] == 9) & (tp[:, 1] >= 3)]
+check('bad pass: flagged in the west, in no block of the east (too thin there)', Pf[9]['flagged'] and Pf[9]['blocks_flagged'] >= 1 and len(east) and not east[:, 9].any(), str(east[:, [1, 6, 9]].tolist()))
+st_e = (Rf['xyz'][:, 0] > 319) & (Rf['xyz'][:, 0] < 321) & (Rf['depth'] > 5)
+check('bad pass: its stripe in the east is set aside too', st_e.sum() == 25 and (Rf['kind'][st_e] == 3).all() and not ((df['x'] > 319) & (df['x'] < 321) & (df['depth'] > 5)).any(),
+      '%d, kinds %s' % (st_e.sum(), np.unique(Rf['kind'][st_e])))
+mp_ = np.hypot(df['x'] - 350, df['y'] - 30) < 1.6
+check('a real pit seen by the bad pass and by good passes: kept, the bad pass\'s returns in it too', mp_.sum() >= 20 and (df['kind'][mp_] == 0).all() and (df['psid'][mp_] == 9).sum() == 12
+      and (df['confirmed_by'][mp_ & (df['psid'] == 9)] != 9).all() and (df['confirmed_by'][mp_ & (df['psid'] == 9)] >= 0).all() and (Rf['holes'] == 1).sum() > 30, '%d, of the bad pass %d' % (mp_.sum(), (df['psid'][mp_] == 9).sum()))
+check('ridge.json says what each pass lost', Pf[9]['set_aside'] == int((Rf['kind'] == 3).sum()) and Pf[9]['kept_confirmed'] == 12 and all(p['set_aside'] == 0 for k_, p in Pf.items() if k_ != 9),
+      '%s %s' % (Pf[9]['set_aside'], Pf[9]['kept_confirmed']))
 check('work folder removed', not os.path.exists(os.path.join(A, '_work')))
 
 import shutil
