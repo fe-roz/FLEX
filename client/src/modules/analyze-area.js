@@ -27,10 +27,11 @@
     { id: 'veg', name: 'Trees and brush', icon: '🌲' },
     { id: 'bush', name: 'Brush / voids', icon: '∴' },
     { id: 'prospect', name: 'Prospects (beta)', icon: '◎', desc: 'Possible entrances: hollows, points below the ground, cliff openings. A list to look at, not a ranking.' },
+    { id: 'ridge', name: 'Ridgewalking', icon: '🕳', desc: 'What the LiDAR saw below the ground: pits, cracks and openings, as on the phone (shapes, returns, true entrances and guessed openings), drawn on this map.' },
   ];
-  const RNAME = { ground: 'Ground', terrain: 'Terrain', veg: 'Trees and brush', bush: 'Brush', prospect: 'Prospects (beta)' };
-  const RKEYS = ['ground', 'terrain', 'veg', 'bush', 'prospect'];
-  const SHOWABLE = ['terrain', 'veg', 'bush', 'prospect'];
+  const RNAME = { ground: 'Ground', terrain: 'Terrain', veg: 'Trees and brush', bush: 'Brush', prospect: 'Prospects (beta)', ridge: 'Ridgewalking' };
+  const RKEYS = ['ground', 'terrain', 'veg', 'bush', 'prospect', 'ridge'];
+  const SHOWABLE = ['terrain', 'veg', 'bush', 'prospect', 'ridge'];
   const MAPRES = ['bush', 'ground'];      // results drawn as map layers in 🗺 Layers (area-maps.js), not here
   const CHIP = { fits: ['ok', 'Fits'], partly: ['warn', 'Partly covered'], toobig: ['bad', 'Too big'], needslidar: ['bad', 'Needs LiDAR'] };
 
@@ -79,7 +80,7 @@
     const tools = rows.filter(r => r.ticked).map(r => r.id);
     let min = rows.filter(r => r.ticked).reduce((a, r) => a + (r.minutes || 0), 0);
     const hasG = !!(area && area.results && area.results.ground);
-    if (tools.length && !hasG && check && check.ground && +check.ground.minutes) min += +check.ground.minutes;
+    if (tools.some(t => t !== 'ridge') && !hasG && check && check.ground && +check.ground.minutes) min += +check.ground.minutes;      // (Ridgewalking alone makes no ground)
     return { tools, minutes: min, text: tools.length ? tools.length + ' ticked · ' + minTxt(min) : 'Tick at least one tool.' };
   }
   /** The switch state: { areas: { id: { on, res: { tool: bool } } } }. One vegetation set drawn at a time. */
@@ -395,6 +396,7 @@
       try { ids.forEach(id => CL().api.setView(id, { show: want1 })); await CL().sync(); if (w._terrainPanel && w._terrainPanel.render) w._terrainPanel.render(true); } catch (e) { console.warn('[areas] terrain', e); }
     }
     try { if (w._areaProspects) w._areaProspects.sync(want, S.areas); } catch (e) { console.warn('[areas] prospect', e); }
+    try { if (w._ridgeDraw) w._ridgeDraw.sync(want, S.areas); } catch (e) { console.warn('[areas] ridge', e); }       // ridgewalking on the globe (ridge-draw.js)
     if (v && v.scene && v.scene.requestRender) v.scene.requestRender();
   }
   // The Terrain panel's keep(): the job's patch(es) and hillshade become layer records (project or My data), once.
@@ -537,7 +539,8 @@
       const del = S.delRes === a.id + ':' + k
         ? `<button type="button" class="ar-btn ar-danger" data-act="delresyes" data-id="${esc(a.id)}" data-res="${k}">Yes, delete</button><button type="button" class="ar-btn" data-act="delresno">No</button>`
         : `<button type="button" class="ar-x" data-act="delres" data-id="${esc(a.id)}" data-res="${k}" title="Delete this result">✕</button>`;
-      const pros = k === 'prospect' ? `<div class="ar-prospect" data-area="${esc(a.id)}"></div>` : '';
+      const pros = k === 'prospect' ? `<div class="ar-prospect" data-area="${esc(a.id)}"></div>`
+        : k === 'ridge' ? `<span class="ar-dim ar-small"> · ${(r.counts && r.counts.features || 0).toLocaleString()} features</span><div class="ar-ridge" data-area="${esc(a.id)}"></div>` : '';      // its switches (ridge-draw.js mounts them while it is drawn)
       return `<div class="ar-rr" data-res="${k}"><span class="ar-grow">${RNAME[k]}${r.coarse ? ' <span class="ar-coarse" title="Made with a coarser setting">coarse</span>' : ''}<br><span class="ar-dim">${fmtMB(r.bytes)} · ${shortDate(r.date)}${extra}</span>${vegNote}${notes}${pros}</span>${showable ? eyeBtn(st, 'ressw', a.id, k, 'Show ' + RNAME[k] + ' of ' + a.name, true) : '<span class="ar-dim">kept</span>'}${del}</div>`;
     }).join('');
   }
@@ -545,7 +548,8 @@
     const box = $('ar-procs'); if (!box) return;
     const list = S.areas.filter(a => a.results && Object.keys(a.results).length);
     if (!list.length) { box.innerHTML = '<div class="ar-none">Nothing yet. Run a tool and its area is kept here.</div>'; return; }
-    const done = () => { try { if (w._areaProspects) w._areaProspects.mount(box); } catch (e) { console.warn('[areas] prospect mount', e); } };
+    const done = () => { try { if (w._areaProspects) w._areaProspects.mount(box); } catch (e) { console.warn('[areas] prospect mount', e); }
+      try { if (w._ridgeDraw) w._ridgeDraw.mount(box); } catch (e) { console.warn('[areas] ridge mount', e); } };
     box.innerHTML = list.map(a => {
       const open = S.open === a.id, ks = RKEYS.filter(k => a.results[k]);
       let h = `<div class="ar-proc" data-id="${esc(a.id)}"><div class="ar-ph">${eyeBtn(eyeOf(SHOW, a.id), 'procsw', a.id, null, 'Show ' + a.name + ' on the map')}
