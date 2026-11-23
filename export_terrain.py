@@ -2941,12 +2941,13 @@ def main():
                 tdetail = export_trees.detail_for(tn)
                 zf.writestr(zipfile.ZipInfo('trees.bin'), trees_bytes, compress_type=zipfile.ZIP_DEFLATED)
                 caves_meta_trees = {'count': tn, 'detail': tdetail, **{k: trees_counts[k] for k in ('cone', 'round', 'mound')}}
-                zf.writestr('trees.json', json.dumps({'version': 1, **caves_meta_trees, 'outside': trees_counts['outside'],
+                zf.writestr('trees.json', json.dumps({'version': 1, **caves_meta_trees, 'outside': trees_counts['outside'], 'cliff': trees_counts.get('cliff', 0), 'cliff_by_height': trees_counts.get('cliff_by_height', {}),
                                                       'viewer': export_trees.trees_object(tn, tdetail)}, separators=(',', ':')))
                 trees_json = json.dumps(export_trees.trees_object(tn, tdetail, data=trees_bytes), separators=(',', ':'))
                 print(f"[6/7] Trees and brush: {tn:,} ({trees_counts['cone']:,} cones, {trees_counts['round']:,} round crowns, "
                       f"{trees_counts['mound']:,} low mounds"
                       + (f"; {trees_counts['outside']:,} outside the polygon left out" if trees_counts['outside'] else '')
+                      + (f"; {trees_counts['cliff']:,} that a cliff explains left out" if trees_counts.get('cliff') else '')
                       + f"), trees.bin {len(trees_bytes) // 1024} KB, detail {tdetail}")
 
             # Viewer HTML: fully self-contained (Three.js + GLB + textures + caves all inline)

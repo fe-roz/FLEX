@@ -9,11 +9,12 @@ kind density r1 r2 r3 r4; x east / y north in metres on the tangent plane at
 veg.json's origin, zg the ground under it). This file runs it as a child with
 its progress relayed and turns the records into what an export carries:
 
-  trees.bin   "FTR1", uint32 n, then 20 bytes a tree: float32 x, y, z (the
+  trees.bin   "FTR2", uint32 n, then 24 bytes a tree: float32 x, y, z (the
               foot, in the VIEWER's frame: metres from the terrain's centre,
               the point clouds' vertical shift added), float32 height, uint16
               radius in cm, uint8 kind (0 cone, 1 round crown, 2 low mound),
-              uint8 tint (0..255)
+              uint8 tint (0..255), uint16 the crown's base above the foot in
+              cm, uint16 spare. (Version 1, "FTR1", 20 bytes, had no base.)
   TREES       { version: 1, count, file, detail } for PLACEHOLDER_TREES_JSON
               (`file`: the name, or inline base64 in the single-file viewer)
 
@@ -32,8 +33,8 @@ from pathlib import Path
 import numpy as np
 
 SCRIPT_DIR = Path(__file__).parent
-MAGIC = b'FTR1'
-RECORD = 20                         # bytes a tree in trees.bin
+MAGIC = b'FTR2'                     # version 2: + the crown's base (version 1, "FTR1", 20 bytes, had none; unpack reads both)
+RECORD = 24                         # bytes a tree in trees.bin
 CONE, ROUND, MOUND = 0, 1, 2        # trees.bin kinds
 VEG_DOME, VEG_CONE, VEG_BRUSH = 0, 1, 2      # shapes.bin kinds (veg_shapes.py)
 # A crown this low is drawn as a mound, like brush: the low layer under tall
@@ -45,8 +46,15 @@ DETAIL_1_FROM, DETAIL_2_FROM = 120_000, 300_000
 # The vegetation step holds a tile's whole cloud in memory (about 4 GB a km2 of dense cloud): the export runs it
 # in tiles of at most TILE_M a side, each read MARGIN_M wider so crowns on a tile line are whole.
 TILE_M, MARGIN_M = 700.0, 15.0
-DTYPE = np.dtype([('x', '<f4'), ('y', '<f4'), ('z', '<f4'), ('h', '<f4'), ('r', '<u2'), ('kind', 'u1'), ('tint', 'u1')])
-assert DTYPE.itemsize == RECORD
+DTYPE = np.dtype([('x', '<f4'), ('y', '<f4'), ('z', '<f4'), ('h', '<f4'), ('r', '<u2'), ('kind', 'u1'), ('tint', 'u1'),
+                  ('base', '<u2'), ('spare', '<u2')])
+DTYPE_V1 = np.dtype([('x', '<f4'), ('y', '<f4'), ('z', '<f4'), ('h', '<f4'), ('r', '<u2'), ('kind', 'u1'), ('tint', 'u1')])
+assert DTYPE.itemsize == RECORD and DTYPE_V1.itemsize == 20
+# A cliff read as a crown. No height limit of any kind (there are 100 m trees): a tree is left out only when the
+# ground itself explains it: within its crown's radius + CLIFF_REACH_M the export's ground rises CLIFF_RISE_M or
+# more above its foot (a cliff, not a slope: 8 m within a crown) AND the tree's top does not stand clear of that
+# ground by more than the larger of CLIFF_CLEAR_M and CLIFF_CLEAR_SHARE of its height.
+CLIFF_REACH_M, CLIFF_RISE_M, CLIFF_CLEAR_M, CLIFF_CLEAR_SHARE = 2.0, 8.0, 2.0, 0.15
 
 
 def relay_line(line):
@@ -168,9 +176,12 @@ def detail_for(count):
     return 2 if count >= DETAIL_2_FROM else (1 if count >= DETAIL_1_FROM else 0)
 
 
-def pack(x, y, z, h, radius, kind, tint):
+def pack(x, y, z, h, radius, kind, tint, base=None):
+    """trees.bin, version 2. `base`: the crown's base above the foot, metres (None: 0)."""
     n = len(x)
     a = np.zeros(n, DTYPE)
+    if base is not None:
+        a['base'] = np.clip(np.round(np.nan_to_num(np.asarray(base, np.float64)) * 100.0), 0, 65535).astype(np.uint16)
     a['x'], a['y'], a['z'], a['h'] = x, y, z, h
     a['r'] = np.clip(np.round(np.asarray(radius, np.float64) * 100.0), 1, 65535).astype(np.uint16)
     a['kind'], a['tint'] = kind, tint
@@ -178,12 +189,59 @@ def pack(x, y, z, h, radius, kind, tint):
 
 
 def unpack(buf):
-    if buf[:4] != MAGIC:
-        raise ValueError("not a trees.bin (FTR1) file")
+    """The records of a trees.bin, version 2 or 1 (version 1 comes back with base 0)."""
+    if buf[:4] not in (MAGIC, b'FTR1'):
+        raise ValueError("not a trees.bin (FTR1 / FTR2) file")
+    v1 = buf[:4] == b'FTR1'
     n = struct.unpack_from('<I', buf, 4)[0]
-    if len(buf) < 8 + n * RECORD:
+    if len(buf) < 8 + n * (20 if v1 else RECORD):
         raise ValueError("trees.bin is cut short")
-    return np.frombuffer(buf, DTYPE, n, 8)
+    if not v1:
+        return np.frombuffer(buf, DTYPE, n, 8)
+    old = np.frombuffer(buf, DTYPE_V1, n, 8)
+    a = np.zeros(n, DTYPE)
+    for k in DTYPE_V1.names:
+        a[k] = old[k]
+    return a
+
+
+def ground_rise(dem, x_bins, y_bins, e, n, reach, foot_z):
+    """For each foot: the highest ground of the export's DEM ([x, y], blank =
+    NaN) within `reach` metres of it, minus the ground at the foot (`foot_z`).
+    The DEM is first taken down to cells of about 1 m (the highest of each
+    block). NaN where there is no ground in reach."""
+    from numpy.lib.stride_tricks import sliding_window_view
+    dem = np.asarray(dem, np.float32)
+    cell = float(x_bins[1] - x_bins[0])
+    k = max(1, int(round(1.0 / cell)))
+    nx, ny = (dem.shape[0] // k) * k, (dem.shape[1] // k) * k
+    if nx < k or ny < k or not len(e):
+        return np.full(len(e), np.nan)
+    hi = np.where(np.isfinite(dem[:nx, :ny]), dem[:nx, :ny], -np.inf).reshape(nx // k, k, ny // k, k).max(axis=(1, 3))
+    c = cell * k
+    ix = np.floor((np.asarray(e, np.float64) - x_bins[0]) / c).astype(np.int64)
+    iy = np.floor((np.asarray(n, np.float64) - y_bins[0]) / c).astype(np.int64)
+    inside = (ix >= 0) & (iy >= 0) & (ix < hi.shape[0]) & (iy < hi.shape[1])
+    R = np.maximum(1, np.ceil(np.asarray(reach, np.float64) / c).astype(np.int64))
+    top = np.full(len(ix), -np.inf)
+    for r in np.unique(R[inside]):                              # trees of one reach together: a disc of 2r+1 cells
+        sel = np.nonzero(inside & (R == r))[0]
+        pad = np.pad(hi, r, constant_values=-np.inf)
+        win = sliding_window_view(pad, (2 * r + 1, 2 * r + 1))
+        yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
+        disc = (xx * xx + yy * yy) <= r * r
+        for a in range(0, len(sel), 20000):
+            s = sel[a:a + 20000]
+            top[s] = np.where(disc, win[ix[s], iy[s]], -np.inf).max(axis=(1, 2))
+    return np.where(np.isfinite(top), top - np.asarray(foot_z, np.float64), np.nan)
+
+
+def on_cliff(rise, height):
+    """The rule (see CLIFF_*): the ground in the crown's reach rises like a
+    cliff, and the tree's top does not stand clear of it."""
+    rise = np.asarray(rise, np.float64); height = np.asarray(height, np.float64)
+    clear = np.maximum(CLIFF_CLEAR_M, CLIFF_CLEAR_SHARE * height)
+    return np.isfinite(rise) & (rise >= CLIFF_RISE_M) & (height <= rise + clear)
 
 
 def trees_object(count, detail, data=None, name='trees.bin'):
@@ -295,8 +353,10 @@ class Trees:
         """trees.bin in the viewer's frame. The foot stands on the export's
         own ground (`dem`, heights already shifted by z_offset) where it has
         one, else on the vegetation step's ground + z_offset. `polygon`: a UTM
-        ring; trees whose foot is outside it are left out. Returns (bytes,
-        counts {cone, round, mound, outside})."""
+        ring; trees whose foot is outside it are left out. With the DEM,
+        trees a cliff explains are left out too (on_cliff; never by height
+        alone). Returns (bytes, counts {cone, round, mound, outside, cliff,
+        cliff_by_height})."""
         e, n = utm if utm is not None else (self.e, self.n)
         r = self.recs
         keep = np.isfinite(e) & np.isfinite(n) & (r[:, 3] > 0) & (r[:, 4] > 0)
@@ -311,7 +371,18 @@ class Trees:
             zd = sample_dem(dem, x_bins, y_bins, e, n)
             z = np.where(np.isfinite(zd), zd, z)
         kind = kinds_of(r)
-        buf = pack(e - center_e, n - center_n, z, r[:, 3], r[:, 4], kind, tints_of(e, n))
+        cliff, by_h = 0, {}
+        if dem is not None and len(e):
+            tree = kind != MOUND
+            rise = ground_rise(dem, x_bins, y_bins, e, n, r[:, 4].astype(np.float64) + CLIFF_REACH_M, z)
+            drop = tree & on_cliff(rise, r[:, 3])
+            cliff = int(drop.sum())
+            for lo, hi_, name in ((0, 15, 'under 15 m'), (15, 30, '15-30 m'), (30, 45, '30-45 m'), (45, 1e9, 'over 45 m')):
+                by_h[name] = int((drop & (r[:, 3] > lo) & (r[:, 3] <= hi_)).sum())
+            if cliff:
+                e, n, r, z, kind = e[~drop], n[~drop], r[~drop], z[~drop], kind[~drop]
+        base = np.where(kind == MOUND, 0.0, np.clip(r[:, 5], 0.0, r[:, 3] * 0.9))     # the crown's base above the foot
+        buf = pack(e - center_e, n - center_n, z, r[:, 3], r[:, 4], kind, tints_of(e, n), base=base)
         counts = {'cone': int((kind == CONE).sum()), 'round': int((kind == ROUND).sum()),
-                  'mound': int((kind == MOUND).sum()), 'outside': outside}
+                  'mound': int((kind == MOUND).sum()), 'outside': outside, 'cliff': cliff, 'cliff_by_height': by_h}
         return buf, counts

@@ -92,7 +92,7 @@ function makeViewer() {
   let o = v.FT.objects();
   ok('active and loaded; one group in the scene; one redraw asked for', r === true && v.FT.active() && v.FT.loaded() && v.scene.children.length === 1 && o.group.parent === v.scene && v.redraws === 1);
   ok('one instanced mesh per kind (a small set is one ground tile): 2 cones, 2 round crowns, 2 mounds', o.tiles === 1 && o.meshes.map(m => m.length).join() === '1,1,1' && o.count.join() === '2,2,2' && o.meshes.every(m => m[0].isInstancedMesh && m[0].count === 2));
-  ok('defaults: trees and brush shown, see-through on', o.meshes.every(m => m[0].visible) && o.see === 1 && JSON.stringify(v.FT.state()) === JSON.stringify({ trees: true, brush: true, see: true }));
+  ok('defaults: trees and brush shown, see-through on', o.meshes.every(m => m[0].visible) && o.see === 1 && JSON.stringify(v.FT.state()) === JSON.stringify({ trees: true, brush: true, see: true, crown: false }));
   const mat4 = (mesh, i) => Array.from(mesh.instanceMatrix.array.slice(i * 16, i * 16 + 16));
   const m0 = mat4(o.meshes[0][0], 1);
   ok('a tree’s matrix: the stock solid stretched to its radius (x, y) and height (z), stood at its foot', near(m0[0], 4.1) && near(m0[5], 4.1) && near(m0[10], 25) && m0[12] === 40 && m0[13] === 22 && m0[14] === 503 && m0[15] === 1 && m0[1] === 0 && m0[4] === 0, m0);
@@ -125,7 +125,7 @@ function makeViewer() {
   ok('See-through off: the shared uniform goes to 0 (no rebuild, no new material), one redraw', v.FT.objects().see === 0 && o.meshes[0][0].material === mtl && v.redraws === n0 + 1);
   v.FT.set('nonsense', true); ok('an unknown switch is ignored', !('nonsense' in v.FT.state()));
   const saved = JSON.parse(JSON.stringify(v.FT.serialize()));
-  ok('what is saved: the version and the three switches', saved.v === 1 && saved.trees === true && saved.brush === false && saved.see === false && Object.keys(saved).length === 4, saved);
+  ok('what is saved: the version, the three switches and the conifers\' look', saved.v === 1 && saved.trees === true && saved.brush === false && saved.see === false && saved.crown === false && Object.keys(saved).length === 5, saved);
   const v2 = makeViewer(); await v2.FT.init(v2.opts(treesObj(TREES), saved));
   const o2 = v2.FT.objects();
   ok('a map opened again starts from them', o2.meshes[0][0].visible && !o2.meshes[2][0].visible && o2.see === 0);
@@ -148,6 +148,43 @@ function makeViewer() {
     ok('a kind this build does not know is drawn as a mound', w.FT.objects().count.join() === '0,0,1'); }
   { const w = makeViewer(); await w.FT.init(w.opts(treesObj([])));
     ok('no trees in the file: active, nothing drawn', w.FT.active() && w.FT.objects().count.join() === '0,0,0' && w.FT.objects().group.children.length === 0); }
+
+  // ── 6b. Version 2 (the crown's base) and the conifers' other look ───────────
+  {
+    // [x, y, z, height, radius, kind, tint, crown base]
+    const L2 = [[10, 20, 500, 30, 4, 0, 100, 12], [40, 22, 503, 20, 3, 0, 100, 19.5], [70, 90, 498, 9, 2.5, 1, 128, 3], [15, 80, 501, 1.2, 1.8, 2, 10, 0], [50, 50, 500, 10, 2, 0, 9, 0]];
+    const b2 = Buffer.alloc(8 + L2.length * 24); b2.write('FTR2', 0, 'latin1'); b2.writeUInt32LE(L2.length, 4);
+    L2.forEach((t, i) => { const o = 8 + i * 24; b2.writeFloatLE(t[0], o); b2.writeFloatLE(t[1], o + 4); b2.writeFloatLE(t[2], o + 8); b2.writeFloatLE(t[3], o + 12);
+      b2.writeUInt16LE(Math.round(t[4] * 100), o + 16); b2.writeUInt8(t[5], o + 18); b2.writeUInt8(t[6], o + 19); b2.writeUInt16LE(Math.round(t[7] * 100), o + 20); });
+    const T2 = FT.parse(ab(b2));
+    ok('FTR2: 24 bytes a tree, the same fields at the same places, and the crown base in cm', T2.n === 5 && T2.version === 2 && T2.B === 24 && T2.f32[1 * 6] === 40 && T2.f32[1 * 6 + 3] === 20 && T2.u16[1 * 12 + 8] === 300 && T2.u8[2 * 24 + 18] === 1 && T2.u16[0 * 12 + 10] === 1200 && T2.u16[1 * 12 + 10] === 1950);
+    ok('FTR1 is still read (version 1, 20 bytes a tree)', FT.parse(ab(treesBin(TREES))).version === 1 && FT.parse(ab(treesBin(TREES))).B === 20 && throws(() => FT.parse(ab(b2).slice(0, 100))));
+    const w = makeViewer(); await w.FT.init(w.opts({ version: 1, count: 5, detail: 0, file: b2.toString('base64') }));
+    let q = w.FT.objects(); const cone = q.meshes[0][0], M = i => Array.from(cone.instanceMatrix.array.slice(i * 16, i * 16 + 16));
+    ok('a version 2 file draws as ever by default: cones are spikes from the foot to the top, no trunks', q.count.join() === '3,1,1' && M(0)[10] === 30 && M(0)[14] === 500 && M(1)[10] === 20 && M(1)[14] === 503 && q.trunks.length === 0 && w.FT.state().crown === false && w.scene.children[0].children.length === 3, [M(0)[10], M(0)[14]]);
+    const r0 = w.redraws; w.FT.set('crown', true); q = w.FT.objects();
+    ok('crown on: the cone runs from the crown\'s base to the top (18 m of a 30 m tree, starting 12 m up); its width and place stay; one redraw', near(M(0)[10], 18) && near(M(0)[14], 512) && M(0)[0] === 4 && M(0)[12] === 10 && w.redraws === r0 + 1, M(0));
+    ok('…a crown is never less than a quarter of the tree (base 19.5 m of 20 m: drawn from 15 m)', near(M(1)[10], 5) && near(M(1)[14], 518));
+    ok('…a conifer with no base measured stays a spike', near(M(2)[10], 10) && near(M(2)[14], 500));
+    const tk = q.trunks[0], K = i => Array.from(tk.instanceMatrix.array.slice(i * 16, i * 16 + 16));
+    ok('…with a thin trunk a cone from the ground to the crown\'s base: one instanced mesh a tile, 6 triangles a trunk', q.trunks.length === 1 && tk.isInstancedMesh && tk.count === 3 && tk.geometry.attributes.position.count === 18 && tk.parent === q.group && tk.visible &&
+      near(K(0)[10], 12) && K(0)[14] === 500 && K(0)[12] === 10 && near(K(0)[0], 0.24) && near(K(1)[0], 0.18) && near(K(1)[10], 15) && tk.frustumCulled === true, K(0));
+    ok('…round crowns and mounds are untouched', near(q.meshes[1][0].instanceMatrix.array[10], 9) && q.meshes[1][0].instanceMatrix.array[14] === 498 && near(q.meshes[2][0].instanceMatrix.array[10], 1.2));
+    ok('…the trunk shares the screen door and answers no ray', (() => { const sh = { uniforms: {}, fragmentShader: w.THREE.ShaderLib.lambert.fragmentShader }; tk.material.onBeforeCompile(sh); const hits = []; tk.raycast(new w.THREE.Raycaster(new w.THREE.Vector3(10, 20, 600), new w.THREE.Vector3(0, 0, -1)), hits); return sh.uniforms.uSee && sh.fragmentShader.includes('discard') && hits.length === 0; })());
+    w.FT.set('trees', false); ok('Trees off hides the trunks too', !tk.visible && !cone.visible);
+    w.FT.set('trees', true); ok('…and on shows them again', tk.visible && cone.visible);
+    const sv = JSON.parse(JSON.stringify(w.FT.serialize()));
+    w.FT.set('crown', false);
+    ok('crown off: the spikes are back exactly, the trunks hidden (kept for next time)', M(0)[10] === 30 && M(0)[14] === 500 && M(1)[10] === 20 && !tk.visible && w.FT.objects().trunks.length === 1);
+    const w2 = makeViewer(); await w2.FT.init(w2.opts({ version: 1, count: 5, detail: 0, file: b2.toString('base64') }, sv));
+    ok('the look is remembered with the other choices', sv.crown === true && w2.FT.state().crown === true && near(w2.FT.objects().meshes[0][0].instanceMatrix.array[10], 18) && w2.FT.objects().trunks.length === 1);
+    const ui2 = []; w2.FT.sheet({ head: t => ui2.push(t), chips: c => c.forEach(x => ui2.push(x[1])) });
+    ok('…but it is not in Display (yet)', ui2.join('|') === 'Trees and brush|Trees|Brush|See-through');
+    const w3 = makeViewer(); await w3.FT.init(w3.opts({ version: 1, count: 5, detail: 2, file: b2.toString('base64') })); w3.FT.set('crown', true);
+    ok('at the lowest detail: cones from the crown base, no trunks', near(w3.FT.objects().meshes[0][0].instanceMatrix.array[10], 18) && w3.FT.objects().trunks.length === 0);
+    const w4 = makeViewer(); await w4.FT.init(w4.opts(treesObj(TREES))); w4.FT.set('crown', true);
+    ok('a version 1 file with crown on: nothing to go by, the spikes stay (trunks of no length)', w4.FT.objects().meshes[0][0].instanceMatrix.array[10] === 18 && w4.FT.objects().meshes[0][0].instanceMatrix.array[14] === 500);
+  }
 
   // ── 7. A big set: filed in ground tiles, quickly ────────────────────────────
   let seed = 7; const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
