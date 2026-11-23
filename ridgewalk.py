@@ -53,12 +53,15 @@ PARAMS = dict(
     measure='normal',    # a candidate is below ground when it lies behind the local face
     min_behind=1.0,      # m behind the face
     face_radius=[2.5, 1.5, 4.0], face_min=12, face_sheet=0.35, face_rms=0.30, face_passes=4, face_smooth=10, face_cap=150,
+    corner=True, corner_min=6, corner_cos=0.87, corner_trim=0.15, corner_on=0.35,      # a rough fit is tried as a corner of two sheets (each 6+ returns, 30 degrees or more apart)
     max_depth=35.0,      # m
     link=1.5,            # m, returns closer than this are one group
     lone_far=5.0,        # m, a lone return farther than this from any other = likely noise
     deep=3.0,            # m, "deep" for the pass statistics
     pass_share=0.01, pass_ratio=8.0, pass_min=30, pass_confirm=1.5, pass_others=1000,
-    pass_block=96.0,     # m, the statistics are kept per block of this size and judged on a block and its 8 neighbours
+    pass_block=96.0,     # m, a pass is judged per block of this size, on the block and its 8 neighbours
+    pass_cell=24.0,      # m, the statistics are kept per cell of this size (a quarter of a block); the pattern is traced on them
+    trace_min=3, trace_share=0.002, trace_cells=5,    # the path of a flagged pass's pattern: see trace_pattern()
     max_link=12.0,       # m, the longest guessed link (a tie, or the way out to the surface) a shape may rest on
     wrap=2.0,            # m, one skin per feature
     wrap_min=4,          # returns
@@ -438,18 +441,69 @@ def lid_window(C, J0, J1, I0, I1):
     return L, 1.0 / np.sqrt(1 + gx * gx + gy * gy)
 
 
+def _planes(D, rep, st, w=None):
+    """Least-squares planes through each segment of D (rows st[k]..; w = which rows count): centroids, the three
+    axes of each (column 0 = the normal), how many rows counted."""
+    if w is None:
+        k = np.diff(np.r_[st, len(D)]).astype('f8'); Dw = D
+    else:
+        k = np.add.reduceat(w.astype('f8'), st); Dw = D * w[:, None]
+    c = np.add.reduceat(Dw, st, 0) / np.maximum(k, 1)[:, None]
+    d = D - c[rep]
+    if w is not None: d = d * w[:, None]
+    u = np.add.reduceat(np.c_[d[:, 0] * d[:, 0], d[:, 0] * d[:, 1], d[:, 0] * d[:, 2], d[:, 1] * d[:, 1], d[:, 1] * d[:, 2], d[:, 2] * d[:, 2]], st, 0)
+    return c, np.linalg.eigh(u[:, [0, 1, 2, 1, 3, 4, 2, 4, 5]].reshape(-1, 3, 3))[1], k
+
+
+def _two_sheets(D, rep, st, outd, c0, ax0, scale):
+    """Where one plane fits badly the face may be a corner (a wall meeting the ground): two planes are fitted, the
+    returns shared out to the nearer one. Returns the distance behind the corner (in a hollow corner the rock is
+    behind either sheet: the larger of the two; on an edge it is behind both: the smaller), the normal of the sheet
+    that gave it, the rms, and whether it is a corner at all (both sheets well filled, at an angle, fitting)."""
+    P_ = PARAMS; sheet = -P_['face_sheet']; m = len(st); best = None
+    for ax in (1, 2):                                      # first split: across one of the single plane's own axes
+        w1 = ((D - c0[rep]) * ax0[:, :, ax][rep]).sum(1) < 0; live = np.ones(len(D), bool)
+        for it in range(5):
+            c1, e1, k1 = _planes(D, rep, st, w1 & live); c2, e2, k2 = _planes(D, rep, st, ~w1 & live)
+            n1 = e1[:, :, 0].copy(); n1[(n1 * outd).sum(1) < 0] *= -1; n2 = e2[:, :, 0].copy(); n2[(n2 * outd).sum(1) < 0] *= -1
+            d1 = ((D - c1[rep]) * n1[rep]).sum(1); d2 = ((D - c2[rep]) * n2[rep]).sum(1)
+            s12 = ((c1 - c2) * n2).sum(1); s21 = ((c2 - c1) * n1).sum(1)
+            hollow = (s12 > 0) & (s21 > 0); edge = (s12 < 0) & (s21 < 0)
+            w1 = np.abs(d1) < np.abs(d2)
+            if it >= 1:                                     # the outer sheet only: what lies behind the corner is left out
+                live = np.where(hollow[rep], np.minimum(d1, d2), np.maximum(d1, d2)) > sheet
+        near = np.minimum(np.abs(d1), np.abs(d2)); kl = np.add.reduceat(live.astype('f8'), st)
+        with np.errstate(invalid='ignore', divide='ignore'):
+            rms = np.sqrt(np.add.reduceat(near * near * live, st) / kl)
+        b1 = (c1 * n1).sum(1); b2 = (c2 * n2).sum(1)
+        beh = np.where(hollow, np.maximum(b1, b2), np.minimum(b1, b2)); nv = np.where((beh == b1)[:, None], n1, n2)
+        ok = ((hollow | edge) & (k1 * scale >= P_['corner_min']) & (k2 * scale >= P_['corner_min']) & (np.abs((n1 * n2).sum(1)) < P_['corner_cos'])
+              & (rms < P_['face_rms']))
+        rms = np.where(ok, rms, np.inf)
+        if best is None:
+            best = [beh, nv, rms, ok]
+        else:
+            q = rms < best[2]
+            best[0][q] = beh[q]; best[1][q] = nv[q]; best[2][q] = rms[q]; best[3][q] = ok[q]
+    return best
+
+
 def face_fit(Q, S, outd, key, chunk=512):
     """How far each point of Q lies BEHIND THE LOCAL FACE: a plane fitted in 3D to the surface returns S around it
     (the radii in turn, at least face_min returns; the outer sheet: what lies more than face_sheet behind the plane
-    is dropped and the plane refitted, three times; a rough fit at the first radius goes on to the next). outd is
-    the air side for each point. Where there are more than face_cap returns around a point the fit uses about that
-    many of them, picked by key (a number 0..1 per surface return that does not depend on the tile). Returns behind
-    (NaN = no fit) and the plane's unit normal (towards the air)."""
+    is dropped and the plane refitted, three times). Where one plane fits roughly (rms over face_rms) or leaves
+    much of the surface behind it (corner_trim), the face is also tried as a corner of two sheets (_two_sheets): a
+    return the corner says lies ON one of its sheets (less than corner_on behind) is the surface, whatever the one
+    plane said: the square corner between a wall and the ground is not a hollow. Otherwise the one plane stands.
+    Still rough at the first radius: the next radius; at the others the single plane stands. outd is the air side
+    for each point. Where there are more than face_cap returns around a point the fit uses about that many of them,
+    picked by key (a number 0..1 per surface return that does not depend on the tile). Returns behind (NaN = no
+    fit) and the unit normal of the face (towards the air)."""
     from itertools import chain
     from scipy.spatial import cKDTree
-    P_ = PARAMS; n = len(Q); behind = np.full(n, np.nan); nvec = np.zeros((n, 3))
+    P_ = PARAMS; n = len(Q); behind = np.full(n, np.nan); nvec = np.zeros((n, 3)); corner = np.full(n, np.nan)
     if len(S) < P_['face_min'] or not n:
-        return behind, nvec
+        return behind, nvec, corner
     tree = cKDTree(S); todo = np.arange(n); sheet = -P_['face_sheet']; cap = P_['face_cap']
     for ri, r in enumerate(P_['face_radius']):
         left = []
@@ -469,18 +523,7 @@ def face_fit(Q, S, outd, key, chunk=512):
                     raise ValueError('face fit: no returns left')
             st = np.r_[0, np.cumsum(ln)[:-1]]
             D = S[flat] - Q[ids][rep]                              # from each point to its neighbours
-
-            def plane(w):
-                if w is None:
-                    k = ln.astype('f8'); Dw = D
-                else:
-                    k = np.add.reduceat(w.astype('f8'), st); Dw = D * w[:, None]
-                c = np.add.reduceat(Dw, st, 0) / np.maximum(k, 1)[:, None]
-                d = D - c[rep]
-                if w is not None: d = d * w[:, None]
-                u = np.add.reduceat(np.c_[d[:, 0] * d[:, 0], d[:, 0] * d[:, 1], d[:, 0] * d[:, 2], d[:, 1] * d[:, 1], d[:, 1] * d[:, 2], d[:, 2] * d[:, 2]], st, 0)
-                return c, np.linalg.eigh(u[:, [0, 1, 2, 1, 3, 4, 2, 4, 5]].reshape(-1, 3, 3))[1][:, :, 0]
-            c, nrm = plane(None)
+            c, ax, _k = _planes(D, rep, st); nrm = ax[:, :, 0].copy()
             nrm[(nrm * outd[ids]).sum(1) < 0] *= -1
             active = np.ones(len(ids), bool)
             for _ in range(3):
@@ -488,20 +531,31 @@ def face_fit(Q, S, outd, key, chunk=512):
                 active &= np.add.reduceat(keep.astype('f8'), st) * scale >= 10
                 if not active.any():
                     break
-                c2, n2 = plane(keep)
+                c2, ax2, _k = _planes(D, rep, st, keep); n2 = ax2[:, :, 0].copy()
                 n2[(n2 * nrm).sum(1) < 0] *= -1
-                c[active] = c2[active]; nrm[active] = n2[active]
+                c[active] = c2[active]; nrm[active] = n2[active]; ax[active] = ax2[active]
             dd = ((D - c[rep]) * nrm[rep]).sum(1); m = dd > sheet
             km = np.add.reduceat(m.astype('f8'), st)
             with np.errstate(invalid='ignore', divide='ignore'):
                 rms = np.sqrt(np.add.reduceat(dd * dd * m, st) / km)
-            acc = (rms < P_['face_rms']) | (ri > 0)
-            behind[ids[acc]] = (c[acc] * nrm[acc]).sum(1); nvec[ids[acc]] = nrm[acc]
+            bh = (c * nrm).sum(1); good = rms < P_['face_rms']
+            rough = np.flatnonzero(~good | (km < (1 - P_['corner_trim']) * ln))      # rough, or much of the surface lies behind the plane
+            if len(rough) and P_['corner']:                        # one plane does not fit: a corner of two sheets?
+                isr = np.zeros(len(ids), bool); isr[rough] = True; rows = isr[rep]; l3 = ln[rough]; st3 = np.r_[0, np.cumsum(l3)[:-1]]; rep3 = np.repeat(np.arange(len(rough)), l3)
+                b3, n3, _r3, ok3 = _two_sheets(D[rows], rep3, st3, outd[ids][rough], c[rough], ax[rough], scale[rough])
+                q = rough[ok3]; b2c = np.full(len(ids), np.nan); b2c[q] = b3[ok3]
+                # a return that the corner says lies ON one of its sheets is the surface, whatever the one plane said
+                on = np.zeros(len(ids), bool); on[q] = b3[ok3] < P_['corner_on']
+                bh[on] = b2c[on]; good[on] = True
+            else:
+                b2c = np.full(len(ids), np.nan)
+            acc = good | (ri > 0)
+            behind[ids[acc]] = bh[acc]; nvec[ids[acc]] = nrm[acc]; corner[ids[acc]] = b2c[acc]
             left.append(ids[~acc])
         todo = np.concatenate(left) if left else np.zeros(0, int)
         if not len(todo):
             break
-    return behind, nvec
+    return behind, nvec, corner
 
 
 def w_classify(t):
@@ -526,9 +580,9 @@ def w_classify(t):
     ix = np.clip((lx / cell).astype(int), 0, W - 1); iy = np.clip((ly / cell).astype(int), 0, H - 1)
     dv = bilin(L, lx, ly, cell) - z
     cand = dv * cosm[iy, ix] > P_['below']
-    BS = P_['pass_block']; bk = (y[own] // BS).astype(np.int64) * 100000 + (x[own] // BS).astype(np.int64)
+    BS = P_['pass_cell']; bk = (y[own] // BS).astype(np.int64) * 100000 + (x[own] // BS).astype(np.int64)
     uk, un = np.unique(np.c_[bk, ps[own]], axis=0, return_counts=True)
-    stats = [(int(k_), int(p), int(n)) for (k_, p), n in zip(uk, un)]          # block, pass, returns (blocks do not depend on the tile size)
+    stats = [(int(k_), int(p), int(n)) for (k_, p), n in zip(uk, un)]          # cell, pass, returns (the cells do not depend on the tile size)
     # brush: of the returns that got down to brush height, the share the band stopped (as lidar_derive.py)
     G = fill_nan_nearest(np.array(np.load(C['gfile'], mmap_mode='r')[J0:J1, I0:I1], 'f8'))
     hag = z[own] - bilin(G, lx[own], ly[own], cell); lo, hi = P_['brush_band']; S = P_['brush_block']
@@ -538,7 +592,7 @@ def w_classify(t):
     under = np.bincount(f[(hag < lo) & (hag > -1.0)], minlength=bh * bw).reshape(bh, bw)
     # the measure: behind the local face, fitted to the last returns that are not candidates; candidates that turn
     # out to lie on the face join it and the fit is repeated
-    ci = np.flatnonzero(cand); behind = np.full(len(ci), np.nan); nvec = np.zeros((len(ci), 3))
+    ci = np.flatnonzero(cand); behind = np.full(len(ci), np.nan); nvec = np.zeros((len(ci), 3)); corner = np.full(len(ci), np.nan)
     if len(ci) and own[ci].any():
         gy, gx = np.gradient(ndimage.gaussian_filter(L, P_['face_smooth'], mode='nearest'), cell)       # the air side: the coarse ground's slope
         outd = np.c_[-gx[iy[ci], ix[ci]], -gy[iy[ci], ix[ci]], np.ones(len(ci))]; outd /= np.linalg.norm(outd, axis=1)[:, None]
@@ -551,7 +605,7 @@ def w_classify(t):
         todo = np.arange(len(ci))
         for _ in range(P_['face_passes']):
             use = np.r_[si, ci[onface & cl]]
-            behind[todo], nvec[todo] = face_fit(Q[todo], XYZ[use], outd[todo], key[use])
+            behind[todo], nvec[todo], corner[todo] = face_fit(Q[todo], XYZ[use], outd[todo], key[use])
             new_on = np.isfinite(behind) & (behind < P_['face_sheet'])
             ch = (new_on != onface) & cl                         # the surface changed here: only what is around is fitted again
             onface = new_on
@@ -559,8 +613,8 @@ def w_classify(t):
                 break
             from scipy.spatial import cKDTree
             todo = np.flatnonzero(cKDTree(Q[ch]).query(Q, distance_upper_bound=max(P_['face_radius']))[0] < np.inf)
-    k = own[ci]; ci = ci[k]; behind = behind[k]; nvec = nvec[k]
-    return t, dict(n=int(own.sum()), stats=stats, x=x[ci], y=y[ci], z=z[ci], dv=dv[ci], ps=ps[ci], behind=behind,
+    k = own[ci]; ci = ci[k]; behind = behind[k]; nvec = nvec[k]; corner = corner[k]
+    return t, dict(n=int(own.sum()), stats=stats, x=x[ci], y=y[ci], z=z[ci], dv=dv[ci], ps=ps[ci], behind=behind, corner=corner,
                    foot=np.where(np.isfinite(behind), behind, 0.0)[:, None] * nvec, brush=(bj0, bi0, inband.astype('i4'), under.astype('i4')))
 
 
@@ -824,6 +878,47 @@ def shape_mesh(C, Vx, L, zc, zlo, gp, gj0, gi0, I0, J0, Lw, stree):
 # ---------------------------------------------------------------------------------------------------------
 # The run
 # ---------------------------------------------------------------------------------------------------------
+def trace_pattern(fine, p, flagged, KB):
+    """The path of a flagged pass's pattern, as a set of statistics cells (24 m). fine: {cell: {pass: [returns, deep
+    ones]}}; flagged: the blocks (KB x KB cells) in which the pass was flagged. Seen on real data the pattern is a
+    band along the edge of the pass's swath, some 40 m wide and hundreds of metres long, of returns 3 to 70 m down
+    every metre or so. A cell is on the path when, in it and its 8 neighbours (72 m), the pass has at least
+    trace_min deep returns, they are at least trace_share of its returns there (a fifth of what flagging takes) and
+    pass_ratio times the other passes' share. Cells on the path that touch are one stretch; a stretch counts when
+    it starts in a flagged block, holds at least pass_min deep returns and they lie in at least trace_cells cells
+    (a pit seen by this pass alone is a few returns in one or two cells: it stays). One cell around a stretch is
+    taken with it."""
+    from scipy import ndimage
+    P = PARAMS
+    keys = [k for k, st in fine.items() if p in st]
+    if not keys or not flagged:
+        return set()
+    j0 = min(k[0] for k in keys) - 1; i0 = min(k[1] for k in keys) - 1
+    j0 -= 1; i0 -= 1; H = max(k[0] for k in keys) - j0 + 3; W = max(k[1] for k in keys) - i0 + 3
+    nb = np.zeros((H, W)); db = np.zeros((H, W)); no = np.zeros((H, W)); do = np.zeros((H, W))
+    for (fj, fi), st in fine.items():
+        if 0 <= fj - j0 < H and 0 <= fi - i0 < W:
+            for q, (n, d) in st.items():
+                if q == p: nb[fj - j0, fi - i0] += n; db[fj - j0, fi - i0] += d
+                else: no[fj - j0, fi - i0] += n; do[fj - j0, fi - i0] += d
+    w = np.ones((3, 3)); cv = lambda A: ndimage.convolve(A, w, mode='constant')
+    Nb, Db, No, Do = cv(nb), cv(db), cv(no), cv(do)
+    share = Db / np.maximum(Nb, 1)
+    low = (Db >= P['trace_min']) & (share >= P['trace_share']) & (share >= P['pass_ratio'] * np.maximum(Do / np.maximum(No, 1), 1e-5))
+    lab, n = ndimage.label(low, structure=np.ones((3, 3)))
+    fl = np.zeros((H, W), bool)
+    for (bj, bi) in flagged:
+        a0, a1 = max(0, bj * KB - j0), min(H, (bj + 1) * KB - j0); b0, b1 = max(0, bi * KB - i0), min(W, (bi + 1) * KB - i0)
+        if a1 > a0 and b1 > b0: fl[a0:a1, b0:b1] = True
+    path = np.zeros((H, W), bool)
+    for k in range(1, n + 1):
+        m = lab == k
+        if (m & fl).any() and db[m].sum() >= P['pass_min'] and (db[m] > 0).sum() >= P['trace_cells']:
+            path |= m
+    path = ndimage.binary_dilation(path, structure=np.ones((3, 3)))        # and one cell around it: the fringe where it fades
+    return {(int(a) + j0, int(b) + i0) for a, b in zip(*np.nonzero(path))}
+
+
 def split_cluster(xy, idx, limit):
     """A cluster larger than the limit is cut at the middle of its longer side (said in the notes)."""
     ext = xy[idx].max(0) - xy[idx].min(0)
@@ -889,35 +984,40 @@ def run(C, notes):
         for _r in pmap(C, w_lid, work, 52, 60, 'lid'):
             pass
         lap('lid')
-        cand = []; stats = {}; nret = 0
+        cand = []; stats = {}; fine = {}; nret = 0
         S = P['brush_block']; by, bx = (ny + S - 1) // S, (nx + S - 1) // S
         b_in = np.zeros((by, bx), 'i4'); b_un = np.zeros((by, bx), 'i4')
         for t, r in pmap(C, w_classify, work, 60, 70, 'returns against the lid'):
             if r is None: continue
             nret += r['n']
             for k_, p, n in r['stats']:
-                a = stats.setdefault((k_ // 100000, k_ % 100000), {}).setdefault(p, [0, 0]); a[0] += n
+                a = fine.setdefault((k_ // 100000, k_ % 100000), {}).setdefault(p, [0, 0]); a[0] += n
             bj0, bi0, a, b = r['brush']; b_in[bj0:bj0 + a.shape[0], bi0:bi0 + a.shape[1]] += a; b_un[bj0:bj0 + a.shape[0], bi0:bi0 + a.shape[1]] += b
             if len(r['x']):
-                cand.append((r['x'], r['y'], r['z'], r['dv'], r['ps'], np.zeros(len(r['x']), np.int64), r['behind'], r['foot']))
+                cand.append((r['x'], r['y'], r['z'], r['dv'], r['ps'], r['corner'], r['behind'], r['foot']))
         cat = lambda k, dt: np.concatenate([c[k] for c in cand]).astype(dt) if cand else np.zeros(0, dt)
-        X, Y, Z, DV, PS, _u, BH = cat(0, 'f8'), cat(1, 'f8'), cat(2, 'f8'), cat(3, 'f8'), cat(4, 'i8'), cat(5, 'i8'), cat(6, 'f8')
+        X, Y, Z, DV, PS, CRN, BH = cat(0, 'f8'), cat(1, 'f8'), cat(2, 'f8'), cat(3, 'f8'), cat(4, 'i8'), cat(5, 'f8'), cat(6, 'f8')
         FT = np.concatenate([c[7] for c in cand]) if cand else np.zeros((0, 3))
         # below ground = behind the local face by more than min_behind; no face could be fitted: the lid's measure stands
         FIT = np.isfinite(BH); ok = ~FIT | (BH > C['min_behind'])
         ncand = len(X); nonface = int((FIT & ~ok).sum()); nofit = int((~FIT).sum())
-        X, Y, Z, PS, FT, FIT = X[ok], Y[ok], Z[ok], PS[ok], FT[ok], FIT[ok]
-        TK = (Y // P['pass_block']).astype(np.int64) * 100000 + (X // P['pass_block']).astype(np.int64)      # the statistics block of each
+        X, Y, Z, PS, FT, FIT, CRN = X[ok], Y[ok], Z[ok], PS[ok], FT[ok], FIT[ok], CRN[ok]
+        TK = (Y // P['pass_cell']).astype(np.int64) * 100000 + (X // P['pass_cell']).astype(np.int64)      # the statistics cell of each
         DVL = DV[ok]; DV = np.where(FIT, BH[ok], DVL)            # from here on the depth is the distance behind the face
         dk, dn = np.unique(np.c_[TK, PS][DV > P['deep']], axis=0, return_counts=True)
         for (tk, p), q in zip(dk, dn):
-            stats.setdefault((int(tk // 100000), int(tk % 100000)), {}).setdefault(int(p), [0, 0])[1] = int(q)
+            fine.setdefault((int(tk // 100000), int(tk % 100000)), {}).setdefault(int(p), [0, 0])[1] = int(q)
+        KB = int(round(P['pass_block'] / P['pass_cell']))
+        for (fj, fi), st in fine.items():                       # blocks = KB x KB cells
+            for p, (n, d) in st.items():
+                a = stats.setdefault((fj // KB, fi // KB), {}).setdefault(p, [0, 0]); a[0] += n; a[1] += d
         lap('returns')
-        # 5. patterned noise: a pass is judged per block of 96 m on the statistics of the block and its 8 neighbours;
-        # a pass flagged anywhere is a bad pass everywhere: its returns below ground are set aside over the whole
-        # area, except those a pass that is NOT flagged confirms (one of its returns within 1.5 m)
+        # 5. patterned noise: a pass is judged per block of 96 m on the statistics of the block and its 8 neighbours.
+        # A flagged pass is not set aside everywhere: the path of its pattern is traced (trace_pattern) from the
+        # flagged blocks on, and only its returns below ground along that path are set aside, except those a pass
+        # that is NOT flagged confirms (one of its returns within 1.5 m). Elsewhere its returns are ordinary returns.
         say(70, 'flight passes')
-        tot = {}; flagged_tiles = {}; trows = []
+        tot = {}; flagged_tiles = {}; trows = []; flagged_blocks = set()
         for t, st in stats.items():
             for p, (n, d) in st.items():
                 a = tot.setdefault(p, [0, 0]); a[0] += n; a[1] += d
@@ -932,17 +1032,25 @@ def run(C, notes):
                 fl = alln - n >= P['pass_others'] and d >= P['pass_min'] and share >= P['pass_share'] and share >= P['pass_ratio'] * max(others, 1e-5)
                 trows.append((t[0], t[1], p, st[p][0], st[p][1], n, d, alln - n, alld - d, int(fl)))
                 if fl:
-                    flagged_tiles[p] = flagged_tiles.get(p, 0) + 1
-        isbad = np.isin(PS, list(flagged_tiles)) if flagged_tiles else np.zeros(len(X), bool)
+                    flagged_tiles[p] = flagged_tiles.get(p, 0) + 1; flagged_blocks.add((t, p))
+        isflag = np.isin(PS, list(flagged_tiles)) if flagged_tiles else np.zeros(len(X), bool)
+        isbad = np.zeros(len(X), bool); reached = {}
+        for p in flagged_tiles:
+            cells = trace_pattern(fine, p, {t for t, _p in flagged_blocks if _p == p}, KB)
+            reached[p] = (len(cells), len({(fj // KB, fi // KB) for fj, fi in cells}))
+            if cells:
+                isbad |= (PS == p) & np.isin(TK, [fj * 100000 + fi for fj, fi in cells])
         kind = np.zeros(len(X), 'u1'); confirmed = 0; confby = np.full(len(X), -1, np.int64)
         if isbad.any():
-            ci = np.flatnonzero(isbad); gi = np.flatnonzero(~isbad)
+            ci = np.flatnonzero(isbad); gi = np.flatnonzero(~isflag)
             if len(gi):
                 d_, q_ = cKDTree(np.c_[X[gi], Y[gi], Z[gi]]).query(np.c_[X[ci], Y[ci], Z[ci]]); okc = d_ <= P['pass_confirm']
                 confirmed = int(okc.sum()); confby[ci[okc]] = PS[gi[q_[okc]]]; ci = ci[~okc]
             kind[ci] = 3
         passes = [dict(id=int(p), returns=int(n), deep=int(d), share=round(d / max(1, n), 5), flagged=p in flagged_tiles, blocks_flagged=int(flagged_tiles.get(p, 0)),
-                       tiles_flagged=int(flagged_tiles.get(p, 0)), set_aside=int(((kind == 3) & (PS == p)).sum()), kept_confirmed=int((isbad & (kind == 0) & (PS == p)).sum()))
+                       tiles_flagged=int(flagged_tiles.get(p, 0)), cells_reached=int(reached.get(p, (0, 0))[0]), blocks_reached=int(reached.get(p, (0, 0))[1]),
+                       set_aside=int(((kind == 3) & (PS == p)).sum()), kept_confirmed=int((isbad & (kind == 0) & (PS == p)).sum()),
+                       left_outside=int((isflag & ~isbad & (PS == p)).sum()))
                   for p, (n, d) in sorted(tot.items())]
         # groups, lone, likely noise: over the whole area at once
         say(72, 'groups')
@@ -1023,7 +1131,7 @@ def run(C, notes):
     if C.get('debug'):
         np.savez(os.path.join(out, 'debug.npz'), x=pts[:, 0] if len(bi) else np.zeros(0), y=pts[:, 1] if len(bi) else np.zeros(0),
                  z=pts[:, 2] if len(bi) else np.zeros(0), depth=DV[bi], kind=kb, feature=feat, open=openp, sideways=side,
-                 link=ltype, link_len=llen, way_out=wayout, psid=PS[bi], confirmed_by=confby[bi], tile=TK[bi],
+                 link=ltype, link_len=llen, way_out=wayout, psid=PS[bi], confirmed_by=confby[bi], corner=CRN[bi], tile=TK[bi],
                  noise=np.c_[X, Y, Z, DV, PS][kind == 3], tile_pass=np.array(trows, np.int64).reshape(-1, 10))
     return counts, passes, (float(np.mean(cover)) if cover else 0.0)
 
@@ -1072,7 +1180,6 @@ def read_shapes_bin(path):
 DEMO = dict(
     size=(192.0, 144.0),
     cliff_y=110.1, cliff_h=10.0, cliff_run=1.2, cliff_lip=0.45,   # a wall: 10 m up over 1.2 m, the ground above it reaching out over its top
-    talus=(2.0, 1.2),                            # the ground rises 1.2 m over the last 2 m to the wall's foot
     pit=(96.0, 38.0, 2.0, 9.0),                  # x, y, radius, depth: a vertical pit (on the line between two tiles)
     slant=(37.0, 38.0, 2.2, 8.0),                # x, y, mouth radius, length: a pit going down at 45 degrees to the east
     slant_deep=(51.0, 38.0, 14.0),               # x, y, depth: a group under a roof, about 8 m from the pit's end: joined to it by a tie
@@ -1088,8 +1195,7 @@ DEMO = dict(
 
 
 def demo_ground(x, y):
-    tw, th = DEMO['talus']
-    return (100.0 + 0.02 * x + 0.04 * y + 0.3 * np.sin(x / 23.0) * np.cos(y / 31.0) + th * np.clip((y - DEMO['cliff_y'] + tw) / tw, 0, 1)
+    return (100.0 + 0.02 * x + 0.04 * y + 0.3 * np.sin(x / 23.0) * np.cos(y / 31.0)
             + np.where(y > DEMO['cliff_y'] + DEMO['cliff_lip'], DEMO['cliff_h'], 0.0))
 
 
@@ -1229,7 +1335,7 @@ def main(argv=None):
                  'Depends on the tile cut: the fill of ground gaps near a tile\'s margin edge; the water level of a hollow wider than the '
                  'margin whose rim is thinner than %g m (the area-wide fill is on a %g m grid); the face fits use the returns within 12 m of the tile, so a chain of '
                  'candidates joining the face from farther away is not followed. The patterned-noise decision is made on blocks of %g m that '
-                 'do not move with the tile size; a pass flagged in any block is set aside over the whole area.' % (2 * K * cell, K * cell, PARAMS['pass_block']))
+                 'do not move with the tile size; a flagged pass is set aside along the path of its pattern only.' % (2 * K * cell, K * cell, PARAMS['pass_block']))
     if not a.keep_work:
         shutil.rmtree(C['tmp'], ignore_errors=True)
     ox, oy = C['ox'], C['oy']
