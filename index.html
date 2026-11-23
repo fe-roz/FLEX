@@ -1804,7 +1804,6 @@
                   Copies the zip to the phone plugged into this computer; the map then waits in FLEX Field under "from your PC". The phone needs USB debugging on.
                 </div>
               </div>
-              <div id="export_jobs_spacer" aria-hidden="true"></div>   <!-- as tall as the Jobs strip while it shows (export-ui.js) -->
             </div>
 
           </div>
@@ -2150,6 +2149,8 @@
 <!-- 📍 Surface: project | My data -->
 <style>
   /* the Export dialog's rows: an option that cannot be had right now is greyed, with the reason under its name */
+  /* the Jobs strip lies over the bottom of the panels: every panel gets that much room under its last control (export-ui.js sets the height) */
+  #toolbar .lp-panel-wrap { padding-bottom: var(--flex-jobs-h, 0px); }
   #exportCollapsible .exp-row { padding: 4px 0 6px; border-bottom: 1px solid rgba(255,255,255,0.05); }
   #exportCollapsible .exp-row:last-child { border-bottom: 0; }
   #exportCollapsible .exp-why { display: none; font-size: 10px; color: #e8a33d; margin: 0 0 3px; }

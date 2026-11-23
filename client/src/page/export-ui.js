@@ -986,7 +986,7 @@
     trees_s_per_km2: 75,         // Trees and brush
     triangles_per_km2: 40e6,     // what the ground would take before the Max triangles cap
     glb_bytes_per_triangle: 12,
-    aerial_bytes_per_km2: 6e6, aerial_min_bytes: 2e6, aerial_bytes_per_pixel: 0.6,     // capped by the picture size
+    aerial_bytes_per_km2: 6e6, aerial_min_bytes: 2e6, aerial_bytes_per_pixel: 0.25,     // capped by the picture size
     hillshade_bytes_per_pixel: 0.47,   // one pixel per terrain cell
     brush_factor: 1.2,           // "hillshade + brush" against the hillshade
     slope_factor: 1.6,           // the slope map against the hillshade
@@ -1119,9 +1119,9 @@
     ['export_ridgewalk', 'export_ridge_shapes', 'export_trees', 'export_slope_map', 'export_hillshade_mode', 'export_resolution', 'export_map_cell', 'export_max_tri', 'export_tex_size'].forEach(id => {
       const e = document.getElementById(id); if (e) e.addEventListener('change', () => _exportSyncModes()); });
     // the Jobs strip lies over the bottom of the panels: leave it room under the buttons
-    const jp = document.getElementById('jobs-panel'), sp = document.getElementById('export_jobs_spacer');
-    if (jp && sp) {
-      const fit = () => { sp.style.height = (jp.hidden ? 0 : Math.ceil(jp.getBoundingClientRect().height) + 8) + 'px'; };
+    const jp = document.getElementById('jobs-panel');
+    if (jp) {
+      const fit = () => { document.documentElement.style.setProperty('--flex-jobs-h', (jp.hidden ? 0 : Math.ceil(jp.getBoundingClientRect().height) + 8) + 'px'); };
       try { new ResizeObserver(fit).observe(jp); } catch (_) {}
       new MutationObserver(fit).observe(jp, { attributes: true, attributeFilter: ['hidden'] });
       fit();
