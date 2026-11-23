@@ -4,9 +4,10 @@
 // trees.bin by name or as inline base64 (the viewer's own dual mode). A normal export has TREES = null
 // and this file does nothing at all.
 //
-//   trees.bin  "FTR1", uint32 n, then 20 bytes a tree, little-endian: float32 x, y, z (the foot, in the
+//   trees.bin  "FTR2", uint32 n, then 24 bytes a tree, little-endian: float32 x, y, z (the foot, in the
 //              viewer's own frame), float32 height, uint16 radius in cm, uint8 kind (0 cone, 1 round
-//              crown, 2 low mound), uint8 tint (0..255)
+//              crown, 2 low mound), uint8 tint (0..255); uint16 the crown's base above the foot in cm, uint16 spare.
+//              Version 1 ("FTR1", 20 bytes a tree, no crown base) is read too.
 //
 // Every tree and bush is ONE of three stock solids stretched to its radius and height: instanced meshes
 // (THREE.InstancedMesh, r128), a few triangles a shape, fewer when the export says the area is large
@@ -22,7 +23,11 @@
   var COLOUR = [[0x2c, 0x5a, 0x33], [0x4a, 0x86, 0x3c], [0x7c, 0x96, 0x4c]];     // conifer, broadleaf, brush
   var TINT_LO = 0.78, TINT_HI = 1.16;                          // the tint byte scales the colour between these
   var SINK = 0.06;                                             // the solids start this share of their height under the foot (slopes)
-  var DEFAULTS = { trees: true, brush: true, see: true };
+  // `crown` is a look to compare, not in Display yet: off = a conifer is a spike from the ground up (as ever);
+  // on = its cone starts at the crown's base, on a thin trunk (FlexTrees.set('crown', true)).
+  var DEFAULTS = { trees: true, brush: true, see: true, crown: false };
+  var TRUNK_COLOUR = [0x4c, 0x3b, 0x2a], TRUNK_SHARE = 0.06, TRUNK_MIN = 0.15;      // trunk radius: a share of the crown's, at least 15 cm
+  var CROWN_MIN = 0.25;                                        // a crown is at least this share of the tree's height
   var STATE_V = 1;
   var TILE_TARGET = 6000, TILE_MAX = 8;                        // about this many shapes a ground tile, at most 8 x 8 tiles
   // The stock solids, as a profile turned round the vertical: [sides, [radius, height] rings from the
@@ -46,21 +51,24 @@
       tri(at(rings[k], i), at(rings[k + 1], i + 1), at(rings[k + 1], i));
     }
     var top = rings[rings.length - 1];
-    for (i = 0; i < S; i++) tri(at(top, i), at(top, i + 1), [0, 0, 1]);
+    if (!def.open) for (i = 0; i < S; i++) tri(at(top, i), at(top, i + 1), [0, 0, 1]);
     return new Float32Array(pos);
   }
   function solidFor(kind, detail) { return solid(SOLIDS[kind][detail]); }
   function triangles(kind, detail) { return solidFor(kind, detail).length / 9; }
 
-  // { n, f32, u16, u8 }: views over the bytes, nothing copied. Tree i: x, y, z, height = f32[i*5 .. +3],
-  // radius cm = u16[i*10 + 8], kind = u8[i*20 + 18], tint = u8[i*20 + 19].
+  // { n, version, B, F, U, f32, u16, u8 }: views over the bytes, nothing copied; B bytes a tree (24, or 20 in
+  // version 1), F = B / 4, U = B / 2. Tree i: x, y, z, height = f32[i*F .. +3], radius cm = u16[i*U + 8],
+  // kind = u8[i*B + 18], tint = u8[i*B + 19], and in version 2 the crown's base in cm = u16[i*U + 10].
   function parse(buf) {
     if (!buf || buf.byteLength < 8) throw new Error('trees: file too short');
     var m = new Uint8Array(buf, 0, 4);
-    if (String.fromCharCode(m[0], m[1], m[2], m[3]) !== 'FTR1') throw new Error('trees: not an FTR1 file');
-    var n = new DataView(buf).getUint32(4, true);
-    if (buf.byteLength < 8 + n * 20) throw new Error('trees: file cut short');
-    return { n: n, f32: new Float32Array(buf, 8, n * 5), u16: new Uint16Array(buf, 8, n * 10), u8: new Uint8Array(buf, 8, n * 20) };
+    var tag = String.fromCharCode(m[0], m[1], m[2], m[3]);
+    if (tag !== 'FTR1' && tag !== 'FTR2') throw new Error('trees: not an FTR1 / FTR2 file');
+    var B = tag === 'FTR2' ? 24 : 20, n = new DataView(buf).getUint32(4, true);
+    if (buf.byteLength < 8 + n * B) throw new Error('trees: file cut short');
+    return { n: n, version: B === 24 ? 2 : 1, B: B, F: B / 4, U: B / 2,
+             f32: new Float32Array(buf, 8, n * B / 4), u16: new Uint16Array(buf, 8, n * B / 2), u8: new Uint8Array(buf, 8, n * B) };
   }
   function restore(saved) {
     var st = {}, k;
@@ -70,14 +78,14 @@
   }
   // How the instances are filed: tiles x tiles over the trees' own extent, [kind][tile] -> count.
   function plan(T) {
-    var n = T.n, f = T.f32, i, minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (i = 0; i < n; i++) { var x = f[i * 5], y = f[i * 5 + 1]; if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y; }
+    var n = T.n, f = T.f32, F = T.F, i, minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (i = 0; i < n; i++) { var x = f[i * F], y = f[i * F + 1]; if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y; }
     var G = Math.max(1, Math.min(TILE_MAX, Math.ceil(Math.sqrt(n / TILE_TARGET))));
     var sx = G / Math.max(1e-6, maxX - minX), sy = G / Math.max(1e-6, maxY - minY);
     var tileOf = new Uint16Array(n), counts = [new Uint32Array(G * G), new Uint32Array(G * G), new Uint32Array(G * G)];
     for (i = 0; i < n; i++) {
-      var tx = Math.min(G - 1, Math.floor((f[i * 5] - minX) * sx)), ty = Math.min(G - 1, Math.floor((f[i * 5 + 1] - minY) * sy));
-      var kind = T.u8[i * 20 + 18]; if (kind > 2) kind = 2;
+      var tx = Math.min(G - 1, Math.floor((f[i * F] - minX) * sx)), ty = Math.min(G - 1, Math.floor((f[i * F + 1] - minY) * sy));
+      var kind = T.u8[i * T.B + 18]; if (kind > 2) kind = 2;
       tileOf[i] = ty * G + tx; counts[kind][ty * G + tx]++;
     }
     return { G: G, tileOf: tileOf, counts: counts };
@@ -96,7 +104,7 @@
   }
 
   function build(T) {
-    var THREE = S.THREE, detail = S.detail, P = plan(T), G = P.G, n = T.n, f = T.f32, k, t, i;
+    var THREE = S.THREE, detail = S.detail, P = plan(T), G = P.G, n = T.n, f = T.f32, F = T.F, k, t, i;
     S.group = new THREE.Group(); S.group.name = 'trees'; S.group.matrixAutoUpdate = false;
     S.meshes = [[], [], []];
     S.count = [0, 0, 0];
@@ -118,7 +126,7 @@
         mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(c * 3), 3);
         mesh.name = 'trees-' + KINDS[k]; mesh.matrixAutoUpdate = false;
         mesh.frustumCulled = true;                               // (three switches it off for instanced meshes; each tile has real bounds)
-        mesh.userData = { kind: k, tile: t };
+        mesh.userData = { kind: k, tile: t, zhb: k === 0 ? new Float32Array(c * 3) : null };      // cones: foot z, height, crown base
         mesh.visible = k === 2 ? S.st.brush : S.st.trees;
         slot[k][t] = { mesh: mesh, at: 0, box: [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity] };
         S.meshes[k].push(mesh); S.group.add(mesh);
@@ -126,15 +134,16 @@
       }
     }
     for (i = 0; i < n; i++) {
-      var kind = T.u8[i * 20 + 18]; if (kind > 2) kind = 2;
+      var kind = T.u8[i * T.B + 18]; if (kind > 2) kind = 2;
       var s = slot[kind][P.tileOf[i]], m = s.mesh.instanceMatrix.array, o = s.at * 16;
-      var x = f[i * 5], y = f[i * 5 + 1], z = f[i * 5 + 2], h = f[i * 5 + 3], r = T.u16[i * 10 + 8] / 100;
+      var x = f[i * F], y = f[i * F + 1], z = f[i * F + 2], h = f[i * F + 3], r = T.u16[i * T.U + 8] / 100;
+      if (kind === 0) { var zhb = s.mesh.userData.zhb; zhb[s.at * 3] = z; zhb[s.at * 3 + 1] = h; zhb[s.at * 3 + 2] = T.version === 2 ? T.u16[i * T.U + 10] / 100 : 0; }
       // column-major: scale (r, r, h), then the foot's place
       m[o] = r; m[o + 1] = 0; m[o + 2] = 0; m[o + 3] = 0;
       m[o + 4] = 0; m[o + 5] = r; m[o + 6] = 0; m[o + 7] = 0;
       m[o + 8] = 0; m[o + 9] = 0; m[o + 10] = h; m[o + 11] = 0;
       m[o + 12] = x; m[o + 13] = y; m[o + 14] = z; m[o + 15] = 1;
-      var tint = TINT_LO + (TINT_HI - TINT_LO) * T.u8[i * 20 + 19] / 255, col = s.mesh.instanceColor.array, c3 = COLOUR[kind];
+      var tint = TINT_LO + (TINT_HI - TINT_LO) * T.u8[i * T.B + 19] / 255, col = s.mesh.instanceColor.array, c3 = COLOUR[kind];
       col[s.at * 3] = c3[0] / 255 * tint; col[s.at * 3 + 1] = c3[1] / 255 * tint; col[s.at * 3 + 2] = c3[2] / 255 * tint;
       var b = s.box;
       if (x - r < b[0]) b[0] = x - r; if (y - r < b[1]) b[1] = y - r; if (z - h * SINK < b[2]) b[2] = z - h * SINK;
@@ -151,6 +160,42 @@
     }
     S.tiles = G;
     S.scene.add(S.group);
+    if (S.st.crown) crownLook(true);
+  }
+
+  // The other look of the conifers: each cone from its crown's base to its top (never under CROWN_MIN of the
+  // height), on a thin trunk from the ground (the trunks are made the first time, a 3-sided post a tree; none
+  // at the lowest detail). Off puts the spikes back. Only the cones' matrices change; bounds stay.
+  function crownLook(on) {
+    var THREE = S.THREE;
+    S.meshes[0].forEach(function (mesh) {
+      var a = mesh.instanceMatrix.array, q = mesh.userData.zhb, n = mesh.count, i;
+      for (i = 0; i < n; i++) {
+        var z = q[i * 3], h = q[i * 3 + 1], b = on ? Math.min(q[i * 3 + 2], h * (1 - CROWN_MIN)) : 0;
+        a[i * 16 + 10] = h - b; a[i * 16 + 14] = z + b;
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+      if (on && !mesh.userData.trunks && S.detail < 2) {
+        if (!S.trunkGeo) {
+          S.trunkGeo = new THREE.BufferGeometry();
+          S.trunkGeo.setAttribute('position', new THREE.BufferAttribute(solid({ sides: 3, rings: [[1, -SINK], [1, 1]], open: true }), 3));
+          S.trunkGeo.computeVertexNormals();
+          S.trunkMat = screenDoor(new THREE.MeshLambertMaterial({ color: (TRUNK_COLOUR[0] << 16) | (TRUNK_COLOUR[1] << 8) | TRUNK_COLOUR[2] }), S.uSee);
+        }
+        var tg = new THREE.BufferGeometry();
+        tg.setAttribute('position', S.trunkGeo.attributes.position); tg.setAttribute('normal', S.trunkGeo.attributes.normal);
+        tg.boundingSphere = mesh.geometry.boundingSphere; tg.boundingBox = mesh.geometry.boundingBox;
+        var tm = new THREE.InstancedMesh(tg, S.trunkMat, n), m = tm.instanceMatrix.array;
+        for (i = 0; i < n; i++) {
+          var bb = Math.min(q[i * 3 + 2], q[i * 3 + 1] * (1 - CROWN_MIN)), tr = Math.max(TRUNK_MIN, a[i * 16] * TRUNK_SHARE), o = i * 16;
+          m[o] = tr; m[o + 5] = tr; m[o + 10] = Math.max(bb, 0.01); m[o + 12] = a[o + 12]; m[o + 13] = a[o + 13]; m[o + 14] = q[i * 3]; m[o + 15] = 1;
+        }
+        tm.name = 'trees-trunk'; tm.matrixAutoUpdate = false; tm.frustumCulled = true; tm.raycast = function () {};
+        tm.instanceMatrix.needsUpdate = true;
+        mesh.userData.trunks = tm; S.trunks.push(tm); S.group.add(tm);
+      }
+    });
+    S.trunks.forEach(function (tm) { tm.visible = !!on && S.st.trees; });
   }
 
   function redraw() { if (S && S.redraw) S.redraw(); }
@@ -166,7 +211,7 @@
       if (!tr || typeof tr !== 'object' || !tr.file) return Promise.resolve(false);
       var d = tr.detail === 1 || tr.detail === 2 ? tr.detail : 0;
       S = { THREE: o.THREE, scene: o.scene, trees: tr, detail: d, st: restore(o.saved), redraw: o.redraw, uSee: { value: 0 },
-            group: null, meshes: [[], [], []], count: [0, 0, 0], tiles: 0, loaded: false };
+            group: null, meshes: [[], [], []], trunks: [], trunkGeo: null, trunkMat: null, count: [0, 0, 0], tiles: 0, loaded: false };
       S.uSee.value = S.st.see ? 1 : 0;
       var load;
       try {
@@ -184,16 +229,17 @@
     loaded: function () { return !!(S && S.loaded); },
     state: function () { return S ? Object.assign({}, S.st) : null; },
     serialize: function () { return S ? Object.assign({ v: STATE_V }, S.st) : undefined; },
-    // { group, meshes: [cones, rounds, mounds], count: [..], tiles, detail, see }
-    objects: function () { return S ? { group: S.group, meshes: S.meshes, count: S.count.slice(), tiles: S.tiles, detail: S.detail, see: S.uSee.value } : null; },
+    // { group, meshes: [cones, rounds, mounds], trunks, count: [..], tiles, detail, see }
+    objects: function () { return S ? { group: S.group, meshes: S.meshes, trunks: S.trunks, count: S.count.slice(), tiles: S.tiles, detail: S.detail, see: S.uSee.value } : null; },
 
-    // One switch: trees (cones and round crowns), brush (mounds), see (see-through).
+    // One switch: trees (cones and round crowns), brush (mounds), see (see-through), crown (the conifers' other look).
     set: function (key, v) {
       if (!S || !(key in DEFAULTS)) return;
       S.st[key] = !!v;
-      if (key === 'see') S.uSee.value = v ? 1 : 0;
+      if (key === 'crown') { if (S.loaded) crownLook(!!v); }
+      else if (key === 'see') S.uSee.value = v ? 1 : 0;
       else if (key === 'brush') S.meshes[2].forEach(function (m) { m.visible = !!v; });
-      else { S.meshes[0].forEach(function (m) { m.visible = !!v; }); S.meshes[1].forEach(function (m) { m.visible = !!v; }); }
+      else { S.meshes[0].forEach(function (m) { m.visible = !!v; }); S.meshes[1].forEach(function (m) { m.visible = !!v; }); S.trunks.forEach(function (m) { m.visible = !!v && S.st.crown; }); }
       redraw();
     },
 

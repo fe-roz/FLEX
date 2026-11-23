@@ -54,15 +54,20 @@ k = xt.kinds_of(recs)
 check('kinds: cone, round, round, cone, round, mound, mound, mound', k.tolist() == [0, 1, 1, 0, 1, 2, 2, 2], k.tolist())
 check('a crown of exactly the low height is a mound, one just over it is a tree', xt.kinds_of(np.array([[0, 0, 0, xt.LOW_TREE_M, 1, 0, 0, 1, 1, 1, 1, 1], [0, 0, 0, xt.LOW_TREE_M + 0.1, 1, 0, 0, 1, 1, 1, 1, 1]], np.float32)).tolist() == [2, 1])
 buf = xt.pack(recs[:, 0], recs[:, 1], recs[:, 2], recs[:, 3], recs[:, 4], k, xt.tints_of(recs[:, 0], recs[:, 1]))
-check('trees.bin: FTR1, the count, 20 bytes a tree', buf[:4] == b'FTR1' and int.from_bytes(buf[4:8], 'little') == 8 and len(buf) == 8 + 8 * 20 and xt.RECORD == 20)
+check('trees.bin: FTR2, the count, 24 bytes a tree', buf[:4] == b'FTR2' and int.from_bytes(buf[4:8], 'little') == 8 and len(buf) == 8 + 8 * 24 and xt.RECORD == 24)
 a = xt.unpack(buf)
 check('…x, y, z, height as float32, radius in cm, kind, tint', a['x'].tolist() == recs[:, 0].tolist() and a['h'][0] == 20 and a['r'].tolist() == [300, 500, 600, 250, 250, 150, 200, 300] and a['kind'].tolist() == k.tolist())
 import struct
-check('…at the byte offsets of the contract', struct.unpack_from('<ffffHBB', buf, 8 + 20) == (10.0, 0.0, 100.0, 15.0, 500, 1, int(a['tint'][1])))
+check('…at the byte offsets of the contract, then the crown base (cm) and a spare', struct.unpack_from('<ffffHBBHH', buf, 8 + 24) == (10.0, 0.0, 100.0, 15.0, 500, 1, int(a['tint'][1]), 0, 0))
+bufb = xt.pack(recs[:, 0], recs[:, 1], recs[:, 2], recs[:, 3], recs[:, 4], k, xt.tints_of(recs[:, 0], recs[:, 1]), base=[4, 3, 5, 2, 2, 0.5, 0, 700.0])
+check('the crown\'s base above the foot, in cm (capped at what the field holds)', xt.unpack(bufb)['base'].tolist() == [400, 300, 500, 200, 200, 50, 0, 65535])
+v1 = b'FTR1' + struct.pack('<I', 2) + struct.pack('<ffffHBB', 1, 2, 3, 20, 300, 0, 7) + struct.pack('<ffffHBB', 4, 5, 6, 2, 150, 2, 9)
+o1 = xt.unpack(v1)
+check('a version 1 file (FTR1, 20 bytes) is still read, with no crown base', len(o1) == 2 and o1['x'].tolist() == [1, 4] and o1['r'].tolist() == [300, 150] and o1['kind'].tolist() == [0, 2] and o1['tint'].tolist() == [7, 9] and o1['base'].tolist() == [0, 0])
 t1, t2 = xt.tints_of(np.arange(500) * 3.7, np.arange(500) * 1.3), xt.tints_of(np.arange(500) * 3.7, np.arange(500) * 1.3)
 check('the tint is steady (the same place, the same tint) and spread over the range', (t1 == t2).all() and t1.min() < 40 and t1.max() > 215 and 90 < t1.mean() < 165, (int(t1.min()), int(t1.max()), float(t1.mean())))
 check('a radius too big for the field is capped, one of zero is 1 cm', xt.unpack(xt.pack([0, 0], [0, 0], [0, 0], [1, 1], [900.0, 0.0], [0, 0], [0, 0]))['r'].tolist() == [65535, 1])
-for bad in (b'', b'RWP1\0\0\0\0', buf[:50]):
+for bad in (b'', b'RWP1\0\0\0\0', buf[:50], v1[:30]):
     try:
         xt.unpack(bad); check('a wrong or short file is refused', False)
     except ValueError:
@@ -82,6 +87,38 @@ dem2 = dem.copy(); dem2[3, 3] = np.nan
 check('a blank cell beside the foot: none (the vegetation step\'s ground is used instead)', np.isnan(xt.sample_dem(dem2, xb, yb, np.array([1006.5]), np.array([5006.5]))[0]))
 ring = [[0, 0], [10, 0], [10, 10], [0, 10]]
 check('inside a ring: even-odd', xt.point_in_ring(np.array([5.0, 15.0, -1.0, 9.9]), np.array([5.0, 5.0, 5.0, 0.1]), ring).tolist() == [True, False, False, True])
+
+# a cliff read as a crown: left out only when the ground itself explains the tree; never by height
+def slope_dem(deg, n=400, cell=1.0, step_at=None, step=0.0):
+    """[x, y] ground rising eastward at `deg`, with an optional cliff (a step up of `step` m at x = step_at)."""
+    x = (np.arange(n) + 0.5) * cell
+    z = 500.0 + x * math.tan(math.radians(deg)) + (step if step_at is None else np.where(x >= step_at, step, 0.0))
+    return np.repeat(z[:, None], n, axis=1).astype(np.float32), np.arange(n + 1) * cell, np.arange(n + 1) * cell
+def rise_at(dem, xb, yb, x, y, radius):
+    foot = xt.sample_dem(dem, xb, yb, np.array([x]), np.array([y]))
+    return float(xt.ground_rise(dem, xb, yb, np.array([x]), np.array([y]), np.array([radius + xt.CLIFF_REACH_M]), foot)[0])
+d10 = slope_dem(10); d30 = slope_dem(30); d45 = slope_dem(45)
+r10, r30 = rise_at(*d10, 200.0, 200.0, 12.0), rise_at(*d30, 200.0, 200.0, 12.0)
+check('the ground within a 12 m crown (+ 2 m) rises about 2.5 m on a 10 degree slope and about 8 m on a 30 degree one', 2.0 < r10 < 3.2 and 7.5 < r30 < 9.2, (r10, r30))
+check('a 100 m tree on a 10 degree slope stays (no height limit)', not xt.on_cliff(r10, 100.0))
+check('a 100 m tree on a 30 degree slope stays: it stands far clear of the ground beside it', not xt.on_cliff(r30, 100.0))
+check('a 75 m tree, 3 m wide, on a 30 degree slope stays', not xt.on_cliff(rise_at(*d30, 200.0, 200.0, 3.0), 75.0))
+check('a 5 m tree on a 45 degree slope stays (5 m of rise within its crown is a slope, not a cliff)', not xt.on_cliff(rise_at(*d45, 200.0, 200.0, 3.0), 5.0), rise_at(*d45, 200.0, 200.0, 3.0))
+dc = slope_dem(5, step_at=204.0, step=25.0)                                    # a 25 m cliff 4 m east of the foot
+rc_ = rise_at(*dc, 200.0, 200.0, 5.0)
+check('at the foot of a 25 m cliff the ground within the crown rises 25 m', 24.5 < rc_ < 27, rc_)
+check('a 24 m "tree" there is the cliff: left out', bool(xt.on_cliff(rc_, 24.0)))
+check('a 28 m one too (its top is within 15 % of its height of the cliff top)', bool(xt.on_cliff(rc_, 28.0)))
+check('a 6 m "tree" under that cliff too (all of it is below the cliff top, inside its own crown)', bool(xt.on_cliff(rc_, 6.0)))
+check('a 45 m tree at the foot of the 25 m cliff stays: it stands well clear of the cliff top', not xt.on_cliff(rc_, 45.0))
+check('a 100 m tree there stays', not xt.on_cliff(rc_, 100.0))
+check('the same cliff 12 m away from a 5 m wide crown: out of reach, the tree stays whatever its height', not xt.on_cliff(rise_at(*slope_dem(5, step_at=212.0, step=25.0), 200.0, 200.0, 5.0), 24.0))
+check('a 6 m step is not a cliff: a 6 m tree beside it stays', not xt.on_cliff(rise_at(*slope_dem(5, step_at=203.0, step=6.0), 200.0, 200.0, 3.0), 6.0))
+check('no ground in reach (outside the DEM): the tree stays', not xt.on_cliff(float('nan'), 30.0) and np.isnan(xt.ground_rise(dc[0], dc[1], dc[2], np.array([-50.0]), np.array([10.0]), np.array([5.0]), np.array([500.0]))[0]))
+hole = dc[0].copy(); hole[204:, :] = np.nan
+check('blank ground (a hole, outside the polygon) is not a cliff', np.nan_to_num(rise_at(hole, dc[1], dc[2], 200.0, 200.0, 5.0)) < 1.0)
+fine = slope_dem(5, n=800, cell=0.5, step_at=204.0, step=25.0)
+check('the same answer on a DEM of 0.5 m cells', abs(rise_at(*fine, 200.0, 200.0, 5.0) - rc_) < 1.0, rise_at(*fine, 200.0, 200.0, 5.0))
 
 # tiles
 g = xt.tile_grid((0, 0, 1000, 1000))
@@ -113,8 +150,25 @@ with tempfile.TemporaryDirectory() as tmp:
     b2, c2 = T.binary(e0, n0, -24.5, polygon=half)
     check('with a polygon: trees whose foot is outside it are left out, and counted', 0 < len(xt.unpack(b2)) < len(A) and c2['outside'] == len(A) - len(xt.unpack(b2)) and (xt.unpack(b2)['x'] <= 0.01).all(), c2)
     flat = np.full((400, 400), 250.0); fx, fy = e0 - 200 + np.arange(401) * 1.0, n0 - 200 + np.arange(401) * 1.0
-    b3, _ = T.binary(e0, n0, -24.5, dem=flat, x_bins=fx, y_bins=fy)
+    b3, c3 = T.binary(e0, n0, -24.5, dem=flat, x_bins=fx, y_bins=fy)
     check('with the export\'s ground: every foot stands on it', np.allclose(xt.unpack(b3)['z'], 250.0))
+    A3 = xt.unpack(b3)
+    check('on that gentle ground the cliff rule removes nothing', c3['cliff'] == 0 and len(A3) == len(T.recs) and all(v == 0 for v in c3['cliff_by_height'].values()), c3)
+    trees_only = T.recs[:, 6] != 2
+    check('the crown\'s base travels: the step\'s own, for trees; none for mounds', (A3['base'][A3['kind'] == 2] == 0).all() and (A3['base'][A3['kind'] != 2] > 0).any() and
+          np.allclose(A3['base'][A3['kind'] != 2] / 100.0, np.minimum(T.recs[xt.kinds_of(T.recs) != 2, 5], T.recs[xt.kinds_of(T.recs) != 2, 3] * 0.9), atol=0.006))
+    # the same trees with a 30 m cliff 2 m east of one of them (a tree under 32 m): the cliff explains that one
+    kd = xt.kinds_of(T.recs)
+    j = int(np.nonzero((kd != 2) & (T.recs[:, 3] < 32) & (T.recs[:, 3] > 8))[0][0])
+    line = T.e[j] + 2.0
+    cl = flat.copy(); cl[int(math.ceil(line - fx[0])):, :] = 280.0
+    b4, c4 = T.binary(e0, n0, -24.5, dem=cl, x_bins=fx, y_bins=fy)
+    A4 = xt.unpack(b4)
+    kept = np.isin(np.round(T.e - e0, 2), np.round(A4['x'].astype(np.float64), 2))
+    check('with a 30 m cliff beside a tree: that tree is left out, counted by height; no mound and nothing over 45 m goes', not kept[j] and 0 < len(A3) - len(A4) == c4['cliff'] == sum(c4['cliff_by_height'].values()) and
+          c4['cliff_by_height']['over 45 m'] == 0 and (A4['kind'] == 2).sum() == (A3['kind'] == 2).sum(), c4)
+    check('…and every tree left out stood within its crown\'s reach of the cliff line, on the low side, its top under 15 % clear of the cliff top',
+          all(T.e[i] < line + 1 and line - T.e[i] <= T.recs[i, 4] + xt.CLIFF_REACH_M + 1.5 and T.recs[i, 3] <= 30 + max(2, 0.15 * T.recs[i, 3]) + 0.5 for i in np.nonzero(~kept)[0]), c4)
 
     # ── 3. The step as a child process, in tiles (a stand-in script) ──────────
     stub = tmp / 'veg_stub.py'
@@ -123,6 +177,8 @@ sys.path.insert(0, %r)
 import numpy as np, veg_shapes as vs, route_cost as rc
 a = sys.argv; p = json.load(open(a[a.index('--params') + 1])); out = a[a.index('--out') + 1]
 if os.environ.get('VEG_STUB_FAIL'): print('reading tile 1/1'); sys.exit(3)
+once = os.environ.get('VEG_STUB_FAIL_ONCE')
+if once and not os.path.exists(once): open(once, 'w').close(); print('could not read from the network'); sys.exit(134)
 ring = p['area']; zone = 14
 xy = [rc.lonlat_to_xy(q[0], q[1], zone) for q in ring]
 x0, y0, x1, y1 = min(q[0] for q in xy), min(q[1] for q in xy), max(q[0] for q in xy), max(q[1] for q in xy)
@@ -161,8 +217,13 @@ print('Done in 1.5 s')
     try:
         xt.run_veg_tiled(tmp / 'tiled_fail', '/data/cave-ridge/ept.json', R, 14, False, progress=lambda m: None, script=stub); check('a step that fails says so', False)
     except RuntimeError as ex:
-        check('a step that fails says so, with its last lines', 'code 3' in str(ex) and 'reading tile' in str(ex), ex)
+        check('a step that fails every time says so, with its last lines', 'code 3' in str(ex) and 'reading tile' in str(ex), ex)
     del os.environ['VEG_STUB_FAIL']
+    os.environ['VEG_STUB_FAIL_ONCE'] = str(tmp / 'failed_once'); again = []
+    idx3 = xt.run_veg_tiled(tmp / 'tiled_retry', '/data/cave-ridge/ept.json', R, 14, False, progress=again.append, script=stub)
+    del os.environ['VEG_STUB_FAIL_ONCE']
+    check('a tile whose read fails once is run again: all four tiles arrive, and the log says it was tried again', len(idx3['tiles']) == 4 and len(xt.Trees(tmp / 'tiled_retry').recs) == len(TT.recs) and
+          sum('trying it again' in l for l in again) == 1 and any('tile 1/4: tile 1 failed, trying it again (veg_shapes.py stopped with code 134' in l for l in again), [l for l in again if 'again' in l])
 
     # ── 4. Through the exporter ───────────────────────────────────────────────
     def no_points(*a, **k): raise AssertionError('no point cloud may be read')
@@ -220,6 +281,7 @@ print('Done in 1.5 s')
     tb = z.read('trees.bin'); A = xt.unpack(tb); side = json.loads(z.read('trees.json'))
     check('trees.json: the count, the kinds, the detail and the TREES object by file name', side['count'] == len(A) == len(T.recs) and side['cone'] + side['round'] + side['mound'] == len(A) and side['detail'] == 0 and side['viewer'] == {'version': 1, 'count': len(A), 'detail': 0, 'file': 'trees.bin'}, side)
     check('the log says how many of each', re.search(r'Trees and brush: \d+ \(\d+ cones, \d+ round crowns, \d+ low mounds\), trees\.bin \d+ KB, detail 0', log) is not None, log[-400:])
+    check('trees.json counts what the cliff rule left out (nothing on this ground)', side['cliff'] == 0 and 'cliff_by_height' in side and 'a cliff explains' not in log, side)
     meta = json.loads(z.read('caves.json'))['meta']
     ce, cn = meta['utm_center_e'], meta['utm_center_n']
     check('feet are in the viewer frame: metres from the terrain\'s centre', abs((A['x'][i] + ce) - T.e[i]) < 0.01 and abs((A['y'][i] + cn) - T.n[i]) < 0.01)
