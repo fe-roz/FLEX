@@ -102,14 +102,8 @@
     const day = d && !isNaN(d) ? d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
     return [who || '', day].filter(Boolean).join(' · ');
   }
-  /** The change log's wording for an rmark.set. */
-  function describe(e) {
-    if (e.removed === true) return 'Mark on a ridgewalking feature removed';
-    if (e.removed === false && !e.kind) return 'Mark on a ridgewalking feature put back';
-    const k = e.kind ? (FL.RMARK_LABELS[e.kind] || e.kind) : null, note = e.note ? ' — “' + String(e.note).slice(0, 60) + '”' : '';
-    if (e.prev === null) return 'Ridgewalking feature marked: ' + (k || '?') + note;
-    return 'Ridgewalking mark ' + (k ? 'changed to ' + k : 'note changed') + note;
-  }
+  /** The change log's wording for an rmark.set (flexlib's, the same as on the desktop). */
+  const describe = e => FL.rmarkDescribe(e);
   function restore(saved) {
     const st = Object.assign({}, DEFAULTS);
     if (saved && typeof saved === 'object' && saved.v === STATE_V) Object.keys(DEFAULTS).forEach(k => { if (typeof saved[k] === 'boolean') st[k] = saved[k]; });

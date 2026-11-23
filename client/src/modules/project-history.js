@@ -81,6 +81,7 @@
       'segment.del': () => `Removed ${[].concat(e.seg != null ? [e.seg] : [], e.segs || []).length} segment(s)`,
       'feature.set': () => { const f = pj.P.features[e.feature] || {}, k = e.kind || f.kind, nm = e.name || f.name || ''; return e.removed ? `Removed ${k || 'feature'} “${nm}”` : `${{ point: 'Point', line: 'Line', area: 'Area' }[k] || 'Feature'} “${nm}”`; },
       'arealabel.set': () => { const a = pj.P.arealabels[e.label] || {}, nm = e.text || a.text || '', f = e.file || a.file || ''; return (e.removed ? `Removed area label “${nm}”` : e.removed === false ? `Area label “${nm}” back` : e.prev === null ? `Area label “${nm}”` : e.text != null ? `Renamed area label to “${nm}”` : `Moved area label “${nm}”`) + (f ? ' in ' + f : ''); },
+      'rmark.set': () => FL.rmarkDescribe(e),
       'trip.set': () => { const t = pj.P.trips[e.trip] || {}, nm = e.name || t.name || 'trip'; if (e.trip === FL.TRIP_NONE) return 'Trip: marked as not part of a trip'; return e.removed ? `Deleted trip “${nm}”` : e.removed === false ? `Trip “${nm}” back` : e.prev === null ? `Trip “${nm}”` : `Edited trip “${nm}”: ` + [['name', 'name'], ['start', 'dates'], ['end', 'dates'], ['desc', 'notes']].filter(([k]) => e[k] != null).map(x => x[1]).concat(['people', 'caves', 'links'].filter(k => (e.add && e.add[k]) || (e.drop && e.drop[k])).map(k => k === 'links' ? 'surveys, documents' : k)).filter((v, i, a) => a.indexOf(v) === i).join(', '); },
       'group.set': () => e.removed ? `Removed folder “${(pj.P.groups[e.group] || {}).name || ''}”` : `Folder “${e.name || (pj.P.groups[e.group] || {}).name || ''}”`,
       accept: () => `Accepted ${n} suggestion(s)${e.note ? ': ' + e.note : ''}`,
@@ -113,6 +114,7 @@
       case 'layer.set': return e.removed ? { op: 'layer.set', layer: e.layer, removed: false } : null;
       case 'arealabel.set': return FL.areaLabelUndo(e);
       case 'trip.set': return FL.tripUndo(e);
+      case 'rmark.set': return FL.rmarkUndo(e);                 // a mark on a ridgewalking feature (ridge-marks.js)
       default: return null;
     }
   }

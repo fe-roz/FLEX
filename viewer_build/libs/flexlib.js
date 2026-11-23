@@ -2218,6 +2218,14 @@
     out.prev = now;
     return out;
   }
+  // The change log's wording for an rmark.set (the phone's log and the desktop's History say the same).
+  function rmarkDescribe(e) {
+    if (e.removed === true) return 'Mark on a ridgewalking feature removed';
+    if (e.removed === false && !e.kind) return 'Mark on a ridgewalking feature put back';
+    const k = e.kind ? (RMARK_LABELS[e.kind] || e.kind) : null, note = e.note ? ' \u2014 \u201c' + String(e.note).slice(0, 60) + '\u201d' : '';
+    if (e.prev === null) return 'Ridgewalking feature marked: ' + (k || '?') + note;
+    return 'Ridgewalking mark ' + (k ? 'changed to ' + k : 'note changed') + note;
+  }
   /**
    * Which mark speaks for which feature. marks: [{ id, lon, lat, h?, updated: { t } … }] (liveRmarks, or an export's);
    * features: [{ id, lon, lat, h?, box?: [west m, south m, east m, north m] round its anchor … }].
@@ -2291,7 +2299,7 @@
   }
 
   return {
-    RMARK_KINDS, RMARK_LABELS, RMARK_COLOURS, RMARK_MATCH_M, RMARK_BOX_PAD_M, RMARK_UP_M, liveRmarks, rmarkBody, rmarkUndo, rmarkMatch, rmarkNear, rmarkMetres, rmarksPayload, rmarkFromExport,   // ridgewalking marks (the section above)
+    RMARK_KINDS, RMARK_LABELS, RMARK_COLOURS, RMARK_MATCH_M, RMARK_BOX_PAD_M, RMARK_UP_M, liveRmarks, rmarkBody, rmarkUndo, rmarkMatch, rmarkNear, rmarkMetres, rmarksPayload, rmarkFromExport, rmarkDescribe,   // ridgewalking marks (the section above)
     INV, invKey, invQty, invItems, invPhotos, invDate, invAge, invMark, replayInventories, liveInventories, invsOn, invSetBody, invLogBody, invLogRemoveBody, invUndo, invAdoptBodies, invMoveEntries, invMoveClear, invPhotoBlobs, featureInvMove, invLine, invPayload,   // inventories (the section above)
     FORMAT, FT, DOCS, projScope, scopeProject, sha256, uid, clone, nowIso, same, cmp, sortEntries, surveyCode,
     T, parseTarget, areaHas, DOC_KINDS, DOC_KIND_LABELS, docMedia, dateKey, resolveProposals, reviewQueue, causalOrder, LEAD, LEAD_FIELDS, leadLists, statusLabel, leadActive, heads,
