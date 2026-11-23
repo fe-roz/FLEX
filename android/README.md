@@ -141,6 +141,14 @@ without them gets `null` and looks as before. A map imported with an older
 build of the app has to be imported again (or updated from the same zip) to
 get those files. The build command is unchanged.
 
+A ridgewalking export also carries `ridge_features.json` (the list of features:
+anchor, box, depth, returns, true entrance / guessed, lon / lat) and, when the
+project had marks in the area, `ridge_marks.json`; both are in `RIDGE_FILES`
+and named in `RIDGE`. `viewer_build/libs/ridge-marks.js` uses them: tap a
+feature, mark it cave / pit / nothing / not reached. A mark is a record of the
+map's project (`rmark.set` in the library's log, rules in `flexlib.js`), so it
+needs no new storage and travels in the sync file as it is.
+
 The viewer is bundled in the app, not taken from each export, so a viewer fix
 reaches every map with one rebuild; it reads every older export layout.
 
