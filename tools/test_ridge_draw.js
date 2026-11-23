@@ -24,7 +24,7 @@ ok('a setting on top of saved ones keeps the rest', RD.clampSettings({ size: '5'
 
 // ── patches.bin ──
 const pb = Buffer.alloc(16 + 3 * 12); pb.write('RWQ1', 0, 'latin1'); pb.writeUInt32LE(2, 4); pb.writeUInt32LE(1, 8); pb.writeFloatLE(0.3, 12);
-[[10.15, 20.15, 500], [10.45, 20.15, 500.5], [40.15, 5.15, 498]].forEach((p, i) => p.forEach((v, k) => pb.writeFloatLE(v, 16 + (i * 3 + k) * 4)));
+[[10.15, 20.15, 500], [10.45, 20.15, 500.5], [50.15, 5.15, 498]].forEach((p, i) => p.forEach((v, k) => pb.writeFloatLE(v, 16 + (i * 3 + k) * 4)));
 const ab = b => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
 const Q = RD.parsePatchCells(ab(pb));
 ok('RWQ1: counts of true and guessed cells, the cell, the centres', Q.nTrue === 2 && Q.nGuess === 1 && near(Q.cell, 0.3) && near(Q.xyz[3], 10.45) && Q.xyz[8] === 498);
