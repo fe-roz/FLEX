@@ -96,6 +96,8 @@ with tempfile.TemporaryDirectory() as tmp:
     real_glb = et.export_glb
     def spy_glb(vertices, faces, uvs, out_path, progress=print):
         seen['v'] = np.asarray(vertices).copy(); seen['f'] = np.asarray(faces).copy()
+        if et.pygltflib is None:                       # an interpreter without it: the mesh is what is checked
+            Path(out_path).write_bytes(b'glb'); return
         return real_glb(vertices, faces, uvs, out_path, progress=progress)
     et.export_glb = spy_glb
     d = 0.0009
@@ -285,7 +287,7 @@ with tempfile.TemporaryDirectory() as tmp:
     dem = (np.fromfunction(lambda i, j: 0.02 * i + 3 * np.sin(j / 9.0), (90, 120))).astype(np.float32)
     xb = np.arange(91) * 0.5; yb = np.arange(121) * 0.5
     v1, f1 = et.build_mesh(dem, xb, yb, 0, 0, max_triangles=6000, progress=lambda m: None)
-    v2, f2 = et.build_mesh(dem, xb, yb, 0, 0, max_triangles=6000, progress=lambda m: None, extra=None, force=None, flat_div=4)
+    v2, f2 = et.build_mesh(dem, xb, yb, 0, 0, max_triangles=6000, progress=lambda m: None, score=None, force=None, flat_div=4)
     check('build_mesh: defaults give the same bytes', v1.tobytes() == v2.tobytes() and f1.tobytes() == f2.tobytes())
 
 print(f'{passes} passed, {fails} failed ({time.time() - T0:.1f} s)')

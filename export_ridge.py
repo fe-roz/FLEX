@@ -28,9 +28,14 @@ import numpy as np
 SCRIPT_DIR = Path(__file__).parent
 PATCH_LIFT = 0.08                 # guessed openings lie this far above the ground (m)
 DEPTH_CAP = 20                    # the viewer's depth ramp ends here (m)
-# Mesh detail for this mode: slope at or past STEEP_FULL counts as much as the
-# sharpest curvature; flat ground is left to the coarse background grid.
+# Mesh detail for this mode, in real units (the normal export ranks cells by
+# curvature relative to the scene's own, so on quiet ground it spends its
+# triangles on noise). Slope from STEEP_FROM degrees counts, STEEP_FULL and
+# steeper come first; so do sharp edges: bending (1/m, of the lid smoothed
+# over EDGE_SIGMA cells) from EDGE_FROM, which 3 cm of roughness stays under.
+# Everything quieter scores 0 and is left to the coarse background grid.
 STEEP_FROM, STEEP_FULL = 12.0, 35.0
+EDGE_SIGMA, EDGE_FROM, EDGE_FULL = 1.5, 0.15, 0.6
 RIM_CELLS = 3                     # full detail this many cells round a true hole
 FLAT_DIV = 10                     # background grid = 1/10 of the triangles (normal export: 1/4)
 BRUSH_CLASSES = ((0.6, (0x1f, 0x5f, 0x1f, 255)),        # dense
@@ -103,31 +108,38 @@ class Ridge:
         the cells to cut out and build_mesh's options for this mode.
         `clipped`: a polygon cuts the mesh, so blank cells along its line are
         left to that cut (the mesh ends exactly at the line, not at cells)."""
-        from scipy.ndimage import binary_dilation, binary_erosion
+        from scipy.ndimage import binary_dilation, binary_erosion, gaussian_filter, laplace
         x_bins = self.ox + np.arange(self.nx + 1) * self.cell
         y_bins = self.oy + np.arange(self.ny + 1) * self.cell
         true = self.holes == 1
         blank = binary_erosion(self.blank, iterations=3) if clipped else self.blank
         drop = (true | blank).T
         slope = self.slope()
-        extra = np.clip((slope - STEEP_FROM) / (STEEP_FULL - STEEP_FROM), 0.0, None)   # > 1 past STEEP_FULL: steepest first
+        score = np.clip((slope - STEEP_FROM) / (STEEP_FULL - STEEP_FROM), 0.0, None)   # > 1 past STEEP_FULL: steepest first
+        bend = np.abs(laplace(gaussian_filter(self.filled, EDGE_SIGMA))) / (self.cell * self.cell)
+        score = np.maximum(score, np.clip((bend - EDGE_FROM) / (EDGE_FULL - EDGE_FROM), 0.0, 1.0)).astype(np.float32)
+        del bend
         force = binary_dilation(true, iterations=RIM_CELLS) | binary_dilation(self.holes == 2)
         force &= ~true
         return (self.filled.T.copy(), x_bins, y_bins, drop,
-                dict(extra=extra.T, force=force.T, flat_div=FLAT_DIV))
+                dict(score=score.T, force=force.T, flat_div=FLAT_DIV))
+
+    def _slope_shade(self):
+        if getattr(self, '_ss', None) is None:
+            from area_maps import slope_shade          # the multidirectional shade: one implementation
+            self._ss = slope_shade(self.filled, self.cell)
+        return self._ss
 
     def slope(self):
         """Slope of the lid, degrees, [ny, nx] south-up."""
-        from area_maps import slope_shade
-        return slope_shade(self.filled, self.cell)[0]
+        return self._slope_shade()[0]
 
     def hillshade(self, max_px=16384, tone=None):
         """The multidirectional hillshade of the lid as a PIL 'L' image, north
         up, on exactly the grid's rectangle. `tone` stretches 0..1 shade
         (export_terrain._tone_map, as the normal export's hillshade)."""
         from PIL import Image
-        from area_maps import slope_shade
-        shade = slope_shade(self.filled, self.cell)[1][::-1]
+        shade = self._slope_shade()[1][::-1]
         if tone is not None:
             shade = tone(shade)
         img = Image.fromarray(np.clip(shade * 255.0 + 0.5, 0, 255).astype(np.uint8))

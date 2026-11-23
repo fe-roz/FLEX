@@ -630,7 +630,7 @@ def filter_spikes(dem, resolution, radius_m=10.0, threshold_m=1.5, progress=prin
 # ──────────────────────────────────────────────────────────────────────────────
 
 def build_mesh(dem, x_bins, y_bins, x_origin, y_origin, max_triangles=2_000_000, progress=print,
-               drop=None, clip=None, extra=None, force=None, flat_div=4):
+               drop=None, clip=None, score=None, force=None, flat_div=4):
     """
     Build a curvature-adaptive TIN mesh from a DEM grid.
 
@@ -661,10 +661,12 @@ def build_mesh(dem, x_bins, y_bins, x_origin, y_origin, max_triangles=2_000_000,
     centre is outside go. The vertex budget is spent inside the polygon.
 
     For the ridgewalking export only (export_ridge.py; the defaults leave the
-    mesh exactly as it was): `extra` is one more importance per cell, taken
-    where it is larger than the curvature's (steep ground); `force` marks
-    cells that are always kept (the rims of the holes); `flat_div` is the
-    share of the triangles the background grid gets (1 / flat_div).
+    mesh exactly as it was): `score` is the importance per cell used in
+    place of the curvature's (steep ground and sharp edges, in real units, 0
+    on quiet ground: cells at 0 are never picked, however much budget is
+    left, so flat ground stays on the background grid); `force` marks cells
+    that are always kept (the rims of the holes); `flat_div` is the share of
+    the triangles the background grid gets (1 / flat_div).
     """
     from scipy.ndimage import laplace, uniform_filter, binary_dilation, binary_erosion
     from scipy.spatial import Delaunay
@@ -694,8 +696,8 @@ def build_mesh(dem, x_bins, y_bins, x_origin, y_origin, max_triangles=2_000_000,
     # Normalise against robust max (99th pct) to ignore extreme outliers
     curv_scale = float(np.percentile(curv, 99)) + 1e-9
     curv_norm = np.clip(curv / curv_scale, 0.0, 1.0)
-    if extra is not None:
-        curv_norm = np.maximum(curv_norm, np.asarray(extra, dtype=curv_norm.dtype).ravel())
+    if score is not None:
+        curv_norm = np.asarray(score, dtype=curv_norm.dtype).ravel()
 
     # ── 2. Background subgrid (flat areas) ───────────────────────────────────
     # flat_step: coarse spacing for genuinely flat cells.
@@ -726,6 +728,10 @@ def build_mesh(dem, x_bins, y_bins, x_origin, y_origin, max_triangles=2_000_000,
         threshold = float(np.partition(cand, len(cand) - n_curv_budget)
                           [len(cand) - n_curv_budget])
         curv_mask = curv_norm >= threshold
+        if score is not None:
+            curv_mask &= curv_norm > 0
+    elif score is not None and n_curv_budget > 0:
+        curv_mask = curv_norm > 0          # budget to spare: every cell that matters, and no more
     else:
         curv_mask = np.zeros(rows * cols, dtype=bool)
     del cand
@@ -2294,7 +2300,7 @@ def main():
         help='With --area-dir: run the spike filter (--spike-threshold) on the area ground anyway.')
     ap.add_argument('--ridgewalk', action='store_true',
         help='V2 - Ridgewalking: run ridgewalk.py on the LiDAR and build the terrain from its ground, '
-             'with real holes at true entrances, plus the ridge files for FLEX Ridgewalk.')
+             'with real holes at true entrances, plus the ridge files for FLEX Field.')
     ap.add_argument('--ridgewalk-dir', default=None, metavar='DIR',
         help='With or without --ridgewalk: use this already computed ridge folder (ridgewalk.py --out DIR).')
     args = ap.parse_args()
