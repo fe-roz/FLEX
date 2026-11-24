@@ -17,7 +17,7 @@
 //
 //   GroundDrag.init({ camera, controls, dom, groundZ(x, y), bounds() -> {minX, minY, maxX, maxY, cell} | null,
 //                     saved, save(on), wake(), following() -> bool, headingLocked() -> bool })
-//   GroundDrag.on() / setOn(bool) / sheet({ head, chips })       the switch (⋯ More)
+//   GroundDrag.on() / setOn(bool) / sheet({ head, chips, sheet }) the switch (⋯ More)
 //   GroundDrag.math                                             the pure half (tools/test_ground_drag.js)
 (function (root) {
   'use strict';
@@ -318,6 +318,8 @@
   function sheet(ui) {
     ui.head('Touch');
     ui.chips([['✋', 'Drag the ground', on, function (v) { setOn(v); }]]);
+    var row = ui.sheet && ui.sheet.lastElementChild, chip = row && row.firstElementChild;
+    if (chip) { chip.style.gridColumn = '1 / -1'; chip.title = 'One finger moves the map, pinch zooms to the spot between the fingers, a twist turns it, two fingers up or down tilt it. Off: one finger orbits.'; }
   }
 
   var api = { init: init, on: function () { return on; }, setOn: setOn, sheet: sheet, math: math,

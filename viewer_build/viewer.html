@@ -4764,7 +4764,7 @@ function renderDisplaySheet() {
 function renderMoreSheet() {
   sheetHead('Units');
   sheetSeg(['Feet', 'Metres'], UNITS === 'm' ? 1 : 0, i => { setUnits(i ? 'm' : 'ft'); rerenderSheet(); });
-  if (window.GroundDrag) GroundDrag.sheet({ head: sheetHead, chips: sheetChips });   // Touch: Drag the ground (libs/ground-drag.js)
+  if (window.GroundDrag) GroundDrag.sheet({ head: sheetHead, chips: sheetChips, sheet: sheetEl });   // Touch: Drag the ground (libs/ground-drag.js)
   sheetHead('Route difficulty');
   [['Narrow below', 'narrow', 'ft wide', 0.5], ['Stooping below', 'stoop', 'ft high', 0.5], ['Crawling below', 'crawl', 'ft high', 0.5],
    ['Steep from', 'steepDeg', '° (and at least the drop below)', 5], ['Steep drop of', 'steepDrop', 'ft up or down', 1]].forEach(([lab, k, unit, step]) => {
