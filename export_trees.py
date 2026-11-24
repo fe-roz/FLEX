@@ -36,9 +36,12 @@ SCRIPT_DIR = Path(__file__).parent
 MAGIC = b'FTR2'                     # version 2: + the crown's base (version 1, "FTR1", 20 bytes, had none; unpack reads both)
 RECORD = 24                         # bytes a tree in trees.bin
 CONE, ROUND, MOUND = 0, 1, 2        # trees.bin kinds
-VEG_DOME, VEG_CONE, VEG_BRUSH = 0, 1, 2      # shapes.bin kinds (veg_shapes.py)
+VEG_DOME, VEG_CONE, VEG_BRUSH, VEG_TALL_BRUSH = 0, 1, 2, 3      # shapes.bin kinds (veg_shapes.py)
 # A crown this low is drawn as a mound, like brush: the low layer under tall
-# trees and shrubs the crown finder took for trees.
+# trees and shrubs the crown finder took for trees. Taller brush is told from
+# trees by its shape, where the returns are: veg_shapes.py marks it (kind 3,
+# tall_brush) and it is a mound here too, as tall and as wide as measured. A
+# shapes.bin made before that kind has none, and only this height decides.
 LOW_TREE_M = 3.0
 # Sides of the solids by how many there are (the viewer has three levels):
 # 0 full, 1 fewer sides, 2 fewest.
@@ -158,8 +161,8 @@ def bbox_ring(bbox):
 
 
 def kinds_of(recs):
-    """trees.bin kind per shapes.bin record [n, 12]: brush mounds and low
-    crowns -> mound; a tapering crown -> cone; else round."""
+    """trees.bin kind per shapes.bin record [n, 12]: brush mounds, tall brush
+    and low crowns -> mound; a tapering crown -> cone; else round."""
     recs = np.asarray(recs, np.float32).reshape(-1, 12)
     vk, h = recs[:, 6], recs[:, 3]
     prof = recs[:, 8:12]                                   # r1..r4 at 10 / 35 / 60 / 85 % of the crown
@@ -168,7 +171,7 @@ def kinds_of(recs):
     # lower half" alone would make nine trees in ten a cone; a crown that swells above its start never is one.
     swells = prof[:, 2:].max(axis=1) > prof[:, :2].max(axis=1)
     kind = np.where((vk == VEG_CONE) & ~swells, CONE, ROUND).astype(np.uint8)
-    kind[(vk == VEG_BRUSH) | (h <= LOW_TREE_M)] = MOUND
+    kind[(vk == VEG_BRUSH) | (vk == VEG_TALL_BRUSH) | (h <= LOW_TREE_M)] = MOUND
     return kind
 
 

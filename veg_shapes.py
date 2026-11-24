@@ -17,7 +17,10 @@ vegetation brief; outputs in OUTDIR:
 
     veg.json     the index: origin, frame, bbox, counts, stats, params
     shapes.bin   N x 12 float32: x y zg height radius base kind density
-                 r1 r2 r3 r4 (version 2; record 48 bytes)
+                 r1 r2 r3 r4 (version 2; record 48 bytes). kind: 0 dome,
+                 1 cone, 2 brush mound, 3 tall brush (a crown measured like
+                 a tree's that is brush by its shape; a reader that does not
+                 know 3 draws it as a dome, as before the kind existed)
     shell.bin    V x 4 float32 (x y z hag) then T x 3 uint32 (CCW outside)
     ground.bin   ny x nx float32, row 0 south, the job's ground (coarse)
     preview.png  top-down picture (ground shading, canopy, crowns, brush)
@@ -68,6 +71,11 @@ How, in plain words:
             top is narrow (r4 <= 0.6) and the crown is at least twice as
             long as it is wide, else dome. Density = share of the column's
             returns caught by the crown above its base.
+  tall brush  a crown under TALL_SURE_M that is brush by its shape (kind 3,
+            see tall_brush): no taller than TALL_LOW_M, or part of a
+            flat-topped canopy joined to neighbours of its own height;
+            never a crown on a clear trunk that stands apart, a narrow
+            peaked cone, or one with too few returns to say.
   brush     returns min_height..brush_top, as a share of all returns per
             cell; cells under trees whose crown starts low are the tree's
             own branches and are left out. Brushy cells are pooled in tiles
@@ -719,6 +727,73 @@ BRUSH_PROFILE = (1.0, 0.9, 0.7, 0.4)  # a low dome, unless measured
 PRIOR = {0: (0.70, 1.0, 0.90, 0.50), 1: (1.0, 0.80, 0.50, 0.20)}
 
 
+# Tall brush (kind 3): a crown the tree finder measured that is brush by its
+# shape. Chosen on real thickets (side profiles of the returns, about 50 per
+# m2): there a crown of 3 to 6 m has its base at 0.5 to 1.9 m whatever its
+# height (a blob to the ground, or a leafy shell over bare stems), while real
+# trees show bases of 2 to 14 m; and a thicket is a flat-topped canopy joined
+# to neighbours of the same height, cut into "crowns" by the watershed.
+TALL_SURE_M = 8.0        # this tall or taller: a tree, whatever its shape
+TALL_LOW_M = 6.0         # up to this: brush unless it shows a trunk or is a spire
+TRUNK_BASE_M = 2.0       # a clear trunk: the crown starts at least this high ...
+TRUNK_BASE_SHARE = 0.4   # ... and at least this share of the height up
+JOINED_SHARE = 0.5       # joined: this share of the canopy around the crown is
+JOINED_BAND = (0.6, 1.4)  # within this band of the crown's own height
+FLAT_TOP = 0.7           # flat-topped: mean canopy height over the crown / its height
+TALL_MIN_RETURNS = 40    # fewer returns kept by the crown: no evidence, a tree as before
+RING_OUT = (1.0, 2.5)    # where the canopy around a crown is read: metres outside its radius
+RING_N = 16              # samples a ring
+
+
+def tall_brush(height, base, cone, flat, joined, measured):
+    """The rule, per crown (arrays): True = tall brush, not a tree.
+    height, base in metres; cone = the outline's label; flat = mean canopy
+    height over the crown / height; joined = share of the canopy around the
+    crown that is about as tall as it (JOINED_BAND); measured = enough
+    returns and slices to say anything.
+
+      a tree, always:  height >= TALL_SURE_M; not measured;
+                       a clear trunk standing apart (base >= TRUNK_BASE_M and
+                       >= TRUNK_BASE_SHARE of the height, joined < JOINED_SHARE:
+                       inside a thicket a high base is the thicket's leafy
+                       shell, not a trunk);
+                       a spire (a cone that is not flat-topped: a young conifer
+                       has branches to the ground but a narrow peak)
+      else brush when: height <= TALL_LOW_M, or joined and flat-topped
+                       (a thicket that reaches over TALL_LOW_M)
+    """
+    height = np.asarray(height, np.float64)
+    base = np.asarray(base, np.float64)
+    flat = np.asarray(flat, np.float64)
+    joined = np.asarray(joined, np.float64)
+    cone = np.asarray(cone, bool)
+    apart = joined < JOINED_SHARE
+    trunk = (base >= np.maximum(TRUNK_BASE_M, TRUNK_BASE_SHARE * height)) & apart
+    spire = cone & (flat < FLAT_TOP)
+    thicket = ~apart & (flat >= FLAT_TOP)
+    return (height < TALL_SURE_M) & np.asarray(measured, bool) & ~trunk & \
+        ~spire & ((height <= TALL_LOW_M) | thicket)
+
+
+def canopy_around(chm_s, x, y, radius, height, cx0, cy0, cell):
+    """Share of the canopy around each crown that is about as tall as it:
+    chm_s read on two rings (RING_OUT metres outside the radius), the share
+    of samples within JOINED_BAND of the crown's height. Outside the grid
+    counts as open."""
+    ang = np.arange(RING_N) * (2.0 * math.pi / RING_N)
+    ny, nx = chm_s.shape
+    vals = []
+    for dr in RING_OUT:
+        rr = (np.asarray(radius, np.float64) + dr)[:, None]
+        col = np.rint((np.asarray(x)[:, None] + rr * np.cos(ang) - cx0) / cell).astype(np.int64)
+        row = np.rint((cy0 - (np.asarray(y)[:, None] + rr * np.sin(ang))) / cell).astype(np.int64)
+        inside = (col >= 0) & (row >= 0) & (col < nx) & (row < ny)
+        v = np.where(inside, chm_s[np.clip(row, 0, ny - 1), np.clip(col, 0, nx - 1)], 0.0)
+        vals.append(v)
+    v = np.concatenate(vals, axis=1) / np.maximum(np.asarray(height, np.float64), 0.1)[:, None]
+    return ((v >= JOINED_BAND[0]) & (v <= JOINED_BAND[1])).mean(axis=1)
+
+
 def _group_quantile(hist, q):
     """Per row of a (rows, bins) histogram, the q quantile in bin units
     (linear inside the bin); NaN for empty rows."""
@@ -734,9 +809,11 @@ def _group_quantile(hist, q):
 
 
 def tree_records(V, f_c, chm, chm_s, lab, cg, tops_r, tops_c, tot_c,
-                 min_h, brush_top, kinds_mode="auto", keep_m2=16.0):
+                 min_h, brush_top, kinds_mode="auto", keep_m2=16.0,
+                 tall_mode="auto"):
     """Per crown: position, height, base, the measured outline (radius at
-    PROFILE heights and the widest), kind, density. Returns (records,
+    PROFILE heights and the widest), kind (0 dome, 1 cone, 3 tall brush;
+    tall_mode "off": never 3), density. Returns (records,
     diag, base of every label for the brush)."""
     from scipy import ndimage
     n = len(tops_r)
@@ -982,6 +1059,17 @@ def tree_records(V, f_c, chm, chm_s, lab, cg, tops_r, tops_c, tot_c,
     rec[:, 6] = kind[1:]
     rec[:, 7] = dens[1:]
     rec[:, 8:12] = fracs[1:]
+    # Tall brush: a crown that is brush by its shape (see tall_brush).
+    flat = (np.bincount(L, chm[rr, cc], minlength=n + 1)
+            / np.maximum(ncell, 1))[1:] / hgt[1:]
+    joined = canopy_around(chm_s, ax[1:], ay[1:], rec[:, 4], hgt[1:],
+                           cx0, cy0, c)
+    measured = ~weak[1:] & (cntc[1:] * 1.0 >= TALL_MIN_RETURNS)
+    if tall_mode != "off":
+        tb = tall_brush(hgt[1:], base[1:], kind[1:] == 1, flat, joined, measured)
+        rec[tb, 6] = 3.0
+    if DEBUG is not None:
+        DEBUG.update(flat=flat, joined=joined, measured=measured)
     # A small crown whose returns nearly all fit its neighbours better is
     # a sliver of them, not a tree (it would draw as a thin spike).
     sliver = weak[1:] & (rad_area[1:] < 1.5)
@@ -1288,7 +1376,10 @@ def preview(path, frame, dem, ggrid, chm, cg, recs, bbox, has_data=None,
         if rec[6] == 2:
             ring(rec[0], rec[1], rec[4], (150, 110, 60), fill=True)
     for rec in recs:
-        if rec[6] != 2:
+        if rec[6] == 3:                          # tall brush: an outline in the brush colour
+            ring(rec[0], rec[1], rec[4], (150, 110, 60))
+    for rec in recs:
+        if rec[6] < 2:
             ring(rec[0], rec[1], rec[4],
                  (10, 60, 20) if rec[6] == 1 else (230, 255, 120))
             ci, ri = int((rec[0] - x0) / px), int((y1 - rec[1]) / px)
@@ -1326,7 +1417,7 @@ def clean_params(params):
         raise RuntimeError("need 0 <= min_height < brush_top <= 20")
     if out["max_triangles"] < 1000:
         raise RuntimeError("max_triangles must be at least 1000")
-    for k in ("kinds", "area_bbox_utm"):        # tests and diagnostics
+    for k in ("kinds", "tall_brush", "area_bbox_utm"):        # tests and diagnostics
         if k in p:
             out[k] = p[k]
     return out
@@ -1496,7 +1587,8 @@ def run(params, out_dir, say=say_default, area_dir=None):
         trees, diag, bases = tree_records(V, f_c, chm, chm_s, lab, cg, tr, tc,
                                           tot_c, min_h, brush_top,
                                           kinds_mode=prm.get("kinds", "auto"),
-                                          keep_m2=D["keep"])
+                                          keep_m2=D["keep"],
+                                          tall_mode=prm.get("tall_brush", "auto"))
         say(f"  {len(tr):,} crowns ({n_merged:,} bumps joined to their crown, "
             f"{n_lower:,} in a lower layer under taller trees), "
             f"outlines measured ({diag.get('seconds', 0):.1f} s)")
@@ -1523,13 +1615,15 @@ def run(params, out_dir, say=say_default, area_dir=None):
                                    np.median(trees[:, 8:12], axis=0)]
                 if len(trees) else [],
                 "seconds": round(diag["seconds"], 2)}
-        counts = {"trees": int(len(trees)),
+        n_tall = int((trees[:, 6] == 3).sum())
+        counts = {"trees": int(len(trees)) - n_tall,
                   "cones": int((trees[:, 6] == 1).sum()),
                   "domes": int((trees[:, 6] == 0).sum()),
+                  "tall_brush": n_tall,
                   "brush": int(len(brush))}
         say(f"  {counts['trees']:,} trees ({counts['cones']:,} cones, "
-            f"{counts['domes']:,} domes), {counts['brush']:,} brush mounds "
-            f"({time.time() - t0:.1f} s)")
+            f"{counts['domes']:,} domes), {n_tall:,} crowns of tall brush, "
+            f"{counts['brush']:,} brush mounds ({time.time() - t0:.1f} s)")
 
     # Shell.
     shell = None
@@ -1603,7 +1697,7 @@ def run(params, out_dir, say=say_default, area_dir=None):
                      "x0": gx0, "y0": gy0,
                      "note": "row 0 south; sample (i, j) at x0 + i*cell, "
                              "y0 + j*cell (cell centres)"}
-    trees_h = recs[recs[:, 6] != 2, 3] if len(recs) else np.zeros(0)
+    trees_h = recs[recs[:, 6] < 2, 3] if len(recs) else np.zeros(0)
     timings["write_s"] = round(time.time() - t0, 2)
     try:
         preview(os.path.join(out_dir, "preview.png"), frame, dem, ggrid, chm,
@@ -1660,7 +1754,7 @@ def outline_at(prof, u):
 def synth_scene(seed=3, density=20.0):
     """Points (local x, y, z, class) and the truth over a 200 x 160 m area
     on a gentle slope: conifers (cones), broadleaf (domes), a brush patch,
-    open ground. Returns x, y, z, cls, truth dict."""
+    a clump of tall brush with a small tree beside it, open ground. Returns x, y, z, cls, truth dict."""
     rng = np.random.default_rng(seed)
     W, H = 200.0, 160.0
 
@@ -1737,12 +1831,38 @@ def synth_scene(seed=3, density=20.0):
     px = rng.uniform(bx0, bx1, m); py = rng.uniform(by0, by1, m)
     X.append(px); Y.append(py); Z.append(zf(px, py) + rng.uniform(0.6, 1.6, m))
     C.append(np.full(m, 1, np.uint8))
+    # Tall brush: three joined blobs of 4 to 4.5 m, filled with returns down
+    # to the ground (no trunk space), and beside them a small tree for
+    # contrast: a 4 m crown on a clear 2 m trunk, standing apart. (Drawn
+    # after everything else, so the rest of the scene is what it was.)
+    tall = [(84.0, 40.0, 4.5, 3.2), (89.0, 42.5, 4.0, 3.0), (85.5, 46.0, 4.2, 3.0)]
+    for (tx, ty, h, r) in tall:
+        m = int(math.pi * r * r * density * 1.6)
+        rho = r * np.sqrt(rng.random(m)); a = rng.uniform(0, 2 * math.pi, m)
+        top = h * np.sqrt(np.maximum(1 - (rho / r) ** 2, 0.0))       # half an ellipsoid
+        first = rng.random(m) < 0.5                                   # half on its surface, half anywhere inside
+        pz = np.where(first, top - rng.exponential(0.15, m), rng.uniform(0.2, 1.0, m) * top)
+        px, py = tx + rho * np.cos(a), ty + rho * np.sin(a)
+        X.append(px); Y.append(py); Z.append(zf(px, py) + np.clip(pz, 0.15, None))
+        C.append(np.full(m, 1, np.uint8))
+    small = [(60.0, 45.0, 4.0, 2.0, 2.0)]                             # x, y, height, radius, base
+    for (tx, ty, h, r, b) in small:
+        m = int(math.pi * r * r * density * 2.0)
+        rho = r * np.sqrt(rng.random(m)); a = rng.uniform(0, 2 * math.pi, m)
+        top = b + (h - b) * np.sqrt(np.maximum(1 - (rho / r) ** 2, 0.0))
+        pz = np.where(rng.random(m) < 0.6, top - rng.exponential(0.1, m), b + rng.random(m) * (top - b))
+        px, py = tx + rho * np.cos(a), ty + rho * np.sin(a)
+        X.append(px); Y.append(py); Z.append(zf(px, py) + np.clip(pz, b, None))
+        C.append(np.full(m, 1, np.uint8))
+        X.append(tx + rng.normal(0, 0.1, 4)); Y.append(ty + rng.normal(0, 0.1, 4))
+        Z.append(zf(tx, ty) + rng.uniform(0.3, b, 4)); C.append(np.full(4, 1, np.uint8))
     # Noise: a bird high up, a few low noise returns (class 7).
     X.append(np.array([100.0, 100.3])); Y.append(np.array([20.0, 20.2]))
     Z.append(zf(100.0, 20.0) + np.array([45.0, 45.4])); C.append(np.array([1, 1], np.uint8))
     X.append(np.array([60.0, 61.0])); Y.append(np.array([130.0, 131.0]))
     Z.append(zf(60.0, 130.0) + np.array([25.0, -8.0])); C.append(np.array([7, 7], np.uint8))
     truth = {"trees": trees, "brush": brush, "open": (160.0, 100.0, 200.0, 160.0),
+             "tall_brush": tall, "small_trees": small,
              "W": W, "H": H, "zf": zf}
     return (np.concatenate(X), np.concatenate(Y), np.concatenate(Z),
             np.concatenate(C), truth)
