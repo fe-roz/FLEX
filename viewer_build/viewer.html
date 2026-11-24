@@ -503,7 +503,7 @@
       <details class="help-sec" open>
         <summary class="help-section">GESTURES</summary>
         <div class="help-row"><span class="help-icon">☝️</span><span class="help-desc">Drag to orbit · two-finger drag to pan · pinch to zoom</span></div>
-        <div class="help-row"><span class="help-icon">✋</span><span class="help-desc">Prefer it as in a map app? ⋯ → Touch → <b>Drag the ground</b>: one finger moves the map, pinch zooms to the spot between your fingers, a twist turns the map, two fingers up or down tilt it.</span></div>
+        <div class="help-row"><span class="help-icon">✋</span><span class="help-desc">⋯ → Touch picks how the map moves. <b>Orbit</b>: as above, one finger orbits about the centre of the view. <b>Orbit on the ground</b>: the same gestures, but that centre always sits on the ground, so two fingers slide the view over the terrain. <b>Drag the ground</b>: as in a map app, one finger moves the map, pinch zooms to the spot between your fingers, a twist turns the map, two fingers up or down tilt it.</span></div>
         <div class="help-row"><span class="help-icon">👆</span><span class="help-desc">Tap a station for its card · again: a caver for scale · again: reach (what is within range along the survey) · again: off</span></div>
         <div class="help-row"><span class="help-icon">👆</span><span class="help-desc">A tap finds the nearest station, lead, name or pin within a finger’s width. A drag or a two-finger move is never a tap.</span></div>
       </details>
@@ -4796,7 +4796,7 @@ function renderDisplaySheet() {
 function renderMoreSheet() {
   sheetHead('Units');
   sheetSeg(['Feet', 'Metres'], UNITS === 'm' ? 1 : 0, i => { setUnits(i ? 'm' : 'ft'); rerenderSheet(); });
-  if (window.GroundDrag) GroundDrag.sheet({ head: sheetHead, chips: sheetChips, sheet: sheetEl });   // Touch: Drag the ground (libs/ground-drag.js)
+  if (window.GroundDrag) GroundDrag.sheet({ head: sheetHead, seg: sheetSeg, sheet: sheetEl, rerender: rerenderSheet });   // Touch: Orbit / Orbit on the ground / Drag the ground (libs/ground-drag.js)
   sheetHead('Route difficulty');
   [['Narrow below', 'narrow', 'ft wide', 0.5], ['Stooping below', 'stoop', 'ft high', 0.5], ['Crawling below', 'crawl', 'ft high', 0.5],
    ['Steep from', 'steepDeg', '° (and at least the drop below)', 5], ['Steep drop of', 'steepDrop', 'ft up or down', 1]].forEach(([lab, k, unit, step]) => {
@@ -8251,6 +8251,7 @@ function exitFlyMode() {
   // Fly and crane go anywhere; only the orbit centre they hand back is held
   // inside the band, and the camera stays exactly where it was flown to.
   controls.target.copy(orbitAimInRange(camera.position, dir, terrainScale * 0.1));
+  if (window.GroundDrag) GroundDrag.aim();         // "Orbit on the ground": the centre where the view meets the ground
   controls.update();
 }
 
@@ -8636,9 +8637,9 @@ function orbitOverMap(p) {
   return p;
 }
 
-// ── Drag the ground (libs/ground-drag.js): touch as in a map app, a switch in ⋯ More, off unless chosen ──
+// ── Drag the ground (libs/ground-drag.js): the choice in ⋯ More → Touch: Orbit (as always, the default), Orbit on the ground, Drag the ground ──
 if (window.GroundDrag) GroundDrag.init({
-  camera, controls, dom: renderer.domElement, groundZ: gridZAt, saved: DISP.groundDrag, save: on => dispSave({ groundDrag: on }),
+  camera, controls, dom: renderer.domElement, groundZ: gridZAt, saved: DISP.touchMode, savedOld: DISP.groundDrag, save: m => dispSave({ touchMode: m }),
   bounds: () => (_hgrid ? { minX: _hgrid.minX, minY: _hgrid.minY, maxX: _hgrid.minX + _hgrid.spanX, maxY: _hgrid.minY + _hgrid.spanY, cell: Math.max(_hgrid.spanX, _hgrid.spanY) / _hgrid.levels[0].n } : null),
   wake: () => wakeRender(), following: () => followMode, headingLocked: () => followMode && headingUp,
 });
@@ -8787,6 +8788,7 @@ let _t = 0;
     }
     controls.update();
     clampOrbitTarget(true);
+    if (window.GroundDrag) GroundDrag.snap();      // "Orbit on the ground": the orbit centre onto the ground (does nothing in the other two)
   }
 
   if (window.FlexBrush) FlexBrush.update();      // brush blocks: which tiles this view draws (returns at once when nothing moved)

@@ -1,4 +1,5 @@
-// "Drag the ground" (viewer_build/libs/ground-drag.js): the pure maths of the map-style touch mode.
+// The touch choice of the viewer (viewer_build/libs/ground-drag.js): the pure maths of "Drag the ground" (map-style
+// touch), the choice of three with the old switch carried over, and the snap of "Orbit on the ground".
 // The view ray against three.js itself, the ground march over a made-up hill, the drag that keeps the grabbed spot
 // under the finger, zoom / turn / tilt about a spot with their limits, and the two-finger rule (tilt or zoom).
 //   node tools/test_ground_drag.js
@@ -11,6 +12,7 @@ const near = (a, b, e) => Math.abs(a - b) <= (e || 1e-6);
 const nearV = (a, b, e) => a.every((v, i) => near(v, b[i], e));
 const add = (a, b) => a.map((v, i) => v + b[i]), mul = (a, k) => a.map(v => v * k), sub = (a, b) => a.map((v, i) => v - b[i]);
 const len = a => Math.hypot(...a);
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const FOV = 55, ASPECT = 800 / 600;
 // Where a point of the scene lands on the screen (-1..1), by three.js: the independent check of every move.
 function project(pose, q) {
@@ -153,6 +155,111 @@ let calls = 0; const counted = (x, y) => { calls++; return hill(x, y); };
   ok('…each finger still has its own spot under it, but for the dead zone of the twist (and the turn goes the fingers’ way)',
     near(Math.hypot(pb[0] - pa[0], pb[1] - pa[1]), 2 * rr, 0.5) && lag > 0 && lag < M.TWIST_DEAD + 0.03, [pa, pb, a, b, lag]);
   ok('…the view is still straight down and its height went down with the zoom', M.polar(pose) < 1e-4 && near(pose.p[2], 400 * 100 / 180, 0.5), pose);
+}
+
+// ── The choice of three, and the switch of before ────────────────────────────
+{
+  ok('nothing saved = Orbit, the default', M.modeFrom(undefined, undefined) === 'orbit' && M.modeFrom(null, false) === 'orbit');
+  ok('the old switch on = Drag the ground; off = Orbit', M.modeFrom(undefined, true) === 'drag' && M.modeFrom(undefined, false) === 'orbit');
+  ok('a saved choice wins over the old switch', M.modeFrom('ground', true) === 'ground' && M.modeFrom('orbit', true) === 'orbit' && M.modeFrom('drag', false) === 'drag');
+  ok('a value that is not one of the three falls back to the old switch', M.modeFrom('map', true) === 'drag' && M.modeFrom(7, undefined) === 'orbit' && M.modeFrom(true, undefined) === 'orbit');
+  // the viewer side, with a made-up camera and controls
+  const fresh = () => { delete require.cache[require.resolve('../viewer_build/libs/ground-drag.js')]; return require('../viewer_build/libs/ground-drag.js'); };
+  const world = (saved, savedOld) => {
+    const G = fresh(), saves = [], lis = { addEventListener() {} };
+    const cam = { position: new THREE.Vector3(0, -300, 200), fov: FOV, far: 60000, lookAt(v) { this.looked = v.clone(); } };
+    const controls = { target: new THREE.Vector3(0, 0, 0), enableRotate: true, enablePan: true, enableZoom: true, screenSpacePanning: true, enabled: true, minDistance: 5, maxDistance: 25000, maxPolarAngle: Math.PI * 0.88, update() {} };
+    G.init({ camera: cam, controls, dom: Object.assign({ ownerDocument: lis, getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }) }, lis), groundZ: hill, bounds: () => box, saved, savedOld, save: m => saves.push(m) });
+    return { G, cam, controls, saves };
+  };
+  const flags = c => [c.enableRotate, c.enablePan, c.enableZoom, c.screenSpacePanning];
+  let w = world(undefined, undefined);
+  ok('a new map starts in Orbit with OrbitControls untouched', w.G.mode() === 'orbit' && w.G.on() === false && flags(w.controls).every(v => v === true) && w.saves.length === 0);
+  ok('…and in Orbit the per-frame snap and the aim after flying do nothing', w.G.snap() === false && w.G.aim() === false && w.cam.position.z === 200 && w.controls.target.z === 0);
+  w.G.setMode('ground');
+  ok('Orbit on the ground: OrbitControls keeps rotate, pan and zoom; its pan goes along the ground; saved as "ground"', w.G.mode() === 'ground' && w.G.on() === false && eq(flags(w.controls), [true, true, true, false]) && eq(w.saves, ['ground']), [flags(w.controls), w.saves]);
+  ok('…the snap puts the centre on the ground and the camera up by the same', w.G.snap() === true && near(w.controls.target.z, 60) && near(w.cam.position.z, 260) && w.G.snap() === false, [w.controls.target.z, w.cam.position.z]);
+  w.G.setMode('drag');
+  ok('Drag the ground: rotate, pan, zoom off, the pan rule back; on() is true', w.G.on() === true && eq(flags(w.controls), [false, false, false, true]) && eq(w.saves, ['ground', 'drag']) && w.G.snap() === false);
+  w.G.setOn(false);
+  ok('setOn(false) from Drag = Orbit, everything back', w.G.mode() === 'orbit' && flags(w.controls).every(v => v === true) && eq(w.saves, ['ground', 'drag', 'orbit']));
+  w.G.setMode('ground'); w.G.setOn(false);
+  ok('setOn(false) while on the ground changes nothing (it was not on); setOn(true) = Drag', w.G.mode() === 'ground' && (w.G.setOn(true), w.G.mode() === 'drag') && eq(flags(w.controls), [false, false, false, true]));
+  w.G.setMode('nonsense');
+  ok('an unknown choice is ignored', w.G.mode() === 'drag');
+  ok('the old switch saved on starts in Drag; a saved "ground" starts on the ground', world(undefined, true).G.mode() === 'drag' && world('ground', true).G.mode() === 'ground' && world('ground', true).controls.screenSpacePanning === false);
+  // leaving fly mode on the ground: the centre goes where the view meets the ground, the camera stays
+  w = world('ground');
+  w.cam.position.set(0, -400, 300); w.controls.target.set(0, -350, 250);          // 71 m ahead, in the air
+  const c0 = w.cam.position.toArray();
+  ok('aim(): the centre lands on the ground along the view, the camera is not moved', w.G.aim() === true && eq(w.cam.position.toArray(), c0) && near(w.controls.target.z, hill(w.controls.target.x, w.controls.target.y), 1e-3) &&
+    near(w.controls.target.x, 0, 1e-9) && near((w.controls.target.y + 400) / (300 - w.controls.target.z), 1, 1e-9), w.controls.target.toArray());
+  ok('…and the snap that follows has nothing to do', w.G.snap() === false);
+  w.cam.position.set(0, -400, 300); w.controls.target.set(0, -400.001, 900);
+  ok('aim() at the sky leaves the centre to the snap', w.G.aim() === false);
+}
+
+// ── Orbit on the ground: the snap ────────────────────────────────────────────
+{
+  const MARGIN = 2;
+  const slope = (x, y) => (Math.abs(x) > 500 || Math.abs(y) > 500 ? null : 100 + 0.5 * x + 20 * Math.sin(y / 40));
+  const offs = q => sub(q.p, q.t);
+  let st = {}, pose = { p: [100, -300, 400], t: [120, 40, 77] };
+  let q = M.groundSnap(pose, slope, st, MARGIN);
+  ok('the centre goes to the ground at its x, y', near(q.t[2], slope(120, 40), 1e-12) && q.t[0] === 120 && q.t[1] === 40);
+  ok('…and the camera by the same amount: the offset between them is the same, to the bit, so distance, tilt and bearing are', eq(offs(q).slice(0, 2), offs(pose).slice(0, 2)) && near(offs(q)[2], offs(pose)[2], 1e-12) && near(q.p[2] - pose.p[2], q.dz, 1e-12));
+  // the view: every scene point lands on the screen where it would if the scene had moved down by dz instead
+  const pts = [[60, -80, 25], [300, 200, 240], [120, 40, 77]];
+  ok('…the picture is the same picture, moved straight up or down by that amount (three.js)', pts.every(P => nearV(project(q, add(P, [0, 0, q.dz])), project(pose, P), 1e-9)));
+  ok('again with nothing moved: the same object back, nothing written', M.groundSnap(q, slope, st, MARGIN) === q);
+  // orbiting and zooming: the camera moves, the centre does not
+  let same = true;
+  for (let i = 1; i <= 40; i++) { const o = M.zoom(M.turn(q, q.t, i * 0.1), q.t, 1 - i * 0.01, 5, 25000); if (M.groundSnap(o, slope, st, MARGIN) !== o) same = false; }
+  ok('orbiting and zooming about the centre change nothing, at any angle (no jitter on a slope)', same);
+  // a pan across the slope, in steps: always on the ground, and each step's change of height is the ground's
+  let worstG = 0, worstO = 0, cur = q;
+  for (let i = 0; i < 200; i++) {
+    const m = M.translate(cur, [1.3, 0.9, 0.4]);          // OrbitControls moved both (a little off the level too)
+    const n = M.groundSnap(m, slope, st, MARGIN);
+    worstG = Math.max(worstG, Math.abs(n.t[2] - slope(n.t[0], n.t[1])));
+    worstO = Math.max(worstO, len(sub(offs(n), offs(q))));
+    cur = n;
+  }
+  ok('a pan across a slope: the centre is on the ground after every step and the offset never changes', worstG < 1e-9 && worstO < 1e-9, [worstG, worstO]);
+  // off the map: the height is kept
+  st = {};
+  const edge = M.groundSnap({ p: [480, -200, 500], t: [499, 0, 300] }, slope, st, MARGIN);
+  const out = { p: add(edge.p, [10, 0, 0]), t: add(edge.t, [10, 0, 0]) };
+  ok('off the map (no ground): nothing moves, the last height stays', M.groundSnap(out, slope, st, MARGIN) === out && near(out.t[2], slope(499, 0)));
+  ok('a hole in the grid (NaN, undefined) is the same', M.groundSnap(out, () => NaN, {}, MARGIN) === out && M.groundSnap(out, () => undefined, {}, MARGIN) === out);
+  // the camera stays above the ground when the centre moves down under a ridge
+  const ridge = (x, y) => (x < 0 ? 100 : 0);              // a 100 m step: high ground at x < 0
+  st = {};
+  let a = M.groundSnap({ p: [-50, 0, 130], t: [-10, 0, 100] }, ridge, st, MARGIN);
+  ok('(the camera starts 30 m over the high ground)', st.above === true && a.p[2] === 130);
+  let b = M.groundSnap(M.translate(a, [20, 0, 0]), ridge, st, MARGIN);      // the centre steps off the edge: 100 m down
+  ok('the centre drops 100 m; the camera, still over the high ground, stays above it by the margin', b.t[2] === 0 && near(b.p[2], 100 + MARGIN) && b.lifted === true && b.p[0] === -30, b);
+  b = M.groundSnap(M.translate(b, [40, 0, 0]), ridge, st, MARGIN);
+  ok('…and once the camera is over the low ground too nothing lifts it', b.t[2] === 0 && near(b.p[2], 100 + MARGIN) && !b.lifted);
+  // …but a camera the user took under the ground is left there
+  st = {};
+  a = M.groundSnap({ p: [-50, 0, 60], t: [-10, 0, 100] }, ridge, st, MARGIN);
+  b = M.groundSnap(M.translate(a, [0, 5, 0]), ridge, st, MARGIN);
+  ok('a camera under the ground (orbited there to look up at a cave) is not lifted by a pan', st.above === false && b.p[2] === 60 && !b.lifted);
+  st = {};
+  a = M.groundSnap({ p: [-50, 0, 130], t: [-10, 0, 100] }, ridge, st, MARGIN);
+  const under = { p: [-50, 0, 80], t: a.t };              // orbited under: the centre did not move
+  ok('orbiting under the ground is not stopped', M.groundSnap(under, ridge, st, MARGIN) === under && st.above === false);
+  // the crumbs of a damped pan under a zoom: the centre creeps by fractions of a millimetre while the camera comes down
+  st = {};
+  a = M.groundSnap({ p: [-50, 0, 130], t: [-10, 0, 100] }, ridge, st, MARGIN);
+  const zoomed = { p: [-50, 1e-5, 101], t: [-10, 1e-5, 100] };
+  ok('a zoom that brings the camera to the ground is not a move of the centre: no lift', M.groundSnap(zoomed, ridge, st, MARGIN) === zoomed);
+  ok('…and a camera within the margin still counts as above, so the next pan keeps it out of the ground', st.above === true && M.groundSnap(M.translate(zoomed, [0, 5, 0]), ridge, st, MARGIN).p[2] === 100 + MARGIN);
+  // cost: reads of the height grid per frame
+  let reads = 0; const cnt = (x, y) => { reads++; return slope(x, y); };
+  M.groundSnap(q, cnt, {}, MARGIN);
+  ok('two reads of the height grid per frame, no ray', reads === 2, reads);
 }
 
 console.log(`${pass} passed, ${fail} failed`);
