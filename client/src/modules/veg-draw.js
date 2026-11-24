@@ -4,7 +4,7 @@
 // Two looks to compare:
 //   shapes  one crown per tree, a surface of revolution through the outline the job measured from the tree's own returns
 //           (shapes.bin version 2: radius at 10/35/60/85 % of the crown; version 1: an outline by kind; kind 3, tall
-//           brush, is drawn as brush), closed by a
+//           brush, is drawn as a dome), closed by a
 //           small round cap; a lobed clump per brush patch. All in ONE batched mesh built here with typed arrays, with a
 //           little per-shape variation (turn, slight oval, lumps) from a hash of the position, kept small enough that
 //           the measured outline shows. Two levels of detail in that mesh (see "Level of detail" below): near shapes
@@ -300,8 +300,7 @@
     for (let i = 0; i < n; i++) {
       const o = i * stride;
       let k = Math.round(rec[o + 6]);
-      if (k === 3) k = 2;                                    // tall brush (brush by its shape, veg_shapes.py): drawn as brush, at its measured height and outline
-      if (k !== 0 && k !== 1 && k !== 2) k = 0;
+      if (k !== 0 && k !== 1 && k !== 2) k = 0;            // kind 3 (tall brush by shape, veg_shapes.py) too: drawn as a tree (dome)
       kinds[i] = k; counts[k === 0 ? 'dome' : k === 1 ? 'cone' : 'brush']++;
       let H = Math.max(0.2, num(rec[o + 3], 1)), r = Math.max(0.3, num(rec[o + 4], 1)), base = Math.max(0, num(rec[o + 5], 0));
       if (k === 2) { base = 0; H = Math.min(H, Math.max(caps[i], H * 0.65)); }      // brush: held under a crown, never squashed flat

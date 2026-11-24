@@ -54,17 +54,19 @@ recs = np.array([
 k = xt.kinds_of(recs)
 check('kinds: cone, round, round, cone, round, mound, mound, mound', k.tolist() == [0, 1, 1, 0, 1, 2, 2, 2], k.tolist())
 check('a crown of exactly the low height is a mound, one just over it is a tree', xt.kinds_of(np.array([[0, 0, 0, xt.LOW_TREE_M, 1, 0, 0, 1, 1, 1, 1, 1], [0, 0, 0, xt.LOW_TREE_M + 0.1, 1, 0, 0, 1, 1, 1, 1, 1]], np.float32)).tolist() == [2, 1])
-# tall brush by shape (veg_shapes.py's kind 3): a mound whatever its height or outline; a 4 m crown the step kept as a
-# tree stays one; a shapes.bin from before the kind (the same crowns as kind 0) goes by height alone, as it always did
+# tall brush by shape (veg_shapes.py's kind 3) is a label only: it is drawn as an ordinary round tree at its measured size
+# (height alone decides mounds, as before the kind); brush on the phone comes from the brush grid, not from here
 tall = np.array([
-    [0, 0, 100, 4.0, 3.0, 0.5, 3, .8, 1.0, 0.9, 0.7, 0.4],           # a 4 m blob filled to the ground: mound
-    [10, 0, 100, 7.0, 3.5, 1.5, 3, .8, 0.9, 1.0, 0.9, 0.6],          # 7 m of thicket: mound
+    [0, 0, 100, 4.0, 3.0, 0.5, 3, .8, 1.0, 0.9, 0.7, 0.4],           # a 4 m blob filled to the ground: round
+    [10, 0, 100, 7.0, 3.5, 1.5, 3, .8, 0.9, 1.0, 0.9, 0.6],          # 7 m of thicket: round
     [20, 0, 100, 4.0, 2.0, 2.0, 0, .6, 0.8, 1.0, 0.9, 0.5],          # a 4 m crown on a clear trunk: round
     [30, 0, 100, 5.0, 1.2, 0.5, 1, .8, 1.0, 0.8, 0.5, 0.2],          # a 5 m young conifer: cone
 ], np.float32)
-check('tall brush (kind 3) is a mound; a 4 m crown on a trunk and a 5 m conifer stay trees', xt.kinds_of(tall).tolist() == [2, 2, 1, 0], xt.kinds_of(tall).tolist())
+check('tall brush (kind 3) is a round tree; a 4 m crown on a trunk and a 5 m conifer are trees as ever', xt.kinds_of(tall).tolist() == [1, 1, 1, 0], xt.kinds_of(tall).tolist())
+low3 = tall[:1].copy(); low3[0, 3] = 2.5
+check('…and one no taller than the low height is a mound, by height alone', xt.kinds_of(low3).tolist() == [2])
 before = tall.copy(); before[before[:, 6] == 3, 6] = 0
-check('a shapes.bin from before the kind: over the low height everything is a tree, as it was', xt.kinds_of(before).tolist() == [1, 1, 1, 0] and xt.VEG_TALL_BRUSH == 3 and xt.LOW_TREE_M == 3.0)
+check('a shapes.bin from before the kind gives the same trees.bin kinds', xt.kinds_of(before).tolist() == xt.kinds_of(tall).tolist() == [1, 1, 1, 0] and xt.VEG_TALL_BRUSH == 3 and xt.LOW_TREE_M == 3.0)
 buf = xt.pack(recs[:, 0], recs[:, 1], recs[:, 2], recs[:, 3], recs[:, 4], k, xt.tints_of(recs[:, 0], recs[:, 1]))
 check('trees.bin: FTR2, the count, 24 bytes a tree', buf[:4] == b'FTR2' and int.from_bytes(buf[4:8], 'little') == 8 and len(buf) == 8 + 8 * 24 and xt.RECORD == 24)
 a = xt.unpack(buf)
@@ -167,9 +169,10 @@ with tempfile.TemporaryDirectory() as tmp:
     A3 = xt.unpack(b3)
     check('on that gentle ground the cliff rule removes nothing', c3['cliff'] == 0 and len(A3) == len(T.recs) and all(v == 0 for v in c3['cliff_by_height'].values()), c3)
     tb = T.recs[:, 6] == 3
-    check('the demo\'s clump of tall brush: mounds in trees.bin, as tall and as wide as measured, base 0; the small tree on a trunk beside it a round crown with its base',
-          tb.sum() == veg['shapes']['tall_brush'] == 3 and (A['kind'][tb] == 2).all() and np.allclose(A['h'][tb], T.recs[tb, 3]) and (A['h'][tb] > 3.5).all() and (A['base'][tb] == 0).all() and
-          c['mound'] == nb + int(tb.sum()) + int(((T.recs[:, 6] < 2) & (T.recs[:, 3] <= xt.LOW_TREE_M)).sum()) and
+    check('the demo\'s clump of tall brush: still kind 3 in shapes.bin, round trees in trees.bin at their measured height, radius and crown base, counted as tall_brush; mounds by height alone',
+          tb.sum() == veg['shapes']['tall_brush'] == 3 == c['tall_brush'] and (A['kind'][tb] == 1).all() and np.allclose(A['h'][tb], T.recs[tb, 3]) and (A['h'][tb] > 3.5).all() and
+          np.allclose(A['r'][tb] / 100.0, T.recs[tb, 4], atol=0.006) and np.allclose(A['base'][tb] / 100.0, T.recs[tb, 5], atol=0.006) and
+          c['mound'] == nb + int(((T.recs[:, 6] != 2) & (T.recs[:, 3] <= xt.LOW_TREE_M)).sum()) and
           ((A['kind'] == 1) & (np.abs(A['h'] - 4.0) < 0.4) & (np.abs(A['base'] / 100.0 - 2.0) < 0.5)).sum() == 1, c)
     trees_only = T.recs[:, 6] != 2
     check('the crown\'s base travels: the step\'s own, for trees; none for mounds', (A3['base'][A3['kind'] == 2] == 0).all() and (A3['base'][A3['kind'] != 2] > 0).any() and
@@ -296,6 +299,7 @@ print('Done in 1.5 s')
     z = zipfile.ZipFile(out); names = z.namelist()
     check('the zip carries trees.bin and trees.json', 'trees.bin' in names and 'trees.json' in names, names)
     tb = z.read('trees.bin'); A = xt.unpack(tb); side = json.loads(z.read('trees.json'))
+    check('trees.json counts the round crowns that are tall brush by shape (drawn as trees all the same)', side.get('tall_brush') == 3 and side['round'] >= 3, side)
     check('trees.json: the count, the kinds, the detail and the TREES object by file name', side['count'] == len(A) == len(T.recs) and side['cone'] + side['round'] + side['mound'] == len(A) and side['detail'] == 0 and side['viewer'] == {'version': 1, 'count': len(A), 'detail': 0, 'file': 'trees.bin'}, side)
     check('the log says how many of each', re.search(r'Trees and brush: \d+ \(\d+ cones, \d+ round crowns, \d+ low mounds\), trees\.bin \d+ KB, detail 0', log) is not None, log[-400:])
     check('trees.json counts what the cliff rule left out (nothing on this ground)', side['cliff'] == 0 and 'cliff_by_height' in side and 'a cliff explains' not in log, side)
