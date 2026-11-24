@@ -43,7 +43,7 @@
   var BUILD_MS = 4;                                            // building time a frame
   // A bush's radius in cells: one cell [low brush, tall brush]; a 2 x 2 block. Between LOW_H and TALL_H (m) of
   // height it grows from the first to the second, so tall brush is a shrub and not a post.
-  var WIDTH = [0.64, 0.95], WIDTH2 = [1.12, 1.3], LOW_H = 0.8, TALL_H = 2.2;
+  var WIDTH = [0.72, 0.98], WIDTH2 = [1.3, 1.45], LOW_H = 0.8, TALL_H = 2.2;
   var SIZE_VAR = 0.15, OVAL = 0.1, JITTER = 0.28, JITTER2 = 0.3;      // +- width; oval; place inside the cell (cells)
   var TINT_LO = 0.86, TINT_HI = 1.14;
   var MERGE_DH = 60, MERGE_DO = 0.5;                           // a 2 x 2 block is one bush when heights are within this (cm) and opacities within this
