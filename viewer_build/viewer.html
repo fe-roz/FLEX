@@ -2188,6 +2188,7 @@ setTimeout(() => {
       THREE, scene, camera, brush: typeof BRUSH === 'undefined' ? null : BRUSH, isAssetRef, b64ToArrayBuffer, groundZ: gridZAt,
       dither: window.FlexTrees && FlexTrees.dither, redraw: () => { requestRender(); wakeRender(); },
       onLook: () => { if (_dispRestored) dispCapture(); },
+      detail: DISP.brushDetail, simpleFar: DISP.brushSimple, save: p => dispSave(p),     // ⋯ More → Brush detail, Simpler bushes far away
     });
     // Trees and brush as simple solids (nothing when TREES is null).
     if (window.FlexTrees) FlexTrees.init({
@@ -2196,6 +2197,8 @@ setTimeout(() => {
       redraw: () => { requestRender(); wakeRender(); },
     });
     dispRestoreUi();
+    // The brush grid comes in a moment later: what it then shows (its look, its classes) is this map's start too, not a change to save.
+    if (window.FlexBrush && FlexBrush.active() && window.FlexTrees) FlexBrush.whenReady().then(() => { try { if (_dispRestored && FlexTrees.active()) dispStore.seen({ trees: FlexTrees.serialize() }); } catch (_) {} });
     setP(100, 'Ready');
     setTimeout(hideLoading, 300);
   }, (err) => {
@@ -4799,6 +4802,7 @@ function renderMoreSheet() {
   sheetHead('Units');
   sheetSeg(['Feet', 'Metres'], UNITS === 'm' ? 1 : 0, i => { setUnits(i ? 'm' : 'ft'); rerenderSheet(); });
   if (window.GroundDrag) GroundDrag.sheet({ head: sheetHead, seg: sheetSeg, sheet: sheetEl, rerender: rerenderSheet });   // Touch: Orbit / Surface drag / Drag the ground (libs/ground-drag.js)
+  if (window.FlexBrush && FlexBrush.active()) FlexBrush.sheet({ head: sheetHead, seg: sheetSeg, rerender: rerenderSheet });   // Brush detail: Normal / Far / Very far (libs/brush-blocks.js)
   sheetHead('Route difficulty');
   [['Narrow below', 'narrow', 'ft wide', 0.5], ['Stooping below', 'stoop', 'ft high', 0.5], ['Crawling below', 'crawl', 'ft high', 0.5],
    ['Steep from', 'steepDeg', '° (and at least the drop below)', 5], ['Steep drop of', 'steepDrop', 'ft up or down', 1]].forEach(([lab, k, unit, step]) => {
@@ -4816,6 +4820,7 @@ function renderMoreSheet() {
   sheetRow('⇄', 'Project & sync', ffPid ? (ffP.name || 'project') + ' · sync files to other phones and FLEX' : 'pick or start this map’s project', () => { ffOpenProject(); });
   sheetRow('⇪', 'Export project data', 'notes, leads, documents list, field surveys, the log (JSON)', () => { closeSheet(); ffExportData(); });
   if (window.FF_MAP_ID) sheetRow('🗂', 'Maps', 'back to the list of maps', () => { location.href = '../../assets/flexfield/index.html'; });
+  if (window.FlexBrush && FlexBrush.active()) FlexBrush.sheetLow({ row: sheetRow, rerender: rerenderSheet });   // Simpler bushes far away
   sheetRow('⛶', 'Fullscreen', null, () => { closeSheet(); document.getElementById('btn-fullscreen').click(); });
   sheetRow('?', 'Help', null, () => { closeSheet(); document.getElementById('btn-help').click(); });
   if (window.AboutMap) sheetRow('ⓘ', 'About this map', 'when it was exported, the area, what it carries', () => { closeSheet(); aboutMapOpen(); });
