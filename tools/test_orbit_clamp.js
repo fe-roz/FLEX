@@ -235,8 +235,9 @@ function panRun(pitch, code, frames) {
   const flyBranch = loop.slice(loop.indexOf('if (flyMode) {'), loop.indexOf('} else {\n    // Follow mode keeps'));
   ok('loop clamps once, in the orbit branch', (loop.match(/clampOrbitTarget\(true\)/g) || []).length === 1);
   ok('fly/crane branch is not clamped', !/clampOrbitTarget/.test(flyBranch));
+  ok('…nor snapped to the ground (the touch choice "Orbit on the ground" is for orbiting)', !/GroundDrag/.test(flyBranch) && (loop.match(/GroundDrag\.snap\(\)/g) || []).length === 1);
   ok('clamp runs right after controls.update() in the loop',
-     /controls\.update\(\);\n\s*clampOrbitTarget\(true\);\n\s*\}\n\n(?:\s*if \(window\.FlexBrush\)[^\n]*\n)?\s*renderer\.render/.test(loop));
+     /controls\.update\(\);\n\s*clampOrbitTarget\(true\);\n(?:\s*if \(window\.GroundDrag\) GroundDrag\.snap\(\);[^\n]*\n)?\s*\}\n\n(?:\s*if \(window\.FlexBrush\)[^\n]*\n)?\s*renderer\.render/.test(loop));
   ok('range computed when caves load', /updateOrbitZRange\(\);\n\}/.test(html));
   ok('terrain extent captured at load', /_orbitTerrainZ = \[box\.min\.z, box\.max\.z\]/.test(html) && /_orbitXY = \[box\.min\.x/.test(html));
   ok('exitFlyMode aims into the band', /controls\.target\.copy\(orbitAimInRange\(camera\.position, dir/.test(html));

@@ -1,6 +1,19 @@
-// "Drag the ground" in the portable viewer / FLEX Field (window.GroundDrag): touch that works as in a map app.
+// How the map is moved in the portable viewer / FLEX Field (window.GroundDrag): a choice of three in ⋯ More → Touch.
 //
-// Off (the default) nothing here runs and OrbitControls behaves as always. On, OrbitControls' own rotate / pan /
+//   'orbit'  (the default) nothing here runs and OrbitControls behaves as always.
+//   'ground' "Orbit on the ground": OrbitControls' own gestures, but the orbit centre always sits on the ground. The
+//            viewer calls snap() once per drawn frame, right after controls.update() and its orbit clamp: the centre's
+//            height becomes the ground's at its x, y (the height grid, never a ray cast) and the camera moves up or
+//            down by the same amount, so distance, tilt and bearing stay. Off the map (no ground) the height is kept.
+//            A camera that was above the ground is not carried into it by a move of the centre (CAM_MARGIN above
+//            it); one the user orbited under the ground is left there. Two fingers pan along the ground
+//            (OrbitControls' screenSpacePanning off while this is chosen; put back after). Orbiting and zooming do
+//            not move the centre's x, y, so the snap changes nothing then. Fly-to and focus moves are snapped at
+//            every step, so they end over their place with no jump; following keeps the centre on the ground at the
+//            fix. Leaving fly mode, aim() puts the centre where the view meets the ground, the camera untouched.
+//   'drag'   "Drag the ground", touch that works as in a map app:
+//
+// In 'drag', OrbitControls' own rotate / pan /
 // zoom are switched off (its flags, nothing in the vendored file) and this file moves the camera AND the orbit
 // centre together, so everything that reads controls.target (focus, follow, the orbit clamp) keeps working:
 //   one finger            the spot of ground under the finger stays under it
@@ -16,8 +29,11 @@
 // No inertia and nothing animated: a gesture moves the view only while the fingers move.
 //
 //   GroundDrag.init({ camera, controls, dom, groundZ(x, y), bounds() -> {minX, minY, maxX, maxY, cell} | null,
-//                     saved, save(on), wake(), following() -> bool, headingLocked() -> bool })
-//   GroundDrag.on() / setOn(bool) / sheet({ head, chips, sheet }) the switch (⋯ More)
+//                     saved (the mode), savedOld (the switch of before: true = 'drag'), save(mode), wake(),
+//                     following() -> bool, headingLocked() -> bool })
+//   GroundDrag.mode() / setMode('orbit' | 'ground' | 'drag')    the choice; on() / setOn(bool) = 'drag' or not
+//   GroundDrag.sheet({ head, seg, sheet, rerender })            the choice in ⋯ More
+//   GroundDrag.snap() / aim()                                   'ground' only: see above (both return true if they moved)
 //   GroundDrag.math                                             the pure half (tools/test_ground_drag.js)
 (function (root) {
   'use strict';
@@ -157,11 +173,45 @@
     return out;
   }
 
-  var math = { basis: basis, rayDir: rayDir, planeHit: planeHit, marchRay: marchRay, translate: translate, turn: turn, tilt: tilt,
+  // The choice. What was saved wins; a viewer of before saved only a switch (true = drag the ground).
+  var MODES = ['orbit', 'ground', 'drag'];
+  function modeFrom(saved, savedOld) {
+    if (MODES.indexOf(saved) >= 0) return saved;
+    return savedOld === true ? 'drag' : 'orbit';
+  }
+  // "Orbit on the ground", one drawn frame. The orbit centre goes to the ground's height at its x, y and the camera
+  // with it by the same amount (a rigid move: the camera-to-centre offset is untouched). No ground there (off the
+  // map): nothing moves. st remembers between frames { x, y: where the centre was, above: the camera was at least
+  // `margin` above the ground under it }. When the centre moved and the camera was above the ground, it stays above
+  // (lifted to ground + margin); a camera already under the ground is left alone. Returns the same pose object when
+  // nothing changes, so a still or orbiting view costs two reads of the height grid and no writes.
+  var zOr = function (zAt, x, y) { var z = zAt(x, y); return z === null || z === undefined || isNaN(z) ? null : z; };
+  function groundSnap(pose, zAt, st, margin) {
+    var t = pose.t, p = pose.p, out = pose;
+    var gz = zOr(zAt, t[0], t[1]);
+    var dz = gz === null ? 0 : gz - t[2];
+    if (Math.abs(dz) < 1e-7) dz = 0;
+    var moved = dz !== 0 || st.x !== t[0] || st.y !== t[1];
+    var pz = p[2] + dz;
+    if (dz) out = { p: [p[0], p[1], pz], t: [t[0], t[1], gz], dz: dz };
+    var gc = zOr(zAt, p[0], p[1]);
+    if (gc !== null) {
+      if (moved && st.above && pz < gc + margin) {
+        pz = gc + margin;
+        out = { p: [p[0], p[1], pz], t: out.t, dz: dz, lifted: true };
+      }
+      st.above = pz >= gc + margin - 1e-7;
+    }
+    st.x = t[0]; st.y = t[1];
+    return out;
+  }
+
+  var math = { modeFrom: modeFrom, MODES: MODES, groundSnap: groundSnap, basis: basis, rayDir: rayDir, planeHit: planeHit, marchRay: marchRay, translate: translate, turn: turn, tilt: tilt,
     polar: polar, zoom: zoom, panTo: panTo, twoStart: twoStart, twoStep: twoStep, TWIST_DEAD: TWIST_DEAD, DECIDE_PX: DECIDE_PX };
 
   // ── The viewer side ──────────────────────────────────────────────────────────────────────────────────────────
-  var O = null, on = false, kept = null;
+  var O = null, mode = 'orbit', kept = null, keptSSP = null, snapSt = {};
+  var CAM_MARGIN = 2;                            // metres a camera carried by the centre stays above the ground
   var g = null;            // the gesture: { kind: 'drag' | 'two' | 'orbit', pivot, normal, maxT, two, last }
   var TILT_PER_SCREEN = Math.PI / 2 / 0.6;       // two fingers over 60 % of the screen's height = a right angle
   var WHEEL_K = 0.95;                            // one wheel notch, as OrbitControls
@@ -180,7 +230,7 @@
     var r = O.dom.getBoundingClientRect();
     return rayDir(pose, O.camera.fov, r.width / Math.max(1, r.height), (x - r.left) / r.width * 2 - 1, 1 - (y - r.top) / r.height * 2);
   }
-  var active = function () { return on && O && O.controls.enabled !== false; };
+  var active = function () { return mode === 'drag' && O && O.controls.enabled !== false; };
   var following = function () { return !!(O.following && O.following()); };
   var limits = function () {
     var c = O.controls;
@@ -284,14 +334,16 @@
   }
 
   function apply() {
-    var c = O.controls;
-    if (on && !kept) {
+    var c = O.controls, drag = mode === 'drag', ground = mode === 'ground';
+    if (drag && !kept) {
       kept = { r: c.enableRotate, p: c.enablePan, z: c.enableZoom };
       c.enableRotate = c.enablePan = c.enableZoom = false;
-    } else if (!on && kept) {
+    } else if (!drag && kept) {
       c.enableRotate = kept.r; c.enablePan = kept.p; c.enableZoom = kept.z; kept = null;
     }
-    g = null;
+    if (ground && keptSSP === null) { keptSSP = c.screenSpacePanning; c.screenSpacePanning = false; }
+    else if (!ground && keptSSP !== null) { c.screenSpacePanning = keptSSP; keptSSP = null; }
+    g = null; snapSt = {};
   }
   function init(o) {
     O = o;
@@ -305,24 +357,68 @@
     doc.addEventListener('pointerup', mouseUp);
     doc.addEventListener('pointercancel', mouseUp);
     d.addEventListener('wheel', wheel, { passive: false });
-    on = o.saved === true;
+    mode = modeFrom(o.saved, o.savedOld);
     apply();
+  }
+  function setMode(m) {
+    if (MODES.indexOf(m) < 0 || m === mode) return;
+    mode = m;
+    if (O) { apply(); if (O.save) O.save(mode); if (O.wake) O.wake(); }
   }
   function setOn(v) {
     v = !!v;
-    if (v === on) return;
-    on = v;
-    if (O) { apply(); if (O.save) O.save(on); }
-  }
-  // The switch, in ⋯ More.
-  function sheet(ui) {
-    ui.head('Touch');
-    ui.chips([['✋', 'Drag the ground', on, function (v) { setOn(v); }]]);
-    var row = ui.sheet && ui.sheet.lastElementChild, chip = row && row.firstElementChild;
-    if (chip) { chip.style.gridColumn = '1 / -1'; chip.title = 'One finger moves the map, pinch zooms to the spot between the fingers, a twist turns it, two fingers up or down tilt it. Off: one finger orbits.'; }
+    if (v === (mode === 'drag')) return;
+    setMode(v ? 'drag' : 'orbit');
   }
 
-  var api = { init: init, on: function () { return on; }, setOn: setOn, sheet: sheet, math: math,
+  // 'ground': once per drawn frame, after controls.update() (the viewer's render loop). Nothing here calls update():
+  // a rigid move leaves the camera's aim as it is; after a lift the camera is aimed at the centre again here.
+  function snap() {
+    if (mode !== 'ground' || !O || !O.groundZ) return false;
+    var pose = getPose(), q = groundSnap(pose, O.groundZ, snapSt, CAM_MARGIN);
+    if (q === pose) return false;
+    O.camera.position.z = q.p[2];
+    O.controls.target.z = q.t[2];
+    if (q.lifted) O.camera.lookAt(O.controls.target);
+    return true;
+  }
+  // 'ground', leaving fly mode: the orbit centre goes where the middle of the view meets the ground, so the camera
+  // stays where it was flown to and the view does not change. No ground in view: left to snap().
+  function aim() {
+    if (mode !== 'ground' || !O || !O.groundZ) return false;
+    var pose = getPose(), d = norm(sub(pose.t, pose.p)), box = null, L = limits();
+    try { box = O.bounds && O.bounds(); } catch (_) {}
+    if (!box || !len(d)) return false;
+    var t = marchRay(pose.p, d, O.groundZ, box, Math.min(O.camera.far || 60000, L.maxD));
+    if (t === null || t < L.minD) return false;
+    var q = add(pose.p, mul(d, t));
+    O.controls.target.set(q[0], q[1], q[2]);
+    snapSt = {};
+    return true;
+  }
+
+  // The choice, in ⋯ More: three in a row, and a line that says what the chosen one does.
+  var NAMES = { orbit: 'Orbit', ground: 'Orbit on the ground', drag: 'Drag the ground' };
+  var HINTS = {
+    orbit: 'One finger orbits about the centre of the view, two fingers move it, pinch zooms.',
+    ground: 'The same gestures, but the centre you orbit about stays on the ground: two fingers slide the view over the terrain.',
+    drag: 'As in a map app: one finger moves the map, pinch zooms to the spot between the fingers, a twist turns it, two fingers up or down tilt it.',
+  };
+  function sheet(ui) {
+    ui.head('Touch');
+    var seg = ui.seg(MODES.map(function (m) { return NAMES[m]; }), MODES.indexOf(mode), function (i) { setMode(MODES[i]); if (ui.rerender) ui.rerender(); });
+    if (seg) {
+      seg.id = 'touch-mode';
+      for (var i = 0; i < seg.children.length; i++) { seg.children[i].title = HINTS[MODES[i]]; seg.children[i].style.lineHeight = '1.15'; }
+      var doc = seg.ownerDocument, note = doc.createElement('div');
+      note.id = 'touch-mode-hint'; note.textContent = HINTS[mode];
+      note.style.cssText = 'font-size:11px;opacity:.55;margin:5px 2px 0;line-height:1.3';
+      seg.parentNode.insertBefore(note, seg.nextSibling);
+    }
+  }
+
+  var api = { init: init, on: function () { return mode === 'drag'; }, setOn: setOn, mode: function () { return mode; }, setMode: setMode,
+    snap: snap, aim: aim, sheet: sheet, math: math,
     busy: function () { return g ? g.kind : null; } };
   root.GroundDrag = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
