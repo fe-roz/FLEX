@@ -1835,7 +1835,7 @@ def synth_scene(seed=3, density=20.0):
     # to the ground (no trunk space), and beside them a small tree for
     # contrast: a 4 m crown on a clear 2 m trunk, standing apart. (Drawn
     # after everything else, so the rest of the scene is what it was.)
-    tall = [(84.0, 40.0, 4.5, 3.2), (89.0, 42.5, 4.0, 3.0), (85.5, 46.0, 4.2, 3.0)]
+    tall = [(84.0, 39.5, 4.5, 3.2), (89.0, 42.5, 4.0, 3.0), (85.5, 46.0, 4.2, 3.0)]
     for (tx, ty, h, r) in tall:
         m = int(math.pi * r * r * density * 1.6)
         rho = r * np.sqrt(rng.random(m)); a = rng.uniform(0, 2 * math.pi, m)
