@@ -338,6 +338,22 @@ const hill = (x, y) => 800 + 0.2 * x + 60 * Math.sin(y / 300);
   const g = two.group.children;
   ok('look: tiles share no buffers', g.length > 1 && g[0].geometry.attributes.position !== g[1].geometry.attributes.position && g[0].geometry.index !== g[1].geometry.index && g[0].material === g[1].material);
   two.dispose();
+  // the classes shown (the Light / Medium / Dense chips)
+  const K3 = B.knots([{ min: 0.1 }, { min: 0.3 }, { min: 0.6 }]), L3 = B.lut(K3), Lm = B.mask(L3, K3, [true, false, true]);
+  ok('mask: the bytes of a class that is off have no opacity, the others keep theirs', Lm[26] === L3[26] && Lm[76] === L3[76] && Lm[77] === 0 && Lm[152] === 0 && Lm[153] === L3[153] && Lm[255] === L3[255] && Lm[25] === 0 && B.mask(L3, K3, undefined) === L3);
+  const cl = B.create(mkCtx()); lookAt([0, -60, hill(0, -60) + 25], [0, 0, hill(0, 0)]); cl.settle(camera);
+  const nAll = cl.stats().instances, cAll = cl.stats().cells;
+  cl.setClasses([false, false, true]); cl.settle(camera);
+  const nDense = cl.stats().instances, cDense = cl.stats().cells;
+  ok('look: setClasses takes the bushes of the classes that are off away (dense only: fewer, not none)', nAll > 0 && nDense > 0 && nDense < nAll && cDense < cAll && cl.stats().classesOn.join() === 'false,false,true', [nAll, nDense, cAll, cDense]);
+  const cd = B.create(mkCtx({ classesOn: [false, false, true] })); cd.settle(camera);
+  ok('look: created with ctx.classesOn it draws the same', cd.stats().instances === nDense && cd.stats().cells === cDense, [cd.stats().instances, nDense]);
+  cd.dispose();
+  cl.setClasses([false, false, false]); cl.settle(camera);
+  ok('look: all off draws nothing', cl.stats().instances === 0 && cl.group.children.length === 0 && !cl.stats().waiting);
+  cl.setClasses([true, true, true]); cl.settle(camera);
+  ok('look: all on again is as before', cl.stats().instances === nAll && cl.stats().cells === cAll);
+  cl.dispose();
 }
 
 console.log((fail ? 'FAILED' : 'ok') + ': ' + pass + ' passed, ' + fail + ' failed');

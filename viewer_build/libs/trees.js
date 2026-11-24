@@ -91,7 +91,9 @@
       ['trees', 'brush', 'crown'].forEach(function (q) { if (typeof saved[q] === 'boolean') st[q] = saved[q]; });
       if (typeof saved.see === 'boolean') st.treesOp = st.brushOp = saved.see ? 0.5 : 1;
     }
-    if (typeof saved.look === 'string' && saved.look.length < 40) st.look = saved.look;      // the brush's look (libs/brush-blocks.js)
+    // the brush's look (libs/brush-blocks.js); 'blocks' and 'blanket' are from before the bushes were the look: forgotten, the map's own default applies
+    if (typeof saved.look === 'string' && saved.look.length < 40 && saved.look !== 'blocks' && saved.look !== 'blanket') st.look = saved.look;
+    if (Array.isArray(saved.classesOn) && saved.classesOn.length <= 16 && saved.classesOn.every(function (b) { return typeof b === 'boolean'; })) st.classesOn = saved.classesOn.slice();   // the brush classes shown
     return st;
   }
   // The 4 x 4 Bayer pattern: pixel (x, y) has rank 0..15, and is kept at level k / 16 when its rank is under k.
@@ -311,10 +313,11 @@
       if (!tr && !bl) return Promise.resolve(false);
       var d = tr && (tr.detail === 1 || tr.detail === 2) ? tr.detail : 0;
       S = { THREE: o.THREE, scene: o.scene, trees: tr, detail: d, st: restore(o.saved), redraw: o.redraw, uTrees: { value: 1 }, uBrush: { value: 1 }, blocks: bl,
-            group: null, meshes: [[], [], []], trunks: [], trunkGeo: null, trunkMat: null, count: [0, 0, 0], tiles: 0, loaded: false };
+            group: null, meshes: [[], [], []], trunks: [], trunkGeo: null, trunkMat: null, count: [0, 0, 0], tiles: 0, loaded: false, classRow: null };
       S.uTrees.value = S.st.treesOp; S.uBrush.value = S.st.brushOp;
       var mine = S;
       if (bl) {
+        if (bl.classesOn && S.st.classesOn) bl.classesOn(S.st.classesOn);
         if (bl.look && S.st.look) bl.look(S.st.look);            // the look chosen before (a name nobody registered: the blocks)
         applyBrush();
         // blocks that did not load: the mounds are the brush again
@@ -337,7 +340,7 @@
     loaded: function () { return !!(S && S.loaded); },
     state: function () { return S ? Object.assign({}, S.st) : null; },
     // (the brush's look is asked where it lives: FlexBrush.look(name) switches it, and it is saved from here)
-    serialize: function () { return S ? Object.assign({ v: STATE_V }, S.st, S.blocks && S.blocks.look ? { look: S.blocks.look() } : null) : undefined; },
+    serialize: function () { return S ? Object.assign({ v: STATE_V }, S.st, S.blocks && S.blocks.look ? { look: S.blocks.look() } : null, S.blocks && S.blocks.classesOn && S.blocks.classesOn() ? { classesOn: S.blocks.classesOn() } : null) : undefined; },
     // { group, meshes: [cones, rounds, mounds], trunks, count: [..], tiles, detail, op: [trees, brush] levels, blocks }
     objects: function () { return S ? { group: S.group, meshes: S.meshes, trunks: S.trunks, count: S.count.slice(), tiles: S.tiles, detail: S.detail, op: [S.uTrees.value, S.uBrush.value], blocks: blocksOn() } : null; },
 
@@ -346,7 +349,7 @@
       if (!S || typeof DEFAULTS[key] !== 'boolean') return;
       S.st[key] = !!v;
       if (key === 'crown') { if (S.loaded) crownLook(!!v); }
-      else if (key === 'brush') applyBrush();
+      else if (key === 'brush') { applyBrush(); if (S.classRow) S.classRow(); }
       else { S.meshes[0].forEach(function (m) { m.visible = !!v; }); S.meshes[1].forEach(function (m) { m.visible = !!v; }); S.trunks.forEach(function (m) { m.visible = !!v && S.st.crown; }); }
       redraw();
     },
@@ -374,6 +377,34 @@
           } }];
       };
       ui.chips((S.trees ? [chip('🌲', 'Trees', 'trees')] : []).concat([chip('🌿', 'Brush', 'brush')]));
+      // A map with a brush grid: one small chip a class (Light, Medium, Dense), each on / off at once in whichever
+      // look draws the brush; the row is there only while Brush is on. (The baked brush picture is not changed.)
+      var info = S.blocks && S.blocks.classInfo ? S.blocks.classInfo() : [];
+      S.classRow = null;
+      if (info.length > 1) {
+        var els = [];
+        var paint = function () {
+          var inf = S && S.blocks ? S.blocks.classInfo() : [], show = !!(S && S.st.brush);
+          els.forEach(function (c, k) {
+            if (!c || !c.style) return;
+            if (c.parentNode && c.parentNode.style) { c.parentNode.style.display = show ? '' : 'none'; c.parentNode.style.gridTemplateColumns = 'repeat(' + els.length + ', 1fr)'; }
+            if (c.firstChild && c.firstChild.style && inf[k]) c.firstChild.style.background = inf[k].colour;
+          });
+        };
+        S.classRow = paint;
+        ui.chips(info.map(function (ci, k) {
+          var label = ci.name ? ci.name.charAt(0).toUpperCase() + ci.name.slice(1) : 'Class ' + (k + 1);
+          return ['', label, ci.on, function (on) { var v = S.blocks.classesOn(); v[k] = !!on; S.blocks.classesOn(v); redraw(); },
+            { brushClass: k, attach: function (c) {
+              els[k] = c;
+              if (!c || !c.style) return;
+              c.className += ' sh-chip-class'; c.style.padding = '4px 6px'; c.style.fontSize = '11px'; c.style.justifyContent = 'center'; c.style.minWidth = '0';
+              var sw = c.firstChild;
+              if (sw && sw.style) { sw.style.width = '11px'; sw.style.height = '11px'; sw.style.borderRadius = '3px'; sw.style.flex = '0 0 11px'; sw.style.border = '1px solid rgba(255,255,255,.35)'; sw.style.background = ci.colour; }
+              if (typeof Promise !== 'undefined') Promise.resolve().then(paint);
+            } }];
+        }));
+      }
     },
     closeSlider: closePop,
   };

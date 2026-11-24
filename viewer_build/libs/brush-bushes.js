@@ -9,7 +9,8 @@
 //            x east, y north, z up)
 //   look = { group, update(camera) (before each drawn frame: returns at once when the camera has not moved and
 //            nothing waits), setLevel(0..1) (the Brush chip's level), dispose(), stats(), settle() (builds all
-//            this view wants at once: pictures, tests) }
+//            this view wants at once: pictures, tests), setClasses([bool a class]) (the Light / Medium / Dense
+//            chips: the cells of a class that is off have no bush; ctx.classesOn is the same at create) }
 //
 // Every brushy cell (share at or over the lightest class's `min`) is a bush: a stock low-poly dome (SIDES
 // sides, RINGS, a blunt top; smooth normals, vertex-lit as the trees' mounds are), as tall as the cell's
@@ -85,6 +86,13 @@
     var L = new Uint8Array(256), cut = Math.max(1, Math.ceil(K[0].min * 255 - 1e-9)), i;
     for (i = cut; i < 256; i++) L[i] = Math.max(1, Math.round(opacityOf(Math.max(i / 255, K[0].min), K) * 255));
     return L;
+  }
+  // The opacity bytes with the classes that are off taken out (K[k] is class k, lightest first; on: [bool a class]).
+  function mask(L, K, on) {
+    if (!Array.isArray(on)) return L;
+    var out = new Uint8Array(256), i, k;
+    for (i = 1; i < 256; i++) { for (k = K.length; k > 0; k--) if (i >= Math.max(1, Math.ceil(K[k - 1].min * 255 - 1e-9))) break; out[i] = k && on[k - 1] !== false ? L[i] : 0; }
+    return out;
   }
   // The distance fade: 1 up to (1 - FADE) * far, 0 from far on; and 0 at NEAR[0] from the eye, whole from NEAR[1]
   // (the shader computes the same).
@@ -253,7 +261,7 @@
   var BODY_F = '\n\tif (flexBayer4(gl_FragCoord.xy) + 0.03125 > vBushOp) discard;';
 
   function create(ctx) {
-    var THREE = ctx.THREE, F = ctx.grid, K = knots(ctx.classes), L = lut(K);
+    var THREE = ctx.THREE, F = ctx.grid, K = knots(ctx.classes), L0 = lut(K), L = new Uint8Array(mask(L0, K, ctx.classesOn)), on = Array.isArray(ctx.classesOn) ? ctx.classesOn.slice() : null;
     var D = { F: F, L: L, K: K, groundZ: ctx.groundZ, low: ctx.bandLow };
     var T = tiles(F, L), stock = dome();
     var uLevel = { value: 1 }, uFade = { value: new THREE.Vector4(FAR_MAX * (1 - FADE), FAR_MAX, NEAR[0], NEAR[1]) };
@@ -337,6 +345,15 @@
       update: function (cam) { update(cam, false); },
       settle: function (cam) { S.dirty = true; update(cam, true); },
       setLevel: function (v) { v = Number(v); if (!isFinite(v)) return; uLevel.value = v < 0 ? 0 : v > 1 ? 1 : v; wake(); },
+      // The classes shown ([bool a class], lightest first): the cells of a class that is off have no bush. The
+      // tiles are made again as views want them (the same lazy way).
+      setClasses: function (v) {
+        if (S.gone || !Array.isArray(v) || (on && v.join() === on.join())) return;
+        on = v.slice(); L.set(mask(L0, K, on));
+        S.built.forEach(function (t) { if (t.mesh) { group.remove(t.mesh); t.mesh.geometry.dispose(); if (t.mesh.dispose) t.mesh.dispose(); t.mesh = null; } });
+        S.built = []; S.drawn = []; S.held = 0; S.tris = 0; S.inst = 0;
+        T = tiles(F, L); S.dirty = true; wake();
+      },
       // budget (triangles), the farthest bushes (m), the cache (bushes): for tests and for trying numbers
       limits: function (o) { if (o) { if (o.budget > 0) S.budget = o.budget; if (o.far > 0) S.farMax = o.far; if (o.cache > 0) S.cache = o.cache; S.dirty = true; wake(); } return { budget: S.budget, far: S.farMax, cache: S.cache }; },
       dispose: function () {
@@ -349,14 +366,14 @@
       // { triangles, instances (drawn now), tiles drawn, far (m), level, waiting (tiles to build), built tiles, held bushes, cells, all tiles }
       stats: function () {
         return { triangles: S.tris, instances: S.inst, tiles: S.drawn.length, far: S.far, level: uLevel.value, waiting: S.dirty ? Math.max(1, S.waiting) : 0, built: S.built.length, held: S.held,
-                 cells: T.cells, allTiles: T.list.length, budget: S.budget, trisPerBush: TRIS };
+                 cells: T.cells, allTiles: T.list.length, budget: S.budget, trisPerBush: TRIS, classesOn: on ? on.slice() : null };
       },
     };
   }
 
   var R = { TILE: TILE, TRIS: TRIS, SIDES: SIDES, BUDGET: BUDGET, FAR_MAX: FAR_MAX, FADE: FADE, CACHE: CACHE, WIDTH: WIDTH, WIDTH2: WIDTH2, SIZE_VAR: SIZE_VAR, JITTER: JITTER, JITTER2: JITTER2,
             TINT_LO: TINT_LO, TINT_HI: TINT_HI, SINK: SINK, SLOPE_MAX: SLOPE_MAX, SINK_MAX: SINK_MAX, NEAR: NEAR, LOW: LOW, LOW_H: LOW_H, TALL_H: TALL_H, widthOf: widthOf, MERGE_DH: MERGE_DH, MERGE_DO: MERGE_DO,
-            hash: hash, vary: vary, knots: knots, opacityOf: opacityOf, lut: lut, fade: fade, plan: plan, merges: merges, buildTile: buildTile, tiles: tiles, select: select, dome: dome, create: create };
+            hash: hash, vary: vary, knots: knots, opacityOf: opacityOf, lut: lut, mask: mask, fade: fade, plan: plan, merges: merges, buildTile: buildTile, tiles: tiles, select: select, dome: dome, create: create };
 
   root.FlexBrushLooks = root.FlexBrushLooks || {};
   root.FlexBrushLooks.bushes = R;
