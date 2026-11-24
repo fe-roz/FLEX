@@ -244,7 +244,7 @@ const b64 = buf => Buffer.from(buf).toString('base64');
     ok('the ctx: THREE, the grid as parsed (rows from the south), classes, the ground, the camera, wake, bayer4, dither, budget', got.THREE === w.THREE && F.nx === 40 && F.ny === 40 && F.cell === 1 && F.x0 === 5 && F.y0 === 7 && F.top === 2.5 && F.share.length === 1600 && F.share[41] === 200 && F.height[41] === 120 &&
       got.classes.map(c => c.name + ':' + c.min + ':' + c.colour + ':' + c.cut + ':' + c.rgb.join('.')).join('|') === 'light:0.1:b7e4a0:26:183.228.160|medium:0.3:5fae4f:77:95.174.79|dense:0.6:1f5f1f:153:31.95.31' &&
       got.groundZ(3, 9) === 103 && got.camera === w.camera && typeof got.wake === 'function' && got.bayer4(1, 1) === FB.bayer4(1, 1) && got.bayer4(2, 3) === w.FT.bayer4(2, 3) && got.dither === w.FT.dither &&
-      got.budget.triangles === FB.BUDGET && got.budget.cache > got.budget.triangles && got.budget.buildMs > 0, got && got.classes);
+      got.budget.triangles === FB.LOOK_BUDGET && FB.LOOK_BUDGET === 900000 && got.budget.cache > got.budget.triangles && got.budget.buildMs > 0, got && got.classes);
     const q = got.toScene(1, 2, 3);
     ok('toScene is the identity (x east, y north, z up), a THREE.Vector3', q.isVector3 && q.x === 1 && q.y === 2 && q.z === 3);
     const r0 = w.redraws; got.wake();
