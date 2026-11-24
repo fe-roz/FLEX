@@ -56,7 +56,7 @@ def run(args):
 
 def load(d):
     R = dict(J=json.load(open(os.path.join(d, 'ridge.json'))), lid=np.load(os.path.join(d, 'lid.npy')), holes=np.load(os.path.join(d, 'holes.npy')),
-             brush=np.load(os.path.join(d, 'brush.npy')), bj=json.load(open(os.path.join(d, 'brush.json'))))
+             brush=np.load(os.path.join(d, 'brush.npy')), bh=np.load(os.path.join(d, 'brush_h.npy')), bj=json.load(open(os.path.join(d, 'brush.json'))))
     R['xyz'], R['depth'], R['kind'] = rw.read_points_bin(os.path.join(d, 'points.bin'))
     if os.path.exists(os.path.join(d, 'debug.npz')):
         R['dbg'] = dict(np.load(os.path.join(d, 'debug.npz')))
@@ -89,7 +89,8 @@ check('shapes.bin RWS1 and its size', raw[:4] == b'RWS1' and len(raw) == 12 + nv
 sv, sd, st = rw.read_shapes_bin(os.path.join(A, 'shapes.bin'))
 check('shape triangles index their vertices', st.max() < nv and np.isfinite(sv).all())
 check('brush.npy in blocks of 3 cells', R['brush'].dtype == np.float32 and R['brush'].shape == ((ny + 2) // 3, (nx + 2) // 3) and
-      R['bj']['nx'] == R['brush'].shape[1] and R['bj']['ny'] == R['brush'].shape[0] and abs(R['bj']['cell'] - 0.9) < 1e-6 and R['bj']['band'] == [0.3, 2.0], str(R['bj']))
+      R['bj']['nx'] == R['brush'].shape[1] and R['bj']['ny'] == R['brush'].shape[0] and abs(R['bj']['cell'] - 0.9) < 1e-6 and R['bj']['band'] == [0.3, 2.5], str(R['bj']))
+check('the brush band is 0.3 to 2.5 m', rw.PARAMS['brush_band'] == [0.3, 2.5] and R['J']['params']['brush_band'] == [0.3, 2.5])
 check('counts match the files', R['J']['counts']['below'] == int((R['kind'] < 3).sum()) and R['J']['counts']['pattern_noise'] == int((R['kind'] == 3).sum())
       and R['J']['counts']['true_cells'] == int((R['holes'] == 1).sum()) and R['J']['counts']['guessed_cells'] == int((R['holes'] == 2).sum()))
 
@@ -202,6 +203,13 @@ b0, b1, b2, b3 = D['brush']; S = 0.9
 bj, bi = np.mgrid[0:R['brush'].shape[0], 0:R['brush'].shape[1]]; bx = (bi + 0.5) * S; by = (bj + 0.5) * S
 inp = (bx > b0 + 1) & (bx < b1 - 1) & (by > b2 + 1) & (by < b3 - 1); outp = (bx < b0 - 1) | (bx > b1 + 1) | (by < b2 - 1) | (by > b3 + 1)
 check('brush: the patch reads about 0.4', abs(np.nanmean(R['brush'][inp]) - 0.4) < 0.06, '%.3f' % np.nanmean(R['brush'][inp]))
+# the brush's height: brush_h.npy on the same grid, the top of the in-band returns (the demo's reach 2.4 m: above the old 2 m band)
+BH = R['bh']; hb = np.isfinite(BH)
+check('brush_h.npy: float32 on brush.npy\'s grid, named in brush.json', BH.dtype == np.float32 and BH.shape == R['brush'].shape and R['bj'].get('height') == 'brush_h.npy' and R['bj'].get('height_pct') == 95, str(R['bj']))
+check('brush height: only where there is brush (share above 0), and everywhere there', np.array_equal(hb, np.nan_to_num(R['brush'], nan=0.0) > 0))
+check('brush height: inside the band', hb.any() and float(BH[hb].min()) >= 0.3 and float(BH[hb].max()) <= 2.5, '%.2f..%.2f' % (BH[hb].min(), BH[hb].max()))
+check('brush height: the patch stands about 2 m (returns up to 2.4 m count)', 1.8 < float(np.nanmedian(BH[inp])) < 2.4 and float(np.nanmax(BH[inp])) > 2.2,
+      '%.2f / %.2f' % (np.nanmedian(BH[inp]), np.nanmax(BH[inp])))
 check('brush: none elsewhere, blank where too few returns reach', np.nanmax(R['brush'][outp & (np.abs(by - D['cliff_y']) > 2) & (np.abs(by - py) > 6)]) < 0.2 and np.isnan(R['brush']).any())
 
 # ---- the tile cut does not change the result
@@ -215,6 +223,9 @@ ca, cb = R['J']['counts'], Rb['J']['counts']
 check('other tiles: the same counts', all(ca[k] == cb[k] for k in ('below', 'groups', 'lone', 'likely_noise', 'pattern_noise', 'features')), '%s / %s' % (ca, cb))
 check('other tiles: the same lid', np.nanmax(np.abs(R['lid'] - Rb['lid'])) < 0.05, '%.3f' % np.nanmax(np.abs(R['lid'] - Rb['lid'])))
 check('other tiles: the same holes', (R['holes'] != Rb['holes']).sum() <= 0.02 * max(1, (R['holes'] > 0).sum()), '%d cells differ of %d' % ((R['holes'] != Rb['holes']).sum(), (R['holes'] > 0).sum()))
+_d = np.abs(Rb['bh'] - R['bh']); _both = np.isfinite(Rb['bh']) & np.isfinite(R['bh'])
+check('brush height: the same blocks whatever the tile cut, the heights equal but on the tile lines', np.array_equal(np.isfinite(Rb['bh']), np.isfinite(R['bh'])) and float((_d[_both] > 1e-6).mean()) < 0.03,
+      '%.4f differ' % float((_d[_both] > 1e-6).mean()))
 check('the pit on the tile line is whole and single', abs(int(h1[at(px, py, pr + 1.5)].sum()) - int((Rb['holes'] == 1)[at(px, py, pr + 1.5)].sum())) <= 3)
 
 # ---- --npz, a polygon, --no-shapes
@@ -305,7 +316,7 @@ import filecmp
 Qa = json.load(open(os.path.join(A, 'quality.json'))); Qm = json.load(open(os.path.join(A, 'maps.json')))
 N0 = os.path.join(tmp, 'noq')
 run(['--demo', N0, '--debug', '--workers', '1', '--tile', '48', '--no-quality'])       # as run B: one process, so the order of the returns is fixed
-RES = ['lid.npy', 'holes.npy', 'points.bin', 'shapes.bin', 'features.json', 'brush.npy', 'brush.json']
+RES = ['lid.npy', 'holes.npy', 'points.bin', 'shapes.bin', 'features.json', 'brush.npy', 'brush_h.npy', 'brush.json']
 check('the results are byte for byte the same with and without the report', os.path.exists(os.path.join(B, 'quality.json')) and all(filecmp.cmp(os.path.join(B, f), os.path.join(N0, f), shallow=False) for f in RES),
       ' '.join(f for f in RES if not filecmp.cmp(os.path.join(B, f), os.path.join(N0, f), shallow=False)))
 Jn = json.load(open(os.path.join(N0, 'ridge.json')))
