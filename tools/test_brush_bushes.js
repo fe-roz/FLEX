@@ -5,6 +5,8 @@
 // kind as one bush, every brushy cell stood for once); the variation is the same every time and inside its
 // limits; opacity from the share (nothing under the lightest class, solid from the densest, never going down);
 // the distance fade; a tile's instances (on the ground, as tall as the cell, base on the slope, steep ground);
+// the clumps that stand for the brush farther away (the pyramid of sums, a clump's size / height / opacity from
+// its patch, the ground covered at every level, the rings and their hand-overs, no gaps, the classes);
 // the choice of tiles per view and the triangle budget on a grid the size of a real map; the look's own
 // interface (update returns at once with the camera still, lazy building asks for frames, the cache, the level,
 // dispose). Synthetic numbers only.
@@ -87,7 +89,7 @@ function grid(nx, ny, fill) {
   let mono = true; for (let d = a; d < far; d += 0.5) if (B.fade(d + 0.5, far) > B.fade(d, far) + 1e-12) mono = false;
   ok('fade: only goes down with distance, no step', mono && B.fade(a + 0.5, far) > 0.99 && B.fade(far - 0.5, far) < 0.01);
   ok('fade: bushes at the eye are gone, whole from NEAR[1]', B.fade(0, far) === 0 && B.fade(B.NEAR[0], far) === 0 && B.fade((B.NEAR[0] + B.NEAR[1]) / 2, far) > 0.4 && B.fade((B.NEAR[0] + B.NEAR[1]) / 2, far) < 0.6);
-  ok('limits: the budget is 600 k triangles, full detail to about 150 m', B.BUDGET === 600000 && B.FAR_MAX * (1 - B.FADE) >= 120 && B.FAR_MAX <= 260);
+  ok('limits: the budget is 900 k triangles, bushes whole to about 125 m and handed over by 180 m', B.BUDGET === 900000 && B.FAR_MAX * (1 - B.FADE) >= 120 && B.FAR_MAX <= 260);
 }
 
 // ── which cells get a bush ──
@@ -224,33 +226,160 @@ const BIG = grid(NX, NY, (i, j) => {
   return [0.1 + 0.9 * rndB() * Math.min(1, patch + 0.6), r < 0.7 ? 2 + rndB() * 0.5 : 0.3 + rndB() * 1.7];
 });
 const hill = (x, y) => 800 + 0.2 * x + 60 * Math.sin(y / 300);
+// brute force: the sums of the cells i0..i1, j0..j1 of a grid
+function sums(F, L, i0, j0, s) {
+  const o = { n: 0, w: 0, h: 0, h2: 0, x: 0, y: 0 };
+  for (let j = j0; j < Math.min(F.ny, j0 + s); j++) for (let i = i0; i < Math.min(F.nx, i0 + s); i++) { const a = j * F.nx + i, c = L[F.share[a]]; if (!c) continue; const h = F.height[a] || 30; o.n++; o.w += c; o.h += h; o.h2 += h * h; o.x += c * (i - i0); o.y += c * (j - j0); }
+  return o;
+}
+const same = (a, b) => a.n === b.n && a.w === b.w && a.h === b.h && a.h2 === b.h2 && a.x === b.x && a.y === b.y;
+const LALL = B.lut(B.knots(CLS));
+
+// ── clumps: the pyramid of sums ──
 {
-  const L = B.lut(B.knots(CLS)), D = { F: BIG, L, groundZ: hill };
-  const T = B.tiles(BIG, L);
+  let sd = 3; const rnd = () => (sd = (sd * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const G = grid(203, 151, (i, j) => rnd() < 0.45 ? [0.05 + 0.95 * rnd(), rnd() < 0.1 ? 0 : 0.3 + 2.2 * rnd()] : null);
+  const P = B.pyramid(G, LALL), D = { F: G, L: LALL, P, groundZ: () => 0 };
+  ok('pyramid: levels PYR .. LEVELS, a patch of level k is 2^k cells wide', B.PYR >= 2 && B.LEVELS >= 4 && P.lv[B.PYR].s === (1 << B.PYR) && P.lv[B.LEVELS].px === Math.ceil(203 / (1 << B.LEVELS)) && !P.ready);
+  let steps = 0; while (!B.pyramidStep(P, 0) && steps < 1000) steps++;
+  ok('pyramid: filled a slice of rows at a time', P.ready && steps >= 1, steps);
+  const P2 = B.pyramid(G, LALL); B.pyramidStep(P2);
+  let eq = true; for (let k = B.PYR; k <= B.LEVELS; k++) for (const f of ['n', 'w', 'h', 'h2', 'x', 'y']) if (Buffer.compare(Buffer.from(P.lv[k][f].buffer), Buffer.from(P2.lv[k][f].buffer))) eq = false;
+  ok('pyramid: in slices or at once, the same numbers', eq);
+  let bad = 0, seen = 0; const o = {};
+  for (let k = 1; k <= B.LEVELS; k++) { const s = 1 << k; for (let pj = 0; pj < Math.ceil(151 / s); pj++) for (let pi = 0; pi < Math.ceil(203 / s); pi++) { seen++; if (!same(B.patchSums(D, k, pi, pj, o), sums(G, LALL, pi * s, pj * s, s))) bad++; } }
+  ok('pyramid: every patch of every level has its cells\' sums (count, opacity, height, height squared, centre)', bad === 0 && seen > 9000, [bad, seen]);
+  const tot = P.lv[B.LEVELS], cells = G.share.reduce((n, v) => n + (LALL[v] ? 1 : 0), 0);
+  ok('pyramid: the coarsest level counts every brushy cell once', tot.n.reduce((a, b) => a + b, 0) === cells && cells > 5000);
+  // the classes: a pyramid made with a class off has none of its cells
+  const K = B.knots(CLS), Ld = B.mask(LALL, K, [false, false, true]), Pd = B.pyramid(G, Ld); B.pyramidStep(Pd);
+  const dense = G.share.reduce((n, v) => n + (v >= byteOf(0.6) ? 1 : 0), 0);
+  ok('classes: with light and medium off every level holds the dense cells only', dense > 0 && dense < cells && [B.PYR, B.LEVELS].every(k => Pd.lv[k].n.reduce((a, b) => a + b, 0) === dense));
+  ok('pyramid: small (22 bytes a patch from level PYR up)', [B.PYR].every(k => P.lv[k].n.BYTES_PER_ELEMENT === 2 && P.lv[k].w.BYTES_PER_ELEMENT === 4));
+}
+
+// ── clumps: one clump from one patch ──
+{
+  const cell = 0.9, R1 = k => cell * (1 << k) * Math.sqrt(B.AREA / Math.PI);
+  for (const k of [1, 2, 4]) {
+    const s = 1 << k, G = grid(4 * s, 4 * s, () => [0.9, 2]), C = B.clumpOf(G, k, 1, 2, sums(G, LALL, s, 2 * s, s));
+    const cx = G.x0 + (s + s / 2) * cell, cy = G.y0 + (2 * s + s / 2) * cell;
+    ok('clump (level ' + k + '): a full dense patch is one solid clump at its centre, as tall as the brush, sized by the patch\'s area', C && near(C.op, 1) && near(C.h, 2) && near(C.r, R1(k), 1e-9) && C.cover === 1 &&
+      Math.abs(C.x - cx) <= B.C_JITTER * s * cell + 1e-9 && Math.abs(C.y - cy) <= B.C_JITTER * s * cell + 1e-9, C);
+  }
+  { const k = 3, s = 8, G = grid(32, 32, (i, j) => i < 12 ? [0.3, 1] : null), o = sums(G, LALL, 8, 8, s), C = B.clumpOf(G, k, 1, 1, o), v = C.v;
+    ok('clump: half a patch of brush: half the area, at the brushy half, the cells\' own opacity', o.n === 32 && near(C.r, R1(3) * Math.sqrt(0.5), 1e-9) && near(C.op, LALL[byteOf(0.3)] / 255, 1e-9) && near(C.h, 1) &&
+      near(C.x - v.dx * s * cell, G.x0 + (8 + 2) * cell, 1e-9) && near(C.y - v.dy * s * cell, G.y0 + (8 + 4) * cell, 1e-9), C); }
+  { const G = grid(16, 16, (i, j) => i < 8 ? [0.9, 0.5] : [0.11, 2.5]), o = sums(G, LALL, 0, 0, 16), C = B.clumpOf(G, 4, 0, 0, o), v = C.v;
+    const x = C.x - v.dx * 16 * cell - G.x0;
+    ok('clump: the centre leans to the denser cells, the opacity is the cells\' mean, the height above the mean (so far brush does not shrink)', x < 8 * cell - 1 && x > 4 * cell && C.op > 0.5 && C.op < 0.7 && C.h > 1.5 && C.h <= 2.5, [x, C.op, C.h]); }
+  ok('clump: an empty patch has none', B.clumpOf(grid(8, 8, () => null), 2, 0, 0, { n: 0, w: 0, h: 0, h2: 0, x: 0, y: 0 }) === null);
+  const a = JSON.stringify(B.clumpOf(grid(8, 8, () => [0.5, 1]), 2, 1, 1, sums(grid(8, 8, () => [0.5, 1]), LALL, 4, 4, 4)));
+  ok('clump: the same patch gives the same clump every time', a === JSON.stringify(B.clumpOf(grid(8, 8, () => [0.5, 1]), 2, 1, 1, sums(grid(8, 8, () => [0.5, 1]), LALL, 4, 4, 4))));
+  // opacity is the bushes' curve, continuous: more share, never less opaque
+  let mono = true, last = 0; for (let sh = 0.1; sh <= 1; sh += 0.01) { const G = grid(4, 4, () => [sh, 1]), C = B.clumpOf(G, 2, 0, 0, sums(G, LALL, 0, 0, 4)); if (C.op < last - 1e-9 || Math.abs(C.op - last) > 0.05 && last) mono = false; last = C.op; }
+  ok('clump: opacity follows the share without a step (the bushes\' curve)', mono && near(last, 1));
+  const S = B.clumpSolid();
+  ok('clump: a lighter solid than the bush (12 to 16 triangles), wide at the ground, unit height', B.C_TRIS === S.idx.length / 3 && B.C_TRIS >= 12 && B.C_TRIS <= 16 && B.C_TRIS < B.TRIS && Math.max(...S.pos.filter((v, i) => i % 3 === 2)) === 1 && Math.hypot(S.pos[0], S.pos[1]) === 1);
+}
+
+// ── clumps: the ground covered stays true at every level ──
+{
+  for (const cover of [0.1, 0.3, 0.5, 0.8]) {
+    let sd = 17; const rnd = () => (sd = (sd * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    // brush in blobs, as on a real slope: the cover is the blobs' share of the ground
+    const G = grid(512, 512, (i, j) => (Math.sin(i * 0.05) * Math.cos(j * 0.04) + (rnd() - 0.5) * 1.2) > 0.86 - 1.72 * cover * 1.02 + 0.5 - 0.5 ? [0.3 + 0.7 * rnd(), 1 + rnd()] : null);
+    const P = B.pyramid(G, LALL); B.pyramidStep(P);
+    const D = { F: G, L: LALL, P, groundZ: () => 0 }, cells = P.lv[B.LEVELS].n.reduce((a, b) => a + b, 0), o = {}, out = [];
+    for (let k = 1; k <= B.LEVELS; k++) {
+      const s = 1 << k; let area = 0, n = 0;
+      for (let pj = 0; pj < 512 / s; pj++) for (let pi = 0; pi < 512 / s; pi++) { const C = B.clumpOf(G, k, pi, pj, B.patchSums(D, k, pi, pj, o)); if (C) { n++; area += Math.PI * C.r * C.r / B.AREA; } }
+      out.push(+(area / (cells * 0.81)).toFixed(3));
+    }
+    ok('cover ' + Math.round(100 * cells / 262144) + ' %: the clumps of every level stand for the brushy ground (within 6 %)', out.every(v => v > 0.94 && v < 1.06), out);
+  }
+  // a patch with little brush: a clump now and then, by an ordered threshold over the patches
+  let drawn = 0; for (let pj = 0; pj < 16; pj++) for (let pi = 0; pi < 16; pi++) if (B.clumpDrawn(13, 4, pi, pj)) drawn++;          // 13 of 256 cells: a quarter of CMIN
+  ok('a patch under CMIN of brush has a clump in its share of the patches, evenly', B.CMIN === 0.2 && drawn === Math.round(256 * (13 / 256) / B.CMIN / 16) * 16 && B.clumpDrawn(52, 4, 3, 3) && !B.clumpDrawn(0, 4, 0, 0), drawn);
+}
+
+// ── the choice of tiles and the budget, on a grid the size of a real map ──
+{
+  const L = LALL, t0 = Date.now(), P = B.pyramid(BIG, L); B.pyramidStep(P); const tPyr = Date.now() - t0;
+  const D = { F: BIG, L, groundZ: hill, P };
+  const T = B.tiles(BIG, L), C = [null]; for (let k = 1; k <= B.LEVELS; k++) C.push(B.clumpTiles(D, k));
+  const V = { T, C }, per = t => t.k || t.d > B.LIGHT_FROM ? B.C_TRIS : B.TRIS;                 // (bushes past LIGHT_FROM are the lighter dome)
   ok('real size: over a million brushy cells in thousands of tiles', T.cells > 1e6 && T.list.length > 2000, { cells: T.cells, tiles: T.list.length });
+  let bytes = 0; for (let k = B.PYR; k <= B.LEVELS; k++) bytes += P.lv[k].n.length * 22;
+  ok('real size: the pyramid is made in well under a second and holds a few megabytes', tPyr < 1000 && bytes < 6e6, { tPyr, bytes });
+  console.log('pyramid of a real-size grid: ' + tPyr + ' ms, ' + (bytes / 1048576).toFixed(1) + ' MB');
+  // a tile's count before it is built: exact from PYR up, never fewer under it
+  let exact = true, bound = true;
+  for (const k of [1, 2, B.PYR, B.LEVELS]) for (const t of C[k].list.slice(0, 6).concat(C[k].list.slice(-3))) { const b = B.buildClumps(D, k, t.cx, t.cy), n = b ? b.n : 0; if (k >= B.PYR ? n !== t.n : n > t.n) (k >= B.PYR ? (exact = false) : (bound = false)); }
+  ok('clump tiles: the count before building is exact from level PYR up, never fewer under it', exact && bound);
+  ok('clump tiles: every level has all the map\'s brush (tiles of at most TILE_C patches, smaller at the coarse levels)', C.slice(1).every(c => c.list.length > 0 && c.size <= 257 * 0.9) && B.tileC(1) === B.TILE_C && B.tileC(B.LEVELS) < B.TILE_C);
   const all = () => true;
-  const s0 = B.select(D, T, [0, 0, hill(0, 0) + 30], all, B.BUDGET, B.FAR_MAX);
+  const s0 = B.select(D, V, [0, 0, hill(0, 0) + 30], all, B.BUDGET);
   ok('select: looking all round, the budget holds', s0.tris <= B.BUDGET && s0.draw.length > 0, { tris: s0.tris, n: s0.draw.length });
-  ok('select: far comes in from FAR_MAX when the view holds too much', s0.far < B.FAR_MAX && s0.far > 60, s0.far);
-  ok('select: nearest first, all nearer than far', s0.draw.every((t, i) => t.d < s0.far && (i === 0 || t.d >= s0.draw[i - 1].d)));
-  ok('select: the count is the tiles\' own', s0.tris === s0.draw.reduce((s, t) => s + t.n * B.TRIS, 0));
-  const sHigh = B.select(D, T, [0, 0, hill(0, 0) + 3200], all, B.BUDGET, B.FAR_MAX);
-  ok('select: from high up nothing is drawn (the brush map picture carries it)', sHigh.draw.length === 0 && sHigh.tris === 0);
-  const sOut = B.select(D, T, [0, 0, hill(0, 0) + 30], () => false, B.BUDGET, B.FAR_MAX);
+  ok('select: the bushes near and every clump level beyond', [0, 1, 2, 3, 4, 5, 6].every(k => s0.draw.some(t => t.k === k)), s0.draw.map(t => t.k).join(''));
+  ok('select: a heavy view takes a later step: the bushes reach less far than FAR_MAX, but not near nothing', s0.step > 0 && s0.far < B.FAR_MAX && s0.far > 50, [s0.step, s0.far]);
+  ok('select: nearest first', s0.draw.every((t, i) => i === 0 || t.d >= s0.draw[i - 1].d));
+  ok('select: the count is the tiles\' own', s0.tris === s0.draw.reduce((s, t) => s + t.n * per(t), 0));
+  const sHigh = B.select(D, V, [0, 0, hill(0, 0) + 3200], all, B.BUDGET);
+  ok('select: from high up the whole map is clumps of the coarse levels (no bushes), far inside the budget', sHigh.step === 0 && sHigh.draw.length > 0 && sHigh.draw.every(t => t.k >= 4) && sHigh.tris > 20000 && sHigh.tris < B.BUDGET / 2, [sHigh.draw.length, sHigh.tris]);
+  { const lv = sHigh.draw.reduce((m, t) => m.add(t.k), new Set()), want = new Set(); for (const k of lv) for (const t of C[k].list) if (B.weight(sHigh.rings, k, Math.hypot(t.box[0] + t.box[3], t.box[1] + t.box[4]) / 2 + 3200) > 0.99) want.add(t);
+    ok('…every tile of a level that is whole there is drawn (the whole map, at any distance)', want.size > 0 && [...want].every(t => sHigh.draw.includes(t)), want.size); }
+  const sSky = B.select(D, V, [0, 0, hill(0, 0) + 30000], all, B.BUDGET);
+  ok('select: from 30 km still the whole map, the coarsest level', sSky.draw.length === C[B.LEVELS].list.length && sSky.draw.every(t => t.k === B.LEVELS));
+  const sOld = B.select(D, { T, C: null }, [0, 0, hill(0, 0) + 30], all, B.BUDGET), sOldHigh = B.select(D, { T, C: null }, [0, 0, hill(0, 0) + 3200], all, B.BUDGET);
+  ok('select: before the pyramid is whole only the bushes are drawn (fading out at their reach)', sOld.draw.length > 0 && sOld.draw.every(t => t.k === 0) && sOldHigh.draw.length === 0 && B.fadeOf(sOld.rings, 0)[1] === sOld.far);
+  const sOut = B.select(D, V, [0, 0, hill(0, 0) + 30], () => false, B.BUDGET);
   ok('select: tiles out of view are skipped', sOut.draw.length === 0);
   const half = b => b[0] >= 0;                                  // a view to the east
-  const sE = B.select(D, T, [0, 0, hill(0, 0) + 30], half, B.BUDGET, B.FAR_MAX);
-  ok('select: a narrower view reaches further', sE.far > s0.far && sE.tris <= B.BUDGET && sE.draw.every(t => t.box[0] >= 0), { far: sE.far, all: s0.far });
-  const sSmall = B.select(D, T, [0, 0, hill(0, 0) + 30], all, 100000, B.FAR_MAX);
-  ok('select: a third of the budget, a shorter reach, still inside', sSmall.tris <= 100000 && sSmall.far < s0.far && sSmall.tris > 0, { tris: sSmall.tris, far: sSmall.far });
-  const sTiny = B.select(D, T, [0, 0, hill(0, 0) + 2], all, 1000, B.FAR_MAX);
-  ok('select: a tiny budget: only the tile the eye is in', sTiny.draw.length >= 1 && sTiny.draw.length <= 4 && sTiny.draw.every(t => t.d === 0), sTiny.draw.length);
-  // moving a metre moves far by little (no pop of the fade ring)
-  let jump = 0; for (let x = 0; x < 40; x += 1) { const a = B.select(D, T, [x, 0, hill(x, 0) + 30], all, B.BUDGET, B.FAR_MAX).far, b = B.select(D, T, [x + 1, 0, hill(x + 1, 0) + 30], all, B.BUDGET, B.FAR_MAX).far; jump = Math.max(jump, Math.abs(a - b)); }
+  const sE = B.select(D, V, [0, 0, hill(0, 0) + 30], half, B.BUDGET);
+  ok('select: a narrower view is finer', sE.step < s0.step && sE.far > s0.far && sE.tris <= B.BUDGET && sE.draw.every(t => t.box[3] >= 0), { far: sE.far, all: s0.far });
+  const sSmall = B.select(D, V, [0, 0, hill(0, 0) + 30], all, 300000);
+  ok('select: a third of the budget: coarser, a shorter reach, still inside and still the whole map', sSmall.tris <= 300000 && sSmall.far < s0.far && sSmall.step > s0.step && [0, B.LEVELS].every(k => sSmall.draw.some(t => t.k === k)), { tris: sSmall.tris, far: sSmall.far });
+  const sTiny = B.select(D, V, [0, 0, hill(0, 0) + 2], all, 1000);
+  ok('select: a budget too small for anything: the last step, the bushes round the eye stay', sTiny.step === B.STEPS.length - 1 && sTiny.draw.some(t => t.k === 0 && t.d === 0) && sTiny.far < 30 && sTiny.far > 10, [sTiny.step, sTiny.far]);
+  // the rings of every step: each level whole somewhere, hand-overs never overlapping, weights adding up to 1
+  let ringsOk = true, sumOk = true;
+  for (let st = 0; st < B.STEPS.length; st++) {
+    const G = B.rings(st, B.FAR_MAX, B.LEVELS);
+    for (let k = 0; k <= B.LEVELS; k++) { const f = B.fadeOf(G, k); if (!(f[0] < f[1] && f[2] < f[3] && f[3] <= f[0])) ringsOk = false; }
+    for (let d = B.NEAR[1]; d < 12000; d *= 1.013) { let sum = 0, n = 0; for (let k = 0; k <= B.LEVELS; k++) { const w = B.weight(G, k, d); sum += w; if (w > 0) n++; } if (Math.abs(sum - 1) > 1e-9 || n > 2) sumOk = false; }
+  }
+  ok('rings: at every step each level is whole over some distance and the hand-overs never overlap', ringsOk && B.STEPS.length > 10 && B.STEPS[0][0] === 1 && B.STEPS[0][1] === 1);
+  ok('rings: at every distance one level is drawn, or two that add up to 1 (no gap, no double cover)', sumOk);
+  { const G = B.rings(0, B.FAR_MAX, B.LEVELS), d1k = [3, 4].map(k => B.weight(G, k, 1000)), size = k => 0.9 * (1 << k);
+    ok('rings: from 1 km the brush is clumps of 7 to 14 m patches', near(d1k[0] + d1k[1], 1, 1e-9) && size(3) > 7 && size(4) < 15 && G.R[1] === B.FAR_MAX, d1k); }
+  // no gaps on the ground: wherever a level has weight, the tile with that ground in it is drawn
+  let gaps = 0, asked = 0;
+  for (const cam of [[0, 0, hill(0, 0) + 30], [300, -500, hill(300, -500) + 400], [-600, 800, hill(-600, 800) + 1500]]) {
+    const sel = B.select(D, V, cam, all, B.BUDGET), drawn = new Set(sel.draw);
+    for (let q = 0; q < 4000; q++) {
+      const x = BIG.x0 + rndB() * NX * 0.9, y = BIG.y0 + rndB() * NY * 0.9, d = Math.hypot(x - cam[0], y - cam[1], hill(x, y) - cam[2]);
+      for (let k = 0; k <= B.LEVELS; k++) { if (B.weight(sel.rings, k, d) <= 0) continue; const TT = k ? C[k] : T, t = TT.at[Math.floor((y - BIG.y0) / TT.size) * TT.tx + Math.floor((x - BIG.x0) / TT.size)]; asked++; if (t && !drawn.has(t)) gaps++; }
+    }
+  }
+  ok('select: no gaps: wherever a level is drawn at all, its tile there is in the view (12 000 places, three eyes)', gaps === 0 && asked > 12000, [gaps, asked]);
+  // the step does not go to and fro: from the step before, a finer one is taken only with room to spare
+  const sAgain = B.select(D, V, [0, 0, hill(0, 0) + 30], all, B.BUDGET, { prev: s0.step }), sFrom = B.select(D, V, [0, 0, hill(0, 0) + 30], all, B.BUDGET, { prev: B.STEPS.length - 1 });
+  ok('select: the same view from the step before stays on it; from a coarse step it comes back to within a step or two', sAgain.step === s0.step && sFrom.step >= s0.step && sFrom.step <= s0.step + 3 && sFrom.tris <= B.BUDGET, [s0.step, sAgain.step, sFrom.step]);
+  // moving a metre moves the reach by little (no pop of the rings)
+  let jump = 0, prev = s0.step; for (let x = 0; x < 40; x += 1) { const a = B.select(D, V, [x, 0, hill(x, 0) + 30], all, B.BUDGET, { prev }), b = B.select(D, V, [x + 1, 0, hill(x + 1, 0) + 30], all, B.BUDGET, { prev: a.step }); prev = b.step; jump = Math.max(jump, Math.abs(a.far - b.far)); }
   ok('select: a metre\'s move changes the reach by a few metres at most', jump < 12, jump);
   // every camera place of a walk across the map stays inside the budget
-  let worst = 0; for (let q = 0; q < 60; q++) { const x = BIG.x0 + rndB() * NX * 0.9, y = BIG.y0 + rndB() * NY * 0.9, s = B.select(D, T, [x, y, hill(x, y) + 2 + rndB() * 150], all, B.BUDGET, B.FAR_MAX); worst = Math.max(worst, s.tris); }
-  ok('select: 60 places over the map, all inside the budget', worst <= B.BUDGET && worst > 0, worst);
+  let worst = 0, least = 1e9; prev = 0; for (let q = 0; q < 60; q++) { const x = BIG.x0 + rndB() * NX * 0.9, y = BIG.y0 + rndB() * NY * 0.9, s = B.select(D, V, [x, y, hill(x, y) + 2 + rndB() * 150], all, B.BUDGET, { prev }); prev = s.step; worst = Math.max(worst, s.tris); least = Math.min(least, s.far); }
+  ok('select: 60 places over the map, all inside the budget, the bushes always there', worst <= B.BUDGET && worst > 0 && least > 50, [worst, least]);
+  // a clump tile: on the ground, the same every time
+  const tk = C[3].list[Math.floor(C[3].list.length / 2)], b1 = B.buildClumps(D, 3, tk.cx, tk.cy), b2 = B.buildClumps(D, 3, tk.cx, tk.cy);
+  ok('clump tile: deterministic', b1 && Buffer.compare(Buffer.from(b1.mat.buffer), Buffer.from(b2.mat.buffer)) === 0 && Buffer.compare(Buffer.from(b1.col.buffer), Buffer.from(b2.col.buffer)) === 0 && Buffer.compare(Buffer.from(b1.op.buffer), Buffer.from(b2.op.buffer)) === 0);
+  let off = 0, low = 0, wide = 0;
+  for (let i = 0; i < b1.n; i++) { const m = b1.mat.subarray(i * 16, i * 16 + 16), g = hill(m[12], m[13]), top = m[14] + m[10], r = Math.hypot(m[0], m[1]); if (m[14] > g - B.SINK + 1e-3) off++; if (top < g + 0.25 || top > g + 2.6 + 1e-3) low++; if (r < 0.9 * 8 * 0.24 || r > 0.9 * 8 * 1.4) wide++; }
+  ok('clump tile: every clump\'s base is in the ground, its top the brush\'s height above it, its width its patch\'s', off === 0 && low === 0 && wide === 0 && b1.n > 50, [off, low, wide, b1.n]);
+  const slope = (() => { const m = b1.mat; return [m[2] / Math.hypot(m[0], m[1]), m[6] / Math.hypot(m[4], m[5])]; })();
+  ok('clump tile: the base follows the slope (the hill rises 0.2 to the east)', Math.abs(Math.hypot(slope[0], slope[1]) - Math.hypot(0.2, 60 / 300 * Math.cos(b1.mat[13] / 300))) < 0.03, slope);
 }
 
 // ── the look itself (three.js objects, no GPU) ──
@@ -260,7 +389,7 @@ const hill = (x, y) => 800 + 0.2 * x + 60 * Math.sin(y / 300);
   let wakes = 0, calls = 0;
   const groundZ = (x, y) => { calls++; return hill(x, y); };
   const mkCtx = (extra) => Object.assign({ THREE, grid: BIG, classes: CLS.map(c => Object.assign({ cut: byteOf(c.min), rgb: [0, 0, 0] }, c)), groundZ, toScene: (x, y, z) => new THREE.Vector3(x, y, z), camera, wake: () => { wakes++; },
-    bayer4: () => 0, dither: null, budget: { triangles: 600000, cache: 1500000, buildMs: 6 } }, extra || {});
+    bayer4: () => 0, dither: null, budget: { triangles: 900000, cache: 3000000, buildMs: 6 } }, extra || {});
   const t0 = Date.now(), look = B.create(mkCtx()), tCreate = Date.now() - t0;
   ok('look: has the hub\'s interface', look && look.group && look.group.isObject3D && ['update', 'setLevel', 'dispose', 'stats', 'settle'].every(k => typeof look[k] === 'function'));
   ok('look: create is quick and builds nothing (lazy)', tCreate < 1500 && look.group.children.length === 0 && look.stats().instances === 0, tCreate);
@@ -273,10 +402,14 @@ const hill = (x, y) => 800 + 0.2 * x + 60 * Math.sin(y / 300);
   let frames = 1; while (look.stats().waiting && frames < 400) { look.update(camera); frames++; }
   s = look.stats();
   ok('look: building ends, over frames', !s.waiting && frames > 2 && frames < 400, { frames, s });
-  ok('look: triangles inside the budget, counted from the instances', s.triangles <= 600000 && s.triangles === s.instances * B.TRIS && s.triangles > 200000, s);
+  ok('look: triangles inside the budget, counted from the instances of every level (bushes and clumps)', s.triangles <= 900000 && s.triangles === s.levels.reduce((n, l) => n + l.triangles, 0) && s.levels.every((l, k) => k ? l.triangles === l.instances * B.C_TRIS : l.triangles > l.instances * B.C_TRIS && l.triangles < l.instances * B.TRIS) && s.triangles > 300000 && s.levels.length === B.LEVELS + 1 && s.levels.every(l => l.instances > 0) && s.pyramid.ready, s);
   ok('look: every drawn tile is an instanced mesh in the group, others hidden', look.group.children.filter(m => m.visible).length === s.tiles && look.group.children.every(m => m.isInstancedMesh && !m.frustumCulled));
   const vis = look.group.children.filter(m => m.visible);
   ok('look: instances carry matrix, colour and opacity', vis.every(m => m.instanceMatrix.count === m.count && m.instanceColor.count === m.count && m.geometry.attributes.aBushOp.count === m.count && m.geometry.attributes.aBushOp.isInstancedBufferAttribute));
+  { const l0 = look.group.children.filter(m => m.visible && m.userData.level === 0), tri = m => m.geometry.index.count / 3, L = B.lightDome(), Dm = B.dome();
+    ok('look: bushes in the tiles round the eye are the full dome, farther ones the same dome with fewer faces', l0.some(m => tri(m) === B.TRIS) && l0.some(m => tri(m) === B.C_TRIS) && l0.every(m => tri(m) === B.TRIS || tri(m) === B.C_TRIS) && B.LIGHT_FROM >= 40);
+    const rmax = S => { let r = 0, z = 0; for (let i = 0; i < S.pos.length; i += 3) { r = Math.max(r, Math.hypot(S.pos[i], S.pos[i + 1])); z = Math.max(z, S.pos[i + 2]); } return [r, z]; };
+    ok('look: …of the same width and height', rmax(L).join() === rmax(Dm).join() && L.idx.length / 3 === B.C_TRIS); }
   ok('look: taps go through', (() => { const hits = []; vis[0].raycast(new THREE.Raycaster(), hits); return hits.length === 0; })());
   // idle: nothing happens
   wakes = 0; calls = 0; const before = look.group.children.length;
@@ -287,11 +420,17 @@ const hill = (x, y) => 800 + 0.2 * x + 60 * Math.sin(y / 300);
   ok('look: the level changes at once, asks one frame, rebuilds nothing', look.stats().level === 1 && wakes === 1 && look.group.children.length === before && calls === 0);
   look.setLevel(7); ok('look: the level is kept inside 0..1', look.stats().level === 1); look.setLevel(-1); ok('look: level 0', look.stats().level === 0); look.setLevel(NaN); ok('look: a bad level is ignored', look.stats().level === 0); look.setLevel(1);
   // the shader: the level, the fade and the per-bush opacity go into the dither
-  const sh = { uniforms: {}, vertexShader: 'void main() {\n#include <project_vertex>\n}', fragmentShader: 'void main() {\n#include <clipping_planes_fragment>\n}' };
+  const sh = { uniforms: {}, vertexShader: 'void main() {\n#include <defaultnormal_vertex>\n#include <project_vertex>\n}', fragmentShader: 'void main() {\n#include <clipping_planes_fragment>\n}' };
   look.material.onBeforeCompile(sh);
   ok('shader: level and fade are uniforms, the opacity an attribute', sh.uniforms.uBushLevel.value === 1 && sh.uniforms.uBushFade.value.y === look.stats().far && near(sh.uniforms.uBushFade.value.x, look.stats().far * (1 - B.FADE), 1e-6) &&
     /attribute float aBushOp/.test(sh.vertexShader) && /aBushOp \* uBushLevel/.test(sh.vertexShader) && /smoothstep\(uBushFade\.x, uBushFade\.y/.test(sh.vertexShader));
-  ok('shader: ordered dither discard, no blending', /flexBayer4\(gl_FragCoord\.xy\) \+ 0\.03125 > vBushOp\) discard/.test(sh.fragmentShader) && look.material.transparent === false && look.material.depthWrite === true);
+  ok('shader: ordered dither discard, no blending', /bushB = flexBayer4\(gl_FragCoord\.xy\)/.test(sh.fragmentShader) && /bushB \+ 0\.03125 > vBushOp\) discard/.test(sh.fragmentShader) && look.material.transparent === false && look.material.depthWrite === true);
+  // the hand-over between levels: each level its own fade, every other level the dither turned over
+  { const st = look.stats(), M = look.materials, U = M.map(m => { const q = { uniforms: {}, vertexShader: sh.vertexShader, fragmentShader: sh.fragmentShader }; m.onBeforeCompile(q); return q.uniforms; });
+    ok('shader: a material a level, the same program (one onBeforeCompile text), the level shared', M.length === B.LEVELS + 1 && M.every(m => String(m.onBeforeCompile) === String(M[0].onBeforeCompile)) && U.every(u => u.uBushLevel === U[0].uBushLevel));
+    ok('shader: every other level draws the pixels the level before leaves (the dither turned over)', U.every((u, k) => u.uBushInv.value === (k & 1)) && /if \(uBushInv > 0\.5\) bushB = 0\.9375 - bushB/.test(sh.fragmentShader));
+    ok('shader: each level fades in exactly where the one before fades out', U.every((u, k) => k === 0 || (u.uBushFade.value.z === U[k - 1].uBushFade.value.x && u.uBushFade.value.w === U[k - 1].uBushFade.value.y)) && U[B.LEVELS].uBushFade.value.x >= 1e9 && st.rings[0] === Math.round(st.far), U.map(u => u.uBushFade.value.toArray().map(Math.round).join('/')));
+    ok('shader: clumps are lit as round bushes, not as the flat solids they are', U[0].uBushRound.value === 0 && U[1].uBushRound.value === 1 && /uBushRound > 0\.5/.test(sh.vertexShader)); }
   ok('shader: does not use cameraPosition (a Lambert material is not given it)', !/cameraPosition\b(?!\))/.test(sh.vertexShader.replace(/\/\/[^\n]*/g, '')));
   // the same dither as the trees
   const FT = (() => { const c2 = { console, Math, Promise, Date, window: {} }; c2.globalThis = c2; vm.createContext(c2); vm.runInContext(fs.readFileSync(path.join(root, 'viewer_build', 'libs', 'trees.js'), 'utf8'), c2); return c2.window.FlexTrees; })();
@@ -301,24 +440,27 @@ const hill = (x, y) => 800 + 0.2 * x + 60 * Math.sin(y / 300);
   // a move: a new choice, old tiles hidden, still inside the budget
   lookAt([400, 300, hill(400, 300) + 25], [400, 360, hill(400, 360)]);
   look.settle(camera); s = look.stats();
-  ok('look: settle builds all a view wants at once', !s.waiting && s.triangles <= 600000 && s.instances > 0 && look.group.children.filter(m => m.visible).length === s.tiles, s);
+  ok('look: settle builds all a view wants at once', !s.waiting && s.triangles <= 900000 && s.instances > 0 && look.group.children.filter(m => m.visible).length === s.tiles, s);
   // from high up: nothing drawn, nothing waiting
   lookAt([0, 0, hill(0, 0) + 3000], [0, 1, hill(0, 0)]);
   look.update(camera); s = look.stats();
-  ok('look: far above the ground nothing is drawn', s.instances === 0 && s.triangles === 0 && !s.waiting && look.group.children.every(m => !m.visible));
+  look.settle(camera); s = look.stats();
+  ok('look: far above the ground the whole map is drawn as clumps (no bushes), nothing waiting', s.levels[0].instances === 0 && s.instances > 2000 && s.triangles === s.instances * B.C_TRIS && s.triangles < 450000 && !s.waiting && s.step === 0 && look.group.children.filter(m => m.visible).every(m => m.userData.level >= 4), s);
+  wakes = 0; calls = 0; for (let i = 0; i < 20; i++) look.update(camera);
+  ok('look: …and then nothing happens (idle)', wakes === 0 && calls === 0);
   // the cache: a walk across the map never holds more than the cap (plus what is drawn now)
   let held = 0, worst = 0;
   for (let q = 0; q < 30; q++) { const x = BIG.x0 + 100 + q * 60, y = BIG.y0 + 200 + q * 80; lookAt([x, y, hill(x, y) + 20], [x + 30, y + 40, hill(x + 30, y + 40)]); look.settle(camera); const st = look.stats(); held = Math.max(held, st.held); worst = Math.max(worst, st.triangles); }
-  const cap = Math.round(1500000 / B.TRIS);
-  ok('look: the cache is capped (bushes held)', held <= cap + 600000 / B.TRIS && held > 0 && look.stats().built === look.group.children.length, { held, cap });
-  ok('look: the walk stays inside the budget', worst <= 600000, worst);
+  const cap = Math.round(3000000 / B.TRIS);
+  ok('look: the cache is capped (bushes and clumps held)', held <= cap + 900000 / B.C_TRIS && held > 0 && look.stats().built === look.group.children.length, { held, cap });
+  ok('look: the walk stays inside the budget', worst <= 900000, worst);
   // limits can be set (a smaller budget, a shorter reach)
   look.limits({ budget: 150000 }); look.settle(camera);
   ok('look: a smaller budget is kept', look.stats().triangles <= 150000 && look.stats().budget === 150000, look.stats());
   // the hub's budget is taken
-  const small = B.create(mkCtx({ budget: { triangles: 90000, cache: 300000, buildMs: 6 } }));
+  const small = B.create(mkCtx({ budget: { triangles: 200000, cache: 600000, buildMs: 6 } }));
   lookAt([0, -60, hill(0, -60) + 25], [0, 0, hill(0, 0)]); small.settle(camera);
-  ok('look: the hub\'s budget is the budget', small.stats().budget === 90000 && small.stats().triangles <= 90000 && small.stats().triangles > 0, small.stats());
+  ok('look: the hub\'s budget is the budget', small.stats().budget === 200000 && small.stats().triangles <= 200000 && small.stats().triangles > 0, small.stats());
   small.dispose();
   // a hidden group does no work
   look.group.visible = false; calls = 0; lookAt([10, 10, hill(10, 10) + 20], [40, 40, hill(40, 40)]); look.update(camera);
@@ -336,16 +478,20 @@ const hill = (x, y) => 800 + 0.2 * x + 60 * Math.sin(y / 300);
   // a tile's own geometry: dropping one tile must not free another's (no shared buffers)
   const two = B.create(mkCtx()); lookAt([0, -60, hill(0, -60) + 25], [0, 0, hill(0, 0)]); two.settle(camera);
   const g = two.group.children;
-  ok('look: tiles share no buffers', g.length > 1 && g[0].geometry.attributes.position !== g[1].geometry.attributes.position && g[0].geometry.index !== g[1].geometry.index && g[0].material === g[1].material);
+  ok('look: tiles share no buffers', g.length > 1 && g[0].geometry.attributes.position !== g[1].geometry.attributes.position && g[0].geometry.index !== g[1].geometry.index && g.filter(m => m.userData.level === 0).every(m => m.material === two.materials[0]) && g.filter(m => m.userData.level === 2).every(m => m.material === two.materials[2] && m.geometry.index.count === B.C_TRIS * 3) && two.materials[0] !== two.materials[2]);
   two.dispose();
   // the classes shown (the Light / Medium / Dense chips)
   const K3 = B.knots([{ min: 0.1 }, { min: 0.3 }, { min: 0.6 }]), L3 = B.lut(K3), Lm = B.mask(L3, K3, [true, false, true]);
   ok('mask: the bytes of a class that is off have no opacity, the others keep theirs', Lm[26] === L3[26] && Lm[76] === L3[76] && Lm[77] === 0 && Lm[152] === 0 && Lm[153] === L3[153] && Lm[255] === L3[255] && Lm[25] === 0 && B.mask(L3, K3, undefined) === L3);
   const cl = B.create(mkCtx()); lookAt([0, -60, hill(0, -60) + 25], [0, 0, hill(0, 0)]); cl.settle(camera);
-  const nAll = cl.stats().instances, cAll = cl.stats().cells;
+  const nAll = cl.stats().instances, cAll = cl.stats().cells; cl.lvAll = cl.stats().levels.map(l => l.instances);
   cl.setClasses([false, false, true]); cl.settle(camera);
   const nDense = cl.stats().instances, cDense = cl.stats().cells;
+  const lvAll = cl.lvAll, lvDense = cl.stats().levels.map(l => l.instances);
   ok('look: setClasses takes the bushes of the classes that are off away (dense only: fewer, not none)', nAll > 0 && nDense > 0 && nDense < nAll && cDense < cAll && cl.stats().classesOn.join() === 'false,false,true', [nAll, nDense, cAll, cDense]);
+  ok('look: …at every level (the clumps are made of the classes that are on)', lvDense.slice(0, 6).every(n => n > 0) && lvDense[0] < lvAll[0], [lvAll, lvDense]);
+  { let maxOp = 0, minOp = 9; cl.group.children.forEach(m => { if (m.visible && m.userData.level >= 1) { const a = m.geometry.attributes.aBushOp.array; for (let i = 0; i < a.length; i++) { maxOp = Math.max(maxOp, a[i]); minOp = Math.min(minOp, a[i]); } } });
+    ok('look: …a clump of dense cells only is solid', minOp === 1 && maxOp === 1, [minOp, maxOp]); }
   const cd = B.create(mkCtx({ classesOn: [false, false, true] })); cd.settle(camera);
   ok('look: created with ctx.classesOn it draws the same', cd.stats().instances === nDense && cd.stats().cells === cDense, [cd.stats().instances, nDense]);
   cd.dispose();

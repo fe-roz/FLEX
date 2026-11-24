@@ -52,7 +52,7 @@
 //            bayer4(x, y) -> 0..15 (the rank of pixel / cell (x, y) in the 4 x 4 ordered pattern of libs/trees.js),
 //            dither(material, uniform) -> material (patches a three.js built-in material so it is drawn at
 //                  uniform.value 0..1 by that ordered dither in screen pixels; null when libs/trees.js is absent),
-//            budget: { triangles (drawn at once at most, 600 000), cache (kept meshed, 1 500 000), buildMs (meshing
+//            budget: { triangles (drawn at once at most, 900 000), cache (kept meshed, 3 000 000), buildMs (meshing
 //                  time a frame, 6) },
 //            classesOn: [bool a class, lightest first] (which classes are shown now: the Light / Medium / Dense
 //                  chips; a cell whose share byte is in a class that is off is not drawn: class k is the bytes
@@ -89,6 +89,7 @@
   var SIDES_TO = 2;                                            // levels 0..2 have walls; the coarsest has tops only
   var WALL_SHADE = 0.8;                                        // walls a little darker than tops
   var BUDGET = 600000, CACHE = 1500000;                        // triangles drawn at once; triangles kept meshed
+  var LOOK_BUDGET = 900000, LOOK_CACHE = 3000000;              // the same for a look (ctx.budget), unless FlexBrush.budget() set other numbers
   var QMAX = 200, QMIN = 6, QSTEP = 0.82;                      // a tile is refined nearer than block size x Q
   var BUILD_MS = 6;                                            // meshing time a frame
   // The lightest class shown when a map is first opened, counted from the lightest (0): 0 = all of them (the
@@ -360,7 +361,7 @@
              classes: S.D.cls.map(function (c) { return { name: c.name, min: c.min, colour: c.colour, cut: c.cut, rgb: c.rgb.slice() }; }),
              groundZ: S.D.groundZ, toScene: function (x, y, z) { return new THREE.Vector3(x, y, z); }, camera: S.camera,
              wake: function () { if (S === mine) redraw(); }, bayer4: bayer4, dither: S.dither || null, classesOn: S.classesOn.slice(),
-             budget: { triangles: S.budget, cache: S.cache, buildMs: BUILD_MS } };
+             budget: { triangles: S.budget === BUDGET ? LOOK_BUDGET : S.budget, cache: S.cache === CACHE ? LOOK_CACHE : S.cache, buildMs: BUILD_MS } };
   }
   // The blocks' finer tiles are let go while another look draws the brush (the roots stay: any view starts from them).
   function shed() {
@@ -457,7 +458,7 @@
   }
 
   var R = {
-    NODE: NODE, LEVELS: LEVELS, HSTEP: HSTEP, SINK: SINK, MAXSPAN: MAXSPAN, SIDES_TO: SIDES_TO, BUDGET: BUDGET, QMAX: QMAX, QMIN: QMIN, DEF_CLASSES: DEF_CLASSES,
+    NODE: NODE, LEVELS: LEVELS, HSTEP: HSTEP, SINK: SINK, MAXSPAN: MAXSPAN, SIDES_TO: SIDES_TO, BUDGET: BUDGET, LOOK_BUDGET: LOOK_BUDGET, QMAX: QMAX, QMIN: QMIN, DEF_CLASSES: DEF_CLASSES,
     MIN_CLASS: MIN_CLASS, DEF_LOOK: DEF_LOOK, parse: parse, encode: encode, classes: classes, luts: luts, pyramid: pyramid, meshTile: meshTile, tile: tile, kidsOf: kidsOf, select: select, fit: fit, bayer4: bayer4,
     // The roots (coarsest tiles) of a grid: D = { F, L, lv, cls, groundZ }.
     roots: function (D) {
