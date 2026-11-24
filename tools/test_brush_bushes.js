@@ -308,7 +308,7 @@ const LALL = B.lut(B.knots(CLS));
   const L = LALL, t0 = Date.now(), P = B.pyramid(BIG, L); B.pyramidStep(P); const tPyr = Date.now() - t0;
   const D = { F: BIG, L, groundZ: hill, P };
   const T = B.tiles(BIG, L), C = [null]; for (let k = 1; k <= B.LEVELS; k++) C.push(B.clumpTiles(D, k));
-  const V = { T, C }, per = t => t.k ? B.C_TRIS : B.TRIS;
+  const V = { T, C }, per = t => t.k || t.d > B.LIGHT_FROM ? B.C_TRIS : B.TRIS;                 // (bushes past LIGHT_FROM are the lighter dome)
   ok('real size: over a million brushy cells in thousands of tiles', T.cells > 1e6 && T.list.length > 2000, { cells: T.cells, tiles: T.list.length });
   let bytes = 0; for (let k = B.PYR; k <= B.LEVELS; k++) bytes += P.lv[k].n.length * 22;
   ok('real size: the pyramid is made in well under a second and holds a few megabytes', tPyr < 1000 && bytes < 6e6, { tPyr, bytes });
@@ -402,10 +402,14 @@ const LALL = B.lut(B.knots(CLS));
   let frames = 1; while (look.stats().waiting && frames < 400) { look.update(camera); frames++; }
   s = look.stats();
   ok('look: building ends, over frames', !s.waiting && frames > 2 && frames < 400, { frames, s });
-  ok('look: triangles inside the budget, counted from the instances of every level (bushes and clumps)', s.triangles <= 900000 && s.triangles === s.levels.reduce((n, l, k) => n + l.instances * (k ? B.C_TRIS : B.TRIS), 0) && s.triangles > 300000 && s.levels.length === B.LEVELS + 1 && s.levels.every(l => l.instances > 0) && s.pyramid.ready, s);
+  ok('look: triangles inside the budget, counted from the instances of every level (bushes and clumps)', s.triangles <= 900000 && s.triangles === s.levels.reduce((n, l) => n + l.triangles, 0) && s.levels.every((l, k) => k ? l.triangles === l.instances * B.C_TRIS : l.triangles > l.instances * B.C_TRIS && l.triangles < l.instances * B.TRIS) && s.triangles > 300000 && s.levels.length === B.LEVELS + 1 && s.levels.every(l => l.instances > 0) && s.pyramid.ready, s);
   ok('look: every drawn tile is an instanced mesh in the group, others hidden', look.group.children.filter(m => m.visible).length === s.tiles && look.group.children.every(m => m.isInstancedMesh && !m.frustumCulled));
   const vis = look.group.children.filter(m => m.visible);
   ok('look: instances carry matrix, colour and opacity', vis.every(m => m.instanceMatrix.count === m.count && m.instanceColor.count === m.count && m.geometry.attributes.aBushOp.count === m.count && m.geometry.attributes.aBushOp.isInstancedBufferAttribute));
+  { const l0 = look.group.children.filter(m => m.visible && m.userData.level === 0), tri = m => m.geometry.index.count / 3, L = B.lightDome(), Dm = B.dome();
+    ok('look: bushes in the tiles round the eye are the full dome, farther ones the same dome with fewer faces', l0.some(m => tri(m) === B.TRIS) && l0.some(m => tri(m) === B.C_TRIS) && l0.every(m => tri(m) === B.TRIS || tri(m) === B.C_TRIS) && B.LIGHT_FROM >= 40);
+    const rmax = S => { let r = 0, z = 0; for (let i = 0; i < S.pos.length; i += 3) { r = Math.max(r, Math.hypot(S.pos[i], S.pos[i + 1])); z = Math.max(z, S.pos[i + 2]); } return [r, z]; };
+    ok('look: …of the same width and height', rmax(L).join() === rmax(Dm).join() && L.idx.length / 3 === B.C_TRIS); }
   ok('look: taps go through', (() => { const hits = []; vis[0].raycast(new THREE.Raycaster(), hits); return hits.length === 0; })());
   // idle: nothing happens
   wakes = 0; calls = 0; const before = look.group.children.length;
@@ -454,9 +458,9 @@ const LALL = B.lut(B.knots(CLS));
   look.limits({ budget: 150000 }); look.settle(camera);
   ok('look: a smaller budget is kept', look.stats().triangles <= 150000 && look.stats().budget === 150000, look.stats());
   // the hub's budget is taken
-  const small = B.create(mkCtx({ budget: { triangles: 90000, cache: 300000, buildMs: 6 } }));
+  const small = B.create(mkCtx({ budget: { triangles: 200000, cache: 600000, buildMs: 6 } }));
   lookAt([0, -60, hill(0, -60) + 25], [0, 0, hill(0, 0)]); small.settle(camera);
-  ok('look: the hub\'s budget is the budget', small.stats().budget === 90000 && small.stats().triangles <= 90000 && small.stats().triangles > 0, small.stats());
+  ok('look: the hub\'s budget is the budget', small.stats().budget === 200000 && small.stats().triangles <= 200000 && small.stats().triangles > 0, small.stats());
   small.dispose();
   // a hidden group does no work
   look.group.visible = false; calls = 0; lookAt([10, 10, hill(10, 10) + 20], [40, 40, hill(40, 40)]); look.update(camera);

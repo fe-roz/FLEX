@@ -33,6 +33,7 @@
 // summed from the cells), filled over the first frames.
 // Budget: BUDGET triangles are drawn at most. A view that holds more first brings the clump levels in sooner
 // and shortens the bushes' reach, a step at a time (STEPS); the bushes nearest the eye are never left out.
+// A bush in a tile farther than LIGHT_FROM is drawn as the same dome with fewer faces (C_TRIS triangles).
 // A bush stands on the ground at its own centre and its base is sheared to the ground's slope there (the top
 // stays straight above the centre), sunk SINK; on ground steeper than SLOPE_MAX it is sunk more instead (half its
 // height at most). Bushes within NEAR of the eye fade out as well: standing in brush, the screen is not one bush.
@@ -72,6 +73,7 @@
   var TINT_LO = 0.86, TINT_HI = 1.14;
   var MERGE_DH = 60, MERGE_DO = 0.5;                           // a 2 x 2 block is one bush when heights are within this (cm) and opacities within this
   var SINK = 0.12, SLOPE_MAX = 1.0, SINK_MAX = 0.5;            // base under the ground (m); the base follows slopes up to this rise / run; steeper: sunk more, to this share of the height at most
+  var LIGHT_FROM = 60, LIGHT_RINGS = [[0.86, 0], [1, 0.42]];      // a bush in a tile farther than this (m) is the dome with fewer faces (C_TRIS triangles, the same outline)
   var NEAR = [3, 9];                                           // bushes this near the eye fade out too (m: gone .. whole), so standing in brush does not fill the screen
   var LOW = 0.3;                                               // height of a cell whose height byte is 0 (m)
   var COLOUR_LIGHT = [0x86, 0x94, 0x58], COLOUR_DENSE = [0x3e, 0x62, 0x30];     // faint brush .. solid brush
@@ -404,7 +406,7 @@
   function weight(G, k, d) { var f = fadeOf(G, k); return (1 - smooth(f[0], f[1], d)) * (k ? smooth(f[2], f[3], d) : 1); }
   // V = { T: tiles(), C: [, clumpTiles(1), …] or null (the pyramid is not whole yet) }; cam = [x, y, z];
   // inView(box); o = { far (the bushes' reach, FAR_MAX), prev (the step of the view before, where the search starts:
-  // a finer step is taken only with a tenth of the budget to spare, so the rings do not go to and fro) }.
+  // a finer step is taken only with a twentieth of the budget to spare, so the rings do not go to and fro) }.
   // Returns { draw (nearest first), tris, far (R[1]), step, rings, levels: [{ tiles, n }] }: the first step whose
   // tiles in view fit the budget (the last one whatever it holds).
   function select(D, V, cam, inView, budget, o) {
@@ -427,14 +429,14 @@
           if (t.d >= out) continue;
           if (inn > 0 && distFar(t.box, cam) <= inn) continue;   // wholly nearer than this level starts
           if (!inView(t.box)) continue;
-          cand.push(t); tris += t.n * per;
+          cand.push(t); tris += t.n * (k || t.d > LIGHT_FROM ? C_TRIS : TRIS);
         }
       }
       return tris;
     }
     // from the step before: finer while that fits with a tenth to spare, coarser while it does not fit
     var step = prev, last = STEPS.length - 1;
-    if (look(step) <= budget) { while (step > 0 && look(step - 1) <= budget * 0.9) step--; }
+    if (look(step) <= budget) { while (step > 0 && look(step - 1) <= budget * 0.95) step--; }
     else while (step < last && look(++step) > budget) {}
     look(step);
     cand.sort(function (a, b) { return a.d - b.d; });
@@ -469,6 +471,8 @@
 
   // The clump: the dome's lighter cousin, wide at the ground (C_TRIS triangles).
   function clumpSolid() { return solid(C_SIDES, C_RINGS, TOP); }
+  // The bush from LIGHT_FROM on: the dome's outline with one ring less.
+  function lightDome() { return solid(C_SIDES, LIGHT_RINGS, TOP); }
 
   // uBushFade = (out0, out1, in0, in1): whole between in1 and out0 from the eye. uBushInv 1 = the dither's ranks
   // turned over (every other level): where two levels hand over, one draws the pixels the other leaves.
@@ -488,7 +492,7 @@
   function create(ctx) {
     var THREE = ctx.THREE, F = ctx.grid, K = knots(ctx.classes), L0 = lut(K), L = new Uint8Array(mask(L0, K, ctx.classesOn)), on = Array.isArray(ctx.classesOn) ? ctx.classesOn.slice() : null;
     var D = { F: F, L: L, K: K, groundZ: ctx.groundZ, low: ctx.bandLow, P: null };
-    var V = { T: tiles(F, L), C: null }, stock = [dome(), clumpSolid()];
+    var V = { T: tiles(F, L), C: null }, stock = [dome(), clumpSolid(), lightDome()];
     var uLevel = { value: 1 }, mats = [];
     // one material a level: the same program, each with its own fade
     function material(k) {
@@ -525,16 +529,33 @@
       V.C = C;
       return true;
     }
-    function make(t) {
-      var B = t.k ? buildClumps(D, t.k, t.cx, t.cy) : buildTile(D, t.cx, t.cy), st = stock[t.k ? 1 : 0];
-      if (!B) { t.state = 2; t.n = 0; return; }
-      // (each tile has its own copy of the solid's few vertices, so dropping a tile frees only what is its own)
+    function geometry(st, op) {
       var g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.BufferAttribute(st.pos.slice(), 3));
       g.setAttribute('normal', new THREE.BufferAttribute(st.nor.slice(), 3));
       g.setIndex(new THREE.BufferAttribute(st.idx.slice(), 1));
-      g.setAttribute('aBushOp', new THREE.InstancedBufferAttribute(B.op, 1));
+      g.setAttribute('aBushOp', op);
+      return g;
+    }
+    // A tile of bushes past LIGHT_FROM is drawn with the lighter dome (its second geometry, the same instances).
+    function solidOf(t) {
+      var light = t.d > LIGHT_FROM;
+      if (t.k || light === t.light) return;
+      if (light && !t.geo[1]) t.geo[1] = geometry(stock[2], t.op);
+      t.mesh.geometry = t.geo[light ? 1 : 0]; t.light = light;
+    }
+    function free(t) {
+      if (!t.mesh) return;
+      group.remove(t.mesh); t.geo[0].dispose(); if (t.geo[1]) t.geo[1].dispose(); if (t.mesh.dispose) t.mesh.dispose();
+      t.mesh = null; t.geo = null; t.op = null;
+    }
+    function make(t) {
+      var B = t.k ? buildClumps(D, t.k, t.cx, t.cy) : buildTile(D, t.cx, t.cy), st = stock[t.k ? 1 : 0];
+      if (!B) { t.state = 2; t.n = 0; return; }
+      // (each tile has its own copy of the solid's few vertices, so dropping a tile frees only what is its own)
+      var op = new THREE.InstancedBufferAttribute(B.op, 1), g = geometry(st, op);
       var mesh = new THREE.InstancedMesh(g, material(t.k), B.n);
+      t.geo = [g, null]; t.light = false; t.op = op;
       mesh.instanceMatrix = new THREE.InstancedBufferAttribute(B.mat, 16);
       mesh.instanceColor = new THREE.InstancedBufferAttribute(B.col, 3);
       mesh.name = t.k ? 'brush-bushes-clumps' : 'brush-bushes-tile'; mesh.userData.level = t.k; mesh.matrixAutoUpdate = false; mesh.frustumCulled = false; mesh.visible = false;
@@ -543,7 +564,7 @@
       group.add(mesh); S.built.push(t); S.held += B.n;
     }
     function drop(t) {
-      if (t.mesh) { group.remove(t.mesh); t.mesh.geometry.dispose(); if (t.mesh.dispose) t.mesh.dispose(); t.mesh = null; S.held -= t.n; }
+      if (t.mesh) { free(t); S.held -= t.n; }
       t.state = 0; t.n = t.cells;
     }
     function trim() {
@@ -554,7 +575,7 @@
       S.built = keep;
     }
     function clear() {
-      S.built.forEach(function (t) { if (t.mesh) { group.remove(t.mesh); t.mesh.geometry.dispose(); if (t.mesh.dispose) t.mesh.dispose(); t.mesh = null; } t.state = 0; });
+      S.built.forEach(function (t) { free(t); t.state = 0; });
       S.built = []; S.drawn = []; S.held = 0; S.tris = 0; S.inst = 0; S.levels = [];
     }
     function update(cam, all) {
@@ -588,7 +609,8 @@
       for (i = 0; i <= LEVELS; i++) lv.push({ tiles: 0, instances: 0, triangles: 0 });
       for (i = 0; i < sel.draw.length; i++) {
         var t = sel.draw[i]; if (t.state !== 1) continue;
-        var per = t.k ? C_TRIS : TRIS;
+        solidOf(t);
+        var per = t.k || t.light ? C_TRIS : TRIS;
         t.mesh.visible = true; t.last = S.frame; drawn.push(t); tris += t.n * per; inst += t.n;
         lv[t.k].tiles++; lv[t.k].instances += t.n; lv[t.k].triangles += t.n * per;
       }
@@ -641,7 +663,7 @@
             TINT_LO: TINT_LO, TINT_HI: TINT_HI, SINK: SINK, SLOPE_MAX: SLOPE_MAX, SINK_MAX: SINK_MAX, NEAR: NEAR, LOW: LOW, LOW_H: LOW_H, TALL_H: TALL_H, widthOf: widthOf, MERGE_DH: MERGE_DH, MERGE_DO: MERGE_DO,
             LEVELS: LEVELS, PYR: PYR, TILE_C: TILE_C, tileC: tileC, C_TRIS: C_TRIS, CMIN: CMIN, AREA: AREA, C_SHADE: C_SHADE, START: START, STEPS: STEPS, C_JITTER: C_JITTER, C_SIZE_VAR: C_SIZE_VAR, C_OVAL: C_OVAL,
             hash: hash, vary: vary, knots: knots, opacityOf: opacityOf, lut: lut, mask: mask, fade: fade, plan: plan, merges: merges, buildTile: buildTile, tiles: tiles, select: select, dome: dome,
-            bayer4: bayer4, pyramid: pyramid, pyramidStep: pyramidStep, patchSums: patchSums, clumpDrawn: clumpDrawn, clumpOf: clumpOf, clumpTiles: clumpTiles, buildClumps: buildClumps, clumpSolid: clumpSolid,
+            bayer4: bayer4, pyramid: pyramid, pyramidStep: pyramidStep, patchSums: patchSums, clumpDrawn: clumpDrawn, clumpOf: clumpOf, clumpTiles: clumpTiles, buildClumps: buildClumps, clumpSolid: clumpSolid, lightDome: lightDome, LIGHT_FROM: LIGHT_FROM,
             rings: rings, fadeOf: fadeOf, weight: weight, create: create };
 
   root.FlexBrushLooks = root.FlexBrushLooks || {};
