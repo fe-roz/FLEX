@@ -152,6 +152,7 @@
         // quad's reach stands above the slope through this vertex (a ridge or a knob between vertices)
         var hx = gx * d / 2, hy = gy * d / 2;
         for (b = -2; b <= 2; b++) for (a = -2; a <= 2; a++) { var q = sG[o + b * m2 + a] - c - a * hx - b * hy; if (q > up) up = q; }
+        if (up > d / 2) up = d / 2;                               // (under a cliff the ground above is not a knob: no sail up to its top)
       }
       out[j * w + i] = c + up + (heightAt(P, l, I, J) + extra) * (k > KMAX ? KMAX : k);
     }
