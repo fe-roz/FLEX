@@ -14,6 +14,9 @@ Scenes sit around the documentation example (45.1234, -100.5678). Pins down:
   * a brush patch gives mounds inside it, open ground gives nothing, a bare
     scene gives no shapes and no shell, a cliff face is not vegetation, and
     noise (class 7, a bird) makes no shape;
+  * a clump of blobs filled to the ground is tall brush (kind 3), a small
+    crown on a clear trunk beside it stays a tree; the rule itself
+    (tall_brush) case by case;
   * the area ring clips the result;
   * every .bin matches veg.json (sizes, record layout, ground NaN-free and
     row 0 south), the shell is closed, outward, in range and under budget;
@@ -101,17 +104,41 @@ veg, log = quiet_run(params, out)
 veg, S, shell, ground = load(out)
 fr = frame_of(veg)
 
-trees = S[S[:, 6] != 2]
+crowns = S[S[:, 6] != 2]              # everything the tree finder measured
+tallb = S[S[:, 6] == 3]               # ... of which tall brush (brush by its shape)
+trees = S[S[:, 6] < 2]
 brush = S[S[:, 6] == 2]
-check('trees counted', len(trees) == len(truth['trees']),
-      f'{len(trees)} vs {len(truth["trees"])}')
+n_true = len(truth['trees']) + len(truth['small_trees'])
+check('trees counted', len(trees) == n_true, f'{len(trees)} vs {n_true}')
 check('veg.json counts', veg['shapes']['trees'] == len(trees) and
       veg['shapes']['brush'] == len(brush) and
+      veg['shapes']['tall_brush'] == len(tallb) and
       veg['shapes']['cones'] + veg['shapes']['domes'] == len(trees) and
       veg['shapes']['count'] == len(S))
-check('trees first, tallest first',
-      np.all(np.diff(trees[:, 3]) <= 1e-6) and
-      np.all(S[:len(trees), 6] != 2), S[:, 6])
+check('crowns first, tallest first',
+      np.all(np.diff(crowns[:, 3]) <= 1e-6) and
+      np.all(S[:len(crowns), 6] != 2), S[:, 6])
+
+# Tall brush: the clump of blobs filled to the ground is brush (kind 3) with
+# its measured height and width; the 4 m crown on a clear trunk beside it
+# stays a tree.
+check('tall brush: one crown per blob, all kind 3', len(tallb) == len(truth['tall_brush']), len(tallb))
+for (tx, ty, h, r) in truth['tall_brush']:
+    xe, yn = fr.to_enu(np.array([E0 + tx]), np.array([N0 + ty]))
+    d = np.hypot(crowns[:, 0] - xe[0], crowns[:, 1] - yn[0])
+    i = int(np.argmin(d))
+    t = crowns[i]
+    check(f'tall brush at {tx},{ty}: found, kind 3', d[i] < 2.0 and t[6] == 3, (d[i], t[6]))
+    check(f'tall brush at {tx},{ty}: height, low base, a few metres wide',
+          abs(t[3] - h) < 0.4 and t[5] < 1.0 and 1.5 < t[4] < r + 1.0, t[3:6])
+for (tx, ty, h, r, b) in truth['small_trees']:
+    xe, yn = fr.to_enu(np.array([E0 + tx]), np.array([N0 + ty]))
+    d = np.hypot(crowns[:, 0] - xe[0], crowns[:, 1] - yn[0])
+    t = crowns[int(np.argmin(d))]
+    check(f'small tree at {tx},{ty}: a crown on a clear trunk stays a tree',
+          d.min() < 1.5 and t[6] < 2 and abs(t[3] - h) < 0.4 and abs(t[5] - b) < 0.5, t[3:7])
+check('the mean tree height does not count tall brush',
+      abs(veg['stats']['mean_tree_height'] - float(trees[:, 3].mean())) < 0.02)
 
 matched = set()
 kind_ok = 0
@@ -161,7 +188,7 @@ inb = (brush[:, 0] > xe[0] - 3) & (brush[:, 0] < xe[1] + 3) & \
     (brush[:, 1] > yn[0] - 3) & (brush[:, 1] < yn[1] + 3)
 check('brush mounds made', inb.sum() >= 40, inb.sum())
 near_tree = np.zeros(len(brush), bool)
-for t in trees:
+for t in crowns:
     near_tree |= np.hypot(brush[:, 0] - t[0], brush[:, 1] - t[1]) < t[4] + 2.0
 check('no brush away from the patch', np.all(inb | near_tree),
       brush[~(inb | near_tree)][:3])
@@ -255,9 +282,9 @@ check('small budget: simplified from more', veg_b['shell']['simplified_from'] > 
 check('only the asked look', 'shapes' not in veg_b and
       not os.path.exists(os.path.join(out_b, 'shapes.bin')))
 
-# Area ring clips: the western half only (the conifers).
+# Area ring clips: the western strip only (the conifers; the tall brush and the small tree are east of it).
 out_c = os.path.join(TMP, 'clip')
-veg_c, _ = quiet_run(dict(params, area=ring_ll(0, 0, 90, H), looks=['shapes']), out_c)
+veg_c, _ = quiet_run(dict(params, area=ring_ll(0, 0, 50, H), looks=['shapes']), out_c)
 Sc = np.fromfile(os.path.join(out_c, 'shapes.bin'), '<f4').reshape(-1, 12)
 tc = Sc[Sc[:, 6] != 2]
 check('area ring clips', len(tc) == 8 and np.all(tc[:, 6] == 1), (len(tc), tc[:, 6]))
@@ -324,6 +351,48 @@ check('lower canopy split from the tall crown', nl >= 3 and a1 < 0.7 * a0 and
       a1 > math.pi * 3.0 ** 2, (nl, a0, a1))
 # The dome above is not split (its rim is steep, not a canopy of its own).
 check('a crown\'s rim is not a lower layer', segment(dome)[2] == 0)
+
+# --------------------------------------------------------------------------
+# 1c. Tall brush: the rule, case by case
+# --------------------------------------------------------------------------
+
+def tb(h, base, cone=False, flat=0.75, joined=0.0, measured=True):
+    return bool(vs.tall_brush([h], [base], [cone], [flat], [joined], [measured])[0])
+
+
+check('rule: a 4 m blob filled to the ground is brush', tb(4.0, 0.5))
+check('rule: the same inside a thicket is brush', tb(4.0, 0.5, joined=0.9))
+check('rule: a 4 m crown on a clear 2 m trunk, standing apart, is a tree', not tb(4.0, 2.0))
+check('rule: a high base inside a thicket is its leafy shell, not a trunk', tb(4.0, 2.0, joined=0.9, flat=0.85))
+check('rule: a trunk must be a real gap (1.2 m under a 4 m crown is not)', tb(4.0, 1.2))
+check('rule: a narrow peaked cone is a young conifer, a tree', not tb(5.0, 0.5, cone=True, flat=0.5))
+check('rule: a "cone" that is a flat piece of thicket is brush', tb(5.0, 0.5, cone=True, flat=0.85, joined=0.9))
+check('rule: 6 to 8 m is brush only as a joined flat-topped thicket',
+      tb(7.0, 1.0, joined=0.8, flat=0.8) and not tb(7.0, 1.0, joined=0.2, flat=0.8) and
+      not tb(7.0, 1.0, joined=0.8, flat=0.6))
+check('rule: 8 m and taller is a tree whatever its shape (no cap on trees: 30 m, 100 m)',
+      not tb(8.0, 0.5, joined=1.0, flat=0.9) and not tb(30.0, 0.5, joined=1.0, flat=0.9) and
+      not tb(100.0, 0.5, joined=1.0, flat=0.95))
+check('rule: too few returns to say: a tree, as before', not tb(4.0, 0.5, measured=False))
+check('rule: the thresholds are the documented ones',
+      (vs.TALL_SURE_M, vs.TALL_LOW_M, vs.TRUNK_BASE_M, vs.TRUNK_BASE_SHARE, vs.JOINED_SHARE, vs.FLAT_TOP) ==
+      (8.0, 6.0, 2.0, 0.4, 0.5, 0.7))
+# canopy_around: a crown in a flat canopy of its own height is joined, one in the open is not, one under
+# much taller neighbours is not "joined" either (they are not its thicket)
+cs = np.full((80, 80), 4.0, np.float32)
+ja = vs.canopy_around(cs, [20.0], [-20.0], [2.5], [4.2], 0.25, -0.25, 0.5)[0]
+jo = vs.canopy_around(np.zeros((80, 80), np.float32), [20.0], [-20.0], [2.5], [4.2], 0.25, -0.25, 0.5)[0]
+jt = vs.canopy_around(np.full((80, 80), 20.0, np.float32), [20.0], [-20.0], [2.5], [4.2], 0.25, -0.25, 0.5)[0]
+je = vs.canopy_around(cs, [0.5], [-0.5], [2.5], [4.2], 0.25, -0.25, 0.5)[0]
+check('canopy around: joined in a level canopy, apart in the open and under tall trees; off the grid counts as open',
+      ja == 1.0 and jo == 0.0 and jt == 0.0 and 0.1 < je < 0.5, (ja, jo, jt, je))
+# tall_brush "off" (diagnostics): the same records, no kind 3; that is also what a reader from before sees
+out_off = os.path.join(TMP, 'scene_off')
+quiet_run(dict(params, looks=['shapes'], tall_brush='off'), out_off)
+So = np.fromfile(os.path.join(out_off, 'shapes.bin'), '<f4').reshape(-1, 12)
+check('tall brush off: same records, the blobs are domes again',
+      len(So) == len(S) and np.array_equal(So[:, :6], S[:, :6]) and np.array_equal(So[:, 7:], S[:, 7:]) and
+      not np.any(So[:, 6] == 3) and np.all(So[S[:, 6] == 3, 6] == 0) and np.array_equal(So[S[:, 6] != 3, 6], S[S[:, 6] != 3, 6]))
 
 # --------------------------------------------------------------------------
 # 2. Bare ground and a cliff

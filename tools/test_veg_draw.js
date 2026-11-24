@@ -87,6 +87,15 @@ const veg = F.veg;
   }
   ok('shapes mesh: triangles = near + far per shape', m.trianglesNear === wantN && m.trianglesFar === wantF && m.triangles === wantN + wantF && m.idx.length === m.triangles * 3, [m.trianglesNear, wantN, m.trianglesFar, wantF]);
   ok('shapes mesh: counts per kind', m.counts.dome === veg.shapes.domes && m.counts.cone === veg.shapes.cones && m.counts.brush === veg.shapes.brush);
+  {
+    // tall brush (kind 3: a crown that is brush by its shape) is drawn as brush: from the ground, at its measured height (a mound under a real crown is held under it; this one is not), brush colour; an unknown kind stays a dome
+    const tb = new Float32Array([0, 0, 0, 4.5, 3, 0.6, 3, 0.8, 1, 0.9, 0.7, 0.4, 20, 0, 0, 4.5, 3, 0.6, 2, 0.8, 1, 0.9, 0.7, 0.4, 40, 0, 0, 9, 3, 2, 7, 0.8, 0.7, 1, 0.9, 0.5]);
+    const mt = M.buildShapes(tb, 3, { shift: () => 0, h0: 0, curvature: false, stride: 12 });
+    const zOf = (a, b) => { let lo = Infinity, hi = -Infinity; for (let v = 0; v < mt.vertices; v++) { const x = mt.pos[v * 3]; if (x > a && x < b) { lo = Math.min(lo, mt.pos[v * 3 + 2]); hi = Math.max(hi, mt.pos[v * 3 + 2]); } } return [lo, hi]; };
+    const z3 = zOf(-10, 10), z2 = zOf(10, 30);
+    let metaOk = true; for (let v = 0; v < mt.vertices; v++) { const x = mt.pos[v * 3]; if (x < 30 && mt.meta[v * 4] !== 2 * 127) metaOk = false; if (x > 30 && mt.meta[v * 4] !== 0) metaOk = false; }
+    ok('shapes mesh: tall brush (kind 3) is drawn as brush, from the ground to its measured height; an unknown kind stays a dome', mt.counts.brush === 2 && mt.counts.dome === 1 && mt.counts.cone === 0 && near(z3[0], z2[0], 0.05) && near(z3[1], z2[1], 0.2) && z3[0] < 0.2 && z3[1] > 4.0 && metaOk, [mt.counts, z3, z2]);
+  }
   ok('shapes mesh: every index in range', m.idx.every(i => i < m.vertices));
   ok('shapes mesh: all finite', m.pos.every(isFinite));
   // blocks: [lod][class][tile] laid out end to end over the whole index buffer
