@@ -181,17 +181,20 @@
   }
   // "Orbit on the ground", one drawn frame. The orbit centre goes to the ground's height at its x, y and the camera
   // with it by the same amount (a rigid move: the camera-to-centre offset is untouched). No ground there (off the
-  // map): nothing moves. st remembers between frames { x, y: where the centre was, above: the camera was at least
-  // `margin` above the ground under it }. When the centre moved and the camera was above the ground, it stays above
-  // (lifted to ground + margin); a camera already under the ground is left alone. Returns the same pose object when
+  // map): nothing moves. st remembers between frames { x, y: where the centre was, above: the camera was above the
+  // ground under it (by half of `margin`, so the last crumbs of a move do not flip it) }. When the centre moved in
+  // this frame (more than MOVED_MIN: a pan, a fly-to, a follow step; not the crumbs OrbitControls' damping leaves
+  // under an orbit or a zoom) and the camera was above the ground, it stays above (lifted to ground + margin); a
+  // camera the user took under the ground, or zoomed into it, is left alone. Returns the same pose object when
   // nothing changes, so a still or orbiting view costs two reads of the height grid and no writes.
+  var MOVED_MIN = 1e-3;
   var zOr = function (zAt, x, y) { var z = zAt(x, y); return z === null || z === undefined || isNaN(z) ? null : z; };
   function groundSnap(pose, zAt, st, margin) {
     var t = pose.t, p = pose.p, out = pose;
     var gz = zOr(zAt, t[0], t[1]);
     var dz = gz === null ? 0 : gz - t[2];
     if (Math.abs(dz) < 1e-7) dz = 0;
-    var moved = dz !== 0 || st.x !== t[0] || st.y !== t[1];
+    var moved = Math.abs(dz) > MOVED_MIN || Math.abs(st.x - t[0]) > MOVED_MIN || Math.abs(st.y - t[1]) > MOVED_MIN;
     var pz = p[2] + dz;
     if (dz) out = { p: [p[0], p[1], pz], t: [t[0], t[1], gz], dz: dz };
     var gc = zOr(zAt, p[0], p[1]);
@@ -200,7 +203,7 @@
         pz = gc + margin;
         out = { p: [p[0], p[1], pz], t: out.t, dz: dz, lifted: true };
       }
-      st.above = pz >= gc + margin - 1e-7;
+      st.above = pz >= gc + margin / 2;
     }
     st.x = t[0]; st.y = t[1];
     return out;

@@ -250,6 +250,12 @@ let calls = 0; const counted = (x, y) => { calls++; return hill(x, y); };
   a = M.groundSnap({ p: [-50, 0, 130], t: [-10, 0, 100] }, ridge, st, MARGIN);
   const under = { p: [-50, 0, 80], t: a.t };              // orbited under: the centre did not move
   ok('orbiting under the ground is not stopped', M.groundSnap(under, ridge, st, MARGIN) === under && st.above === false);
+  // the crumbs of a damped pan under a zoom: the centre creeps by fractions of a millimetre while the camera comes down
+  st = {};
+  a = M.groundSnap({ p: [-50, 0, 130], t: [-10, 0, 100] }, ridge, st, MARGIN);
+  const zoomed = { p: [-50, 1e-5, 101], t: [-10, 1e-5, 100] };
+  ok('a zoom that brings the camera to the ground is not a move of the centre: no lift', M.groundSnap(zoomed, ridge, st, MARGIN) === zoomed);
+  ok('…and a camera within the margin still counts as above, so the next pan keeps it out of the ground', st.above === true && M.groundSnap(M.translate(zoomed, [0, 5, 0]), ridge, st, MARGIN).p[2] === 100 + MARGIN);
   // cost: reads of the height grid per frame
   let reads = 0; const cnt = (x, y) => { reads++; return slope(x, y); };
   M.groundSnap(q, cnt, {}, MARGIN);
