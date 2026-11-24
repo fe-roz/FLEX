@@ -128,8 +128,6 @@
 
   // Are the brush blocks drawing the brush (libs/brush-blocks.js)? Then the mounds stay hidden.
   function blocksOn() { return !!(S && S.blocks); }
-  // The crowns (cones and round crowns: x, y, radius) for the blocks, which leave out the cells under them while the trees show.
-  function applyCrowns() { if (S.blocks && S.blocks.crowns) S.blocks.crowns(S.st.trees && S.crowns ? S.crowns : null); }
   function applyBrush() {
     var on = S.st.brush;
     S.meshes[2].forEach(function (m) { m.visible = on && !S.blocks; });
@@ -166,10 +164,8 @@
         S.count[k] += c;
       }
     }
-    var crowns = new Float32Array((n - P.counts[2].reduce(function (a, b) { return a + b; }, 0)) * 3), nc = 0;
     for (i = 0; i < n; i++) {
       var kind = T.u8[i * T.B + 18]; if (kind > 2) kind = 2;
-      if (kind < 2) { crowns[nc++] = f[i * F]; crowns[nc++] = f[i * F + 1]; crowns[nc++] = T.u16[i * T.U + 8] / 100; }
       var s = slot[kind][P.tileOf[i]], m = s.mesh.instanceMatrix.array, o = s.at * 16;
       var x = f[i * F], y = f[i * F + 1], z = f[i * F + 2], h = f[i * F + 3], r = T.u16[i * T.U + 8] / 100;
       if (kind === 0) { var zhb = s.mesh.userData.zhb; zhb[s.at * 3] = z; zhb[s.at * 3 + 1] = h; zhb[s.at * 3 + 2] = T.version === 2 ? T.u16[i * T.U + 10] / 100 : 0; }
@@ -193,9 +189,8 @@
       q.mesh.instanceMatrix.needsUpdate = true; q.mesh.instanceColor.needsUpdate = true;
       q.mesh.raycast = function () {};                           // taps go through the trees
     }
-    S.tiles = G; S.crowns = crowns;
+    S.tiles = G;
     S.scene.add(S.group);
-    applyCrowns();
     if (S.st.crown) crownLook(true);
   }
 
@@ -256,7 +251,7 @@
       box.className = 'sh-level-pop';
       box.style.cssText = 'position:fixed;z-index:9000;box-sizing:border-box;display:flex;align-items:center;gap:8px;padding:10px 12px;background:rgba(24,28,34,.97);' +
         'border:1px solid rgba(255,255,255,.25);border-radius:10px;color:#eee;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.5);touch-action:none;';
-      var w = Math.max(r.width, 200), left = Math.max(6, Math.min(r.left, (win.innerWidth || 9999) - w - 6));
+      var w = Math.max(r.width, 200), vw = win.innerWidth || 9999, left = Math.max(6, r.left + w > vw - 6 ? Math.min(r.right, vw - 6) - w : r.left);   // over the chip; a chip at the right edge has it end with the chip
       box.style.width = w + 'px'; box.style.left = left + 'px'; box.style.bottom = Math.max(6, (win.innerHeight || 0) - r.top + 6) + 'px';
       sl.type = 'range'; sl.min = '1'; sl.max = String(STEPS); sl.step = '1'; sl.value = String(Math.round(o.level() * STEPS));
       sl.style.cssText = 'flex:1;min-width:0;height:26px;margin:0;';
@@ -314,7 +309,7 @@
       if (!tr && !bl) return Promise.resolve(false);
       var d = tr && (tr.detail === 1 || tr.detail === 2) ? tr.detail : 0;
       S = { THREE: o.THREE, scene: o.scene, trees: tr, detail: d, st: restore(o.saved), redraw: o.redraw, uTrees: { value: 1 }, uBrush: { value: 1 }, blocks: bl,
-            crowns: null, group: null, meshes: [[], [], []], trunks: [], trunkGeo: null, trunkMat: null, count: [0, 0, 0], tiles: 0, loaded: false };
+            group: null, meshes: [[], [], []], trunks: [], trunkGeo: null, trunkMat: null, count: [0, 0, 0], tiles: 0, loaded: false };
       S.uTrees.value = S.st.treesOp; S.uBrush.value = S.st.brushOp;
       var mine = S;
       if (bl) {
@@ -348,7 +343,7 @@
       S.st[key] = !!v;
       if (key === 'crown') { if (S.loaded) crownLook(!!v); }
       else if (key === 'brush') applyBrush();
-      else { S.meshes[0].forEach(function (m) { m.visible = !!v; }); S.meshes[1].forEach(function (m) { m.visible = !!v; }); S.trunks.forEach(function (m) { m.visible = !!v && S.st.crown; }); applyCrowns(); }
+      else { S.meshes[0].forEach(function (m) { m.visible = !!v; }); S.meshes[1].forEach(function (m) { m.visible = !!v; }); S.trunks.forEach(function (m) { m.visible = !!v && S.st.crown; }); }
       redraw();
     },
     // One opacity level, 0..1 (drawn in sixteenths, at least one): key 'trees' or 'brush'. No rebuild: a uniform.

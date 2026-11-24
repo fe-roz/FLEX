@@ -50,7 +50,7 @@ const b64 = buf => Buffer.from(buf).toString('base64');
     const r = await FB.init(v.opts(nothing));
     ok('BRUSH ' + JSON.stringify(nothing) + ': not active, nothing in the scene, nothing decoded', r === false && !FB.active() && !FB.loaded() && v.scene.children.length === 0 && v.decoded === 0 && FB.stats() === null && FB.objects() === null && (await FB.whenReady()) === false);
   }
-  FB.update(); FB.settle(); FB.set({ on: false }); FB.crowns([1, 2, 3]);
+  FB.update(); FB.settle(); FB.set({ on: false });
   ok('…and its calls do nothing', v.redraws === 0);
   const h = fs.readFileSync(path.join(root, 'viewer_build', 'viewer.html'), 'utf8');
   ok('the viewer template has the placeholder once, with the unfilled-template guard, the script line and the hooks', h.split('PLACEHOLDER_BRUSH_JSON').length === 2 && h.includes("<script>window['PLACEHOLDER_' + 'BRUSH_JSON'] = null;</script>\n<script>const BRUSH = PLACEHOLDER_BRUSH_JSON;</script>") &&
@@ -58,12 +58,12 @@ const b64 = buf => Buffer.from(buf).toString('base64');
 
   // ── 2. The file ─────────────────────────────────────────────────────────────
   const g1 = grid(7, 5, (i, j) => [i * 30 + j, 10 * (i + j)]);
-  const buf = FB.encode(Object.assign({ cell: 0.9, x0: -12.5, y0: 40.25, top: 2.5 }, g1));
+  const buf = FB.encode(Object.assign({ cell: 0.9, x0: -12.5, y0: 60.25, top: 2.5 }, g1));
   const dv = new DataView(buf);
-  ok('FBR1 as the contract has it: tag, nx, ny, cell, x0, y0, top, a spare, then the shares and the heights, rows from the south', buf.byteLength === 32 + 70 && Buffer.from(buf, 0, 4).toString('latin1') === 'FBR1' && dv.getUint32(4, true) === 7 && dv.getUint32(8, true) === 5 && near(dv.getFloat32(12, true), 0.9, 1e-6) && dv.getFloat32(16, true) === -12.5 && dv.getFloat32(20, true) === 40.25 && dv.getFloat32(24, true) === 2.5 && dv.getUint32(28, true) === 0 &&
+  ok('FBR1 as the contract has it: tag, nx, ny, cell, x0, y0, top, a spare, then the shares and the heights, rows from the south', buf.byteLength === 32 + 70 && Buffer.from(buf, 0, 4).toString('latin1') === 'FBR1' && dv.getUint32(4, true) === 7 && dv.getUint32(8, true) === 5 && near(dv.getFloat32(12, true), 0.9, 1e-6) && dv.getFloat32(16, true) === -12.5 && dv.getFloat32(20, true) === 60.25 && dv.getFloat32(24, true) === 2.5 && dv.getUint32(28, true) === 0 &&
     dv.getUint8(32 + 1 * 7 + 2) === 61 && dv.getUint8(32 + 35 + 1 * 7 + 2) === 30);
   const F = FB.parse(buf);
-  ok('…read back, as views over the bytes', F.nx === 7 && F.ny === 5 && near(F.cell, 0.9, 1e-6) && F.x0 === -12.5 && F.y0 === 40.25 && F.top === 2.5 && F.share[9] === 61 && F.height[9] === 30 && F.share.buffer === buf);
+  ok('…read back, as views over the bytes', F.nx === 7 && F.ny === 5 && near(F.cell, 0.9, 1e-6) && F.x0 === -12.5 && F.y0 === 60.25 && F.top === 2.5 && F.share[9] === 61 && F.height[9] === 30 && F.share.buffer === buf);
   const throws = f => { try { f(); return false; } catch (_) { return true; } };
   ok('a wrong file, an empty one, one cut short and one with no cells are refused', throws(() => FB.parse(Buffer.from('FTR2\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0').buffer.slice(0, 36))) && throws(() => FB.parse(new ArrayBuffer(0))) && throws(() => FB.parse(buf.slice(0, 60))) && throws(() => FB.parse(FB.encode({ nx: 0, ny: 0, cell: 0.9, share: [], height: [] }))));
 
@@ -87,9 +87,9 @@ const b64 = buf => Buffer.from(buf).toString('base64');
     ok(`scattered brush on ${dens * 100} % of the ground stays about ${dens * 100} % of it at every coarser level (the far view is not emptier or fuller)`, D.lv.cells / (512 * 512) > dens - 0.01 && cov.every(c => Math.abs(c - dens) < 0.07), cov);
   }
   {
-    const g = grid(64, 64, (i, j) => i < 32 ? [i < 16 ? 40 : 255, j < 32 ? 50 : 250] : null), D = FB.data(FB.encode(Object.assign({ cell: 1 }, g)), null, () => 0);
+    const g = grid(64, 64, (i, j) => i < 32 ? [i < 16 ? 100 : 255, j < 32 ? 50 : 250] : null), D = FB.data(FB.encode(Object.assign({ cell: 1 }, g)), null, () => 0);
     const l2 = D.lv[2];
-    ok('a coarse block has its cells’ class and height (means), and solid brush stays solid, bare stays bare', l2.w === 16 && l2.c[0] === 1 && l2.c[5] === 3 && l2.c[9] === 0 && l2.q[0] === 2 && l2.q[15 * 16 + 5] === 10 && D.lv[3].c[0] === 1 && D.lv[3].c[3] === 3 && D.lv[3].c[4] === 0 && D.lv.cells === 32 * 64, [l2.c[0], l2.c[5], l2.q[0]]);
+    ok('a coarse block has its cells’ class and height (means), and solid brush stays solid, bare stays bare', l2.w === 16 && l2.c[0] === 2 && l2.c[5] === 3 && l2.c[9] === 0 && l2.q[0] === 2 && l2.q[15 * 16 + 5] === 10 && D.lv[3].c[0] === 2 && D.lv[3].c[3] === 3 && D.lv[3].c[4] === 0 && D.lv.cells === 32 * 64, [l2.c[0], l2.c[5], l2.q[0]]);
   }
 
   // ── 5. One tile's mesh ──────────────────────────────────────────────────────
@@ -138,7 +138,7 @@ const b64 = buf => Buffer.from(buf).toString('base64');
   const nx = 2391, ny = 3129, n = nx * ny, share = new Uint8Array(n), height = new Uint8Array(n);
   const fn = (x, y) => Math.sin(x * 0.013) * Math.cos(y * 0.017) + 0.6 * Math.sin(x * 0.051 + y * 0.043) + 0.3 * Math.sin(x * 0.21) * Math.sin(y * 0.19);
   seed = 3; let cells = 0;
-  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const q = fn(i, j) - 0.5 + rnd() * 0.25; if (q > 0) { const s = Math.min(1, 0.1 + q * 1.2); share[j * nx + i] = Math.ceil(s * 255); height[j * nx + i] = Math.min(250, Math.round(30 + s * 170 + rnd() * 50)); cells++; } }
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const q = fn(i, j) - 0.5 + rnd() * 0.25; if (q > 0) { const s = Math.min(1, 0.1 + q * 1.2); share[j * nx + i] = Math.ceil(s * 255); height[j * nx + i] = Math.min(250, Math.round(30 + s * 170 + rnd() * 50)); if (share[j * nx + i] >= 77) cells++; } }
   const big = FB.encode({ nx, ny, cell: 0.9, x0: -1076, y0: -1408, share, height });
   const ground = (x, y) => 500 + 0.15 * x + 30 * Math.sin(y * 0.01);
   v = makeViewer();
@@ -146,7 +146,7 @@ const b64 = buf => Buffer.from(buf).toString('base64');
   const r = await v.FB.init(v.opts({ version: 1, file: b64(big) }, ground));
   const initMs = Date.now() - t0;
   let s = v.FB.stats(), o = v.FB.objects();
-  ok(`a ${nx} x ${ny} grid with ${cells.toLocaleString('en')} brushy cells: loaded in ${initMs} ms, 35 coarsest tiles meshed and kept, one group in the scene, one redraw asked`, r === true && v.FB.loaded() && s.cells === cells && cells > 2000000 && s.roots === 35 && s.meshed === 35 && v.scene.children.length === 1 && o.group.parent === v.scene && v.redraws === 1 && initMs < 5000, [s, initMs]);
+  ok(`a ${nx} x ${ny} grid with ${cells.toLocaleString('en')} cells of medium or dense brush: loaded in ${initMs} ms, 35 coarsest tiles meshed and kept, one group in the scene, one redraw asked`, r === true && v.FB.loaded() && s.cells === cells && cells > 1500000 && s.roots === 35 && s.meshed === 35 && v.scene.children.length === 1 && o.group.parent === v.scene && v.redraws === 1 && initMs < 5000, [s, initMs]);
   ok('drawn as ordinary solid surfaces (depth test and write on, no blending, lit, vertex colours), with the dither of the trees', o.material.isMeshLambertMaterial && o.material.depthWrite && !o.material.transparent && o.material.vertexColors === true && (() => { const sh = { uniforms: {}, fragmentShader: v.THREE.ShaderLib.lambert.fragmentShader }; o.material.onBeforeCompile(sh); return sh.fragmentShader.includes('flexBayer4') && sh.uniforms.uOpacityDither.value === 1; })());
   const views = { whole: [[0, -2500, 3200], [0, 0, 500]], oblique: [[300, -900, 900], [0, 0, 500]], near: [[200, -300, 640], [150, 0, 520]], ground: [[-340, 100, ground(-340, 100) + 4], [-300, 100, ground(-300, 100)]], down: [[400, -300, ground(400, -300) + 60], [400, -299, ground(400, -300)]] };
   const res = {};
@@ -194,26 +194,18 @@ const b64 = buf => Buffer.from(buf).toString('base64');
     ok('…its level and its switch reach the blocks', w.FB.stats().opacity === 1 && w.FB.stats().on === false);
   }
 
-  // ── 8. Under tree crowns ────────────────────────────────────────────────────
+  // ── 8. Which classes get a block ────────────────────────────────────────────
   {
-    const w = makeViewer(); await w.FB.init(w.opts({ version: 1, file: b64(FB.encode(Object.assign({ cell: 1, x0: 0, y0: 0 }, grid(100, 100, () => [200, 240])))) }));
-    w.look([50, -60, 200], [50, 50, 100]); w.FB.settle();
-    const all = w.FB.stats();
-    w.FB.crowns(new Float32Array([50.5, 50.5, 10, 20.5, 20.5, 0.4, 500, 500, 5]));
-    w.FB.settle(); const cut = w.FB.stats();
-    ok('cells whose centre is under a tree crown are left out while the trees show (a 10 m crown: about 314 cells; a 0.4 m one: its own cell)', FB.UNDER_CROWNS === false && all.cells === 10000 && all.underCrowns === 0 && cut.underCrowns > 300 && cut.underCrowns < 330 && cut.cells === 10000 - cut.underCrowns, [all.cells, cut]);
-    const m = FB.crownMask(FB.parse(FB.encode(Object.assign({ cell: 1, x0: 0, y0: 0 }, grid(100, 100)))), [50.5, 50.5, 10]), bit = (i, j) => (m[(j * 100 + i) >> 3] >> ((j * 100 + i) & 7)) & 1;
-    ok('…the mask is the crown’s circle', bit(50, 50) === 1 && bit(59, 50) === 1 && bit(61, 50) === 0 && bit(50, 60) === 1 && bit(57, 57) === 1 && bit(58, 58) === 0);
-    w.FB.underCrowns(true); w.FB.settle();
-    ok('the other look (for comparing): all cells drawn', w.FB.stats().cells === 10000 && w.FB.stats().underCrowns === 0);
-    w.FB.underCrowns(false); w.FB.crowns(null); w.FB.settle();
-    ok('trees switched off: the cells under them are brush again', w.FB.stats().cells === 10000);
-    // through FlexTrees: a trees file with one cone and one mound
-    const tb = Buffer.alloc(8 + 2 * 20); tb.write('FTR1', 0, 'latin1'); tb.writeUInt32LE(2, 4);
-    [[50.5, 50.5, 100, 20, 10, 0], [20.5, 20.5, 100, 1, 6, 2]].forEach((t, i) => { const q = 8 + i * 20; tb.writeFloatLE(t[0], q); tb.writeFloatLE(t[1], q + 4); tb.writeFloatLE(t[2], q + 8); tb.writeFloatLE(t[3], q + 12); tb.writeUInt16LE(t[4] * 100, q + 16); tb.writeUInt8(t[5], q + 18); });
-    await w.FT.init({ THREE: w.THREE, scene: w.scene, trees: { version: 1, count: 2, file: tb.toString('base64') }, saved: null, blocks: w.FB, redraw() {}, isAssetRef: () => false, b64ToArrayBuffer: q => { const b = Buffer.from(q, 'base64'); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); } });
-    const a1 = w.FB.stats().underCrowns; w.FT.set('trees', false); const a2 = w.FB.stats().underCrowns; w.FT.set('trees', true);
-    ok('FlexTrees hands over the crowns of its cones and round crowns (not the mounds), and takes them back with Trees off', a1 > 300 && a1 < 330 && a2 === 0 && w.FB.stats().underCrowns === a1, [a1, a2]);
+    const g = grid(90, 30, (i) => [i < 30 ? 40 : i < 60 ? 100 : 255, 150]), file = b64(FB.encode(Object.assign({ cell: 1 }, g)));
+    const w = makeViewer(); await w.FB.init(w.opts({ version: 1, file })); w.look([45, -40, 160], [45, 15, 100]); w.FB.settle();
+    const cols = new Set(); w.FB.objects().drawn.forEach(t => { const c = t.mesh.geometry.attributes.color.array, nn = t.mesh.geometry.attributes.normal.array; for (let k = 0; k < c.length; k += 3) if (nn[k + 2] > 0) cols.add(c[k] + '.' + c[k + 1] + '.' + c[k + 2]); });
+    ok('only medium and dense cells get a block (MIN_CLASS = 1): light cells are bare, a tree and a block may share a spot (nothing is left out under crowns)', FB.MIN_CLASS === 1 && w.FB.stats().cells === 1800 && w.FB.stats().minClass === 1 && [...cols].sort().join('|') === '31.95.31|95.174.79' && typeof w.FB.crowns === 'undefined', [w.FB.stats().cells, [...cols]]);
+    const L1 = FB.luts(C0, 0.3, 1), L2 = FB.luts(C0, 0.3, 2);
+    ok('…the cut is the medium class’s own threshold (share 0.3: bytes from 77)', L1.c[76] === 0 && L1.c[77] === 2 && L1.c[153] === 3 && L2.c[152] === 0 && L2.c[153] === 3);
+    const w0 = makeViewer(); await w0.FB.init(w0.opts({ version: 1, file, minClass: 0 }));
+    ok('all three is one switch (minClass 0)', w0.FB.stats().cells === 2700 && w0.FB.stats().minClass === 0);
+    const w1 = makeViewer(); await w1.FB.init(w1.opts({ version: 1, file, classes: [{ name: 'brush', min: 0.5, colour: '336633' }] }));
+    ok('a map with one class draws that class', w1.FB.stats().cells === 900 && w1.FB.stats().minClass === 0);
   }
 
   // ── 9. Odd files ────────────────────────────────────────────────────────────

@@ -24,7 +24,8 @@
 // needed, a few milliseconds a frame (the coarser tile is drawn meanwhile), and the least recently drawn are
 // dropped past CACHE triangles. update() is called by the viewer before a frame it draws anyway: with the
 // camera still and nothing waiting it returns at once; nothing animates.
-// Cells under a tree crown are left out while the trees are shown (UNDER_CROWNS; libs/trees.js hands the crowns over).
+// Only cells of the medium class and up get a block (MIN_CLASS). A block may share its spot with a tree: low
+// branches under a crown are in the way too, so nothing is left out under trees.
 // Opacity is the ordered dither of libs/trees.js (its Brush chip and level drive this).
 // Blocks are not part of the terrain: the height grid and taps do not see them.   Test: tools/test_brush_blocks.js
 (function (root) {
@@ -39,9 +40,9 @@
   var BUDGET = 600000, CACHE = 1500000;                        // triangles drawn at once; triangles kept meshed
   var QMAX = 200, QMIN = 6, QSTEP = 0.82;                      // a tile is refined nearer than block size x Q
   var BUILD_MS = 6;                                            // meshing time a frame
-  // Brush cells under a tree's crown (trees.bin, cones and round crowns, while the Trees chip is on): the band
-  // there is mostly the tree's own low branches, measured tall. false = such cells are not drawn; true = all are.
-  var UNDER_CROWNS = false;
+  // The lightest class that gets a block, counted from the lightest (0): 1 = medium and dense only, light cells
+  // get none (brush is what is in the way of walking); 0 = all three. BRUSH.minClass, when given, is used instead.
+  var MIN_CLASS = 1;
   var DEF_CLASSES = [{ name: 'light', min: 0.1, colour: 'b7e4a0' }, { name: 'medium', min: 0.3, colour: '5fae4f' }, { name: 'dense', min: 0.6, colour: '1f5f1f' }];
 
   function bayer2(x, y) { x &= 1; y &= 1; return (x * 2 + y * y * 3) & 3; }
@@ -81,23 +82,24 @@
     out.sort(function (a, b) { return a.min - b.min; });
     return out.slice(0, 250);
   }
-  // Share byte -> class number (0 = not drawn, 1 = lightest …); height in cm -> steps of HSTEP (at least one).
-  function luts(cls, bandLow) {
+  // Share byte -> class number (0 = not drawn, 1 = lightest …; classes under `minClass` are not drawn);
+  // height in cm -> steps of HSTEP (at least one).
+  function luts(cls, bandLow, minClass) {
     var c = new Uint8Array(256), h = new Uint8Array(256), i, k, low = Math.round((bandLow > 0 ? bandLow : 0.3) * 100);
-    for (i = 1; i < 256; i++) { for (k = cls.length; k > 0; k--) if (i >= cls[k - 1].cut) break; c[i] = k; }
+    for (i = 1; i < 256; i++) { for (k = cls.length; k > 0; k--) if (i >= cls[k - 1].cut) break; c[i] = k > (minClass || 0) ? k : 0; }
     for (i = 0; i < 256; i++) h[i] = Math.max(1, Math.round((i || low) / (HSTEP * 100)));
     return { c: c, h: h };
   }
   // The coarser levels: lv[l] = { w, h, c, q } for l = 1..LEVELS-1 (class and height step a block; class 0 = not
   // drawn), plus `cells`, the number of brushy cells. A block of level l is drawn when its brushy cells, as a
   // share of the block, pass the ordered threshold of its place: (rank + 0.5) / 16.
-  function pyramid(F, L, mask) {
+  function pyramid(F, L) {
     var nx = F.nx, ny = F.ny, lv = [null], l, i, j, cells = 0;
     var w = nx, h = ny, cnt = null, ss = null, hs = null;
     for (l = 1; l < LEVELS; l++) {
       var W = (w + 1) >> 1, H = (h + 1) >> 1, n = W * H, c2 = new Uint8Array(n), s2 = new Uint16Array(n), h2 = new Uint16Array(n);
       if (l === 1) {
-        for (j = 0; j < ny; j++) { var r = j * nx, o = (j >> 1) * W; for (i = 0; i < nx; i++) { var sv = F.share[r + i]; if (L.c[sv] && !(mask && mask[(r + i) >> 3] & (1 << ((r + i) & 7)))) { var k = o + (i >> 1); c2[k]++; s2[k] += sv; h2[k] += F.height[r + i]; cells++; } } }
+        for (j = 0; j < ny; j++) { var r = j * nx, o = (j >> 1) * W; for (i = 0; i < nx; i++) { var sv = F.share[r + i]; if (L.c[sv]) { var k = o + (i >> 1); c2[k]++; s2[k] += sv; h2[k] += F.height[r + i]; cells++; } } }
       } else {
         for (j = 0; j < h; j++) { var r1 = j * w, o1 = (j >> 1) * W; for (i = 0; i < w; i++) { var k1 = o1 + (i >> 1), a = r1 + i; c2[k1] += cnt[a]; s2[k1] += ss[a]; h2[k1] += hs[a]; } }
       }
@@ -137,7 +139,7 @@
         var gi = bx + i, c = 0, q = 0;
         if (gi >= 0 && gj >= 0 && gi < gw && gj < gh) {
           if (l) { c = D.lv[l].c[gj * gw + gi]; q = D.lv[l].q[gj * gw + gi]; }
-          else { var a = gj * gw + gi; c = D.mask && D.mask[a >> 3] & (1 << (a & 7)) ? 0 : D.L.c[F.share[a]]; q = c ? D.L.h[F.height[a]] : 0; }
+          else { var a = gj * gw + gi; c = D.L.c[F.share[a]]; q = c ? D.L.h[F.height[a]] : 0; }
         }
         sWc[row + i] = c; sWq[row + i] = c ? q : 0;
         if (c && i >= 0 && j >= 0 && i < n && j < m) any++;
@@ -251,22 +253,6 @@
     return { draw: draw, want: want, q: q, tris: tris };
   }
 
-  // The cells whose centre lies under a crown: a bit a cell. crowns: [x, y, radius, …] in the grid's frame.
-  function crownMask(F, crowns) {
-    var mask = new Uint8Array((F.nx * F.ny + 7) >> 3), k, i, j, n = 0;
-    for (k = 0; k + 2 < crowns.length; k += 3) {
-      var cx = (crowns[k] - F.x0) / F.cell - 0.5, cy = (crowns[k + 1] - F.y0) / F.cell - 0.5, r = crowns[k + 2] / F.cell;
-      if (!(r > 0)) continue;
-      var j0 = Math.max(0, Math.ceil(cy - r)), j1 = Math.min(F.ny - 1, Math.floor(cy + r));
-      for (j = j0; j <= j1; j++) {
-        var w = Math.sqrt(r * r - (j - cy) * (j - cy)), i0 = Math.max(0, Math.ceil(cx - w)), i1 = Math.min(F.nx - 1, Math.floor(cx + w));
-        for (i = i0; i <= i1; i++) { var a = j * F.nx + i; if (!(mask[a >> 3] & (1 << (a & 7)))) { mask[a >> 3] |= 1 << (a & 7); n++; } }
-      }
-    }
-    mask.cells = n;
-    return mask;
-  }
-
   var S = null;      // everything of the running viewer; null = no brush blocks (every other export)
 
   // (Again) from the grid: the levels, the coarsest tiles meshed and kept (any view can be drawn from them).
@@ -274,8 +260,7 @@
     var D = S.D, i;
     for (i = 0; i < S.meshed.length; i++) if (S.meshed[i].mesh) { S.group.remove(S.meshed[i].mesh); S.meshed[i].mesh.geometry.dispose(); }
     S.meshed = []; S.meshedTris = 0; S.rects = 0; S.drawn = [];
-    D.mask = S.crowns && !S.underCrowns ? crownMask(D.F, S.crowns) : null;
-    D.lv = pyramid(D.F, D.L, D.mask);
+    D.lv = pyramid(D.F, D.L);
     S.roots = R.roots(D).filter(function (t) { meshOf(t); return t.tris > 0 || R.cellsIn(D, t) > 0; });
     S.dirty = true;
   }
@@ -347,7 +332,7 @@
 
   var R = {
     NODE: NODE, LEVELS: LEVELS, HSTEP: HSTEP, SINK: SINK, MAXSPAN: MAXSPAN, SIDES_TO: SIDES_TO, BUDGET: BUDGET, QMAX: QMAX, QMIN: QMIN, DEF_CLASSES: DEF_CLASSES,
-    UNDER_CROWNS: UNDER_CROWNS, parse: parse, encode: encode, classes: classes, luts: luts, pyramid: pyramid, crownMask: crownMask, meshTile: meshTile, tile: tile, kidsOf: kidsOf, select: select, fit: fit, bayer4: bayer4,
+    MIN_CLASS: MIN_CLASS, parse: parse, encode: encode, classes: classes, luts: luts, pyramid: pyramid, meshTile: meshTile, tile: tile, kidsOf: kidsOf, select: select, fit: fit, bayer4: bayer4,
     // The roots (coarsest tiles) of a grid: D = { F, L, lv, cls, groundZ }.
     roots: function (D) {
       var l = LEVELS - 1, out = [], bx, by;
@@ -356,8 +341,10 @@
     },
     // Everything pure of a file: { F, L, lv, cls, groundZ }.
     data: function (buf, brush, groundZ) {
-      var F = parse(buf), cls = classes(brush && brush.classes), L = luts(cls, brush && brush.band && brush.band[0]);
-      return { F: F, cls: cls, L: L, lv: pyramid(F, L), groundZ: groundZ };
+      var F = parse(buf), cls = classes(brush && brush.classes), mc = brush && typeof brush.minClass === 'number' ? brush.minClass : MIN_CLASS;
+      mc = Math.max(0, Math.min(cls.length - 1, Math.round(mc)));                 // (a map with one class draws it)
+      var L = luts(cls, brush && brush.band && brush.band[0], mc);
+      return { F: F, cls: cls, L: L, minClass: mc, lv: pyramid(F, L), groundZ: groundZ };
     },
 
     // o: { THREE, scene, camera, brush, isAssetRef, b64ToArrayBuffer, groundZ(x, y), dither(material, uniform), redraw }.
@@ -368,7 +355,7 @@
       if (!br || typeof br !== 'object' || !br.file) return Promise.resolve(false);
       var THREE = o.THREE;
       S = { THREE: THREE, scene: o.scene, camera: o.camera, brush: br, redraw: o.redraw, on: true, uOp: { value: 1 }, loaded: false, D: null, roots: [], group: null, mat: null,
-            crowns: null, underCrowns: UNDER_CROWNS, drawn: [], meshed: [], meshedTris: 0, rects: 0, budget: BUDGET, cache: CACHE, frame: 0, dirty: true, q: QMAX, tris: 0, seen: new Float64Array(16),
+            drawn: [], meshed: [], meshedTris: 0, rects: 0, budget: BUDGET, cache: CACHE, frame: 0, dirty: true, q: QMAX, tris: 0, seen: new Float64Array(16),
             m4: new THREE.Matrix4(), pv: new THREE.Matrix4(), frustum: new THREE.Frustum(), box: new THREE.Box3(), ready: null };
       var mine = S, load;
       try {
@@ -405,15 +392,6 @@
       if (typeof v.opacity === 'number' && isFinite(v.opacity)) S.uOp.value = Math.max(0, Math.min(1, v.opacity));
       redraw();
     },
-    // The tree crowns over the grid ([x, y, radius, …]; null = none, the trees are off): their cells are left out
-    // (see UNDER_CROWNS). The levels and tiles are made again: a tenth of a second or so, on a switch only.
-    crowns: function (list) {
-      if (!S) return;
-      S.crowns = list && list.length ? list : null;
-      if (S.loaded && !S.underCrowns) { start(); redraw(); }
-    },
-    // For comparing the two looks: true draws the cells under crowns too.
-    underCrowns: function (v) { if (S && S.underCrowns !== !!v) { S.underCrowns = !!v; if (S.loaded) { start(); redraw(); } } },
     budget: function (n, cache) { if (S) { if (n > 0) S.budget = n; if (cache > 0) S.cache = cache; S.dirty = true; } return S ? S.budget : BUDGET; },
     update: function () { update(false); },
     settle: function () { if (S) S.dirty = true; update(true); },
@@ -421,7 +399,7 @@
     stats: function () {
       if (!S || !S.loaded) return null;
       var by = [0, 0, 0, 0]; S.drawn.forEach(function (t) { by[t.l]++; });
-      return { on: S.on, opacity: S.uOp.value, cells: S.D.lv.cells, underCrowns: S.D.mask ? S.D.mask.cells : 0, nx: S.D.F.nx, ny: S.D.F.ny, drawn: S.drawn.length, tris: S.tris, levels: by, q: S.q, meshed: S.meshed.length, meshedTris: S.meshedTris,
+      return { on: S.on, opacity: S.uOp.value, cells: S.D.lv.cells, minClass: S.D.minClass, nx: S.D.F.nx, ny: S.D.F.ny, drawn: S.drawn.length, tris: S.tris, levels: by, q: S.q, meshed: S.meshed.length, meshedTris: S.meshedTris,
                roots: S.roots.length, waiting: S.dirty, budget: S.budget };
     },
     objects: function () { return S && S.loaded ? { group: S.group, material: S.mat, drawn: S.drawn, roots: S.roots, classes: S.D.cls } : null; },
