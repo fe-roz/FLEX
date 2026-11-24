@@ -150,9 +150,13 @@ An export with ridgewalking also carries `brush.bin` (the bushwhack grid: a
 share and a height a cell, "FBR1") and `brush.json` (the grid's place and the
 classes). `MapStore.kt` keeps both (`BRUSH_FILE`, `BRUSH_INFO`),
 `MainActivity.kt` hands the viewer `brush.json`'s `viewer` object as `BRUSH`
-(drawn as low blocks by `viewer_build/libs/brush-blocks.js`; the Brush chip of
-🎨 Display → Trees and brush switches them, and a hold on a chip opens its
-opacity slider); a map without them gets `null`.
+(drawn as small rounded bushes by `viewer_build/libs/brush-bushes.js`, a look
+registered with the hub in `brush-blocks.js`, whose low blocks are the
+fall-back; how dense the brush is shows as how solid a bush is, and bushes are
+drawn out to about 200 m. The Brush chip of 🎨 Display → Trees and brush
+switches them, a hold on a chip opens its opacity slider, and the Light /
+Medium / Dense chips under it switch each density class); a map without them
+gets `null`.
 
 An export made with **V2 - Ridgewalking** also carries `ridge_points.bin`,
 `ridge_shapes.bin`, `ridge_patches.bin`, `ridge.json` and `tex_hsb.jpg` (the

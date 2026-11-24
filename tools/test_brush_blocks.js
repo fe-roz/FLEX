@@ -5,7 +5,8 @@
 // three without); height steps; the coarser levels keep the covered share of the ground; a tile's mesh (tops on
 // the ground plus the height, walls into the ground only where a neighbour is bare or lower, equal neighbours
 // merged, steep ground); the choice of tiles per view and the triangle budget on a grid the size of a real map;
-// cells under tree crowns left out; the switch and the level. Synthetic numbers only.
+// cells under tree crowns left out; the switch and the level; the looks (registry, switch, fallback, state).
+// Synthetic numbers only.
 //
 //   node tools/test_brush_blocks.js
 'use strict';
@@ -138,7 +139,7 @@ const b64 = buf => Buffer.from(buf).toString('base64');
   const nx = 2391, ny = 3129, n = nx * ny, share = new Uint8Array(n), height = new Uint8Array(n);
   const fn = (x, y) => Math.sin(x * 0.013) * Math.cos(y * 0.017) + 0.6 * Math.sin(x * 0.051 + y * 0.043) + 0.3 * Math.sin(x * 0.21) * Math.sin(y * 0.19);
   seed = 3; let cells = 0;
-  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const q = fn(i, j) - 0.5 + rnd() * 0.25; if (q > 0) { const s = Math.min(1, 0.1 + q * 1.2); share[j * nx + i] = Math.ceil(s * 255); height[j * nx + i] = Math.min(250, Math.round(30 + s * 170 + rnd() * 50)); if (share[j * nx + i] >= 77) cells++; } }
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const q = fn(i, j) - 0.5 + rnd() * 0.25; if (q > 0) { const s = Math.min(1, 0.1 + q * 1.2); share[j * nx + i] = Math.ceil(s * 255); height[j * nx + i] = Math.min(250, Math.round(30 + s * 170 + rnd() * 50)); if (share[j * nx + i] >= 26) cells++; } }
   const big = FB.encode({ nx, ny, cell: 0.9, x0: -1076, y0: -1408, share, height });
   const ground = (x, y) => 500 + 0.15 * x + 30 * Math.sin(y * 0.01);
   v = makeViewer();
@@ -146,7 +147,7 @@ const b64 = buf => Buffer.from(buf).toString('base64');
   const r = await v.FB.init(v.opts({ version: 1, file: b64(big) }, ground));
   const initMs = Date.now() - t0;
   let s = v.FB.stats(), o = v.FB.objects();
-  ok(`a ${nx} x ${ny} grid with ${cells.toLocaleString('en')} cells of medium or dense brush: loaded in ${initMs} ms, 35 coarsest tiles meshed and kept, one group in the scene, one redraw asked`, r === true && v.FB.loaded() && s.cells === cells && cells > 1500000 && s.roots === 35 && s.meshed === 35 && v.scene.children.length === 1 && o.group.parent === v.scene && v.redraws === 1 && initMs < 5000, [s, initMs]);
+  ok(`a ${nx} x ${ny} grid with ${cells.toLocaleString('en')} cells of brush: loaded in ${initMs} ms, 35 coarsest tiles meshed and kept, one group in the scene, one redraw asked`, r === true && v.FB.loaded() && s.cells === cells && cells > 1500000 && s.roots === 35 && s.meshed === 35 && v.scene.children.length === 1 && o.group.parent === v.scene && v.redraws === 1 && initMs < 5000, [s, initMs]);
   ok('drawn as ordinary solid surfaces (depth test and write on, no blending, lit, vertex colours), with the dither of the trees', o.material.isMeshLambertMaterial && o.material.depthWrite && !o.material.transparent && o.material.vertexColors === true && (() => { const sh = { uniforms: {}, fragmentShader: v.THREE.ShaderLib.lambert.fragmentShader }; o.material.onBeforeCompile(sh); return sh.fragmentShader.includes('flexBayer4') && sh.uniforms.uOpacityDither.value === 1; })());
   const views = { whole: [[0, -2500, 3200], [0, 0, 500]], oblique: [[300, -900, 900], [0, 0, 500]], near: [[200, -300, 640], [150, 0, 520]], ground: [[-340, 100, ground(-340, 100) + 4], [-300, 100, ground(-300, 100)]], down: [[400, -300, ground(400, -300) + 60], [400, -299, ground(400, -300)]] };
   const res = {};
@@ -199,11 +200,11 @@ const b64 = buf => Buffer.from(buf).toString('base64');
     const g = grid(90, 30, (i) => [i < 30 ? 40 : i < 60 ? 100 : 255, 150]), file = b64(FB.encode(Object.assign({ cell: 1 }, g)));
     const w = makeViewer(); await w.FB.init(w.opts({ version: 1, file })); w.look([45, -40, 160], [45, 15, 100]); w.FB.settle();
     const cols = new Set(); w.FB.objects().drawn.forEach(t => { const c = t.mesh.geometry.attributes.color.array, nn = t.mesh.geometry.attributes.normal.array; for (let k = 0; k < c.length; k += 3) if (nn[k + 2] > 0) cols.add(c[k] + '.' + c[k + 1] + '.' + c[k + 2]); });
-    ok('only medium and dense cells get a block (MIN_CLASS = 1): light cells are bare, a tree and a block may share a spot (nothing is left out under crowns)', FB.MIN_CLASS === 1 && w.FB.stats().cells === 1800 && w.FB.stats().minClass === 1 && [...cols].sort().join('|') === '31.95.31|95.174.79' && typeof w.FB.crowns === 'undefined', [w.FB.stats().cells, [...cols]]);
+    ok('every class gets a block to start with (MIN_CLASS = 0), a tree and a block may share a spot (nothing is left out under crowns)', FB.MIN_CLASS === 0 && w.FB.stats().cells === 2700 && w.FB.stats().minClass === 0 && w.FB.classes().join() === 'true,true,true' && [...cols].sort().join('|') === '183.228.160|31.95.31|95.174.79' && typeof w.FB.crowns === 'undefined', [w.FB.stats().cells, [...cols]]);
     const L1 = FB.luts(C0, 0.3, 1), L2 = FB.luts(C0, 0.3, 2);
     ok('…the cut is the medium class’s own threshold (share 0.3: bytes from 77)', L1.c[76] === 0 && L1.c[77] === 2 && L1.c[153] === 3 && L2.c[152] === 0 && L2.c[153] === 3);
-    const w0 = makeViewer(); await w0.FB.init(w0.opts({ version: 1, file, minClass: 0 }));
-    ok('all three is one switch (minClass 0)', w0.FB.stats().cells === 2700 && w0.FB.stats().minClass === 0);
+    const w0 = makeViewer(); await w0.FB.init(w0.opts({ version: 1, file, minClass: 1 }));
+    ok('BRUSH.minClass: the classes under it start off', w0.FB.stats().cells === 1800 && w0.FB.stats().minClass === 1 && w0.FB.classes().join() === 'false,true,true');
     const w1 = makeViewer(); await w1.FB.init(w1.opts({ version: 1, file, classes: [{ name: 'brush', min: 0.5, colour: '336633' }] }));
     ok('a map with one class draws that class', w1.FB.stats().cells === 900 && w1.FB.stats().minClass === 0);
   }
@@ -213,6 +214,142 @@ const b64 = buf => Buffer.from(buf).toString('base64');
     ok('a file that is not one: the viewer carries on, nothing in the scene, idle again', rr === false && w.scene.children.length === 0 && !w.FB.active() && (await w.FB.whenReady()) === false); w.FB.update(); }
   { const w = makeViewer(); await w.FB.init(w.opts({ version: 1, file: b64(FB.encode(Object.assign({ cell: 0.9 }, grid(30, 30)))) })); w.look([0, -50, 150], [10, 10, 100]); w.FB.settle();
     ok('a grid with no brush: active, nothing drawn', w.FB.loaded() && w.FB.stats().cells === 0 && w.FB.stats().tris === 0 && w.FB.objects().group.children.length === 0); }
+
+  // ── 10. The looks (the hub) ─────────────────────────────────────────────────
+  {
+    const g = grid(40, 40, (i, j) => [200, 120]), file = b64(FB.encode(Object.assign({ cell: 1, x0: 5, y0: 7 }, g)));
+    const w = makeViewer(), L = w.ctx.window.FlexBrushLooks, log = [];
+    ok('the registry is there, empty of any look this file makes', L && typeof L === 'object' && !('blocks' in L));
+    ok('no brush: look() is the blocks and switching does nothing', w.FB.look() === 'blocks' && w.FB.look('toy') === 'blocks');
+    let got = null;
+    L.toy = { create(ctx) { got = ctx; const grp = new ctx.THREE.Group(); let lv = -1, n = 0, waiting = 3;
+      return { group: grp, update(cam) { log.push('update'); n++; if (waiting) { waiting--; ctx.wake(); } w.sawCam = cam; }, setLevel(v) { lv = v; log.push('level ' + v); }, dispose() { log.push('dispose'); }, stats() { return { triangles: 1234, waiting: waiting > 0, level: lv, updates: n }; } }; } };
+    L.broken = { create() { throw new Error('made to fail'); } };
+    L.half = { create(ctx) { return { group: new ctx.THREE.Group() }; } };
+    let saved = [];
+    await w.FB.init(Object.assign(w.opts({ version: 1, file }, (x, y) => 100 + x), { onLook: n => saved.push(n) }));
+    w.look([20, -40, 160], [20, 20, 100]); w.FB.settle();
+    const blocksTris = w.FB.stats().tris;
+    ok('with no bushes file loaded (DEF_LOOK is not registered) a map starts with the blocks, nothing created', FB.DEF_LOOK === 'bushes' && w.FB.look() === 'blocks' && w.FB.stats().look === 'blocks' && w.FB.stats().shown === null && got === null && blocksTris > 0);
+    for (const bad of ['nobody', 'broken', 'half', '', null, 42, 'constructor', '__proto__']) {
+      const r = w.FB.look(bad);
+      ok('look ' + JSON.stringify(bad) + ': the blocks stay, no error', r === 'blocks' && w.FB.look() === 'blocks' && w.FB.objects().group.visible && w.FB.objects().look === null && w.scene.children.length === 1, r);
+    }
+    ok('…and nothing was saved for a switch that did not happen', saved.length === 0);
+    w.FB.set({ opacity: 0.25 });
+    const r1 = w.FB.look('toy');
+    const o = w.FB.objects();
+    ok('a registered look is put on: its group in the scene, the blocks hidden, the level handed over, saved', r1 === 'toy' && w.FB.look() === 'toy' && o.look && o.look.group.parent === w.scene && o.look.group.visible && !o.group.visible && log.join() === 'level 0.25' && saved.join() === 'toy', [r1, log, saved]);
+    const F = got && got.grid;
+    ok('the ctx: THREE, the grid as parsed (rows from the south), classes, the ground, the camera, wake, bayer4, dither, budget', got.THREE === w.THREE && F.nx === 40 && F.ny === 40 && F.cell === 1 && F.x0 === 5 && F.y0 === 7 && F.top === 2.5 && F.share.length === 1600 && F.share[41] === 200 && F.height[41] === 120 &&
+      got.classes.map(c => c.name + ':' + c.min + ':' + c.colour + ':' + c.cut + ':' + c.rgb.join('.')).join('|') === 'light:0.1:b7e4a0:26:183.228.160|medium:0.3:5fae4f:77:95.174.79|dense:0.6:1f5f1f:153:31.95.31' &&
+      got.groundZ(3, 9) === 103 && got.camera === w.camera && typeof got.wake === 'function' && got.bayer4(1, 1) === FB.bayer4(1, 1) && got.bayer4(2, 3) === w.FT.bayer4(2, 3) && got.dither === w.FT.dither &&
+      got.budget.triangles === FB.BUDGET && got.budget.cache > got.budget.triangles && got.budget.buildMs > 0, got && got.classes);
+    const q = got.toScene(1, 2, 3);
+    ok('toScene is the identity (x east, y north, z up), a THREE.Vector3', q.isVector3 && q.x === 1 && q.y === 2 && q.z === 3);
+    const r0 = w.redraws; got.wake();
+    ok('wake asks for a frame', w.redraws === r0 + 1);
+    log.length = 0; w.FB.update();
+    ok('update goes to the look with the camera, the blocks draw nothing', log.join() === 'update' && w.sawCam === w.camera && w.FB.objects().drawn.length === 0 && w.FB.stats().tris === 1234 && w.FB.stats().shown.triangles === 1234 && w.FB.stats().waiting === true);
+    log.length = 0; w.FB.settle();
+    ok('settle without a settle() of the look: update until nothing is waiting', log.length === 2 && w.FB.stats().waiting === false, log);
+    log.length = 0; w.FB.set({ opacity: 0.75 }); w.FB.set({ on: false }); w.FB.update();
+    ok('the chip drives the look: the level, and off hides it and stops its updates', log.join() === 'level 0.75' && !o.look.group.visible && !w.FB.objects().group.visible, log);
+    w.FB.set({ on: true });
+    ok('…on again: the look, not the blocks', o.look.group.visible && !w.FB.objects().group.visible);
+    log.length = 0;
+    ok('the same look again: nothing happens', w.FB.look('toy') === 'toy' && log.length === 0 && saved.length === 1);
+    const r2 = w.FB.look('nobody');
+    ok('an unknown name while a look is on: back to the blocks, the look disposed and out of the scene', r2 === 'blocks' && log.join() === 'dispose' && o.look.group.parent === null && w.FB.objects().group.visible && w.FB.objects().look === null && saved.join() === 'toy,blocks', [r2, log, saved]);
+    w.FB.settle();
+    ok('…and the blocks draw as before', w.FB.stats().tris === blocksTris && w.FB.stats().look === 'blocks');
+    // the state: kept with the trees' and the brush's, put on again at the next start
+    const tr = { blocks: w.FB, THREE: w.THREE, scene: w.scene, trees: null, saved: undefined, redraw() {} };
+    await w.FT.init(tr);
+    ok('the state has the look in use', w.FT.serialize().look === 'blocks');
+    w.FB.look('toy');
+    const ser = JSON.parse(JSON.stringify(w.FT.serialize()));
+    ok('…switched: saved as that', ser.look === 'toy' && ser.v === w.FT.STATE_V && ser.brush === true);
+    const w2 = makeViewer(); w2.ctx.window.FlexBrushLooks.toy = L.toy; log.length = 0;
+    const pr = w2.FB.init(w2.opts({ version: 1, file }));
+    w2.FT.init({ blocks: w2.FB, THREE: w2.THREE, scene: w2.scene, trees: null, saved: ser, redraw() {} });
+    ok('a new start with that state: asked before the grid is loaded, the name is kept', w2.FB.look() === 'toy' && !w2.FB.loaded());
+    await pr;
+    ok('…and put on at load, at the saved level', w2.FB.look() === 'toy' && w2.FB.stats().look === 'toy' && log.join() === 'level 0.5' && !w2.FB.objects().group.visible && w2.FT.serialize().look === 'toy' && w2.FT.objects().blocks === true, log);
+    const w3 = makeViewer();
+    const pr3 = w3.FB.init(w3.opts({ version: 1, file }));
+    await w3.FT.init({ blocks: w3.FB, THREE: w3.THREE, scene: w3.scene, trees: null, saved: Object.assign({}, ser, { look: 'bushes' }), redraw() {} });
+    await pr3;
+    ok('a saved look that is not registered (its file is not in this build): the blocks, no error', w3.FB.look() === 'blocks' && w3.FB.objects().group.visible && w3.FT.serialize().look === 'blocks');
+    ok('restore keeps a look name, drops a wrong one', w.FT.restore({ v: w.FT.STATE_V, look: 'bushes' }).look === 'bushes' && w.FT.restore({ v: w.FT.STATE_V, look: 'blanket' }).look === undefined && w.FT.restore({ v: w.FT.STATE_V, look: 'blocks' }).look === undefined && w.FT.restore({ v: w.FT.STATE_V, look: 7 }).look === undefined && w.FT.restore({ v: 1, see: true, look: 'bushes' }).look === 'bushes' && w.FT.restore(null).look === undefined);
+    log.length = 0; const lg = w2.FB.objects().look.group;
+    await w2.FB.init(w2.opts(null));
+    ok('the viewer started again without brush: the look is disposed and out of the scene', log.join() === 'dispose' && lg.parent === null && w2.FB.look() === 'blocks', log);
+  }
+
+  // ── 11. The classes shown (Light / Medium / Dense) ──────────────────────────
+  {
+    const g = grid(90, 30, (i) => [i < 30 ? 40 : i < 60 ? 100 : 255, 150]), file = b64(FB.encode(Object.assign({ cell: 1 }, g)));
+    const w = makeViewer(), L = w.ctx.window.FlexBrushLooks, log = []; let saved = 0;
+    ok('no brush: classes() is null, setting does nothing', w.FB.classes() === null && w.FB.classes([true, false, true]) === null);
+    ok('FlexBrush.classes(list) and (null) still parse a class list', w.FB.classes(null).length === 3 && w.FB.classes([{ name: 'a', min: 0.5, colour: '112233' }])[0].cut === 128);
+    await w.FB.init(Object.assign(w.opts({ version: 1, file }), { onLook: () => saved++ }));
+    w.look([45, -40, 160], [45, 15, 100]); w.FB.settle();
+    const colours = () => { const c = new Set(); w.FB.objects().drawn.forEach(t => { const a = t.mesh.geometry.attributes.color.array, nn = t.mesh.geometry.attributes.normal.array; for (let k = 0; k < a.length; k += 3) if (nn[k + 2] > 0) c.add(a[k] + '.' + a[k + 1] + '.' + a[k + 2]); }); return [...c].sort().join('|'); };
+    ok('all on to start with', w.FB.classes().join() === 'true,true,true' && w.FB.stats().classesOn.join() === 'true,true,true' && w.FB.stats().cells === 2700);
+    let r = w.FB.classes([false, true, true]); w.FB.settle();
+    ok('light off: the blocks of the light cells are gone at once, saved', r.join() === 'false,true,true' && w.FB.stats().cells === 1800 && colours() === '31.95.31|95.174.79' && saved === 1, [r, w.FB.stats().cells, colours(), saved]);
+    r = w.FB.classes([false, false, true]); w.FB.settle();
+    ok('dense only', w.FB.stats().cells === 900 && colours() === '31.95.31' && saved === 2);
+    r = w.FB.classes([true, false, false]); w.FB.settle();
+    ok('light only (any mix, not a threshold)', w.FB.stats().cells === 900 && colours() === '183.228.160');
+    r = w.FB.classes([false, false, false]); w.FB.settle();
+    ok('all off: nothing drawn', w.FB.stats().cells === 0 && w.FB.stats().tris === 0);
+    const s0 = saved; w.FB.classes([false, false, false]);
+    ok('the same again: nothing happens, nothing saved', saved === s0);
+    r = w.FB.classes([true]); w.FB.settle();
+    ok('a short or odd list changes only what it names', r.join() === 'true,false,false' && w.FB.classesOn([undefined, 'x', true]).join() === 'true,false,true');
+    w.FB.classes([true, true, true]); w.FB.settle();
+    ok('all on again: as at the start', w.FB.stats().cells === 2700 && colours() === '183.228.160|31.95.31|95.174.79');
+    ok('classInfo for the chips: names, on, a colour a class', (() => { const ci = w.FB.classInfo(); return ci.length === 3 && ci.map(c => c.name).join() === 'light,medium,dense' && ci.every(c => c.on && /^rgb/.test(c.colour)) && ci[0].colour === 'rgb(183,228,160)'; })());
+    // a look with setClasses is told; one without is made again with ctx.classesOn
+    let made = 0;
+    L.can = { create(ctx) { made++; log.push('create ' + ctx.classesOn.join('')); return { group: new ctx.THREE.Group(), update() {}, setLevel() {}, setClasses(v) { log.push('set ' + v.join('')); }, dispose() { log.push('dispose'); }, stats() { return { triangles: 0 }; } }; } };
+    L.cannot = { create(ctx) { made++; log.push('create ' + ctx.classesOn.join('')); return { group: new ctx.THREE.Group(), update() {}, setLevel() {}, dispose() { log.push('dispose'); }, stats() { return { triangles: 0 }; } }; } };
+    w.FB.look('can');
+    ok('a look is told the classes once after create (after setLevel)', log.join() === 'create truetruetrue,set truetruetrue', log);
+    log.length = 0; w.FB.classes([true, false, true]);
+    ok('…and on every change, without being made again', log.join() === 'set truefalsetrue' && made === 1 && w.FB.look() === 'can', log);
+    w.FB.look('cannot'); log.length = 0; const grp = w.FB.objects().look.group;
+    w.FB.classes([false, false, true]);
+    ok('a look without setClasses is disposed and created again with the new ctx.classesOn', log.join() === 'dispose,create falsefalsetrue' && w.FB.look() === 'cannot' && grp.parent === null && w.FB.objects().look.group.parent === w.scene && !w.FB.objects().group.visible, log);
+    ok('classInfo with a look on: one green, more solid a class', (() => { const ci = w.FB.classInfo(); return /^rgba/.test(ci[0].colour) && ci[0].colour !== ci[2].colour && !ci[0].on && ci[2].on; })());
+    // the state
+    await w.FT.init({ blocks: w.FB, THREE: w.THREE, scene: w.scene, trees: null, saved: undefined, redraw() {} });
+    const ser = JSON.parse(JSON.stringify(w.FT.serialize()));
+    ok('the classes shown are in the saved state', ser.classesOn.join() === 'false,false,true');
+    const w2 = makeViewer(); const pr = w2.FB.init(w2.opts({ version: 1, file }));
+    w2.FT.init({ blocks: w2.FB, THREE: w2.THREE, scene: w2.scene, trees: null, saved: ser, redraw() {} });
+    ok('a new start: asked before the grid is loaded, kept', !w2.FB.loaded() && w2.FB.classes().join() === 'false,false,true');
+    await pr;
+    ok('…and put on at load', w2.FB.classes().join() === 'false,false,true' && w2.FB.stats().cells === 900 && w2.FT.serialize().classesOn.join() === 'false,false,true');
+    ok('restore keeps a list of booleans only', w.FT.restore({ v: w.FT.STATE_V, classesOn: [true, false] }).classesOn.join() === 'true,false' && w.FT.restore({ v: w.FT.STATE_V, classesOn: [1, 0] }).classesOn === undefined && w.FT.restore({ v: w.FT.STATE_V, classesOn: 'x' }).classesOn === undefined);
+    // the chips row
+    const rows = []; w2.FT.sheet({ head: t => rows.push('H:' + t), chips: c => rows.push(c) });
+    const row = rows[2];
+    ok('Display: under the Brush chip a row of one chip a class, with its state', rows[0] === 'H:Brush' && rows[1].length === 1 && row && row.length === 3 && row.map(x => x[1] + ':' + x[2]).join() === 'Light:false,Medium:false,Dense:true' && typeof row[0][4].attach === 'function', rows);
+    row[1][3](true);
+    ok('…a tap switches that class at once', w2.FB.classes().join() === 'false,true,true' && w2.FB.stats().cells === 1800);
+    const fake = k => ({ style: {}, className: 'sh-chip', firstChild: { style: {} }, parentNode: { style: {} } });
+    const els = row.map((x, k) => { const c = fake(k); x[4].attach(c); return c; });
+    await Promise.resolve(); await Promise.resolve();
+    ok('…the chips are small, each with a swatch; the row is as many columns as classes', els.every(c => /sh-chip-class/.test(c.className) && c.firstChild.style.background) && els[0].parentNode.style.gridTemplateColumns === 'repeat(3, 1fr)' && els[0].parentNode.style.display === '');
+    w2.FT.set('brush', false);
+    ok('…and the row is hidden while Brush is off, back when it is on', els[0].parentNode.style.display === 'none' && (w2.FT.set('brush', true), els[0].parentNode.style.display === ''));
+    const w4 = makeViewer(); await w4.FB.init(w4.opts({ version: 1, file, classes: [{ name: 'brush', min: 0.5, colour: '336633' }] })); await w4.FT.init({ blocks: w4.FB, THREE: w4.THREE, scene: w4.scene, trees: null, redraw() {} });
+    const rows4 = []; w4.FT.sheet({ head: t => rows4.push(t), chips: c => rows4.push(c) });
+    ok('a map with one class has no such row', rows4.length === 2);
+  }
 
   console.log(`${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

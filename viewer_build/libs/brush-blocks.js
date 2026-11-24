@@ -28,6 +28,57 @@
 // branches under a crown are in the way too, so nothing is left out under trees.
 // Opacity is the ordered dither of libs/trees.js (its Brush chip and level drive this).
 // Blocks are not part of the terrain: the height grid and taps do not see them.   Test: tools/test_brush_blocks.js
+//
+// ── Other looks of the same grid (the hub) ─────────────────────────────────────────────────────────────────────
+// The blocks are one look of the brush grid; a look is pluggable. A file registers one with
+//
+//   window.FlexBrushLooks = window.FlexBrushLooks || {};
+//   FlexBrushLooks.<name> = { create(ctx) -> look };
+//
+//   ctx  = { THREE,
+//            grid: { nx, ny, cell, x0, y0, top, share: Uint8Array(ny * nx), height: Uint8Array(ny * nx) }
+//                  (exactly as parsed from brush.bin: row 0 is the south row, cell [row j, col i] is at index
+//                  j * nx + i and covers x0 + i * cell .. x0 + (i + 1) * cell, y0 + j * cell .. y0 + (j + 1) * cell;
+//                  share 0 = no brush, 1..255 = ceil(share * 255); height in cm above the ground, 0..250),
+//            classes: BRUSH.classes or the usual three, lightest first:
+//                  [{ name, min (share 0..1), colour ('rrggbb'), cut (the share byte it starts at), rgb [r, g, b] }],
+//            groundZ(x, y) -> the ground's height there, or null off the terrain (the viewer's height grid
+//                  sampler, in the frame of the grid's x0 / y0; cheap, never a ray),
+//            toScene(x, y, z) -> THREE.Vector3: the place of grid point (x, y) at height z in the look's group.
+//                  The mapping is the identity, as the blocks use it: scene x = grid x (east), scene y = grid y
+//                  (north), scene z = height (up, metres); the group sits in the scene untransformed,
+//            camera (the viewer's THREE.PerspectiveCamera, z up),
+//            wake() (ask for one more frame: the viewer draws nothing unless asked),
+//            bayer4(x, y) -> 0..15 (the rank of pixel / cell (x, y) in the 4 x 4 ordered pattern of libs/trees.js),
+//            dither(material, uniform) -> material (patches a three.js built-in material so it is drawn at
+//                  uniform.value 0..1 by that ordered dither in screen pixels; null when libs/trees.js is absent),
+//            budget: { triangles (drawn at once at most, 600 000), cache (kept meshed, 1 500 000), buildMs (meshing
+//                  time a frame, 6) },
+//            classesOn: [bool a class, lightest first] (which classes are shown now: the Light / Medium / Dense
+//                  chips; a cell whose share byte is in a class that is off is not drawn: class k is the bytes
+//                  from classes[k].cut up to classes[k + 1].cut) };
+//   look = { group: THREE.Object3D (the hub adds it to the scene and removes it, and sets its .visible from the
+//                  Brush chip),
+//            update(camera) (the hub calls it before each frame the viewer draws anyway, only while the chip is
+//                  on; it must return at once when the camera has not moved and nothing is waiting; a look with
+//                  more to mesh calls ctx.wake() for one more frame; nothing animates),
+//            setLevel(opacity 0..1) (the Brush chip's level; called once right after create, then on every change),
+//            dispose() (free the GPU things; the hub has removed the group already),
+//            stats() -> { triangles (drawn now), ... },
+//            settle() (optional: mesh everything this view wants at once, for tests and pictures; without it the
+//                  hub calls update() until stats().waiting is falsy, 200 times at most),
+//            setClasses([bool a class]) (optional: the classes shown changed; called once after create(), after
+//                  setLevel, and on every change. A look without it is disposed and created again with the new
+//                  ctx.classesOn, so it works either way) };
+//
+// FlexBrush.look(name) switches at run time: 'blocks' (the code in this file), or a registered name
+// ('bushes', libs/brush-bushes.js: the look a map starts with, DEF_LOOK); a name nobody registered, or a look
+// whose create() throws, is 'blocks' without an error. It returns the name now in use; FlexBrush.look() only
+// asks. There is no UI for looks. The choice is kept in the trees / brush state
+// (libs/trees.js: `look`), so it survives a reload. The Brush chip and its level drive whichever look is on, and
+// the mounds of libs/trees.js stay hidden whichever it is.
+// FlexBrush.classes([bool, bool, bool]) shows and hides the classes in whichever look is on (FlexBrush.classes()
+// asks); all on unless BRUSH.minClass says a class starts off; kept in the same state as `classesOn`.
 (function (root) {
   'use strict';
 
@@ -40,9 +91,10 @@
   var BUDGET = 600000, CACHE = 1500000;                        // triangles drawn at once; triangles kept meshed
   var QMAX = 200, QMIN = 6, QSTEP = 0.82;                      // a tile is refined nearer than block size x Q
   var BUILD_MS = 6;                                            // meshing time a frame
-  // The lightest class that gets a block, counted from the lightest (0): 1 = medium and dense only, light cells
-  // get none (brush is what is in the way of walking); 0 = all three. BRUSH.minClass, when given, is used instead.
-  var MIN_CLASS = 1;
+  // The lightest class shown when a map is first opened, counted from the lightest (0): 0 = all of them (the
+  // Light / Medium / Dense chips switch each); BRUSH.minClass, when given, is used instead: the classes under it start off.
+  var MIN_CLASS = 0;
+  var DEF_LOOK = 'bushes';                                     // the look a map starts with (libs/brush-bushes.js); not registered or failing: the blocks
   var DEF_CLASSES = [{ name: 'light', min: 0.1, colour: 'b7e4a0' }, { name: 'medium', min: 0.3, colour: '5fae4f' }, { name: 'dense', min: 0.6, colour: '1f5f1f' }];
 
   function bayer2(x, y) { x &= 1; y &= 1; return (x * 2 + y * y * 3) & 3; }
@@ -76,7 +128,7 @@
     (Array.isArray(list) && list.length ? list : DEF_CLASSES).forEach(function (c) {
       var min = Number(c && c.min), hex = String(c && c.colour || '').replace(/^#/, '');
       if (!(min > 0 && min <= 1) || !/^[0-9a-fA-F]{6}$/.test(hex)) return;
-      out.push({ name: String(c.name || ''), min: min, cut: Math.max(1, Math.ceil(min * 255 - 1e-9)), rgb: [parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)] });
+      out.push({ name: String(c.name || ''), min: min, colour: hex.toLowerCase(), cut: Math.max(1, Math.ceil(min * 255 - 1e-9)), rgb: [parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)] });
     });
     if (!out.length) return classes(DEF_CLASSES);
     out.sort(function (a, b) { return a.min - b.min; });
@@ -84,9 +136,10 @@
   }
   // Share byte -> class number (0 = not drawn, 1 = lightest …; classes under `minClass` are not drawn);
   // height in cm -> steps of HSTEP (at least one).
-  function luts(cls, bandLow, minClass) {
+  // `on` is the classes shown, [bool a class], or the lightest class shown as a number.
+  function luts(cls, bandLow, on) {
     var c = new Uint8Array(256), h = new Uint8Array(256), i, k, low = Math.round((bandLow > 0 ? bandLow : 0.3) * 100);
-    for (i = 1; i < 256; i++) { for (k = cls.length; k > 0; k--) if (i >= cls[k - 1].cut) break; c[i] = k > (minClass || 0) ? k : 0; }
+    for (i = 1; i < 256; i++) { for (k = cls.length; k > 0; k--) if (i >= cls[k - 1].cut) break; c[i] = k && (Array.isArray(on) ? on[k - 1] : k > (on || 0)) ? k : 0; }
     for (i = 0; i < 256; i++) h[i] = Math.max(1, Math.round((i || low) / (HSTEP * 100)));
     return { c: c, h: h };
   }
@@ -299,9 +352,82 @@
   }
   function redraw() { if (S && S.redraw) S.redraw(); }
 
+  // ── The looks ───────────────────────────────────────────────────────────────
+  root.FlexBrushLooks = root.FlexBrushLooks || {};
+  function lookCtx() {
+    var THREE = S.THREE, F = S.D.F, mine = S;
+    return { THREE: THREE, grid: { nx: F.nx, ny: F.ny, cell: F.cell, x0: F.x0, y0: F.y0, top: F.top, share: F.share, height: F.height },
+             classes: S.D.cls.map(function (c) { return { name: c.name, min: c.min, colour: c.colour, cut: c.cut, rgb: c.rgb.slice() }; }),
+             groundZ: S.D.groundZ, toScene: function (x, y, z) { return new THREE.Vector3(x, y, z); }, camera: S.camera,
+             wake: function () { if (S === mine) redraw(); }, bayer4: bayer4, dither: S.dither || null, classesOn: S.classesOn.slice(),
+             budget: { triangles: S.budget, cache: S.cache, buildMs: BUILD_MS } };
+  }
+  // The blocks' finer tiles are let go while another look draws the brush (the roots stay: any view starts from them).
+  function shed() {
+    var c = S.cache, i;
+    S.cache = 0;
+    for (i = 0; i < LEVELS; i++) { S.frame++; trim(); }
+    S.cache = c;
+    for (i = 0; i < S.drawn.length; i++) if (S.drawn[i].mesh) S.drawn[i].mesh.visible = false;
+    S.drawn = []; S.tris = 0; S.dirty = true;
+  }
+  // Puts look `name` on (once the grid is loaded); returns the name now in use.
+  function applyLook(name) {
+    name = typeof name === 'string' && name ? name : DEF_LOOK;
+    if (name === S.lookName) return name;
+    var known = name !== 'blocks' && Object.prototype.hasOwnProperty.call(root.FlexBrushLooks, name) && root.FlexBrushLooks[name] && typeof root.FlexBrushLooks[name].create === 'function';
+    if (!known && !S.look) return 'blocks';                      // the blocks are on and stay
+    if (S.look) {
+      var old = S.look; S.look = null;
+      try { if (old.group && old.group.parent) old.group.parent.remove(old.group); old.dispose(); } catch (e) { console.warn('Brush look not disposed:', e); }
+    }
+    S.lookName = 'blocks';
+    var reg = name !== 'blocks' && Object.prototype.hasOwnProperty.call(root.FlexBrushLooks, name) ? root.FlexBrushLooks[name] : null;
+    if (reg && typeof reg.create === 'function') {
+      try {
+        var lk = reg.create(lookCtx());
+        if (!lk || !lk.group || typeof lk.update !== 'function' || typeof lk.setLevel !== 'function' || typeof lk.dispose !== 'function' || typeof lk.stats !== 'function') throw new Error('not a look');
+        lk.setLevel(S.uOp.value);
+        if (typeof lk.setClasses === 'function') lk.setClasses(S.classesOn.slice());
+        lk.group.visible = S.on;
+        S.scene.add(lk.group);
+        S.look = lk; S.lookName = name;
+        shed();
+      } catch (e2) { console.warn('Brush look "' + name + '" not started, the blocks stay:', e2); S.look = null; }
+    }
+    S.group.visible = S.on && !S.look;
+    S.dirty = true;
+    redraw();
+    return S.lookName;
+  }
+  // [bool a class] from anything: missing ones keep what they were.
+  function cleanOn(v, was) { return was.map(function (w, k) { return typeof v[k] === 'boolean' ? v[k] : w; }); }
+  // Shows / hides classes in the blocks and in the look that is on.
+  function applyClasses(on) {
+    on = cleanOn(on, S.classesOn);
+    if (on.join() === S.classesOn.join()) return on;
+    S.classesOn = on;
+    S.D.L = luts(S.D.cls, S.brush && S.brush.band && S.brush.band[0], on);
+    S.D.minClass = Math.max(0, on.indexOf(true));
+    start();
+    if (S.look) {
+      shed();
+      if (typeof S.look.setClasses === 'function') S.look.setClasses(on.slice());
+      else { var name = S.lookName; applyLook('blocks'); applyLook(name); }          // a look that cannot: made again
+    }
+    redraw();
+    return on;
+  }
+
   // The work before a frame. all = true meshes everything this view wants at once (tests, pictures).
   function update(all) {
     if (!S || !S.loaded || !S.on) return;
+    if (S.look) {                                                // another look draws the brush
+      if (!all) { S.look.update(S.camera); return; }
+      if (typeof S.look.settle === 'function') { S.look.settle(); return; }
+      for (var n = 0; n < 200; n++) { S.look.update(S.camera); var ls = S.look.stats(); if (!ls || !ls.waiting) break; }
+      return;
+    }
     var cam = S.camera, THREE = S.THREE, e, i, k;
     cam.updateMatrixWorld();
     S.m4.copy(cam.matrixWorld).invert(); S.pv.multiplyMatrices(cam.projectionMatrix, S.m4);
@@ -332,7 +458,7 @@
 
   var R = {
     NODE: NODE, LEVELS: LEVELS, HSTEP: HSTEP, SINK: SINK, MAXSPAN: MAXSPAN, SIDES_TO: SIDES_TO, BUDGET: BUDGET, QMAX: QMAX, QMIN: QMIN, DEF_CLASSES: DEF_CLASSES,
-    MIN_CLASS: MIN_CLASS, parse: parse, encode: encode, classes: classes, luts: luts, pyramid: pyramid, meshTile: meshTile, tile: tile, kidsOf: kidsOf, select: select, fit: fit, bayer4: bayer4,
+    MIN_CLASS: MIN_CLASS, DEF_LOOK: DEF_LOOK, parse: parse, encode: encode, classes: classes, luts: luts, pyramid: pyramid, meshTile: meshTile, tile: tile, kidsOf: kidsOf, select: select, fit: fit, bayer4: bayer4,
     // The roots (coarsest tiles) of a grid: D = { F, L, lv, cls, groundZ }.
     roots: function (D) {
       var l = LEVELS - 1, out = [], bx, by;
@@ -344,19 +470,22 @@
       var F = parse(buf), cls = classes(brush && brush.classes), mc = brush && typeof brush.minClass === 'number' ? brush.minClass : MIN_CLASS;
       mc = Math.max(0, Math.min(cls.length - 1, Math.round(mc)));                 // (a map with one class draws it)
       var L = luts(cls, brush && brush.band && brush.band[0], mc);
-      return { F: F, cls: cls, L: L, minClass: mc, lv: pyramid(F, L), groundZ: groundZ };
+      return { F: F, cls: cls, L: L, minClass: mc, classesOn: cls.map(function (c, k) { return k >= mc; }), lv: pyramid(F, L), groundZ: groundZ };
     },
 
-    // o: { THREE, scene, camera, brush, isAssetRef, b64ToArrayBuffer, groundZ(x, y), dither(material, uniform), redraw }.
+    // o: { THREE, scene, camera, brush, isAssetRef, b64ToArrayBuffer, groundZ(x, y), dither(material, uniform), redraw,
+    //      onLook(name) (the look changed: the host saves it) }.
     // Returns a promise that settles when the blocks are in the scene (null brush: at once, false).
     init: function (o) {
+      if (S && S.look) { try { if (S.look.group && S.look.group.parent) S.look.group.parent.remove(S.look.group); S.look.dispose(); } catch (e0) {} }
       S = null;
       var br = o && o.brush;
       if (!br || typeof br !== 'object' || !br.file) return Promise.resolve(false);
       var THREE = o.THREE;
       S = { THREE: THREE, scene: o.scene, camera: o.camera, brush: br, redraw: o.redraw, on: true, uOp: { value: 1 }, loaded: false, D: null, roots: [], group: null, mat: null,
             drawn: [], meshed: [], meshedTris: 0, rects: 0, budget: BUDGET, cache: CACHE, frame: 0, dirty: true, q: QMAX, tris: 0, seen: new Float64Array(16),
-            m4: new THREE.Matrix4(), pv: new THREE.Matrix4(), frustum: new THREE.Frustum(), box: new THREE.Box3(), ready: null };
+            m4: new THREE.Matrix4(), pv: new THREE.Matrix4(), frustum: new THREE.Frustum(), box: new THREE.Box3(), ready: null,
+            look: null, lookName: 'blocks', wantLook: null, classesOn: [], wantClasses: null, dither: o.dither || null, onLook: o.onLook || null };
       var mine = S, load;
       try {
         load = o.isAssetRef(br.file)
@@ -366,12 +495,16 @@
       S.ready = load.then(function (buf) {
         if (S !== mine) return false;
         S.D = R.data(buf, br, o.groundZ);
+        S.classesOn = S.D.classesOn.slice();
         S.mat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
         if (o.dither) o.dither(S.mat, S.uOp);
         S.group = new THREE.Group(); S.group.name = 'brush'; S.group.matrixAutoUpdate = false; S.group.visible = S.on;
         start();
         S.scene.add(S.group);
-        S.loaded = true; redraw();
+        S.loaded = true;
+        if (S.wantClasses) applyClasses(S.wantClasses);
+        if (S.wantLook !== null || DEF_LOOK !== 'blocks') applyLook(S.wantLook !== null ? S.wantLook : DEF_LOOK);
+        redraw();
         return true;
       }).catch(function (e) { console.warn('Brush blocks not loaded:', e); if (S === mine) S = null; return false; });
       return S.ready;
@@ -388,9 +521,39 @@
     // The Brush chip and its level (libs/trees.js): { on, opacity 0..1 }.
     set: function (v) {
       if (!S || !v) return;
-      if (typeof v.on === 'boolean') { S.on = v.on; if (S.group) S.group.visible = v.on; if (v.on) S.dirty = true; }
-      if (typeof v.opacity === 'number' && isFinite(v.opacity)) S.uOp.value = Math.max(0, Math.min(1, v.opacity));
+      if (typeof v.on === 'boolean') { S.on = v.on; if (S.group) S.group.visible = v.on && !S.look; if (S.look) S.look.group.visible = v.on; if (v.on) S.dirty = true; }
+      if (typeof v.opacity === 'number' && isFinite(v.opacity)) { S.uOp.value = Math.max(0, Math.min(1, v.opacity)); if (S.look) S.look.setLevel(S.uOp.value); }
       redraw();
+    },
+    // The look that draws the brush: look() asks, look(name) switches ('blocks', or a name in FlexBrushLooks; anything
+    // else is 'blocks'). Before the grid is loaded the name is kept and put on at load. Returns the name in use.
+    look: function (name) {
+      if (!S) return 'blocks';
+      if (name === undefined) return S.loaded || S.wantLook === null ? S.lookName : S.wantLook;
+      if (!S.loaded) { S.wantLook = typeof name === 'string' && name ? name : 'blocks'; return S.wantLook; }
+      var was = S.lookName, now = applyLook(name);
+      if (now !== was && S.onLook) { try { S.onLook(now); } catch (e) {} }
+      return now;
+    },
+    // The classes shown, lightest first: classesOn() asks ([bool a class], null before the grid is loaded and
+    // nothing was asked), classesOn([bool, …]) sets them in whichever look is on. FlexBrush.classes() and
+    // FlexBrush.classes([bool, …]) are the same (FlexBrush.classes(list of { name, min, colour }) or (null) still parses a class list).
+    classesOn: function (v) {
+      if (!S) return null;
+      if (!Array.isArray(v)) return S.loaded ? S.classesOn.slice() : S.wantClasses ? S.wantClasses.slice() : null;
+      if (!S.loaded) { S.wantClasses = v.slice(0, 250).map(function (x) { return typeof x === 'boolean' ? x : undefined; }); return S.wantClasses.slice(); }
+      var was = S.classesOn.join(), now = applyClasses(v);
+      if (now.join() !== was && S.onLook) { try { S.onLook(S.lookName); } catch (e) {} }
+      return now.slice();
+    },
+    // The chips' rows: [{ name, on, colour (css: how the class looks in the look that is on) }].
+    classInfo: function () {
+      if (!S || !S.loaded) return [];
+      var n = S.D.cls.length;
+      return S.D.cls.map(function (c, k) {
+        var a = n === 1 ? 1 : 0.3 + 0.7 * k / (n - 1);
+        return { name: c.name, on: !!S.classesOn[k], colour: S.look ? 'rgba(74,150,52,' + a.toFixed(2) + ')' : 'rgb(' + c.rgb.join(',') + ')' };
+      });
     },
     budget: function (n, cache) { if (S) { if (n > 0) S.budget = n; if (cache > 0) S.cache = cache; S.dirty = true; } return S ? S.budget : BUDGET; },
     update: function () { update(false); },
@@ -399,12 +562,16 @@
     stats: function () {
       if (!S || !S.loaded) return null;
       var by = [0, 0, 0, 0]; S.drawn.forEach(function (t) { by[t.l]++; });
-      return { on: S.on, opacity: S.uOp.value, cells: S.D.lv.cells, minClass: S.D.minClass, nx: S.D.F.nx, ny: S.D.F.ny, drawn: S.drawn.length, tris: S.tris, levels: by, q: S.q, meshed: S.meshed.length, meshedTris: S.meshedTris,
-               roots: S.roots.length, waiting: S.dirty, budget: S.budget };
+      var shown = null;
+      if (S.look) { try { shown = S.look.stats() || {}; } catch (e) { shown = {}; } }
+      // with another look on: `tris` and `waiting` are that look's, `shown` is all it reports
+      return { on: S.on, opacity: S.uOp.value, cells: S.D.lv.cells, minClass: S.D.minClass, nx: S.D.F.nx, ny: S.D.F.ny, drawn: S.drawn.length, tris: shown ? shown.triangles || 0 : S.tris, levels: by, q: S.q, meshed: S.meshed.length, meshedTris: S.meshedTris,
+               roots: S.roots.length, waiting: shown ? !!shown.waiting : S.dirty, budget: S.budget, look: S.lookName, shown: shown, classesOn: S.classesOn.slice() };
     },
-    objects: function () { return S && S.loaded ? { group: S.group, material: S.mat, drawn: S.drawn, roots: S.roots, classes: S.D.cls } : null; },
+    objects: function () { return S && S.loaded ? { group: S.group, material: S.mat, drawn: S.drawn, roots: S.roots, classes: S.D.cls, look: S.look } : null; },
   };
 
+  R.classes = function (v) { return v === undefined || (Array.isArray(v) && typeof v[0] === 'boolean') ? R.classesOn(v) : classes(v); };
   root.FlexBrush = R;
   if (typeof module !== 'undefined' && module.exports) module.exports = R;
 })(typeof window !== 'undefined' ? window : globalThis);
