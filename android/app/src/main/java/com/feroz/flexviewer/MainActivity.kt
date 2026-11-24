@@ -557,6 +557,7 @@ class MainActivity : AppCompatActivity() {
                 .replace("PLACEHOLDER_RIDGE_JSON", ridgeFor(has))
                 .replace("PLACEHOLDER_FEATURES_JSON", if (has(MapStore.FEATURES_FILE)) "\"features.json\"" else "null")
                 .replace("PLACEHOLDER_TREES_JSON", if (has(MapStore.TREES_FILE) && has(MapStore.TREES_INFO)) "(ffSidecarJson(\"trees.json\").viewer || null)" else "null")
+                .replace("PLACEHOLDER_BRUSH_JSON", if (has(MapStore.BRUSH_FILE) && has(MapStore.BRUSH_INFO)) "(ffSidecarJson(\"brush.json\").viewer || null)" else "null")
         }
 
         /** RIDGE for the viewer (libs/ridgewalk.js): the map's ridgewalking files by

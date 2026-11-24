@@ -128,6 +128,8 @@
 
   // Are the brush blocks drawing the brush (libs/brush-blocks.js)? Then the mounds stay hidden.
   function blocksOn() { return !!(S && S.blocks); }
+  // The crowns (cones and round crowns: x, y, radius) for the blocks, which leave out the cells under them while the trees show.
+  function applyCrowns() { if (S.blocks && S.blocks.crowns) S.blocks.crowns(S.st.trees && S.crowns ? S.crowns : null); }
   function applyBrush() {
     var on = S.st.brush;
     S.meshes[2].forEach(function (m) { m.visible = on && !S.blocks; });
@@ -164,8 +166,10 @@
         S.count[k] += c;
       }
     }
+    var crowns = new Float32Array((n - P.counts[2].reduce(function (a, b) { return a + b; }, 0)) * 3), nc = 0;
     for (i = 0; i < n; i++) {
       var kind = T.u8[i * T.B + 18]; if (kind > 2) kind = 2;
+      if (kind < 2) { crowns[nc++] = f[i * F]; crowns[nc++] = f[i * F + 1]; crowns[nc++] = T.u16[i * T.U + 8] / 100; }
       var s = slot[kind][P.tileOf[i]], m = s.mesh.instanceMatrix.array, o = s.at * 16;
       var x = f[i * F], y = f[i * F + 1], z = f[i * F + 2], h = f[i * F + 3], r = T.u16[i * T.U + 8] / 100;
       if (kind === 0) { var zhb = s.mesh.userData.zhb; zhb[s.at * 3] = z; zhb[s.at * 3 + 1] = h; zhb[s.at * 3 + 2] = T.version === 2 ? T.u16[i * T.U + 10] / 100 : 0; }
@@ -189,8 +193,9 @@
       q.mesh.instanceMatrix.needsUpdate = true; q.mesh.instanceColor.needsUpdate = true;
       q.mesh.raycast = function () {};                           // taps go through the trees
     }
-    S.tiles = G;
+    S.tiles = G; S.crowns = crowns;
     S.scene.add(S.group);
+    applyCrowns();
     if (S.st.crown) crownLook(true);
   }
 
@@ -266,11 +271,14 @@
       box.appendChild(sl); box.appendChild(txt); say();
       doc.body.appendChild(box);
       var away = function (e) { if (!box.contains(e.target)) me.close(); };
+      // (the slider is outside the sheet, whose own "tap outside closes" must not take a touch on it for one)
+      var mine = function (e) { if (box.contains(e.target)) e.stopPropagation(); };
+      win.addEventListener('pointerdown', mine, true);
       var gone = win.MutationObserver ? new win.MutationObserver(function () { if (!c.isConnected) me.close(); }) : null;
       if (gone && c.parentNode && c.parentNode.parentNode) gone.observe(c.parentNode.parentNode, { childList: true });
       var me = { el: box, chip: c, close: function () {
         if (pop === me) pop = null;
-        doc.removeEventListener('pointerdown', away, true); if (gone) gone.disconnect();
+        doc.removeEventListener('pointerdown', away, true); win.removeEventListener('pointerdown', mine, true); if (gone) gone.disconnect();
         if (box.parentNode) box.parentNode.removeChild(box);
       } };
       setTimeout(function () { if (pop === me) doc.addEventListener('pointerdown', away, true); }, 0);
@@ -306,13 +314,13 @@
       if (!tr && !bl) return Promise.resolve(false);
       var d = tr && (tr.detail === 1 || tr.detail === 2) ? tr.detail : 0;
       S = { THREE: o.THREE, scene: o.scene, trees: tr, detail: d, st: restore(o.saved), redraw: o.redraw, uTrees: { value: 1 }, uBrush: { value: 1 }, blocks: bl,
-            group: null, meshes: [[], [], []], trunks: [], trunkGeo: null, trunkMat: null, count: [0, 0, 0], tiles: 0, loaded: false };
+            crowns: null, group: null, meshes: [[], [], []], trunks: [], trunkGeo: null, trunkMat: null, count: [0, 0, 0], tiles: 0, loaded: false };
       S.uTrees.value = S.st.treesOp; S.uBrush.value = S.st.brushOp;
       var mine = S;
       if (bl) {
         applyBrush();
         // blocks that did not load: the mounds are the brush again
-        if (bl.whenReady) bl.whenReady().then(function (ok) { if (!ok && S === mine) { S.blocks = null; applyBrush(); redraw(); } });
+        if (bl.whenReady) bl.whenReady().then(function (ok) { if (S !== mine) return; if (!ok) { S.blocks = null; applyBrush(); redraw(); } });
       }
       if (!tr) return Promise.resolve(false);
       var load;
@@ -340,7 +348,7 @@
       S.st[key] = !!v;
       if (key === 'crown') { if (S.loaded) crownLook(!!v); }
       else if (key === 'brush') applyBrush();
-      else { S.meshes[0].forEach(function (m) { m.visible = !!v; }); S.meshes[1].forEach(function (m) { m.visible = !!v; }); S.trunks.forEach(function (m) { m.visible = !!v && S.st.crown; }); }
+      else { S.meshes[0].forEach(function (m) { m.visible = !!v; }); S.meshes[1].forEach(function (m) { m.visible = !!v; }); S.trunks.forEach(function (m) { m.visible = !!v && S.st.crown; }); applyCrowns(); }
       redraw();
     },
     // One opacity level, 0..1 (drawn in sixteenths, at least one): key 'trees' or 'brush'. No rebuild: a uniform.
