@@ -23,7 +23,7 @@ vm.runInContext(fs.readFileSync(path.join(root, 'viewer_build', 'libs', 'three.m
 vm.runInContext(fs.readFileSync(path.join(root, 'viewer_build', 'libs', 'OrbitControls.js'), 'utf8'), ctx);
 const THREE = ctx.THREE;
 
-const blk = html.match(/const ORBIT_Z_PAD[\s\S]*?(?=\n\/\/ ── Render loop)/);
+const blk = html.match(/const ORBIT_Z_PAD[\s\S]*?(?=\n\/\/ ── (?:Drag the ground|Render loop))/);
 if (!blk) { console.error('FAIL orbit clamp block not found in viewer.html'); process.exit(1); }
 
 let fail = 0, pass = 0;
