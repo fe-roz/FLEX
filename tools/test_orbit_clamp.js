@@ -236,7 +236,7 @@ function panRun(pitch, code, frames) {
   ok('loop clamps once, in the orbit branch', (loop.match(/clampOrbitTarget\(true\)/g) || []).length === 1);
   ok('fly/crane branch is not clamped', !/clampOrbitTarget/.test(flyBranch));
   ok('clamp runs right after controls.update() in the loop',
-     /controls\.update\(\);\n\s*clampOrbitTarget\(true\);\n\s*\}\n\n\s*renderer\.render/.test(loop));
+     /controls\.update\(\);\n\s*clampOrbitTarget\(true\);\n\s*\}\n\n(?:\s*if \(window\.FlexBrush\)[^\n]*\n)?\s*renderer\.render/.test(loop));
   ok('range computed when caves load', /updateOrbitZRange\(\);\n\}/.test(html));
   ok('terrain extent captured at load', /_orbitTerrainZ = \[box\.min\.z, box\.max\.z\]/.test(html) && /_orbitXY = \[box\.min\.x/.test(html));
   ok('exitFlyMode aims into the band', /controls\.target\.copy\(orbitAimInRange\(camera\.position, dir/.test(html));
