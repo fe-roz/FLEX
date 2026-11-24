@@ -5,7 +5,8 @@
 // three without); height steps; the coarser levels keep the covered share of the ground; a tile's mesh (tops on
 // the ground plus the height, walls into the ground only where a neighbour is bare or lower, equal neighbours
 // merged, steep ground); the choice of tiles per view and the triangle budget on a grid the size of a real map;
-// cells under tree crowns left out; the switch and the level. Synthetic numbers only.
+// cells under tree crowns left out; the switch and the level; the looks (registry, switch, fallback, state).
+// Synthetic numbers only.
 //
 //   node tools/test_brush_blocks.js
 'use strict';
@@ -213,6 +214,78 @@ const b64 = buf => Buffer.from(buf).toString('base64');
     ok('a file that is not one: the viewer carries on, nothing in the scene, idle again', rr === false && w.scene.children.length === 0 && !w.FB.active() && (await w.FB.whenReady()) === false); w.FB.update(); }
   { const w = makeViewer(); await w.FB.init(w.opts({ version: 1, file: b64(FB.encode(Object.assign({ cell: 0.9 }, grid(30, 30)))) })); w.look([0, -50, 150], [10, 10, 100]); w.FB.settle();
     ok('a grid with no brush: active, nothing drawn', w.FB.loaded() && w.FB.stats().cells === 0 && w.FB.stats().tris === 0 && w.FB.objects().group.children.length === 0); }
+
+  // ── 10. The looks (the hub) ─────────────────────────────────────────────────
+  {
+    const g = grid(40, 40, (i, j) => [200, 120]), file = b64(FB.encode(Object.assign({ cell: 1, x0: 5, y0: 7 }, g)));
+    const w = makeViewer(), L = w.ctx.window.FlexBrushLooks, log = [];
+    ok('the registry is there, empty of any look this file makes', L && typeof L === 'object' && !('blocks' in L));
+    ok('no brush: look() is the blocks and switching does nothing', w.FB.look() === 'blocks' && w.FB.look('toy') === 'blocks');
+    let got = null;
+    L.toy = { create(ctx) { got = ctx; const grp = new ctx.THREE.Group(); let lv = -1, n = 0, waiting = 3;
+      return { group: grp, update(cam) { log.push('update'); n++; if (waiting) { waiting--; ctx.wake(); } w.sawCam = cam; }, setLevel(v) { lv = v; log.push('level ' + v); }, dispose() { log.push('dispose'); }, stats() { return { triangles: 1234, waiting: waiting > 0, level: lv, updates: n }; } }; } };
+    L.broken = { create() { throw new Error('made to fail'); } };
+    L.half = { create(ctx) { return { group: new ctx.THREE.Group() }; } };
+    let saved = [];
+    await w.FB.init(Object.assign(w.opts({ version: 1, file }, (x, y) => 100 + x), { onLook: n => saved.push(n) }));
+    w.look([20, -40, 160], [20, 20, 100]); w.FB.settle();
+    const blocksTris = w.FB.stats().tris;
+    ok('a map starts with the blocks (DEF_LOOK), nothing created', FB.DEF_LOOK === 'blocks' && w.FB.look() === 'blocks' && w.FB.stats().look === 'blocks' && w.FB.stats().shown === null && got === null && blocksTris > 0);
+    for (const bad of ['nobody', 'broken', 'half', '', null, 42, 'constructor', '__proto__']) {
+      const r = w.FB.look(bad);
+      ok('look ' + JSON.stringify(bad) + ': the blocks stay, no error', r === 'blocks' && w.FB.look() === 'blocks' && w.FB.objects().group.visible && w.FB.objects().look === null && w.scene.children.length === 1, r);
+    }
+    ok('…and nothing was saved for a switch that did not happen', saved.length === 0);
+    w.FB.set({ opacity: 0.25 });
+    const r1 = w.FB.look('toy');
+    const o = w.FB.objects();
+    ok('a registered look is put on: its group in the scene, the blocks hidden, the level handed over, saved', r1 === 'toy' && w.FB.look() === 'toy' && o.look && o.look.group.parent === w.scene && o.look.group.visible && !o.group.visible && log.join() === 'level 0.25' && saved.join() === 'toy', [r1, log, saved]);
+    const F = got && got.grid;
+    ok('the ctx: THREE, the grid as parsed (rows from the south), classes, the ground, the camera, wake, bayer4, dither, budget', got.THREE === w.THREE && F.nx === 40 && F.ny === 40 && F.cell === 1 && F.x0 === 5 && F.y0 === 7 && F.top === 2.5 && F.share.length === 1600 && F.share[41] === 200 && F.height[41] === 120 &&
+      got.classes.map(c => c.name + ':' + c.min + ':' + c.colour + ':' + c.cut + ':' + c.rgb.join('.')).join('|') === 'light:0.1:b7e4a0:26:183.228.160|medium:0.3:5fae4f:77:95.174.79|dense:0.6:1f5f1f:153:31.95.31' &&
+      got.groundZ(3, 9) === 103 && got.camera === w.camera && typeof got.wake === 'function' && got.bayer4(1, 1) === FB.bayer4(1, 1) && got.bayer4(2, 3) === w.FT.bayer4(2, 3) && got.dither === w.FT.dither &&
+      got.budget.triangles === FB.BUDGET && got.budget.cache > got.budget.triangles && got.budget.buildMs > 0, got && got.classes);
+    const q = got.toScene(1, 2, 3);
+    ok('toScene is the identity (x east, y north, z up), a THREE.Vector3', q.isVector3 && q.x === 1 && q.y === 2 && q.z === 3);
+    const r0 = w.redraws; got.wake();
+    ok('wake asks for a frame', w.redraws === r0 + 1);
+    log.length = 0; w.FB.update();
+    ok('update goes to the look with the camera, the blocks draw nothing', log.join() === 'update' && w.sawCam === w.camera && w.FB.objects().drawn.length === 0 && w.FB.stats().tris === 1234 && w.FB.stats().shown.triangles === 1234 && w.FB.stats().waiting === true);
+    log.length = 0; w.FB.settle();
+    ok('settle without a settle() of the look: update until nothing is waiting', log.length === 2 && w.FB.stats().waiting === false, log);
+    log.length = 0; w.FB.set({ opacity: 0.75 }); w.FB.set({ on: false }); w.FB.update();
+    ok('the chip drives the look: the level, and off hides it and stops its updates', log.join() === 'level 0.75' && !o.look.group.visible && !w.FB.objects().group.visible, log);
+    w.FB.set({ on: true });
+    ok('…on again: the look, not the blocks', o.look.group.visible && !w.FB.objects().group.visible);
+    log.length = 0;
+    ok('the same look again: nothing happens', w.FB.look('toy') === 'toy' && log.length === 0 && saved.length === 1);
+    const r2 = w.FB.look('nobody');
+    ok('an unknown name while a look is on: back to the blocks, the look disposed and out of the scene', r2 === 'blocks' && log.join() === 'dispose' && o.look.group.parent === null && w.FB.objects().group.visible && w.FB.objects().look === null && saved.join() === 'toy,blocks', [r2, log, saved]);
+    w.FB.settle();
+    ok('…and the blocks draw as before', w.FB.stats().tris === blocksTris && w.FB.stats().look === 'blocks');
+    // the state: kept with the trees' and the brush's, put on again at the next start
+    const tr = { blocks: w.FB, THREE: w.THREE, scene: w.scene, trees: null, saved: undefined, redraw() {} };
+    await w.FT.init(tr);
+    ok('the state has the look in use', w.FT.serialize().look === 'blocks');
+    w.FB.look('toy');
+    const ser = JSON.parse(JSON.stringify(w.FT.serialize()));
+    ok('…switched: saved as that', ser.look === 'toy' && ser.v === w.FT.STATE_V && ser.brush === true);
+    const w2 = makeViewer(); w2.ctx.window.FlexBrushLooks.toy = L.toy; log.length = 0;
+    const pr = w2.FB.init(w2.opts({ version: 1, file }));
+    w2.FT.init({ blocks: w2.FB, THREE: w2.THREE, scene: w2.scene, trees: null, saved: ser, redraw() {} });
+    ok('a new start with that state: asked before the grid is loaded, the name is kept', w2.FB.look() === 'toy' && !w2.FB.loaded());
+    await pr;
+    ok('…and put on at load, at the saved level', w2.FB.look() === 'toy' && w2.FB.stats().look === 'toy' && log.join() === 'level 0.5' && !w2.FB.objects().group.visible && w2.FT.serialize().look === 'toy' && w2.FT.objects().blocks === true, log);
+    const w3 = makeViewer();
+    const pr3 = w3.FB.init(w3.opts({ version: 1, file }));
+    await w3.FT.init({ blocks: w3.FB, THREE: w3.THREE, scene: w3.scene, trees: null, saved: Object.assign({}, ser, { look: 'bushes' }), redraw() {} });
+    await pr3;
+    ok('a saved look that is not registered (its file is not in this build): the blocks, no error', w3.FB.look() === 'blocks' && w3.FB.objects().group.visible && w3.FT.serialize().look === 'blocks');
+    ok('restore keeps a look name, drops a wrong one', w.FT.restore({ v: w.FT.STATE_V, look: 'blanket' }).look === 'blanket' && w.FT.restore({ v: w.FT.STATE_V, look: 7 }).look === undefined && w.FT.restore({ v: 1, see: true, look: 'bushes' }).look === 'bushes' && w.FT.restore(null).look === undefined);
+    log.length = 0; const lg = w2.FB.objects().look.group;
+    await w2.FB.init(w2.opts(null));
+    ok('the viewer started again without brush: the look is disposed and out of the scene', log.join() === 'dispose' && lg.parent === null && w2.FB.look() === 'blocks', log);
+  }
 
   console.log(`${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

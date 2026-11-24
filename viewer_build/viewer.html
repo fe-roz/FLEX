@@ -2186,6 +2186,7 @@ setTimeout(() => {
     if (window.FlexBrush) FlexBrush.init({
       THREE, scene, camera, brush: typeof BRUSH === 'undefined' ? null : BRUSH, isAssetRef, b64ToArrayBuffer, groundZ: gridZAt,
       dither: window.FlexTrees && FlexTrees.dither, redraw: () => { requestRender(); wakeRender(); },
+      onLook: () => { if (_dispRestored) dispCapture(); },
     });
     // Trees and brush as simple solids (nothing when TREES is null).
     if (window.FlexTrees) FlexTrees.init({

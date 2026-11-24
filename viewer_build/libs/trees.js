@@ -16,7 +16,8 @@
 // steps: at level k / 16 the fragment shader keeps k pixels of every 16 and drops the rest): no blending,
 // no sorting, no second pass, depth test and depth write stay on. One level for the trees (cones, round
 // crowns, trunks), one for the brush (the mounds, or the brush blocks of libs/brush-blocks.js when the
-// map has them: then the mounds are hidden and the Brush chip and its level drive the blocks).
+// map has them: then the mounds are hidden and the Brush chip and its level drive the blocks, or whichever
+// other look of the grid FlexBrush.look(name) put on; that name is kept in this state as `look`).
 // Nothing animates and nothing runs per frame: a switch or a level asks the viewer for one redraw. Trees
 // are not part of the terrain: the height grid and taps do not see them.   Test: tools/test_viewer_trees.js
 (function (root) {
@@ -90,6 +91,7 @@
       ['trees', 'brush', 'crown'].forEach(function (q) { if (typeof saved[q] === 'boolean') st[q] = saved[q]; });
       if (typeof saved.see === 'boolean') st.treesOp = st.brushOp = saved.see ? 0.5 : 1;
     }
+    if (typeof saved.look === 'string' && saved.look.length < 40) st.look = saved.look;      // the brush's look (libs/brush-blocks.js)
     return st;
   }
   // The 4 x 4 Bayer pattern: pixel (x, y) has rank 0..15, and is kept at level k / 16 when its rank is under k.
@@ -313,6 +315,7 @@
       S.uTrees.value = S.st.treesOp; S.uBrush.value = S.st.brushOp;
       var mine = S;
       if (bl) {
+        if (bl.look && S.st.look) bl.look(S.st.look);            // the look chosen before (a name nobody registered: the blocks)
         applyBrush();
         // blocks that did not load: the mounds are the brush again
         if (bl.whenReady) bl.whenReady().then(function (ok) { if (S !== mine) return; if (!ok) { S.blocks = null; applyBrush(); redraw(); } });
@@ -333,7 +336,8 @@
     active: function () { return !!S; },
     loaded: function () { return !!(S && S.loaded); },
     state: function () { return S ? Object.assign({}, S.st) : null; },
-    serialize: function () { return S ? Object.assign({ v: STATE_V }, S.st) : undefined; },
+    // (the brush's look is asked where it lives: FlexBrush.look(name) switches it, and it is saved from here)
+    serialize: function () { return S ? Object.assign({ v: STATE_V }, S.st, S.blocks && S.blocks.look ? { look: S.blocks.look() } : null) : undefined; },
     // { group, meshes: [cones, rounds, mounds], trunks, count: [..], tiles, detail, op: [trees, brush] levels, blocks }
     objects: function () { return S ? { group: S.group, meshes: S.meshes, trunks: S.trunks, count: S.count.slice(), tiles: S.tiles, detail: S.detail, op: [S.uTrees.value, S.uBrush.value], blocks: blocksOn() } : null; },
 
