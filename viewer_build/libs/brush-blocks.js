@@ -52,8 +52,9 @@
 //            bayer4(x, y) -> 0..15 (the rank of pixel / cell (x, y) in the 4 x 4 ordered pattern of libs/trees.js),
 //            dither(material, uniform) -> material (patches a three.js built-in material so it is drawn at
 //                  uniform.value 0..1 by that ordered dither in screen pixels; null when libs/trees.js is absent),
-//            budget: { triangles (drawn at once at most, 900 000), cache (kept meshed, 3 000 000), buildMs (meshing
-//                  time a frame, 6) },
+//            budget: { triangles (drawn at once at most: the detail step's), cache (kept meshed: CACHE_X times
+//                  that), buildMs (meshing time a frame, 6), far (m: the reach of the look's finest level), simple
+//                  (false: no simpler solid far away) },
 //            classesOn: [bool a class, lightest first] (which classes are shown now: the Light / Medium / Dense
 //                  chips; a cell whose share byte is in a class that is off is not drawn: class k is the bytes
 //                  from classes[k].cut up to classes[k + 1].cut) };
@@ -79,6 +80,12 @@
 // the mounds of libs/trees.js stay hidden whichever it is.
 // FlexBrush.classes([bool, bool, bool]) shows and hides the classes in whichever look is on (FlexBrush.classes()
 // asks); all on unless BRUSH.minClass says a class starts off; kept in the same state as `classesOn`.
+// FlexBrush.detail(name) is how far the look's finest level (the single bushes) reaches and how many triangles it
+// may draw: one of DETAILS ('normal' | 'far' | 'very'; DEF_DETAIL when nothing was chosen); the look keeps
+// CACHE_X times the triangle limit built. FlexBrush.simpleFar(bool) is the look's simpler bush far away (on unless
+// switched off). Both take effect at once (look.limits(), one frame asked for) and are handed to the host to keep
+// (init's save({ brushDetail }) / save({ brushSimple }), read back as o.detail / o.simpleFar): ⋯ More shows them
+// (FlexBrush.sheet, FlexBrush.sheetLow) on a map that has a brush grid.
 (function (root) {
   'use strict';
 
@@ -90,6 +97,10 @@
   var WALL_SHADE = 0.8;                                        // walls a little darker than tops
   var BUDGET = 600000, CACHE = 1500000;                        // triangles drawn at once; triangles kept meshed
   var LOOK_BUDGET = 900000, LOOK_CACHE = 3000000;              // the same for a look (ctx.budget), unless FlexBrush.budget() set other numbers
+  // The steps of ⋯ More → Brush detail: the single bushes' reach (m) and the triangles drawn at most.
+  var DETAILS = { normal: { label: 'Normal', far: 180, triangles: 900000 }, far: { label: 'Far', far: 360, triangles: 1800000 }, very: { label: 'Very far', far: 600, triangles: 3000000 } };
+  var DETAIL_NAMES = ['normal', 'far', 'very'], DEF_DETAIL = 'far';
+  var CACHE_X = LOOK_CACHE / LOOK_BUDGET;                      // a look keeps this many times its triangle limit built (3.33)
   var QMAX = 200, QMIN = 6, QSTEP = 0.82;                      // a tile is refined nearer than block size x Q
   var BUILD_MS = 6;                                            // meshing time a frame
   // The lightest class shown when a map is first opened, counted from the lightest (0): 0 = all of them (the
@@ -361,8 +372,19 @@
              classes: S.D.cls.map(function (c) { return { name: c.name, min: c.min, colour: c.colour, cut: c.cut, rgb: c.rgb.slice() }; }),
              groundZ: S.D.groundZ, toScene: function (x, y, z) { return new THREE.Vector3(x, y, z); }, camera: S.camera,
              wake: function () { if (S === mine) redraw(); }, bayer4: bayer4, dither: S.dither || null, classesOn: S.classesOn.slice(),
-             budget: { triangles: S.budget === BUDGET ? LOOK_BUDGET : S.budget, cache: S.cache === CACHE ? LOOK_CACHE : S.cache, buildMs: BUILD_MS } };
+             budget: lookLimits() };
   }
+  // What the look may draw: the detail step's numbers, unless FlexBrush.budget() set other ones.
+  function lookLimits() {
+    var d = DETAILS[S.detail] || DETAILS[DEF_DETAIL];
+    return { triangles: S.budget === BUDGET ? d.triangles : S.budget, cache: S.cache === CACHE ? Math.round(d.triangles * CACHE_X) : S.cache, buildMs: BUILD_MS, far: d.far, simple: S.simpleFar };
+  }
+  function pushLimits() {
+    if (!S) return;
+    if (S.look && typeof S.look.limits === 'function') { var l = lookLimits(); try { S.look.limits({ budget: l.triangles, far: l.far, cacheTris: l.cache, simple: l.simple }); } catch (e) { console.warn('Brush look limits:', e); } }
+    redraw();
+  }
+  function detailName(v) { return typeof v === 'string' && DETAILS.hasOwnProperty(v) ? v : null; }
   // The blocks' finer tiles are let go while another look draws the brush (the roots stay: any view starts from them).
   function shed() {
     var c = S.cache, i;
@@ -459,7 +481,7 @@
 
   var R = {
     NODE: NODE, LEVELS: LEVELS, HSTEP: HSTEP, SINK: SINK, MAXSPAN: MAXSPAN, SIDES_TO: SIDES_TO, BUDGET: BUDGET, LOOK_BUDGET: LOOK_BUDGET, QMAX: QMAX, QMIN: QMIN, DEF_CLASSES: DEF_CLASSES,
-    MIN_CLASS: MIN_CLASS, DEF_LOOK: DEF_LOOK, parse: parse, encode: encode, classes: classes, luts: luts, pyramid: pyramid, meshTile: meshTile, tile: tile, kidsOf: kidsOf, select: select, fit: fit, bayer4: bayer4,
+    MIN_CLASS: MIN_CLASS, DEF_LOOK: DEF_LOOK, DETAILS: DETAILS, DETAIL_NAMES: DETAIL_NAMES, DEF_DETAIL: DEF_DETAIL, CACHE_X: CACHE_X, parse: parse, encode: encode, classes: classes, luts: luts, pyramid: pyramid, meshTile: meshTile, tile: tile, kidsOf: kidsOf, select: select, fit: fit, bayer4: bayer4,
     // The roots (coarsest tiles) of a grid: D = { F, L, lv, cls, groundZ }.
     roots: function (D) {
       var l = LEVELS - 1, out = [], bx, by;
@@ -475,7 +497,8 @@
     },
 
     // o: { THREE, scene, camera, brush, isAssetRef, b64ToArrayBuffer, groundZ(x, y), dither(material, uniform), redraw,
-    //      onLook(name) (the look changed: the host saves it) }.
+    //      onLook(name) (the look changed: the host saves it), detail (the saved Brush detail step), simpleFar (the
+    //      saved "Simpler bushes far away", false = off), save(patch) (keeps { brushDetail } / { brushSimple }) }.
     // Returns a promise that settles when the blocks are in the scene (null brush: at once, false).
     init: function (o) {
       if (S && S.look) { try { if (S.look.group && S.look.group.parent) S.look.group.parent.remove(S.look.group); S.look.dispose(); } catch (e0) {} }
@@ -486,7 +509,8 @@
       S = { THREE: THREE, scene: o.scene, camera: o.camera, brush: br, redraw: o.redraw, on: true, uOp: { value: 1 }, loaded: false, D: null, roots: [], group: null, mat: null,
             drawn: [], meshed: [], meshedTris: 0, rects: 0, budget: BUDGET, cache: CACHE, frame: 0, dirty: true, q: QMAX, tris: 0, seen: new Float64Array(16),
             m4: new THREE.Matrix4(), pv: new THREE.Matrix4(), frustum: new THREE.Frustum(), box: new THREE.Box3(), ready: null,
-            look: null, lookName: 'blocks', wantLook: null, classesOn: [], wantClasses: null, dither: o.dither || null, onLook: o.onLook || null };
+            look: null, lookName: 'blocks', wantLook: null, classesOn: [], wantClasses: null, dither: o.dither || null, onLook: o.onLook || null,
+            detail: detailName(o.detail) || DEF_DETAIL, simpleFar: o.simpleFar !== false, save: typeof o.save === 'function' ? o.save : null };
       var mine = S, load;
       try {
         load = o.isAssetRef(br.file)
@@ -557,6 +581,45 @@
       });
     },
     budget: function (n, cache) { if (S) { if (n > 0) S.budget = n; if (cache > 0) S.cache = cache; S.dirty = true; } return S ? S.budget : BUDGET; },
+    // Brush detail: detail() asks ('normal' | 'far' | 'very'), detail(name) sets it: at once, saved by the host. A
+    // name that is not a step changes nothing.
+    detail: function (name) {
+      if (!S) return DEF_DETAIL;
+      var n = detailName(name);
+      if (name === undefined || !n || n === S.detail) return S.detail;
+      S.detail = n; pushLimits();
+      if (S.save) { try { S.save({ brushDetail: n }); } catch (e) {} }
+      return n;
+    },
+    // The simpler bush far away: simpleFar() asks, simpleFar(bool) sets it: at once, saved by the host.
+    simpleFar: function (v) {
+      if (!S) return true;
+      if (typeof v !== 'boolean' || v === S.simpleFar) return S.simpleFar;
+      S.simpleFar = v; pushLimits();
+      if (S.save) { try { S.save({ brushSimple: v }); } catch (e) {} }
+      return v;
+    },
+    // ⋯ More → Brush detail (ui: { head, seg, rerender }): on a map with a brush grid only.
+    sheet: function (ui) {
+      if (!S) return null;
+      ui.head('Brush detail');
+      var seg = ui.seg(DETAIL_NAMES.map(function (n) { return DETAILS[n].label; }), DETAIL_NAMES.indexOf(S.detail), function (i) { R.detail(DETAIL_NAMES[i]); if (ui.rerender) ui.rerender(); });
+      if (seg) {
+        seg.id = 'brush-detail';
+        var note = seg.ownerDocument.createElement('div');
+        note.id = 'brush-detail-hint'; note.textContent = 'How far from you each bush is drawn on its own. Farther is heavier for the phone.';
+        note.style.cssText = 'font-size:11px;opacity:.55;margin:5px 2px 0;line-height:1.3';
+        seg.parentNode.insertBefore(note, seg.nextSibling);
+      }
+      return seg;
+    },
+    // ⋯ More, low in the list (ui: { row, rerender }): the simpler bush far away, a row that is lit when on.
+    sheetLow: function (ui) {
+      if (!S) return null;
+      var r = ui.row('🌿', 'Simpler bushes far away', S.simpleFar ? 'on · a far bush has fewer faces: lighter for the phone' : 'off · every bush keeps its full shape', function () { R.simpleFar(!S.simpleFar); if (ui.rerender) ui.rerender(); }, S.simpleFar);
+      if (r) r.id = 'brush-simple';
+      return r;
+    },
     update: function () { update(false); },
     settle: function () { if (S) S.dirty = true; update(true); },
     // { on, opacity, cells, tiles drawn, triangles drawn, by level, q, meshed tiles and triangles }
@@ -567,7 +630,7 @@
       if (S.look) { try { shown = S.look.stats() || {}; } catch (e) { shown = {}; } }
       // with another look on: `tris` and `waiting` are that look's, `shown` is all it reports
       return { on: S.on, opacity: S.uOp.value, cells: S.D.lv.cells, minClass: S.D.minClass, nx: S.D.F.nx, ny: S.D.F.ny, drawn: S.drawn.length, tris: shown ? shown.triangles || 0 : S.tris, levels: by, q: S.q, meshed: S.meshed.length, meshedTris: S.meshedTris,
-               roots: S.roots.length, waiting: shown ? !!shown.waiting : S.dirty, budget: S.budget, look: S.lookName, shown: shown, classesOn: S.classesOn.slice() };
+               roots: S.roots.length, waiting: shown ? !!shown.waiting : S.dirty, budget: S.budget, look: S.lookName, shown: shown, classesOn: S.classesOn.slice(), detail: S.detail, simpleFar: S.simpleFar };
     },
     objects: function () { return S && S.loaded ? { group: S.group, material: S.mat, drawn: S.drawn, roots: S.roots, classes: S.D.cls, look: S.look } : null; },
   };
