@@ -720,6 +720,7 @@ catch(e) { window.DOCS_EXPORT = null; }
 <script src="libs/jszip.min.js"></script>
 <script src="libs/flexlib.js"></script>
 <script src="libs/wall-fx.js"></script>
+<script src="libs/disp-store.js"></script>
 <script src="libs/utif.js"></script>
 <script src="libs/field-where.js"></script>
 <script src="libs/route-search.js"></script>
@@ -798,29 +799,48 @@ const META = (CAVES_DATA && CAVES_DATA.meta) || {};
 const MAP_KEY = window.FF_MAP_ID ? 'map:' + window.FF_MAP_ID
   : (META.name || '') + '|' + (META.center_lon || 0).toFixed(3) + '|' + (META.center_lat || 0).toFixed(3);
 
-// ── Display settings, remembered per map ────────────────────────────────────
-// Walls, colour, stations, what is shown, imagery and terrain sliders. In the
-// app they go through the library's key/value store (AndroidHost), else (and
-// as a copy) localStorage; a new map starts with ghost walls coloured by
-// elevation and walls at 60%. Every access is wrapped: storage can be off.
-const DISP_KEY = 'flex_display_v1|' + MAP_KEY;
+// ── Display and settings, remembered per project (else per map) ─────────────
+// Walls, colour, stations, what is shown, imagery and terrain sliders, and the
+// state of the parts (ridgewalking, trees, ...). A map that belongs to a
+// project shares them with the project's other maps on this phone; a map with
+// no project keeps its own. The rules are libs/disp-store.js: only what was
+// changed on this map is written, so a choice this map cannot show (and falls
+// back from) stays saved for the maps that can. In the app they go through the
+// library's key/value store (AndroidHost), else (and as a copy) localStorage; a
+// new map or project starts with ghost walls coloured by elevation and walls
+// at 60%. Every access is wrapped: storage can be off. Not synced.
 const DISP_APP = !!(window.FF_MAP_ID && window.AndroidHost && typeof window.AndroidHost.libKvGet === 'function');
-const DISP = (() => {
-  let raw = null;
-  try { if (DISP_APP) raw = window.AndroidHost.libKvGet(DISP_KEY) || null; } catch (_) {}
-  try { if (!raw) raw = localStorage.getItem(DISP_KEY); } catch (_) {}
-  try { const v = raw && JSON.parse(raw); return v && typeof v === 'object' ? v : {}; } catch (_) { return {}; }
-})();
+const DISP_MAP_ONLY = [];             // keys that stay with the map even in a project (tied to this map's ground): none yet
+const DISP_PROJECT_KEY = 'flex_map_project|' + MAP_KEY;   // a browser's copy of the map's project, readable before IndexedDB is
+const dispStore = FlexDisp.open({
+  mapKey: MAP_KEY, mapOnly: DISP_MAP_ONLY,
+  project: FlexDisp.startProject((() => {
+    try { if (window.FF_MAP_ID && window.AndroidHost && typeof window.AndroidHost.libMapProject === 'function') return window.AndroidHost.libMapProject(window.FF_MAP_ID) || null; } catch (_) {}
+    try { return localStorage.getItem(DISP_PROJECT_KEY); } catch (_) { return null; }
+  })(), META.project),
+  get: k => {
+    let raw = null;
+    try { if (DISP_APP) raw = window.AndroidHost.libKvGet(k) || null; } catch (_) {}
+    try { if (!raw) raw = localStorage.getItem(k); } catch (_) {}
+    return raw;
+  },
+  set: (k, txt) => {
+    try { if (DISP_APP) window.AndroidHost.libKvSet(k, txt); } catch (_) {}
+    try { localStorage.setItem(k, txt); } catch (_) {}
+  },
+});
+const DISP = dispStore.state;
+Object.defineProperty(window, 'DISP_KEY', { get: () => dispStore.key(), configurable: true });   // where the state is kept now (it moves with the map's project)
 const DISP_DEFAULT = { wallMode: 1, colourMode: 1, wallAlpha: 0.6 };
 const dispGet = (k, d) => (DISP[k] !== undefined && DISP[k] !== null ? DISP[k] : (k in DISP_DEFAULT ? DISP_DEFAULT[k] : d));
-let _dispLast = JSON.stringify(DISP);
-function dispSave(patch) {
-  Object.assign(DISP, patch);
-  const txt = JSON.stringify(DISP);
-  if (txt === _dispLast) return;
-  _dispLast = txt;
-  try { if (DISP_APP) window.AndroidHost.libKvSet(DISP_KEY, txt); } catch (_) {}
-  try { localStorage.setItem(DISP_KEY, txt); } catch (_) {}
+function dispSave(patch) { dispStore.save(patch); }
+// The map was linked to a project (or the library says which one it has): from now on the state is that project's.
+// What is on screen stays as it is; the project's own choices show the next time the map is opened.
+function dispProject(pid) {
+  try {
+    dispStore.setProject(pid);
+    if (!DISP_APP) { if (dispStore.project()) localStorage.setItem(DISP_PROJECT_KEY, dispStore.project()); else localStorage.removeItem(DISP_PROJECT_KEY); }
+  } catch (_) {}
 }
 
 // ── Units: feet by default, metres switchable (⋯ More). One unit at a time
@@ -5038,8 +5058,8 @@ const ffHostApp = {
   putBlobB64: async (b64, ext) => JSON.parse(window.AndroidHost.libPutBlob(b64, ext) || 'null'),
   projects: async () => { try { return JSON.parse(window.AndroidHost.libProjects() || '[]'); } catch (_) { return []; } },
   setProject: async (pid, name) => window.AndroidHost.libSetProject(pid, name || ''),
-  mapProject: async () => window.AndroidHost.libMapProject(window.FF_MAP_ID) || null,
-  setMapProject: async pid => window.AndroidHost.libSetMapProject(window.FF_MAP_ID, pid),
+  mapProject: async () => { const p = window.AndroidHost.libMapProject(window.FF_MAP_ID) || null; dispProject(p); return p; },
+  setMapProject: async pid => { const r = window.AndroidHost.libSetMapProject(window.FF_MAP_ID, pid); if (r !== false) dispProject(pid); return r; },
   mapLog: async () => ffLines(window.AndroidHost.logRead(window.FF_MAP_ID)),
   kvGet: async k => window.AndroidHost.libKvGet(k) || null,
   kvSet: async (k, v) => window.AndroidHost.libKvSet(k, v),
@@ -5104,8 +5124,8 @@ const ffHostIdb = {
     if (i >= 0) list[i].name = name || list[i].name; else list.push({ id: pid, name: name || '' });
     await ffHostIdb.kvSet('projects', JSON.stringify(list));
   },
-  mapProject: async () => ffHostIdb.kvGet('map|' + MAP_KEY),
-  setMapProject: async pid => ffHostIdb.kvSet('map|' + MAP_KEY, pid),
+  mapProject: async () => { const p = await ffHostIdb.kvGet('map|' + MAP_KEY); dispProject(p); return p; },
+  setMapProject: async pid => { const r = await ffHostIdb.kvSet('map|' + MAP_KEY, pid); dispProject(pid); return r; },
   mapLog: async () => [],
   kvGet: async k => { try { return await ffIdb(['kv'], 'readonly', async (tx, set) => { const r = await ffReq(tx.objectStore('kv').get(k)); set(r ? r.v : null); }); } catch (_) { return null; } },
   kvSet: async (k, v) => ffIdb(['kv'], 'readwrite', tx => { tx.objectStore('kv').put({ k, v }); }),
@@ -8490,13 +8510,17 @@ function dispRestoreUi() {
   const fb = document.getElementById('tb-focus');             // 🎯 only on a map that has a cave
   if (fb) fb.style.display = stationMap.size ? '' : 'none';
   FlexFx.syncUi();
+  try { dispStore.seen(dispCollect()); } catch (_) {}
   requestRender(); wakeRender();
 }
-function dispCapture() {
+// What this map shows now. dispRestoreUi hands it to the store once (what the saved state became on THIS map, fall-backs
+// included); after that only what differs from it is saved.
+function dispCollect() {
   const sl = id => { const n = document.getElementById(id); return n ? +n.value : undefined; };
-  dispSave({ wallMode, colourMode, wallAlpha: wallOpacity, stationMode, annot: annotMode, tracks: fieldGroup.visible, inv: window.ViewerInv ? ViewerInv.visible() : true, fx: FlexFx.serialize(), rmarks: window.RidgeMarks ? RidgeMarks.serialize() : undefined, trees: window.FlexTrees ? FlexTrees.serialize() : undefined, features: window.ViewerFeatures ? ViewerFeatures.serialize() : undefined, ridge: window.FlexRidge ? FlexRidge.serialize() : undefined, tex: texMode,
+  return ({ wallMode, colourMode, wallAlpha: wallOpacity, stationMode, annot: annotMode, tracks: fieldGroup.visible, inv: window.ViewerInv ? ViewerInv.visible() : true, fx: FlexFx.serialize(), rmarks: window.RidgeMarks ? RidgeMarks.serialize() : undefined, trees: window.FlexTrees ? FlexTrees.serialize() : undefined, features: window.ViewerFeatures ? ViewerFeatures.serialize() : undefined, ridge: window.FlexRidge ? FlexRidge.serialize() : undefined, tex: texMode,
              opacity: sl('terrain-opacity-slider'), bright: sl('terrain-bright-slider'), fog: sl('terrain-fog-slider') });
 }
+function dispCapture() { dispSave(dispCollect()); }
 let _dispTimer = null;
 ['click', 'input', 'change'].forEach(ev => document.addEventListener(ev, () => {
   clearTimeout(_dispTimer); _dispTimer = setTimeout(() => { if (_dispRestored) dispCapture(); }, 150);
