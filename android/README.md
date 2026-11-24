@@ -146,6 +146,14 @@ level). `MapStore.kt` keeps both (`TREES_FILE`, `TREES_INFO`),
 (drawn by `viewer_build/libs/trees.js`: 🎨 Display → Trees and brush); a map
 without them gets `null`.
 
+An export with ridgewalking also carries `brush.bin` (the bushwhack grid: a
+share and a height a cell, "FBR1") and `brush.json` (the grid's place and the
+classes). `MapStore.kt` keeps both (`BRUSH_FILE`, `BRUSH_INFO`),
+`MainActivity.kt` hands the viewer `brush.json`'s `viewer` object as `BRUSH`
+(drawn as low blocks by `viewer_build/libs/brush-blocks.js`; the Brush chip of
+🎨 Display → Trees and brush switches them, and a hold on a chip opens its
+opacity slider); a map without them gets `null`.
+
 An export made with **V2 - Ridgewalking** also carries `ridge_points.bin`,
 `ridge_shapes.bin`, `ridge_patches.bin`, `ridge.json` and `tex_hsb.jpg` (the
 hillshade with the brush map on it, a third Imagery choice; `tex_hsb_<c>_<r>.jpg`

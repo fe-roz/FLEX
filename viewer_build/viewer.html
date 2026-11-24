@@ -714,6 +714,9 @@ catch(e) { window.DOCS_EXPORT = null; }
 <!-- Trees and brush (libs/trees.js): null in an export without them. -->
 <script>window['PLACEHOLDER_' + 'TREES_JSON'] = null;</script>
 <script>const TREES = PLACEHOLDER_TREES_JSON;</script>
+<!-- The brush grid drawn as low blocks (libs/brush-blocks.js): null in an export without it. -->
+<script>window['PLACEHOLDER_' + 'BRUSH_JSON'] = null;</script>
+<script>const BRUSH = PLACEHOLDER_BRUSH_JSON;</script>
 <!-- ═══ THREE.JS LIBS (injected by export_terrain.py) ══════════════════════ -->
 <script src="libs/three.min.js"></script>
 <script src="libs/OrbitControls.js"></script>
@@ -732,6 +735,7 @@ catch(e) { window.DOCS_EXPORT = null; }
 <script src="libs/viewer-features.js"></script>
 <script src="libs/about-map.js"></script>
 <script src="libs/trees.js"></script>
+<script src="libs/brush-blocks.js"></script>
 <script src="libs/ridge-marks.js"></script>
 <script src="libs/ground-drag.js"></script>
 
@@ -2178,8 +2182,14 @@ setTimeout(() => {
       toScene: gpsToScene, groundZ: gridZAt, textSprite: makeTextSprite, showInfo, flyTo: p => flyToPoint(p, Math.max(60, terrainScale * 0.05)),
       fmtLen: m => U.len(m), redraw: () => { requestRender(); wakeRender(); },
     });
+    // The brush grid as low blocks (nothing when BRUSH is null); the Brush chip of FlexTrees drives them.
+    if (window.FlexBrush) FlexBrush.init({
+      THREE, scene, camera, brush: typeof BRUSH === 'undefined' ? null : BRUSH, isAssetRef, b64ToArrayBuffer, groundZ: gridZAt,
+      dither: window.FlexTrees && FlexTrees.dither, redraw: () => { requestRender(); wakeRender(); },
+    });
     // Trees and brush as simple solids (nothing when TREES is null).
     if (window.FlexTrees) FlexTrees.init({
+      blocks: window.FlexBrush,
       THREE, scene, trees: typeof TREES === 'undefined' ? null : TREES, saved: DISP.trees, isAssetRef, b64ToArrayBuffer,
       redraw: () => { requestRender(); wakeRender(); },
     });
@@ -4616,14 +4626,16 @@ function sheetRow(icon, title, sub, onClick, active) {
   sheetEl.appendChild(r);
   return r;
 }
-// On/off chips, two to a row: [[icon, label, on, onChange], …]
+// On/off chips, two to a row: [[icon, label, on, onChange, more], …]. `more.attach(chip, setOn)` lets a module
+// add to its chip (libs/trees.js: the opacity level shown in the chip, and its slider on a hold).
 function sheetChips(items) {
   const g = el('div', 'sh-chips');
-  items.forEach(([icon, label, on, onChange]) => {
+  items.forEach(([icon, label, on, onChange, more]) => {
     const c = el('button', 'sh-chip' + (on ? ' a' : ''));
     c.appendChild(el('span', '', icon));
     c.appendChild(el('span', '', label));
     c.title = label;
+    if (more && more.attach) more.attach(c, v => { on = !!v; c.classList.toggle('a', on); });
     c.addEventListener('click', () => { on = !on; c.classList.toggle('a', on); onChange(on); requestRender(); wakeRender(); });
     g.appendChild(c);
   });
@@ -8777,6 +8789,7 @@ let _t = 0;
     clampOrbitTarget(true);
   }
 
+  if (window.FlexBrush) FlexBrush.update();      // brush blocks: which tiles this view draws (returns at once when nothing moved)
   renderer.render(scene, camera);
   _needsRender = false;
 })();

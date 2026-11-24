@@ -55,9 +55,12 @@ class MapStore(private val ctx: Context) {
         /** Trees and brush (an export made with that box ticked): one simple solid a tree or bush, libs/trees.js; trees.json has the count and detail. */
         const val TREES_FILE = "trees.bin"
         const val TREES_INFO = "trees.json"
+        /** The brush grid drawn as low blocks (an export with ridgewalking): libs/brush-blocks.js; brush.json has the grid's place and the classes. */
+        const val BRUSH_FILE = "brush.bin"
+        const val BRUSH_INFO = "brush.json"
         /** The export's manifest (every data file with size and sha256: what an update is checked against) and what the last update did. */
         const val MANIFEST_FILE = MapUpdate.MANIFEST
-        fun isDataFile(name: String): Boolean = name == MANIFEST_FILE || name == MapUpdate.VERSION_FILE || name in DATA_FILES || name in RIDGE_FILES || name == FEATURES_FILE || name == TREES_FILE || name == TREES_INFO || name == "docs.json" || TILE_RE.matches(name) || DOC_RE.matches(name)
+        fun isDataFile(name: String): Boolean = name == MANIFEST_FILE || name == MapUpdate.VERSION_FILE || name in DATA_FILES || name in RIDGE_FILES || name == FEATURES_FILE || name == TREES_FILE || name == TREES_INFO || name == BRUSH_FILE || name == BRUSH_INFO || name == "docs.json" || TILE_RE.matches(name) || DOC_RE.matches(name)
         private val ID_RE = Regex("^[A-Za-z0-9_-]{1,64}$")
         private val SAFE_RE = Regex("^[A-Za-z0-9._ -]{1,120}$")
         fun validId(id: String?): Boolean = id != null && ID_RE.matches(id)

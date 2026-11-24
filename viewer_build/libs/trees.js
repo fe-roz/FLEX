@@ -12,10 +12,13 @@
 // Every tree and bush is ONE of three stock solids stretched to its radius and height: instanced meshes
 // (THREE.InstancedMesh, r128), a few triangles a shape, fewer when the export says the area is large
 // (detail 0 / 1 / 2). The whole area is drawn, with no distance limit; the instances are filed in ground
-// tiles so the ones out of view are skipped. See-through is a screen door (every other pixel dropped in
-// the fragment shader): no blending, no sorting, no second pass, depth test and depth write stay on.
-// Nothing animates and nothing runs per frame: a switch asks the viewer for one redraw. Trees are not
-// part of the terrain: the height grid and taps do not see them.   Test: tools/test_viewer_trees.js
+// tiles so the ones out of view are skipped. Opacity is an ordered dither (a 4 x 4 Bayer pattern, 16
+// steps: at level k / 16 the fragment shader keeps k pixels of every 16 and drops the rest): no blending,
+// no sorting, no second pass, depth test and depth write stay on. One level for the trees (cones, round
+// crowns, trunks), one for the brush (the mounds, or the brush blocks of libs/brush-blocks.js when the
+// map has them: then the mounds are hidden and the Brush chip and its level drive the blocks).
+// Nothing animates and nothing runs per frame: a switch or a level asks the viewer for one redraw. Trees
+// are not part of the terrain: the height grid and taps do not see them.   Test: tools/test_viewer_trees.js
 (function (root) {
   'use strict';
 
@@ -25,10 +28,12 @@
   var SINK = 0.06;                                             // the solids start this share of their height under the foot (slopes)
   // `crown` is a look to compare, not in Display yet: off = a conifer is a spike from the ground up (as ever);
   // on = its cone starts at the crown's base, on a thin trunk (FlexTrees.set('crown', true)).
-  var DEFAULTS = { trees: true, brush: true, see: true, crown: false };
+  // treesOp / brushOp: the opacity levels, 1/16 .. 1 in steps of 1/16.
+  var DEFAULTS = { trees: true, brush: true, treesOp: 0.5, brushOp: 0.5, crown: false };
+  var STEPS = 16, HOLD_MS = 450;                               // dither steps; how long a chip is held for its slider
   var TRUNK_COLOUR = [0x4c, 0x3b, 0x2a], TRUNK_SHARE = 0.06, TRUNK_MIN = 0.15;      // trunk radius: a share of the crown's, at least 15 cm
   var CROWN_MIN = 0.25;                                        // a crown is at least this share of the tree's height
-  var STATE_V = 1;
+  var STATE_V = 2;                                             // 1 had `see` (true = the 50 % screen door) in place of the two levels
   var TILE_TARGET = 6000, TILE_MAX = 8;                        // about this many shapes a ground tile, at most 8 x 8 tiles
   // The stock solids, as a profile turned round the vertical: [sides, [radius, height] rings from the
   // bottom up], closed by a point at the top (height 1).
@@ -70,11 +75,39 @@
     return { n: n, version: B === 24 ? 2 : 1, B: B, F: B / 4, U: B / 2,
              f32: new Float32Array(buf, 8, n * B / 4), u16: new Uint16Array(buf, 8, n * B / 2), u8: new Uint8Array(buf, 8, n * B) };
   }
+  // A level as the dither can show it: a whole number of sixteenths, never under one.
+  function quant(v) { v = Math.round(Number(v) * STEPS); return (v >= 1 ? (v > STEPS ? STEPS : v) : 1) / STEPS; }
   function restore(saved) {
     var st = {}, k;
     for (k in DEFAULTS) st[k] = DEFAULTS[k];
-    if (saved && typeof saved === 'object' && saved.v === STATE_V) for (k in DEFAULTS) if (typeof saved[k] === 'boolean') st[k] = saved[k];
+    if (!saved || typeof saved !== 'object') return st;
+    if (saved.v === STATE_V) {
+      for (k in DEFAULTS) {
+        if (typeof DEFAULTS[k] === 'boolean') { if (typeof saved[k] === 'boolean') st[k] = saved[k]; }
+        else if (typeof saved[k] === 'number' && isFinite(saved[k])) st[k] = quant(saved[k]);
+      }
+    } else if (saved.v === 1) {                                 // the See-through switch: on was every other pixel (50 %), off solid
+      ['trees', 'brush', 'crown'].forEach(function (q) { if (typeof saved[q] === 'boolean') st[q] = saved[q]; });
+      if (typeof saved.see === 'boolean') st.treesOp = st.brushOp = saved.see ? 0.5 : 1;
+    }
     return st;
+  }
+  // The 4 x 4 Bayer pattern: pixel (x, y) has rank 0..15, and is kept at level k / 16 when its rank is under k.
+  // (Rank < 8 is the checkerboard, so 50 % is the screen door this replaced.) The shader computes the same.
+  function bayer2(x, y) { x &= 1; y &= 1; return ((x * 2 + y * y * 3) & 3); }            // 0 2 / 3 1, in quarters
+  function bayer4(x, y) { return bayer2(x >> 1, y >> 1) + 4 * bayer2(x, y); }
+  function kept(level) { var n = 0, x, y; for (y = 0; y < 4; y++) for (x = 0; x < 4; x++) if ((bayer4(x, y) + 0.5) / STEPS <= level) n++; return n; }
+  var DITHER_HEAD = 'uniform float uOpacityDither;\n' +
+    'float flexBayer2(vec2 a) { a = floor(a); return fract(a.x / 2.0 + a.y * a.y * 0.75); }\n' +
+    'float flexBayer4(vec2 a) { return flexBayer2(0.5 * a) * 0.25 + flexBayer2(a); }\n';
+  var DITHER_BODY = '\n\tif (flexBayer4(gl_FragCoord.xy) + 0.03125 > uOpacityDither) discard;';
+  // Patches a three.js material so it is drawn at `uniform.value` (0..1) by the ordered dither. Shared with the brush blocks.
+  function dither(mat, uniform) {
+    mat.onBeforeCompile = function (sh) {
+      sh.uniforms.uOpacityDither = uniform;
+      sh.fragmentShader = DITHER_HEAD + sh.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>' + DITHER_BODY);
+    };
+    return mat;
   }
   // How the instances are filed: tiles x tiles over the trees' own extent, [kind][tile] -> count.
   function plan(T) {
@@ -93,14 +126,12 @@
 
   var S = null;      // everything of the running viewer; null = no trees (the normal export)
 
-  // The screen door: with uSee on, every other pixel (a checkerboard) is dropped.
-  function screenDoor(mat, uSee) {
-    mat.onBeforeCompile = function (sh) {
-      sh.uniforms.uSee = uSee;
-      sh.fragmentShader = 'uniform float uSee;\n' + sh.fragmentShader.replace('#include <clipping_planes_fragment>',
-        '#include <clipping_planes_fragment>\n\tif (uSee > 0.5 && mod(floor(gl_FragCoord.x) + floor(gl_FragCoord.y), 2.0) < 0.5) discard;');
-    };
-    return mat;
+  // Are the brush blocks drawing the brush (libs/brush-blocks.js)? Then the mounds stay hidden.
+  function blocksOn() { return !!(S && S.blocks); }
+  function applyBrush() {
+    var on = S.st.brush;
+    S.meshes[2].forEach(function (m) { m.visible = on && !S.blocks; });
+    if (S.blocks) S.blocks.set({ on: on, opacity: S.st.brushOp });
   }
 
   function build(T) {
@@ -110,7 +141,7 @@
     S.count = [0, 0, 0];
     var mats = [], geos = [], slot = [[], [], []];
     for (k = 0; k < 3; k++) {
-      mats[k] = screenDoor(new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0x0c160c }), S.uSee);
+      mats[k] = dither(new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0x0c160c }), k === 2 ? S.uBrush : S.uTrees);
       var g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.BufferAttribute(solidFor(k, detail), 3));
       g.computeVertexNormals();
@@ -127,7 +158,7 @@
         mesh.name = 'trees-' + KINDS[k]; mesh.matrixAutoUpdate = false;
         mesh.frustumCulled = true;                               // (three switches it off for instanced meshes; each tile has real bounds)
         mesh.userData = { kind: k, tile: t, zhb: k === 0 ? new Float32Array(c * 3) : null };      // cones: foot z, height, crown base
-        mesh.visible = k === 2 ? S.st.brush : S.st.trees;
+        mesh.visible = k === 2 ? S.st.brush && !S.blocks : S.st.trees;
         slot[k][t] = { mesh: mesh, at: 0, box: [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity] };
         S.meshes[k].push(mesh); S.group.add(mesh);
         S.count[k] += c;
@@ -180,7 +211,7 @@
           S.trunkGeo = new THREE.BufferGeometry();
           S.trunkGeo.setAttribute('position', new THREE.BufferAttribute(solid({ sides: 3, rings: [[1, -SINK], [1, 1]], open: true }), 3));
           S.trunkGeo.computeVertexNormals();
-          S.trunkMat = screenDoor(new THREE.MeshLambertMaterial({ color: (TRUNK_COLOUR[0] << 16) | (TRUNK_COLOUR[1] << 8) | TRUNK_COLOUR[2] }), S.uSee);
+          S.trunkMat = dither(new THREE.MeshLambertMaterial({ color: (TRUNK_COLOUR[0] << 16) | (TRUNK_COLOUR[1] << 8) | TRUNK_COLOUR[2] }), S.uTrees);
         }
         var tg = new THREE.BufferGeometry();
         tg.setAttribute('position', S.trunkGeo.attributes.position); tg.setAttribute('normal', S.trunkGeo.attributes.normal);
@@ -200,19 +231,93 @@
 
   function redraw() { if (S && S.redraw) S.redraw(); }
 
-  var R = {
-    DEFAULTS: DEFAULTS, STATE_V: STATE_V, KINDS: KINDS, parse: parse, restore: restore, plan: plan, solidFor: solidFor, triangles: triangles,
+  // ── A chip that also carries a level ────────────────────────────────────────
+  // The chip's background fills from the left to its level (blue when on, grey when off). Held for HOLD_MS, a
+  // slider opens ABOVE the chip (fixed to the page, so the sheet's scrolling cannot cut it); a tap is still the
+  // switch. Moving the slider on a chip that is off switches it on. Nothing here runs unless a finger is down.
+  var pop = null;                                               // the open slider: { el, close }
+  function closePop() { if (pop) pop.close(); }
+  function levelChip(c, setOn, o) {
+    var doc = c.ownerDocument, win = doc.defaultView, timer = null, held = false, x0 = 0, y0 = 0;
+    var paint = function () {
+      var pc = Math.round(o.level() * 100), on = c.classList.contains('a');
+      c.style.background = 'linear-gradient(90deg, ' + (on ? 'rgba(33,150,243,.55)' : 'rgba(255,255,255,.16)') + ' ' + pc + '%, ' + (on ? 'rgba(33,150,243,.14)' : 'transparent') + ' ' + pc + '%)';
+      c.setAttribute('data-level', String(pc));
+      c.title = o.label + ' ' + pc + ' % (hold for the slider)';
+    };
+    var open = function () {
+      closePop();
+      var box = doc.createElement('div'), txt = doc.createElement('span'), sl = doc.createElement('input'), r = c.getBoundingClientRect();
+      box.className = 'sh-level-pop';
+      box.style.cssText = 'position:fixed;z-index:9000;box-sizing:border-box;display:flex;align-items:center;gap:8px;padding:10px 12px;background:rgba(24,28,34,.97);' +
+        'border:1px solid rgba(255,255,255,.25);border-radius:10px;color:#eee;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.5);touch-action:none;';
+      var w = Math.max(r.width, 200), vw = win.innerWidth || 9999, left = Math.max(6, r.left + w > vw - 6 ? Math.min(r.right, vw - 6) - w : r.left);   // over the chip; a chip at the right edge has it end with the chip
+      box.style.width = w + 'px'; box.style.left = left + 'px'; box.style.bottom = Math.max(6, (win.innerHeight || 0) - r.top + 6) + 'px';
+      sl.type = 'range'; sl.min = '1'; sl.max = String(STEPS); sl.step = '1'; sl.value = String(Math.round(o.level() * STEPS));
+      sl.style.cssText = 'flex:1;min-width:0;height:26px;margin:0;';
+      sl.setAttribute('aria-label', o.label + ' opacity');
+      txt.style.cssText = 'width:38px;text-align:right;font-variant-numeric:tabular-nums;';
+      var say = function () { txt.textContent = Math.round(o.level() * 100) + ' %'; };
+      sl.addEventListener('input', function () {
+        o.setLevel(Number(sl.value) / STEPS);
+        if (!c.classList.contains('a')) { setOn(true); o.setOn(true); }
+        say(); paint();
+      });
+      box.appendChild(sl); box.appendChild(txt); say();
+      doc.body.appendChild(box);
+      var away = function (e) { if (!box.contains(e.target)) me.close(); };
+      // (the slider is outside the sheet, whose own "tap outside closes" must not take a touch on it for one)
+      var mine = function (e) { if (box.contains(e.target)) e.stopPropagation(); };
+      win.addEventListener('pointerdown', mine, true);
+      var gone = win.MutationObserver ? new win.MutationObserver(function () { if (!c.isConnected) me.close(); }) : null;
+      if (gone && c.parentNode && c.parentNode.parentNode) gone.observe(c.parentNode.parentNode, { childList: true });
+      var me = { el: box, chip: c, close: function () {
+        if (pop === me) pop = null;
+        doc.removeEventListener('pointerdown', away, true); win.removeEventListener('pointerdown', mine, true); if (gone) gone.disconnect();
+        if (box.parentNode) box.parentNode.removeChild(box);
+      } };
+      setTimeout(function () { if (pop === me) doc.addEventListener('pointerdown', away, true); }, 0);
+      pop = me;
+    };
+    var stop = function () { if (timer) { clearTimeout(timer); timer = null; } };
+    c.style.touchAction = 'manipulation'; c.style.userSelect = 'none'; c.style.webkitUserSelect = 'none'; c.style.webkitTouchCallout = 'none';
+    c.addEventListener('pointerdown', function (e) {
+      held = false; x0 = e.clientX; y0 = e.clientY; stop();
+      timer = setTimeout(function () { timer = null; held = true; open(); }, HOLD_MS);
+    });
+    c.addEventListener('pointermove', function (e) { if (timer && Math.abs(e.clientX - x0) + Math.abs(e.clientY - y0) > 12) stop(); });
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (t) { c.addEventListener(t, stop); });
+    c.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    // (registered before the host's own click handler: a hold must not also switch the chip)
+    c.addEventListener('click', function (e) { if (held) { held = false; e.stopImmediatePropagation(); e.preventDefault(); } }, true);
+    c._paintLevel = paint;
+    paint();
+  }
 
-    // o: { THREE, scene, trees, saved, isAssetRef, b64ToArrayBuffer, redraw }.
-    // Returns a promise that settles when the trees are in the scene (null trees: at once, false).
+  var R = {
+    DEFAULTS: DEFAULTS, STATE_V: STATE_V, STEPS: STEPS, HOLD_MS: HOLD_MS, KINDS: KINDS, parse: parse, restore: restore, plan: plan, solidFor: solidFor, triangles: triangles,
+    quant: quant, bayer4: bayer4, kept: kept, dither: dither,
+
+    // o: { THREE, scene, trees, saved, isAssetRef, b64ToArrayBuffer, redraw, blocks }.
+    // blocks: window.FlexBrush when the map has brush blocks (its active() is true): the Brush chip then drives
+    // them and the mounds are hidden; a map with blocks and no trees has the Brush chip alone.
+    // Returns a promise that settles when the trees are in the scene (no trees: at once, false).
     init: function (o) {
-      S = null;
-      var tr = o && o.trees;
-      if (!tr || typeof tr !== 'object' || !tr.file) return Promise.resolve(false);
-      var d = tr.detail === 1 || tr.detail === 2 ? tr.detail : 0;
-      S = { THREE: o.THREE, scene: o.scene, trees: tr, detail: d, st: restore(o.saved), redraw: o.redraw, uSee: { value: 0 },
+      S = null; closePop();
+      var tr = o && o.trees, bl = o && o.blocks && o.blocks.active && o.blocks.active() ? o.blocks : null;
+      if (!tr || typeof tr !== 'object' || !tr.file) tr = null;
+      if (!tr && !bl) return Promise.resolve(false);
+      var d = tr && (tr.detail === 1 || tr.detail === 2) ? tr.detail : 0;
+      S = { THREE: o.THREE, scene: o.scene, trees: tr, detail: d, st: restore(o.saved), redraw: o.redraw, uTrees: { value: 1 }, uBrush: { value: 1 }, blocks: bl,
             group: null, meshes: [[], [], []], trunks: [], trunkGeo: null, trunkMat: null, count: [0, 0, 0], tiles: 0, loaded: false };
-      S.uSee.value = S.st.see ? 1 : 0;
+      S.uTrees.value = S.st.treesOp; S.uBrush.value = S.st.brushOp;
+      var mine = S;
+      if (bl) {
+        applyBrush();
+        // blocks that did not load: the mounds are the brush again
+        if (bl.whenReady) bl.whenReady().then(function (ok) { if (S !== mine) return; if (!ok) { S.blocks = null; applyBrush(); redraw(); } });
+      }
+      if (!tr) return Promise.resolve(false);
       var load;
       try {
         load = o.isAssetRef(tr.file)
@@ -220,7 +325,7 @@
           : Promise.resolve(o.b64ToArrayBuffer(tr.file));
       } catch (e) { load = Promise.reject(e); }
       return load.then(function (buf) {
-        if (!S) return false;
+        if (S !== mine) return false;
         build(parse(buf)); S.loaded = true; redraw();
         return true;
       }).catch(function (e) { console.warn('Trees and brush not loaded:', e); return false; });
@@ -229,27 +334,44 @@
     loaded: function () { return !!(S && S.loaded); },
     state: function () { return S ? Object.assign({}, S.st) : null; },
     serialize: function () { return S ? Object.assign({ v: STATE_V }, S.st) : undefined; },
-    // { group, meshes: [cones, rounds, mounds], trunks, count: [..], tiles, detail, see }
-    objects: function () { return S ? { group: S.group, meshes: S.meshes, trunks: S.trunks, count: S.count.slice(), tiles: S.tiles, detail: S.detail, see: S.uSee.value } : null; },
+    // { group, meshes: [cones, rounds, mounds], trunks, count: [..], tiles, detail, op: [trees, brush] levels, blocks }
+    objects: function () { return S ? { group: S.group, meshes: S.meshes, trunks: S.trunks, count: S.count.slice(), tiles: S.tiles, detail: S.detail, op: [S.uTrees.value, S.uBrush.value], blocks: blocksOn() } : null; },
 
-    // One switch: trees (cones and round crowns), brush (mounds), see (see-through), crown (the conifers' other look).
+    // One switch: trees (cones and round crowns), brush (mounds, or the brush blocks), crown (the conifers' other look).
     set: function (key, v) {
-      if (!S || !(key in DEFAULTS)) return;
+      if (!S || typeof DEFAULTS[key] !== 'boolean') return;
       S.st[key] = !!v;
       if (key === 'crown') { if (S.loaded) crownLook(!!v); }
-      else if (key === 'see') S.uSee.value = v ? 1 : 0;
-      else if (key === 'brush') S.meshes[2].forEach(function (m) { m.visible = !!v; });
+      else if (key === 'brush') applyBrush();
       else { S.meshes[0].forEach(function (m) { m.visible = !!v; }); S.meshes[1].forEach(function (m) { m.visible = !!v; }); S.trunks.forEach(function (m) { m.visible = !!v && S.st.crown; }); }
       redraw();
     },
+    // One opacity level, 0..1 (drawn in sixteenths, at least one): key 'trees' or 'brush'. No rebuild: a uniform.
+    level: function (key, v) {
+      if (!S || (key !== 'trees' && key !== 'brush') || !isFinite(Number(v))) return;
+      v = quant(v);
+      S.st[key + 'Op'] = v;
+      if (key === 'trees') S.uTrees.value = v; else { S.uBrush.value = v; if (S.blocks) S.blocks.set({ on: S.st.brush, opacity: v }); }
+      redraw();
+    },
 
-    // The rows in Display. ui: { head, chips } (the viewer's own builders).
+    // The rows in Display. ui: { head, chips } (the viewer's own builders). A chip is [icon, label, on, onChange,
+    // more]; `more.attach(chipElement, setOn)` is called by the host before it adds its own click handler.
     sheet: function (ui) {
       if (!S) return;
-      ui.head('Trees and brush');
-      var st = S.st, chip = function (icon, label, key) { return [icon, label, !!st[key], function (on) { R.set(key, on); }]; };
-      ui.chips([chip('🌲', 'Trees', 'trees'), chip('🌿', 'Brush', 'brush'), chip('👁', 'See-through', 'see')]);
+      ui.head(S.trees ? 'Trees and brush' : 'Brush');
+      var st = S.st, chip = function (icon, label, key) {
+        var el = null;
+        return [icon, label, !!st[key], function (on) { R.set(key, on); if (el && el._paintLevel) el._paintLevel(); },
+          { level: st[key + 'Op'], attach: function (c, setOn) {
+            el = c;
+            if (c && c.addEventListener && c.ownerDocument) levelChip(c, setOn, { label: label, level: function () { return S ? S.st[key + 'Op'] : 1; },
+              setLevel: function (v) { R.level(key, v); }, setOn: function (on) { R.set(key, on); } });
+          } }];
+      };
+      ui.chips((S.trees ? [chip('🌲', 'Trees', 'trees')] : []).concat([chip('🌿', 'Brush', 'brush')]));
     },
+    closeSlider: closePop,
   };
 
   root.FlexTrees = R;
