@@ -1,7 +1,7 @@
 // How the map is moved in the portable viewer / FLEX Field (window.GroundDrag): a choice of three in ⋯ More → Touch.
 //
 //   'orbit'  (the default) nothing here runs and OrbitControls behaves as always.
-//   'ground' "Orbit on the ground": OrbitControls' own gestures, but the orbit centre always sits on the ground. The
+//   'ground' "Surface drag": OrbitControls' own gestures, but the orbit centre always sits on the ground. The
 //            viewer calls snap() once per drawn frame, right after controls.update() and its orbit clamp: the centre's
 //            height becomes the ground's at its x, y (the height grid, never a ray cast) and the camera moves up or
 //            down by the same amount, so distance, tilt and bearing stay. Off the map (no ground) the height is kept.
@@ -179,7 +179,7 @@
     if (MODES.indexOf(saved) >= 0) return saved;
     return savedOld === true ? 'drag' : 'orbit';
   }
-  // "Orbit on the ground", one drawn frame. The orbit centre goes to the ground's height at its x, y and the camera
+  // "Surface drag", one drawn frame. The orbit centre goes to the ground's height at its x, y and the camera
   // with it by the same amount (a rigid move: the camera-to-centre offset is untouched). No ground there (off the
   // map): nothing moves. st remembers between frames { x, y: where the centre was, above: the camera was above the
   // ground under it (by half of `margin`, so the last crumbs of a move do not flip it) }. When the centre moved in
@@ -401,7 +401,7 @@
   }
 
   // The choice, in ⋯ More: three in a row, and a line that says what the chosen one does.
-  var NAMES = { orbit: 'Orbit', ground: 'Orbit on the ground', drag: 'Drag the ground' };
+  var NAMES = { orbit: 'Orbit', ground: 'Surface drag', drag: 'Drag the ground' };
   var HINTS = {
     orbit: 'One finger orbits about the centre of the view, two fingers move it, pinch zooms.',
     ground: 'The same gestures, but the centre you orbit about stays on the ground: two fingers slide the view over the terrain.',

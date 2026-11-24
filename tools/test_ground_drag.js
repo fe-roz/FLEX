@@ -1,5 +1,5 @@
 // The touch choice of the viewer (viewer_build/libs/ground-drag.js): the pure maths of "Drag the ground" (map-style
-// touch), the choice of three with the old switch carried over, and the snap of "Orbit on the ground".
+// touch), the choice of three with the old switch carried over, and the snap of "Surface drag".
 // The view ray against three.js itself, the ground march over a made-up hill, the drag that keeps the grabbed spot
 // under the finger, zoom / turn / tilt about a spot with their limits, and the two-finger rule (tilt or zoom).
 //   node tools/test_ground_drag.js
@@ -177,7 +177,7 @@ let calls = 0; const counted = (x, y) => { calls++; return hill(x, y); };
   ok('a new map starts in Orbit with OrbitControls untouched', w.G.mode() === 'orbit' && w.G.on() === false && flags(w.controls).every(v => v === true) && w.saves.length === 0);
   ok('…and in Orbit the per-frame snap and the aim after flying do nothing', w.G.snap() === false && w.G.aim() === false && w.cam.position.z === 200 && w.controls.target.z === 0);
   w.G.setMode('ground');
-  ok('Orbit on the ground: OrbitControls keeps rotate, pan and zoom; its pan goes along the ground; saved as "ground"', w.G.mode() === 'ground' && w.G.on() === false && eq(flags(w.controls), [true, true, true, false]) && eq(w.saves, ['ground']), [flags(w.controls), w.saves]);
+  ok('Surface drag: OrbitControls keeps rotate, pan and zoom; its pan goes along the ground; saved as "ground"', w.G.mode() === 'ground' && w.G.on() === false && eq(flags(w.controls), [true, true, true, false]) && eq(w.saves, ['ground']), [flags(w.controls), w.saves]);
   ok('…the snap puts the centre on the ground and the camera up by the same', w.G.snap() === true && near(w.controls.target.z, 60) && near(w.cam.position.z, 260) && w.G.snap() === false, [w.controls.target.z, w.cam.position.z]);
   w.G.setMode('drag');
   ok('Drag the ground: rotate, pan, zoom off, the pan rule back; on() is true', w.G.on() === true && eq(flags(w.controls), [false, false, false, true]) && eq(w.saves, ['ground', 'drag']) && w.G.snap() === false);
@@ -199,7 +199,7 @@ let calls = 0; const counted = (x, y) => { calls++; return hill(x, y); };
   ok('aim() at the sky leaves the centre to the snap', w.G.aim() === false);
 }
 
-// ── Orbit on the ground: the snap ────────────────────────────────────────────
+// ── Surface drag: the snap ────────────────────────────────────────────
 {
   const MARGIN = 2;
   const slope = (x, y) => (Math.abs(x) > 500 || Math.abs(y) > 500 ? null : 100 + 0.5 * x + 20 * Math.sin(y / 40));
