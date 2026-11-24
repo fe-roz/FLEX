@@ -19,8 +19,9 @@ vegetation brief; outputs in OUTDIR:
     shapes.bin   N x 12 float32: x y zg height radius base kind density
                  r1 r2 r3 r4 (version 2; record 48 bytes). kind: 0 dome,
                  1 cone, 2 brush mound, 3 tall brush (a crown measured like
-                 a tree's that is brush by its shape; a reader that does not
-                 know 3 draws it as a dome, as before the kind existed)
+                 a tree's that is brush by its shape; a label only: readers
+                 draw it as a dome / round tree, the brush drawn comes from
+                 density near the ground)
     shell.bin    V x 4 float32 (x y z hag) then T x 3 uint32 (CCW outside)
     ground.bin   ny x nx float32, row 0 south, the job's ground (coarse)
     preview.png  top-down picture (ground shading, canopy, crowns, brush)

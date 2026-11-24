@@ -3026,7 +3026,7 @@ def main():
                 zf.writestr(zipfile.ZipInfo('trees.bin'), trees_bytes, compress_type=zipfile.ZIP_DEFLATED)
                 caves_meta_trees = {'count': tn, 'detail': tdetail, **{k: trees_counts[k] for k in ('cone', 'round', 'mound')}}
                 about_facts['trees'] = {'count': tn, **{k: int(trees_counts[k]) for k in ('cone', 'round', 'mound')}}
-                zf.writestr('trees.json', json.dumps({'version': 1, **caves_meta_trees, 'outside': trees_counts['outside'], 'cliff': trees_counts.get('cliff', 0), 'cliff_by_height': trees_counts.get('cliff_by_height', {}),
+                zf.writestr('trees.json', json.dumps({'version': 1, **caves_meta_trees, 'outside': trees_counts['outside'], 'tall_brush': trees_counts.get('tall_brush', 0), 'cliff': trees_counts.get('cliff', 0), 'cliff_by_height': trees_counts.get('cliff_by_height', {}),
                                                       'viewer': export_trees.trees_object(tn, tdetail)}, separators=(',', ':')))
                 trees_json = json.dumps(export_trees.trees_object(tn, tdetail, data=trees_bytes), separators=(',', ':'))
                 print(f"[6/7] Trees and brush: {tn:,} ({trees_counts['cone']:,} cones, {trees_counts['round']:,} round crowns, "
