@@ -3,7 +3,7 @@
 The export's side of "V2 - Ridgewalking" (export_terrain.py --ridgewalk).
 
 ridgewalk.py reads the returns and writes a ridge folder (ridge.json, lid.npy,
-holes.npy, points.bin, shapes.bin, brush.npy + brush.json; x east / y north in
+holes.npy, points.bin, shapes.bin, brush.npy + brush_h.npy + brush.json; x east / y north in
 metres from ridge.json's `origin`, z absolute). This file turns that folder
 into what an export carries:
 
@@ -14,7 +14,9 @@ into what an export carries:
     point clouds' vertical shift added): ridge_points.bin, ridge_shapes.bin,
     ridge_patches.bin, ridge.json;
   * "hillshade with brush": the brush classes baked over a hillshade picture
-    (tex_hsb.jpg and its tiles).
+    (tex_hsb.jpg and its tiles);
+  * brush.bin ("FBR1") + brush.json: the same brush grid with a height per
+    cell, for the phone to draw as low blocks (viewer_build/libs/brush-blocks.js).
 
 numpy + scipy + Pillow; no PDAL here (the child process has it).
 """
@@ -233,6 +235,54 @@ class Ridge:
         ok = ((bj >= 0) & (bj < b.shape[0]))[:, None] & ((bi >= 0) & (bi < b.shape[1]))[None, :]
         return np.where(ok, b[np.clip(bj, 0, b.shape[0] - 1)][:, np.clip(bi, 0, b.shape[1] - 1)], np.nan)
 
+    def brush_bin(self, center_e, center_n, polygon=None, classes=BRUSH_CLASSES):
+        """The brush grid for the phone: (brush.bin bytes, the BRUSH object with
+        the file's name), or None when the folder has no brush or no cell of
+        it is left.
+
+        The frame is trees.bin's (export_trees.py Trees.binary packs
+        x = UTM east - center_e, y = UTM north - center_n, the terrain's
+        centre; x east, y north, metres): x0, y0 are the west / south edge of
+        cell [row 0, col 0] in it, row 0 the southernmost, as brush.npy.
+        `polygon`: a UTM ring; cells whose centre lies outside read 0.
+        share byte: 0 = none / blank / outside, else ceil(share * 255).
+        height byte: centimetres above the ground, 0..250: brush_h.npy
+        (ridgewalk.py: the 95th percentile of the cell's returns inside the
+        band). A folder from before brush_h.npy, or a cell without a height:
+        the top of the band, so the blocks stand as tall as brush can be."""
+        if not self.has_brush():
+            return None
+        m = json.loads((self.dir / 'brush.json').read_text())
+        b = np.load(self.dir / 'brush.npy').astype(np.float32)
+        ny, nx = b.shape
+        bc = float(m['cell'])
+        x0, y0 = float(m.get('x0', 0.0)), float(m.get('y0', 0.0))
+        if abs(x0) < 1e5:                              # metres from the ridge origin (as brush_values)
+            x0 += self.ox; y0 += self.oy
+        band = [float(v) for v in (m.get('band') or [0.3, 2.0])][:2]
+        share = np.where(np.isfinite(b) & (b > 0), np.clip(np.ceil(np.nan_to_num(b) * 255.0), 1, 255), 0).astype(np.uint8)
+        if polygon is not None and share.any():
+            from export_trees import point_in_ring
+            jj, ii = np.nonzero(share)
+            out = ~point_in_ring(x0 + (ii + 0.5) * bc, y0 + (jj + 0.5) * bc, polygon)
+            share[jj[out], ii[out]] = 0
+        if not share.any():
+            return None
+        h = None
+        try:
+            h = np.load(self.dir / 'brush_h.npy').astype(np.float32)
+            if h.shape != b.shape:
+                h = None
+        except Exception:
+            pass
+        if h is None:
+            h = np.full(b.shape, np.nan, np.float32)
+        h = np.where(np.isfinite(h) & (h > 0), h, band[1])
+        hcm = np.where(share > 0, np.clip(np.round(h * 100.0), 1, 250), 0).astype(np.uint8)
+        fx0, fy0 = x0 - center_e, y0 - center_n
+        return (pack_brush(share, hcm, bc, fx0, fy0, band[1]),
+                brush_object(nx, ny, bc, fx0, fy0, band, classes))
+
     def bake_brush(self, hs_img, grid_rect, opacity=BRUSH_OPACITY, classes=BRUSH_CLASSES):
         """"Hillshade with brush": the brush classes laid over a hillshade
         picture of `grid_rect` at `opacity`, at the picture's own size.
@@ -317,6 +367,42 @@ def ridge_object(meta, files, data=None):
         if name in files:
             out[key] = jref(name, key)
     return out
+
+
+BRUSH_FILE, BRUSH_INFO = 'brush.bin', 'brush.json'
+BRUSH_NAMES = ('light', 'medium', 'dense')
+
+
+def brush_object(nx, ny, cell, x0, y0, band, classes=BRUSH_CLASSES, data=None, name=BRUSH_FILE):
+    """The viewer's BRUSH (PLACEHOLDER_BRUSH_JSON): the grid's frame, the band
+    and the classes the "hillshade with brush" picture is baked with (lowest
+    share first; a cell under the first `min` is not brush), with the file by
+    name, or inline base64 when `data` is given."""
+    import base64
+    return {'version': 1, 'file': base64.b64encode(data).decode('ascii') if data is not None else name,
+            'nx': int(nx), 'ny': int(ny), 'cell': round(float(cell), 6), 'x0': round(float(x0), 3), 'y0': round(float(y0), 3),
+            'band': [float(band[0]), float(band[1])],
+            'classes': [{'name': n, 'min': float(cut), 'colour': '%02x%02x%02x' % tuple(int(v) for v in col[:3])}
+                        for n, (cut, col) in zip(BRUSH_NAMES, sorted(classes))]}
+
+
+def pack_brush(share, height_cm, cell, x0, y0, top):
+    """brush.bin, little endian: "FBR1", uint32 nx, uint32 ny, float32 cell,
+    float32 x0, float32 y0, float32 top (the band's top, m), uint32 0, then
+    uint8 share[ny * nx] and uint8 height in cm[ny * nx], rows from the south."""
+    share = np.ascontiguousarray(share, np.uint8); height_cm = np.ascontiguousarray(height_cm, np.uint8)
+    ny, nx = share.shape
+    return (b'FBR1' + struct.pack('<IIffffI', nx, ny, cell, x0, y0, top, 0) + share.tobytes() + height_cm.tobytes())
+
+
+def read_brush(buf):
+    """-> dict(nx, ny, cell, x0, y0, top, share uint8 [ny, nx], height uint8 [ny, nx] in cm)."""
+    if buf[:4] != b'FBR1':
+        sys.exit("ERROR: brush.bin is not an FBR1 file")
+    nx, ny, cell, x0, y0, top, _ = struct.unpack_from('<IIffffI', buf, 4)
+    return dict(nx=nx, ny=ny, cell=cell, x0=x0, y0=y0, top=top,
+                share=np.frombuffer(buf, 'u1', nx * ny, 32).reshape(ny, nx),
+                height=np.frombuffer(buf, 'u1', nx * ny, 32 + nx * ny).reshape(ny, nx))
 
 
 def fill_nearest(a, blank):

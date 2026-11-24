@@ -170,6 +170,18 @@ def trees_inline_json(side, read, names):
     return json.dumps(dict(obj, file=base64.b64encode(read(obj['file'])).decode('ascii')), separators=(',', ':'))
 
 
+def brush_inline_json(side, read, names):
+    """The text for PLACEHOLDER_BRUSH_JSON from an export's brush.json (`side`)
+    and brush.bin (export_ridge.py brush_object): the object brush.json keeps
+    under `viewer`, the file name replaced by the file's base64. None when
+    there is none."""
+    import base64
+    obj = (side or {}).get('viewer')
+    if not isinstance(obj, dict) or not obj.get('file') or obj['file'] not in names:
+        return None
+    return json.dumps(dict(obj, file=base64.b64encode(read(obj['file'])).decode('ascii')), separators=(',', ':'))
+
+
 def ridge_inline_json(side, read, names):
     """The text for PLACEHOLDER_RIDGE_JSON from an export's ridge.json (`side`)
     and its ridge files: the object ridge.json keeps under `viewer` (file
@@ -241,7 +253,7 @@ def clean_ridge_marks(raw, limit=5000):
 
 def build_inline_viewer(glb_path, tex_b64, caves_data, viewer_libs, progress=print,
                         hs_b64=None, walls_bytes=None, docs_json=None, ridge_json=None, hsb_b64=None,
-                        features_json=None, trees_json=None, slope_b64=None):
+                        features_json=None, trees_json=None, slope_b64=None, brush_json=None):
     """
     glb_path: the terrain.glb file, or its bytes.
 
@@ -322,6 +334,10 @@ def build_inline_viewer(glb_path, tex_b64, caves_data, viewer_libs, progress=pri
 
     # 9. Trees and brush (export_trees.py): the TREES object, 'null' for an export without them
     html = html.replace('PLACEHOLDER_TREES_JSON', trees_json or 'null')
+
+    # 10. The brush grid (export_ridge.py brush.bin): the BRUSH object, 'null' for an export without it
+    #     (a template without the placeholder is left as it is)
+    html = html.replace('PLACEHOLDER_BRUSH_JSON', brush_json or 'null')
 
     progress(f"  Viewer HTML total: {len(html)//1024} KB")
     return html

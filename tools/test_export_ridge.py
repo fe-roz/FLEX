@@ -65,10 +65,12 @@ stri = np.array([0, 1, 2, 0, 1, 3, 1, 2, 3, 2, 0, 3], np.uint32)
 BC = CELL * 3
 brush = np.full((NY // 3, NX // 3), 0.02, np.float32)
 brush[10:20, 10:20] = 0.2; brush[30:40, 10:20] = 0.45; brush[50:60, 10:20] = 0.9; brush[70:80, 10:20] = np.nan
+brush_h = np.where(np.isfinite(brush), 0.4 + 2.0 * np.nan_to_num(brush), np.nan).astype(np.float32)    # 0.44 m on thin brush .. 2.2 m on dense
+brush_h[12, 12] = 9.0                                                                                # (out of range: the file says 250 cm)
 COUNTS = {'returns': 1000, 'below': 4, 'groups': 1, 'lone': 1, 'likely_noise': 0, 'pattern_noise': 1, 'features': 1,
           'true_cells': int((holes == 1).sum()), 'guessed_cells': int((holes == 2).sum())}
 
-def write_ridge(d, shapes=True, with_brush=True):
+def write_ridge(d, shapes=True, with_brush=True, height=True, band=(0.3, 2.5)):
     d = Path(d); d.mkdir(parents=True, exist_ok=True)
     (d / 'quality.json').write_text(json.dumps({'version': 1, 'passes': [{'id': 3, 'flagged': False}, {'id': 9, 'flagged': True, 'set_aside': 40}], 'coverage': {'passes_1': 0.25, 'passes_0': 0.0, 'no_ground_within_3m': 0.02, 'no_ground_within_1m': 0.1},
                                              'reading': {'tiles': 4, 'read_in_this_run': True, 'left_blank': 0}, 'cloud': {}}))
@@ -82,8 +84,16 @@ def write_ridge(d, shapes=True, with_brush=True):
         (d / 'shapes.bin').write_bytes(b'RWS1' + struct.pack('<II', len(sv), len(stri) // 3) + sv.tobytes() + sdepth.tobytes() + stri.tobytes())
     if with_brush:
         np.save(d / 'brush.npy', brush)
-        (d / 'brush.json').write_text(json.dumps({'x0': 0, 'y0': 0, 'cell': BC, 'nx': NX // 3, 'ny': NY // 3, 'band': [0.3, 2.0]}))
+        (d / 'brush.json').write_text(json.dumps({'x0': 0, 'y0': 0, 'cell': BC, 'nx': NX // 3, 'ny': NY // 3, 'band': list(band)}))
+        if height:
+            np.save(d / 'brush_h.npy', brush_h)
     return d
+
+def brush_const(html):
+    m = re.search(r'<script>const BRUSH = (.*?);</script>', html, re.S)
+    return json.loads(m.group(1)) if m else 'MISSING'
+
+CLASSES = [{'name': 'light', 'min': 0.1, 'colour': 'b7e4a0'}, {'name': 'medium', 'min': 0.3, 'colour': '5fae4f'}, {'name': 'dense', 'min': 0.6, 'colour': '1f5f1f'}]
 
 def hsb_const(html):
     m = re.search(r'<script>const TERRAIN_HSB_B64 = "(.*?)";</script>', html, re.S)
@@ -155,6 +165,57 @@ with tempfile.TemporaryDirectory() as tmp:
         check('single file RIDGE: version, counts, depthCap', R['version'] == 1 and R['counts'] == COUNTS and R['depthCap'] == 20)
         for k, f in (('points', 'ridge_points.bin'), ('patches', 'ridge_patches.bin'), ('shapes', 'ridge_shapes.bin')):
             check(f'single file RIDGE.{k}: the bytes of {f}', '.' not in R[k] and base64.b64decode(R[k]) == z.read(f))
+
+    # the brush grid: brush.bin (FBR1) + brush.json, in trees.bin's frame (metres east / north of the terrain's centre)
+    check('zip: brush.bin and brush.json', {'brush.bin', 'brush.json'} <= names, sorted(names))
+    bb = z.read('brush.bin'); BNY, BNX = brush.shape
+    hd = struct.unpack_from('<4sIIffffI', bb, 0)
+    check('brush.bin: FBR1 header (nx, ny, cell, x0, y0 = the grid\'s south-west corner from the centre, band top, spare 0)',
+          hd[0] == b'FBR1' and hd[1:3] == (BNX, BNY) and abs(hd[3] - BC) < 1e-6 and abs(hd[4] - (OX - ce)) < 1e-3 and abs(hd[5] - (OY - cn)) < 1e-3 and abs(hd[6] - 2.5) < 1e-6 and hd[7] == 0, hd)
+    check('brush.bin: 32 bytes + a share byte and a height byte a cell', len(bb) == 32 + 2 * BNX * BNY, len(bb))
+    B = er.read_brush(bb)
+    want_s = np.where(np.isfinite(brush), np.ceil(np.nan_to_num(brush) * 255), 0).astype(np.uint8)
+    check('brush.bin share: ceil(share * 255), rows from the south, blank cells 0', np.array_equal(B['share'], want_s) and B['share'][15, 15] == 51 and B['share'][55, 15] == 230 and B['share'][75, 15] == 0 and B['share'][0, 0] == 6,
+          [int(B['share'][j, 15]) for j in (15, 35, 55, 75)])
+    check('brush.bin height: centimetres from brush_h.npy, capped at 250, 0 where there is no brush',
+          B['height'][15, 15] == 80 and B['height'][35, 15] == 130 and B['height'][55, 15] == 220 and B['height'][0, 0] == 44 and B['height'][12, 12] == 250 and B['height'][75, 15] == 0
+          and np.array_equal(B['height'] > 0, B['share'] > 0), [int(B['height'][j, 15]) for j in (15, 35, 55, 75)])
+    bside = json.loads(z.read('brush.json'))
+    bwant = {'version': 1, 'file': 'brush.bin', 'nx': BNX, 'ny': BNY, 'cell': round(BC, 6), 'x0': round(OX - ce, 3), 'y0': round(OY - cn, 3), 'band': [0.3, 2.5], 'classes': CLASSES}
+    check('brush.json: the BRUSH object with the file\'s name (also under viewer), the classes of the baked picture', bside.get('viewer') == bwant and {k: v for k, v in bside.items() if k != 'viewer'} == bwant, bside)
+    man = json.loads(z.read('manifest.json'))
+    import hashlib
+    check('manifest.json lists brush.bin and brush.json (an update package carries them)', man['files'].get('brush.bin') == {'size': len(bb), 'sha256': hashlib.sha256(bb).hexdigest()} and 'brush.json' in man['files'])
+    bj_in = viewer_inline.brush_inline_json(bside, z.read, names)
+    check('single file BRUSH (brush_inline_json): the same object with the file\'s bytes inline', dict(json.loads(bj_in), file='brush.bin') == bwant and base64.b64decode(json.loads(bj_in)['file']) == bb)
+    check('brush_inline_json: None without the file or the object', viewer_inline.brush_inline_json(bside, z.read, names - {'brush.bin'}) is None and viewer_inline.brush_inline_json({}, z.read, names) is None)
+    # the placeholder: filled where the template has it, harmless where it has not
+    tpl = (viewer_inline.VIEWER_BUILD_DIR / 'viewer.html').read_text(encoding='utf-8')
+    if 'PLACEHOLDER_BRUSH_JSON' not in tpl:
+        check('a template without the BRUSH placeholder: the export is as before', 'PLACEHOLDER_BRUSH_JSON' not in html and 'const TREES = null;' in html)
+        tpl = tpl.replace("<script>const TREES = PLACEHOLDER_TREES_JSON;</script>", "<script>const TREES = PLACEHOLDER_TREES_JSON;</script>\n<script>window['PLACEHOLDER_' + 'BRUSH_JSON'] = null;</script>\n<script>const BRUSH = PLACEHOLDER_BRUSH_JSON;</script>")
+        (tmp / 'vb').mkdir(); (tmp / 'vb' / 'viewer.html').write_text(tpl, encoding='utf-8')
+        keep_dir, viewer_inline.VIEWER_BUILD_DIR = viewer_inline.VIEWER_BUILD_DIR, tmp / 'vb'
+        try:
+            h_on = viewer_inline.build_inline_viewer(b'glb', '', {}, {}, progress=lambda m: None, brush_json=bj_in)
+            h_off = viewer_inline.build_inline_viewer(b'glb', '', {}, {}, progress=lambda m: None)
+        finally:
+            viewer_inline.VIEWER_BUILD_DIR = keep_dir
+    else:                                              # the template has the lines: the export itself shows it
+        h_on = html
+        h_off = None
+    Bc = brush_const(h_on)
+    check('PLACEHOLDER_BRUSH_JSON: the BRUSH object inline, the guard line untouched', isinstance(Bc, dict) and dict(Bc, file='brush.bin') == bwant and base64.b64decode(Bc['file']) == bb
+          and "window['PLACEHOLDER_' + 'BRUSH_JSON'] = null;" in h_on and h_on.count('PLACEHOLDER_BRUSH_JSON') == 0, str(Bc)[:120])
+    if h_off is not None:
+        check('PLACEHOLDER_BRUSH_JSON: null without brush', brush_const(h_off) is None)
+    # a ridge folder from before brush_h.npy (band 0.3 to 2 m): the blocks stand as tall as the band, nothing fails
+    old = er.Ridge(write_ridge(tmp / 'oldbrush', height=False, band=(0.3, 2.0))).brush_bin(ce, cn)
+    Bo = er.read_brush(old[0])
+    check('no brush_h.npy: the height is the band\'s top, the header says which band', abs(Bo['top'] - 2.0) < 1e-6 and old[1]['band'] == [0.3, 2.0] and np.array_equal(Bo['share'], want_s)
+          and set(np.unique(Bo['height'])) == {0, 200} and np.array_equal(Bo['height'] > 0, Bo['share'] > 0), np.unique(Bo['height']))
+    bad_h = write_ridge(tmp / 'badh'); np.save(bad_h / 'brush_h.npy', np.zeros((3, 3), np.float32))
+    check('a brush_h.npy of another shape is not used', set(np.unique(er.read_brush(er.Ridge(bad_h).brush_bin(ce, cn)[0])['height'])) == {0, 250})
 
     # points and shapes in the viewer's frame
     sh = np.array([OX - ce, OY - cn, Z_OFF])
@@ -254,6 +315,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check('--brush-colours: light, medium, dense take the three colours given', dom == [0, 1, 2] and block(55)[0][2] > 180 and block(55)[0][0] < 80, [block(bj)[0].round() for bj in (15, 35, 55)])
     okc, det = near(5, None)
     check('--brush-colours: ground without brush is still the hillshade', okc, det)
+    check('--brush-colours: the same three colours in the BRUSH classes', [(c['name'], c['min'], c['colour']) for c in json.loads(zc.read('brush.json'))['classes']]
+          == [('light', 0.1, 'ff0000'), ('medium', 0.3, '00ff00'), ('dense', 0.6, '0000ff')], json.loads(zc.read('brush.json'))['classes'])
     check('--brush-colours: named in meta', json.loads(zc.read('caves.json'))['meta']['hillshade_brush'] == {'opacity': 1.0, 'colours': ['ff0000', '00ff00', '0000ff']},
           json.loads(zc.read('caves.json'))['meta']['hillshade_brush'])
     for bad in ('ff0000,00ff00', 'red,green,blue', 'ff0000,00ff00,0000f'):
@@ -295,6 +358,7 @@ with tempfile.TemporaryDirectory() as tmp:
     R = ridge_const(z2.read('viewer.html').decode('utf-8'))
     check('no shapes / brush: null in RIDGE, no such files', isinstance(R, dict) and R['shapes'] is None and 'brush' not in R and R['points'] and hsb_const(z2.read('viewer.html').decode('utf-8')) == ''
           and not ({'ridge_shapes.bin', 'tex_brush.png', 'tex_hsb.jpg'} & set(z2.namelist())), log2[-300:])
+    check('no brush: no brush.bin, no brush.json, the export is made', not ({'brush.bin', 'brush.json'} & set(z2.namelist())) and 'EXIT' not in log2)
 
     # ── 3. A polygon: the mesh ends at its line, the holes stay ──────────────
     ring = [[BBOX[0] + 0.0002, BBOX[1] + 0.0001], [BBOX[2] - 0.0002, BBOX[1] + 0.0001], [BBOX[2] - 0.0003, BBOX[3] - 0.0001], [BBOX[0] + 0.0003, BBOX[3] - 0.0001]]
@@ -311,6 +375,11 @@ with tempfile.TemporaryDirectory() as tmp:
     cen = (A + B + C) / 3 + [OX + NX * CELL / 2, OY + NY * CELL / 2]
     check('polygon: every triangle inside the line', et.points_in_polygon(cen[:, 0], cen[:, 1], ring_utm).all())
     check('polygon: the pit is still cut, heights are finite', not any(covered(q) for q in centres[:6]) and np.isfinite(v).all())
+    z3 = zipfile.ZipFile(out3); B3 = er.read_brush(z3.read('brush.bin')); m3 = json.loads(z3.read('caves.json'))['meta']
+    gj, gi = np.mgrid[0:brush.shape[0], 0:brush.shape[1]]
+    in3 = et.points_in_polygon((B3['x0'] + m3['utm_center_e'] + (gi.ravel() + 0.5) * BC), (B3['y0'] + m3['utm_center_n'] + (gj.ravel() + 0.5) * BC), ring_utm).reshape(brush.shape)
+    check('polygon: brush.bin has no brush outside the line, all of it inside', (~in3).sum() > 100 and not B3['share'][~in3].any() and not B3['height'][~in3].any()
+          and np.array_equal(B3['share'][in3], want_s[in3]), (int((~in3).sum()), int((B3['share'][~in3] > 0).sum())))
 
     # ── 4. --ridgewalk runs the step as a child and relays its lines ─────────
     stub = tmp / 'fake_ridgewalk.py'
