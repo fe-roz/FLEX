@@ -387,7 +387,7 @@
           var inf = S && S.blocks ? S.blocks.classInfo() : [], show = !!(S && S.st.brush);
           els.forEach(function (c, k) {
             if (!c || !c.style) return;
-            if (c.parentNode && c.parentNode.style) { c.parentNode.style.display = show ? '' : 'none'; c.parentNode.style.gridTemplateColumns = 'repeat(' + els.length + ', 1fr)'; }
+            if (c.parentNode && c.parentNode.style) { c.parentNode.style.display = show ? '' : 'none'; c.parentNode.style.gridTemplateColumns = 'repeat(' + els.length + ', 1fr)'; c.parentNode.style.marginTop = '6px'; }
             if (c.firstChild && c.firstChild.style && inf[k]) c.firstChild.style.background = inf[k].colour;
           });
         };
