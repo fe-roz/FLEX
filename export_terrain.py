@@ -3001,6 +3001,22 @@ def main():
                 ridge_json = json.dumps(export_ridge.ridge_object(ridge.meta, rfiles, data=rfiles), separators=(',', ':'), ensure_ascii=False).replace('</', '<\\/')
                 print(f"[6/7] Ridge files: " + ', '.join(f"{n} {len(b) // 1024} KB" for n, b in rfiles.items()))
 
+            # The brush grid (export_ridge.py): brush.bin + brush.json, the classes of "hillshade with brush" with a
+            # height per cell, in trees.bin's frame, nothing outside the polygon. Never stops the export.
+            brush_json = None
+            if ridge is not None and ridge.has_brush():
+                import export_ridge
+                try:
+                    bb = ridge.brush_bin(utm_center_e, utm_center_n, polygon=poly_utm, classes=brush_cls or export_ridge.BRUSH_CLASSES)
+                    if bb is not None:
+                        brush_bytes, bobj = bb
+                        zf.writestr(zipfile.ZipInfo(export_ridge.BRUSH_FILE), brush_bytes, compress_type=zipfile.ZIP_DEFLATED)
+                        zf.writestr(export_ridge.BRUSH_INFO, json.dumps({**bobj, 'viewer': bobj}, separators=(',', ':')))
+                        brush_json = json.dumps(dict(bobj, file=__import__("base64").b64encode(brush_bytes).decode('ascii')), separators=(',', ':'))
+                        print(f"[6/7] Brush grid: {bobj['nx']} x {bobj['ny']} cells of {bobj['cell']:g} m, brush.bin {len(brush_bytes) // 1024} KB")
+                except Exception as e:
+                    print(f"[6/7] WARNING: the brush grid left out ({e})")
+
             # Trees and brush (export_trees.py): trees.bin, one simple solid a tree or bush
             trees_json = None
             if trees_bytes is not None and trees_counts and len(trees_bytes) > 8:
@@ -3037,7 +3053,7 @@ def main():
             inline_html = build_inline_viewer(
                 glb_path, tex_b64, caves_out, viewer_libs,
                 progress=lambda m: print(f"[6/7] {m}"),
-                hs_b64=hs_b64, walls_bytes=walls_bytes, docs_json=docs_json, ridge_json=ridge_json, hsb_b64=hsb_b64, slope_b64=slope_b64, features_json=features_json, trees_json=trees_json)
+                hs_b64=hs_b64, walls_bytes=walls_bytes, docs_json=docs_json, ridge_json=ridge_json, hsb_b64=hsb_b64, slope_b64=slope_b64, features_json=features_json, trees_json=trees_json, brush_json=brush_json)
             zf.writestr('viewer.html', inline_html.encode('utf-8'))
 
             # serve.bat (Windows) — double-click to start local HTTP server

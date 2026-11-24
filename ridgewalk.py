@@ -70,7 +70,7 @@ PARAMS = dict(
     cluster=6.0,         # m on the map, grouped returns farther apart are worked separately
     cluster_max=64.0,     # m, a larger cluster is split (memory)
     coarse=4,            # cells, the area-wide water fill
-    brush_band=[0.3, 2.0], brush_block=3, brush_min=5,
+    brush_band=[0.3, 2.5], brush_block=3, brush_min=5, brush_top_pct=95,
     simplify_error=0.05, # m
 )
 CELL = PARAMS['cell']
@@ -591,7 +591,16 @@ def w_classify(t):
     hag = z[own] - bilin(G, lx[own], ly[own], cell); lo, hi = P_['brush_band']; S = P_['brush_block']
     bj0, bi0 = j0 // S, i0 // S; bh, bw = (j1 - 1) // S - bj0 + 1, (i1 - 1) // S - bi0 + 1
     f = (np.clip(iy[own] + J0, j0, j1 - 1) // S - bj0) * bw + (np.clip(ix[own] + I0, i0, i1 - 1) // S - bi0)
-    inband = np.bincount(f[(hag >= lo) & (hag <= hi)], minlength=bh * bw).reshape(bh, bw)
+    inb = (hag >= lo) & (hag <= hi)
+    inband = np.bincount(f[inb], minlength=bh * bw).reshape(bh, bw)
+    # the brush's height in each block: the brush_top_pct-th percentile (95) of its in-band returns' heights above
+    # the ground, among this tile's returns (sorted once per tile; the parent keeps only the grid). A block with
+    # fewer than 20 in-band returns takes its highest.
+    fi = f[inb]; o = np.lexsort((hag[inb], fi)); hs = hag[inb][o]
+    cnt = inband.ravel(); end = np.cumsum(cnt); has = cnt > 0
+    btop = np.full(bh * bw, np.nan, 'f4')
+    btop[has] = hs[(end - cnt + np.ceil(P_['brush_top_pct'] / 100.0 * cnt).astype(np.int64) - 1)[has]]
+    btop = btop.reshape(bh, bw)
     under = np.bincount(f[(hag < lo) & (hag > -1.0)], minlength=bh * bw).reshape(bh, bw)
     # the measure: behind the local face, fitted to the last returns that are not candidates; candidates that turn
     # out to lie on the face join it and the fit is repeated
@@ -618,7 +627,7 @@ def w_classify(t):
             todo = np.flatnonzero(cKDTree(Q[ch]).query(Q, distance_upper_bound=max(P_['face_radius']))[0] < np.inf)
     k = own[ci]; ci = ci[k]; behind = behind[k]; nvec = nvec[k]; corner = corner[k]
     return t, dict(n=int(own.sum()), stats=stats, x=x[ci], y=y[ci], z=z[ci], dv=dv[ci], ps=ps[ci], behind=behind, corner=corner,
-                   foot=np.where(np.isfinite(behind), behind, 0.0)[:, None] * nvec, brush=(bj0, bi0, inband.astype('i4'), under.astype('i4')))
+                   foot=np.where(np.isfinite(behind), behind, 0.0)[:, None] * nvec, brush=(bj0, bi0, inband.astype('i4'), under.astype('i4'), btop))
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -1028,13 +1037,14 @@ def run(C, notes):
         lap('lid')
         cand = []; stats = {}; fine = {}; nret = 0
         S = P['brush_block']; by, bx = (ny + S - 1) // S, (nx + S - 1) // S
-        b_in = np.zeros((by, bx), 'i4'); b_un = np.zeros((by, bx), 'i4')
+        b_in = np.zeros((by, bx), 'i4'); b_un = np.zeros((by, bx), 'i4'); b_h = np.full((by, bx), np.nan, 'f4')
         for t, r in pmap(C, w_classify, work, 60, 70, 'returns against the lid'):
             if r is None: continue
             nret += r['n']
             for k_, p, n in r['stats']:
                 a = fine.setdefault((k_ // 100000, k_ % 100000), {}).setdefault(p, [0, 0]); a[0] += n
-            bj0, bi0, a, b = r['brush']; b_in[bj0:bj0 + a.shape[0], bi0:bi0 + a.shape[1]] += a; b_un[bj0:bj0 + a.shape[0], bi0:bi0 + a.shape[1]] += b
+            bj0, bi0, a, b, bt = r['brush']; b_in[bj0:bj0 + a.shape[0], bi0:bi0 + a.shape[1]] += a; b_un[bj0:bj0 + a.shape[0], bi0:bi0 + a.shape[1]] += b
+            hv = b_h[bj0:bj0 + a.shape[0], bi0:bi0 + a.shape[1]]; np.fmax(hv, bt, out=hv)        # a block on a tile line: the higher of its parts
             if len(r['x']):
                 cand.append((r['x'], r['y'], r['z'], r['dv'], r['ps'], r['corner'], r['behind'], r['foot']))
         cat = lambda k, dt: np.concatenate([c[k] for c in cand]).astype(dt) if cand else np.zeros(0, dt)
@@ -1162,13 +1172,14 @@ def run(C, notes):
     lid.flush(); del lid
     reach = b_in + b_un
     brush = np.where(reach >= P['brush_min'], b_in / np.maximum(reach, 1), np.nan).astype('f4')
+    brush_h = np.where(np.isfinite(brush) & (b_in > 0), b_h, np.nan).astype('f4')         # no brush, or too few returns to say: NaN
     counts = dict(returns=int(nret), below=int(len(bi)), groups=ngroups, lone=int((kb == 1).sum()), likely_noise=int((kb == 2).sum()),
                   pattern_noise=int((kind == 3).sum()), pattern_confirmed=confirmed, deeper_than_max=too_deep,
                   candidates=int(ncand), on_face=nonface, no_face=nofit, no_link=int(nolink),
                   features=cnt['features'], wrapped=cnt['wrapped'], shapes=cnt['shapes'], not_reaching=cnt['not_reaching'],
                   true_cells=int((holes == 1).sum()), guessed_cells=int((holes == 2).sum()),
                   deepest=round(float(pD[pK < 3].max()), 2) if (pK < 3).any() else 0.0, shape_triangles=int(sum(len(t) for t in T)))
-    write_outputs(C, holes, (pX, pY, pZ, pD, pK), (V, D, T) if C['shapes'] else None, brush)
+    write_outputs(C, holes, (pX, pY, pZ, pD, pK), (V, D, T) if C['shapes'] else None, brush, brush_h)
     write_features(C, holes, pts if len(bi) else np.zeros((0, 3)), DV[bi], feat)
     if C.get('_q') is not None:
         write_quality(C, passes, counts)
@@ -1180,12 +1191,15 @@ def run(C, notes):
     return counts, passes, (float(np.mean(cover)) if cover else 0.0)
 
 
-def write_outputs(C, holes, pts, shapes, brush):
+def write_outputs(C, holes, pts, shapes, brush, brush_h=None):
     """lid.npy is already in place (float32 [ny, nx], row 0 = south). Little-endian:
     holes.npy   uint8 [ny, nx]: 0 none, 1 true-entrance cell, 2 guessed-opening cell
     points.bin  "RWP1", uint32 n, float32 xyz[n*3], float32 depth[n], uint8 kind[n] (0 group, 1 lone, 2 likely noise, 3 patterned noise)
     shapes.bin  "RWS1", uint32 nv, uint32 nt, float32 xyz[nv*3], float32 depth[nv], uint32 tri[nt*3]
     brush.npy   float32 [by, bx] share 0..1 or NaN, blocks of 3 cells; brush.json its frame
+    brush_h.npy float32 [by, bx] the brush's height above the ground in metres, NaN where there is none (share 0 or
+                NaN): the 95th percentile (PARAMS brush_top_pct) of the heights of the block's returns inside the
+                band, taken per tile; a block that a tile line cuts takes the higher of its parts
     x east, y north in metres from the origin, z absolute metres."""
     out = C['out']
     np.save(os.path.join(out, 'holes.npy'), holes)
@@ -1203,8 +1217,11 @@ def write_outputs(C, holes, pts, shapes, brush):
     elif os.path.exists(sp):
         os.remove(sp)
     np.save(os.path.join(out, 'brush.npy'), brush)
+    if brush_h is not None:
+        np.save(os.path.join(out, 'brush_h.npy'), brush_h)
     S = PARAMS['brush_block']
-    json.dump(dict(x0=0.0, y0=0.0, cell=round(C['cell'] * S, 6), nx=int(brush.shape[1]), ny=int(brush.shape[0]), band=PARAMS['brush_band']),
+    json.dump(dict(x0=0.0, y0=0.0, cell=round(C['cell'] * S, 6), nx=int(brush.shape[1]), ny=int(brush.shape[0]), band=PARAMS['brush_band'],
+                   **(dict(height='brush_h.npy', height_pct=PARAMS['brush_top_pct']) if brush_h is not None else {})),
               open(os.path.join(out, 'brush.json'), 'w'))
 
 
@@ -1549,10 +1566,10 @@ def demo_points(seed=3):
     kx, ky, kd = D['confirmed']; q = rng.normal(0, 0.3, (6, 3)); lxs = np.full(3, kx + 2 - (kx - x0 - 2) % 4.0)
     add(kx + q[:, 0], ky + q[:, 1], float(demo_ground(kx, ky)) - kd + q[:, 2])
     add(np.full(3, kx), ky + np.array([-0.5, 0.0, 0.5]), float(demo_ground(kx, ky)) - kd, ps=D['stripe_pass'])
-    # brush: returns 0.3-2 m above the ground in one patch
+    # brush: returns 0.3-2.5 m above the ground in one patch
     b0, b1, b2, b3 = D['brush']; k = int((b1 - b0) * (b3 - b2) * 6)
     bx_ = rng.uniform(b0, b1, k); by_ = rng.uniform(b2, b3, k)
-    add(bx_, by_, demo_ground(bx_, by_) + rng.uniform(0.35, 1.9, k), cls=3, last=False)
+    add(bx_, by_, demo_ground(bx_, by_) + rng.uniform(0.35, 2.4, k), cls=3, last=False)
     cat = lambda i, dt: np.concatenate([p[i] for p in P]).astype(dt)
     return cat(0, 'f8'), cat(1, 'f8'), cat(2, 'f8'), cat(3, 'u1'), cat(4, 'i4'), cat(5, bool)
 
