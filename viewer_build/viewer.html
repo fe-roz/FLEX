@@ -489,6 +489,10 @@
   <input type="range" id="terrain-opacity-slider" min="0" max="100" value="70"
     style="width:110px; accent-color:#00e5ff; display:block;">
   <div id="terrain-opacity-label" style="font-size:10px; opacity:.55; text-align:center; margin-top:4px">70%</div>
+  <div class="map-section-label" style="margin-top:12px" title="The inside of the ground: how much it covers what is behind a ridge, and the ground above you when underground">UNDERSIDE</div>
+  <input type="range" id="terrain-under-slider" min="0" max="100" value="90"
+    style="width:110px; accent-color:#00e5ff; display:block;">
+  <div id="terrain-under-label" style="font-size:10px; opacity:.55; text-align:center; margin-top:4px">90%</div>
 
 </div>
 
@@ -724,6 +728,7 @@ catch(e) { window.DOCS_EXPORT = null; }
 <script src="libs/jszip.min.js"></script>
 <script src="libs/flexlib.js"></script>
 <script src="libs/wall-fx.js"></script>
+<script src="libs/terrain-under.js"></script>
 <script src="libs/disp-store.js"></script>
 <script src="libs/utif.js"></script>
 <script src="libs/field-where.js"></script>
@@ -885,6 +890,11 @@ FlexFx.init({
   redraw: () => { requestRender(); wakeRender(); },
   applyWallMode: () => { applyWallMode(); if (routes.length) routeApplyAlpha(); },
   toast: m => showToast(m),
+});
+// The inside of the ground (libs/terrain-under.js): after FlexFx, whose focus uniforms it shares. Terrain → Underside.
+FlexUnder.init({
+  THREE, renderer, scene, camera, terrain: () => terrainGroup, value: DISP.under,
+  redraw: () => { requestRender(); wakeRender(); },
 });
 
 // The name typed in FLEX's export panel titles the viewer (and the app).
@@ -2180,7 +2190,7 @@ setTimeout(() => {
     // Surface features of the project, view only (nothing when FEATURES is null).
     if (window.ViewerFeatures) ViewerFeatures.init({
       THREE, scene, camera, renderer, controls, features: typeof FEATURES === 'undefined' ? null : FEATURES, saved: DISP.features,
-      toScene: gpsToScene, groundZ: gridZAt, textSprite: makeTextSprite, showInfo, flyTo: p => flyToPoint(p, Math.max(60, terrainScale * 0.05)),
+      toScene: gpsToScene, groundZ: gridZAt, textSprite: (t, c) => makeTextSprite(t, c, true), showInfo, flyTo: p => flyToPoint(p, Math.max(60, terrainScale * 0.05)),
       fmtLen: m => U.len(m), redraw: () => { requestRender(); wakeRender(); },
     });
     // The brush grid as low blocks (nothing when BRUSH is null); the Brush chip of FlexTrees drives them.
@@ -2238,7 +2248,7 @@ const stationMeshes = [];
 let _selMesh = null, _selSprite = null, _selBaseScale = null;
 
 /** Render text label as a always-facing sprite. */
-function makeTextSprite(text, hexColor) {
+function makeTextSprite(text, hexColor, onTop) {      // onTop: never thinned behind the inside of the ground (a tool's own readout)
   const canvas = document.createElement('canvas');
   const ctx    = canvas.getContext('2d', {willReadFrequently: false});
   const fs = 22;
@@ -2254,6 +2264,7 @@ function makeTextSprite(text, hexColor) {
   ctx.fillText(text, 7, fs);
   const tex = new THREE.CanvasTexture(canvas);
   const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+  if (!onTop) FlexUnder.patch(mat);
   mat.renderOrder = 2;
   const sp  = new THREE.Sprite(mat);
   sp._isLabel = true;
@@ -2660,7 +2671,7 @@ function measureLine(a, b, color, dashed) {
 }
 
 function measureLabel(text, color, at) {
-  const { sprite, aspect } = makeTextSprite(text, color);
+  const { sprite, aspect } = makeTextSprite(text, color, true);
   sprite.material.sizeAttenuation = false;
   sprite.renderOrder = 6;
   sprite.userData.aspect = aspect;
@@ -3797,7 +3808,7 @@ function routeDraw() {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
-  const lines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false, transparent: true }));
+  const lines = new THREE.LineSegments(geo, FlexUnder.patch(new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false, transparent: true })));
   lines.renderOrder = 7;               // above walls and terrain
   routeGroup.add(lines);
   routeLabel('Start', routeFrom.pos, '#7dff9a', 14);
@@ -4226,8 +4237,8 @@ function fieldDispose(o) {
 function trackObject(tr) {
   const pts = tr.pts.map(p => fieldScenePos(p[0], p[1], p[2]));
   const geo = new THREE.BufferGeometry().setFromPoints(pts.length > 1 ? pts : pts.concat(pts));
-  const ln = new THREE.Line(geo, new THREE.LineBasicMaterial({
-    color: FIELD_COL, depthTest: false, transparent: true, opacity: tr === recTrack ? 1 : 0.85 }));
+  const ln = new THREE.Line(geo, FlexUnder.patch(new THREE.LineBasicMaterial({
+    color: FIELD_COL, depthTest: false, transparent: true, opacity: tr === recTrack ? 1 : 0.85 })));
   ln.renderOrder = 4;
   ln.userData.trackId = tr.id;
   return ln;
@@ -4237,7 +4248,7 @@ function fieldRebuild() {
   field.tracks.forEach(tr => { if (tr.pts.length) fieldGroup.add(trackObject(tr)); });
   field.points.forEach(p => {
     const at = fieldScenePos(p.lat, p.lon, p.alt);
-    const pin = new THREE.Sprite(new THREE.SpriteMaterial({ map: fieldPinTexture(), depthTest: false, transparent: true, sizeAttenuation: false }));
+    const pin = new THREE.Sprite(FlexUnder.patch(new THREE.SpriteMaterial({ map: fieldPinTexture(), depthTest: false, transparent: true, sizeAttenuation: false })));
     pin.center.set(0.5, 0); pin.position.copy(at); pin.renderOrder = 5;
     pin.userData.pointId = p.id;
     fieldFixedSprite(pin, FIELD_PIN_PX, 1);
@@ -4576,7 +4587,7 @@ let stationNamesOn = true, kmlNames = [];   // names follow the Stations setting
 
 // Nodes that live in a sheet while it is open, parked here otherwise.
 function uiStash() {
-  ['fp-field', 'terrain-opacity-slider', 'terrain-opacity-label', 'terrain-bright-slider', 'terrain-bright-label',
+  ['fp-field', 'terrain-opacity-slider', 'terrain-opacity-label', 'terrain-under-slider', 'terrain-under-label', 'terrain-bright-slider', 'terrain-bright-label',
    'terrain-fog-slider', 'terrain-fog-label'].forEach(id => { const n = document.getElementById(id); if (n) uiHolder.appendChild(n); });
 }
 function closeSheet() {
@@ -4787,7 +4798,7 @@ function renderDisplaySheet() {
     sheetSeg(kinds.map(k => names[k]), kinds.indexOf(texMode), i => { setTexMode(kinds[i]); rerenderSheet(); });
   }
   sheetHead('Terrain');
-  [['Opacity', 'terrain-opacity-slider', 'terrain-opacity-label'], ['Brightness', 'terrain-bright-slider', 'terrain-bright-label'],
+  [['Opacity', 'terrain-opacity-slider', 'terrain-opacity-label'], ['Underside', 'terrain-under-slider', 'terrain-under-label'], ['Brightness', 'terrain-bright-slider', 'terrain-bright-label'],
    ['Haze', 'terrain-fog-slider', 'terrain-fog-label']].forEach(([lab, s, v]) => {
     const r = el('div', 'sh-sl');
     r.appendChild(el('label', '', lab));
@@ -7274,8 +7285,8 @@ function parseKMLCoords(text, colHex) {
   const parser = new DOMParser();
   const dom    = parser.parseFromString(text, 'application/xml');
   const color  = new THREE.Color(colHex);
-  const mat    = new THREE.LineBasicMaterial({ color, linewidth: 1.5, depthTest: false });
-  mat.renderOrder = 1;
+  // Drawn where the survey lines are (first of the see-through things), so the inside of the ground can cover it.
+  const mat    = FlexUnder.patch(new THREE.LineBasicMaterial({ color, linewidth: 1.5, depthTest: false, transparent: true }));
   let count    = 0;
 
   // LineStrings
@@ -7288,7 +7299,9 @@ function parseKMLCoords(text, colHex) {
       return new THREE.Vector3(x, y, z + 1);
     }).filter(Boolean);
     if (pts.length >= 2) {
-      importGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+      const kl = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat);
+      kl.renderOrder = -1;
+      importGroup.add(kl);
       count++;
     }
   });
@@ -8022,6 +8035,13 @@ opacitySlider.addEventListener('input', () => {
   terrainMaterials.forEach(m => { m.opacity = v; m.needsUpdate = true; });
   requestRender(); wakeRender();
 });
+// Underside: the inside of the ground (libs/terrain-under.js). 0 % = not drawn, the old look.
+const underSlider = document.getElementById('terrain-under-slider');
+const underLabel  = document.getElementById('terrain-under-label');
+underSlider.addEventListener('input', () => {
+  underLabel.textContent = underSlider.value + '%';
+  FlexUnder.set(parseInt(underSlider.value));
+});
 
 // ── Brightness ───────────────────────────────────────────────────────────────
 // Scaling both lights by the same factor is what keeps contrast intact: the
@@ -8514,9 +8534,9 @@ window.addEventListener('resize', () => { requestRender(); wakeRender(); });
 // need the scene, so they are put back here after the terrain and caves are
 // built; any tap or slider move afterwards saves the lot (debounced).
 function dispRestoreSliders() {
-  [['terrain-opacity-slider', 'opacity'], ['terrain-bright-slider', 'bright'], ['terrain-fog-slider', 'fog']].forEach(([id, k]) => {
+  [['terrain-opacity-slider', 'opacity'], ['terrain-under-slider', 'under'], ['terrain-bright-slider', 'bright'], ['terrain-fog-slider', 'fog']].forEach(([id, k]) => {
     const v = DISP[k], n = document.getElementById(id);
-    if (n && isFinite(v)) { n.value = String(v); if (k === 'opacity') n.dispatchEvent(new Event('input')); }
+    if (n && v != null && isFinite(v)) { n.value = String(v); if (k === 'opacity' || k === 'under') n.dispatchEvent(new Event('input')); }
   });
 }
 let _dispRestored = false;
@@ -8541,7 +8561,7 @@ function dispRestoreUi() {
 function dispCollect() {
   const sl = id => { const n = document.getElementById(id); return n ? +n.value : undefined; };
   return ({ wallMode, colourMode, wallAlpha: wallOpacity, stationMode, annot: annotMode, tracks: fieldGroup.visible, inv: window.ViewerInv ? ViewerInv.visible() : true, fx: FlexFx.serialize(), rmarks: window.RidgeMarks ? RidgeMarks.serialize() : undefined, trees: window.FlexTrees ? FlexTrees.serialize() : undefined, features: window.ViewerFeatures ? ViewerFeatures.serialize() : undefined, ridge: window.FlexRidge ? FlexRidge.serialize() : undefined, tex: texMode,
-             opacity: sl('terrain-opacity-slider'), bright: sl('terrain-bright-slider'), fog: sl('terrain-fog-slider') });
+             opacity: sl('terrain-opacity-slider'), under: sl('terrain-under-slider'), bright: sl('terrain-bright-slider'), fog: sl('terrain-fog-slider') });
 }
 function dispCapture() { dispSave(dispCollect()); }
 let _dispTimer = null;

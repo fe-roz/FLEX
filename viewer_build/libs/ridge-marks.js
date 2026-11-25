@@ -158,6 +158,7 @@
     S.badges.forEach(b => S.group.remove(b)); S.badges = [];
     const add = (kind, alone, x, y, z, ref) => {
       const sp = new T.Sprite(new T.SpriteMaterial({ map: badgeTexture(kind, alone), depthTest: false, depthWrite: false, sizeAttenuation: false, transparent: true, fog: false }));
+      if (root && root.FlexUnder) root.FlexUnder.patch(sp.material);      // thinned behind the inside of the ground (libs/terrain-under.js)
       sp.scale.set(0.042, 0.042, 1); sp.center.set(0.5, 0); sp.position.set(x, y, z); sp.renderOrder = 9; sp.name = 'rmark-' + kind + (alone ? '-alone' : '');
       sp.userData = ref; sp.raycast = function () {};
       sp.visible = S.st.marks && !(S.st.hideNothing && kind === 'nothing');
