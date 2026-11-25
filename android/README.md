@@ -162,6 +162,13 @@ switches them, a hold on a chip opens its opacity slider, and the Light /
 Medium / Dense chips under it switch each density class); a map without them
 gets `null`.
 
+🎨 Display → Terrain → Underside (`DISP.under`, 90 % on a new map, kept per
+project) is how solid the inside of the ground is drawn
+(`viewer_build/libs/terrain-under.js`): what is behind a ridge, or above you
+when underground, is covered by that much; 0 % is the old look. It needs
+WebGL 2 for the layers drawn without a depth test (names, lines, marks) to
+follow; without it only the ground itself gets its inside.
+
 An export made with **V2 - Ridgewalking** also carries `ridge_points.bin`,
 `ridge_shapes.bin`, `ridge_patches.bin`, `ridge.json` and `tex_hsb.jpg` (the
 hillshade with the brush map on it, a third Imagery choice; `tex_hsb_<c>_<r>.jpg`

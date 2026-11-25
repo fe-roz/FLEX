@@ -110,6 +110,7 @@
     mat.onBeforeCompile = function (sh) {
       sh.uniforms.uOpacityDither = uniform;
       sh.fragmentShader = DITHER_HEAD + sh.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>' + DITHER_BODY);
+      if (root.FlexUnder) root.FlexUnder.sunk(sh);          // seen from underground: no sunk parts hanging from the ceiling (libs/terrain-under.js)
     };
     return mat;
   }

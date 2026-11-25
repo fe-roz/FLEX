@@ -140,6 +140,9 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
       .replace('#include <common>', '#include <common>\n' + fragVars)
       .replace('#include <alphatest_fragment>', '#include <alphatest_fragment>\n' + fragBody);
   };
+  // Walls, lines, dots and names are drawn through the ground: behind the INSIDE of the ground they thin
+  // themselves by the Underside share (libs/terrain-under.js). The terrain's own material does not.
+  const under = shader => { if (root.FlexUnder) root.FlexUnder.shader(shader); };
   // One function per kind of material (its text is the program cache key: all materials of a kind
   // share one program). `this` is the material.
   function patchWall(shader) {
@@ -150,18 +153,25 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
     inject(shader, GLSL_VARS_VERT + WALL_VARS_VERT,
       'vFxW = (modelMatrix * vec4(transformed, 1.0)).xyz; vFxN = transformedNormal; vFxP = mvPosition.xyz;',
       GLSL_VARS_FRAG + WALL_VARS_FRAG, WALL_FRAG);
+    under(shader);
   }
   function patchBasic(shader) {            // lines and dots (MeshBasic / LineBasic share a shader)
     share(shader);
     inject(shader, GLSL_VARS_VERT, 'vFxW = (modelMatrix * vec4(transformed, 1.0)).xyz;', GLSL_VARS_FRAG, BASIC_FRAG);
+    under(shader);
   }
-  function patchTerrain(shader) {          // the terrain's lit material (one mesh, or one per 5 km tile): the cut only
+  function cutTerrain(shader) {            // the cut alone (also what the inside of the ground uses, libs/terrain-under.js)
     share(shader);
     inject(shader, GLSL_VARS_VERT, 'vFxW = (modelMatrix * vec4(transformed, 1.0)).xyz;', GLSL_VARS_FRAG, TERRAIN_FRAG);
+  }
+  function patchTerrain(shader) {          // the terrain's lit material (one mesh, or one per 5 km tile): the cut only
+    cutTerrain(shader);
+    if (root.FlexUnder) root.FlexUnder.frontOnly(shader);     // with Underside on, its own back faces are left to terrain-under.js
   }
   function patchSprite(shader) {           // names, leads, area names: faded by the sprite's centre
     share(shader);
     inject(shader, GLSL_VARS_VERT, 'vFxW = modelMatrix[3].xyz;', GLSL_VARS_FRAG, BASIC_FRAG);
+    under(shader);
   }
 
   // ── State shared with the viewer ────────────────────────────────────────────
@@ -435,7 +445,7 @@ float fxFocus(vec3 X) {            // 1: drawn as usual, 0: gone
   const tapFactor = p => (focusActive() ? focusAt(p.x, p.y, p.z) : 1);
 
   const FX = {
-    init, restore, serialize, update, patch, patchTerrain: patchTerrainMaterial, terrainAt, terrainCutActive, cutAt, makeWalls, applyWalls,
+    init, restore, serialize, update, patch, patchTerrain: patchTerrainMaterial, terrainShader: cutTerrain, terrainAt, terrainCutActive, cutAt, makeWalls, applyWalls,
     state: S, defaults: DEFAULTS, limits: LIMITS, uniforms: null, range: RANGE,
     setFocus, toggleFocus, focusActive, focusAt, tapFactor, bindButton, syncUi, sheetWalls, sheetFocus,
     radius: getR, cutRadius: getCutR, defaultRadius: defaultR, caveSize,

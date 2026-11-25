@@ -101,6 +101,7 @@
     mat.onBeforeCompile = function (sh) {
       sh.fragmentShader = sh.fragmentShader.replace('#include <clipping_planes_fragment>',
         '#include <clipping_planes_fragment>\n\tif (length(gl_PointCoord - vec2(0.5)) > 0.5) discard;');
+      if (root.FlexUnder) root.FlexUnder.shader(sh);       // thinned behind the inside of the ground (libs/terrain-under.js)
     };
     return mat;
   }
@@ -124,6 +125,7 @@
     g.computeBoundingSphere();
     var m = new T.MeshBasicMaterial({ color: PATCH_COLOUR, opacity: PATCH_OPACITY, transparent: true, depthWrite: false, side: T.DoubleSide,
       polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    if (root.FlexUnder) root.FlexUnder.patch(m);
     var mesh = new T.Mesh(g, m);
     mesh.renderOrder = 1.5; mesh.name = 'ridge-patches'; mesh.visible = !!S.st.patches; mesh.matrixAutoUpdate = false;
     return mesh;
@@ -136,6 +138,7 @@
     g.computeBoundingSphere();
     // Seen through the ground like the dots; one unsorted see-through mesh, so no depth write.
     var m = new T.MeshBasicMaterial({ vertexColors: true, opacity: 0.45, transparent: true, depthTest: false, depthWrite: false, side: T.DoubleSide, fog: false });
+    if (root.FlexUnder) root.FlexUnder.patch(m);          // thinned behind the inside of the ground, like the dots
     var mesh = new T.Mesh(g, m);
     mesh.renderOrder = 1.55; mesh.name = 'ridge-shapes'; mesh.visible = !!S.st.shapes; mesh.matrixAutoUpdate = false;
     return mesh;
