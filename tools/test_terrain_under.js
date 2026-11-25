@@ -43,7 +43,7 @@ ok('the module defines FlexUnder', !!UN && typeof UN.init === 'function' && type
 
 // ── Numbers ──────────────────────────────────────────────────────────────────
 ok('a new map: 90 %', UN.DEFAULT === 90 && UN.get() === 90);
-ok('clampPct: whole per cent, 0..100, junk = the default', UN.clampPct(40.4) === 40 && UN.clampPct(-5) === 0 && UN.clampPct(250) === 100 && UN.clampPct('x') === 90 && UN.clampPct(undefined) === 90 && UN.clampPct('35') === 35 && UN.clampPct(0) === 0);
+ok('clampPct: whole per cent, 0..100, junk = the default', UN.clampPct(37.4) === 37 && UN.clampPct(-5) === 0 && UN.clampPct(250) === 100 && UN.clampPct('x') === 90 && UN.clampPct(undefined) === 90 && UN.clampPct('35') === 35 && UN.clampPct(0) === 0);
 ok('strength: the slider\'s share at the usual terrain opacity', near(UN.strength(90, 0.7), 0.9) && near(UN.strength(90, 1), 0.9) && near(UN.strength(50, 0.3), 0.5));
 ok('strength: nothing at 0 %, nothing when the terrain is not drawn', UN.strength(0, 0.7) === 0 && UN.strength(90, 0) === 0);
 ok('strength: fades with a nearly invisible terrain (below 30 %)', near(UN.strength(90, 0.15), 0.45) && near(UN.strength(100, 0.03), 0.1) && UN.strength(90, 0.29) < 0.9);
