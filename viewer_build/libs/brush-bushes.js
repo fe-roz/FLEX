@@ -517,6 +517,7 @@
         sh.uniforms.uBushLevel = uLevel; sh.uniforms.uBushFade = m.userData.uFade; sh.uniforms.uBushInv = m.userData.uInv; sh.uniforms.uBushRound = m.userData.uRound;
         sh.vertexShader = HEAD_V + 'uniform float uBushRound;\n' + sh.vertexShader.replace('#include <defaultnormal_vertex>', '#include <defaultnormal_vertex>' + NORMAL_V).replace('#include <project_vertex>', '#include <project_vertex>' + BODY_V);
         sh.fragmentShader = HEAD_F + sh.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>' + BODY_F);
+        if (root.FlexUnder) root.FlexUnder.sunk(sh);         // seen from underground: no sunk bushes hanging from the ceiling (libs/terrain-under.js)
       };
       mats[k] = m;
       return m;

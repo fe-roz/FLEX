@@ -39,7 +39,8 @@
   'use strict';
 
   var DEFAULT = 90;                 // per cent
-  var COLOUR = 0x6f675c;            // quiet grey earth: reads as "inside the hill" on the aerial and the hillshade
+  var COLOUR = 0x4d473f;            // dark grey earth: reads as "inside the hill" on the aerial and the hillshade, and a ridge seen
+                                    // from outside keeps the tone it had (a light inside washed every ridge grey)
   var SHADE = 0.42;                 // how much the headlight shading darkens faces seen edge-on
   var FADE_BELOW = 0.3;             // terrain opacity under this: the inside fades with it (0 = no ground at all)
   var BIAS = 3e-7;                  // window-depth units
@@ -79,13 +80,25 @@
 
   // ── State ───────────────────────────────────────────────────────────────────
   var S = null;        // set by init
-  var U = { depth: { value: null }, p: { value: { x: 0, y: 1, z: 1, w: BIAS } }, on: { value: 0 } };     // shared by every patched material (x 0: off)
+  var U = { depth: { value: null }, p: { value: { x: 0, y: 1, z: 1, w: BIAS } }, on: { value: 0 }, cam: { value: 0 } };     // shared by every patched material (x 0: off)
 
+  // A sprite (a name, a lead mark, a pin) is thinned as a whole, by the place it marks: half a name is no use.
+  // The test runs once per corner in the vertex shader, at the sprite's own point.
+  var SPRITE_VS_DECL = '\nuniform highp sampler2D uUnderDepth;\nuniform vec4 uUnder;\nvarying float vUnderK;\n';
+  var SPRITE_VS_BODY = '\n  vUnderK = 1.0;\n  if (uUnder.x > 0.0) { vec4 uC = projectionMatrix * modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);\n' +
+    '    if (uC.w > 0.0) { vec3 uN = uC.xyz / uC.w * 0.5 + 0.5; if (uN.z > texture2D(uUnderDepth, uN.xy).x + uUnder.w) vUnderK = 1.0 - uUnder.x; } }\n';
+  function spriteText(sh) {
+    var v = sh.vertexShader, f = sh.fragmentShader, i = v.lastIndexOf('}'), j = f.lastIndexOf('}');
+    if (i < 0 || j < 0 || f.indexOf('vUnderK') >= 0) return;
+    sh.vertexShader = SPRITE_VS_DECL + v.slice(0, i) + SPRITE_VS_BODY + v.slice(i);
+    sh.fragmentShader = '\nvarying float vUnderK;\n' + f.slice(0, j) + '\n  gl_FragColor.a *= vUnderK;\n' + f.slice(j);
+  }
   function shader(sh) {            // a three.js shader object in onBeforeCompile, or a ShaderMaterial before its first use
     if (!sh || !sh.fragmentShader) return sh;
     if (!sh.uniforms) sh.uniforms = {};
     sh.uniforms.uUnderDepth = U.depth; sh.uniforms.uUnder = U.p;
-    sh.fragmentShader = dimText(sh.fragmentShader);
+    if (sh.vertexShader && sh.vertexShader.indexOf('uniform vec2 center;') >= 0) spriteText(sh);      // three's sprite shader
+    else sh.fragmentShader = dimText(sh.fragmentShader);
     return sh;
   }
   // The terrain's own material: no back faces while the inside is drawn here.
@@ -93,6 +106,17 @@
     if (!sh || !sh.fragmentShader || sh.fragmentShader.indexOf('uUnderOn') >= 0) return sh;
     sh.uniforms.uUnderOn = U.on;
     sh.fragmentShader = 'uniform float uUnderOn;\n' + sh.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n\tif (uUnderOn > 0.5 && !gl_FrontFacing) discard;');
+    return sh;
+  }
+  // Trees and bushes (opaque, dithered) stand a little INTO the ground. Seen from underground those sunk parts hung
+  // from the ceiling: with the eye under the ground, what lies in front of the nearest inside face is in the ground
+  // too, and is thinned by the same share (a screen-door, as these materials cannot blend).
+  function sunk(sh) {
+    if (!sh || !sh.fragmentShader || sh.fragmentShader.indexOf('uUnderCam') >= 0) return sh;
+    sh.uniforms.uUnderDepth = U.depth; sh.uniforms.uUnder = U.p; sh.uniforms.uUnderCam = U.cam;
+    sh.fragmentShader = (sh.fragmentShader.indexOf('uUnderDepth') < 0 ? DIM_DECL : '') + 'uniform float uUnderCam;\n' + sh.fragmentShader.replace('#include <clipping_planes_fragment>',
+      '#include <clipping_planes_fragment>\n\tif (uUnderCam > 0.5 && uUnder.x > 0.0) { float uD = texture2D(uUnderDepth, gl_FragCoord.xy * uUnder.yz).x;\n' +
+      '\t\tif (uD < 1.0 && gl_FragCoord.z <= uD + uUnder.w && fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) < uUnder.x) discard; }');
     return sh;
   }
   function onlyUnder(sh) { shader(sh); }          // one function: its text is the program cache key of every material patched alone
@@ -171,7 +195,7 @@
     S.meshes = [];
     if (S.quad) S.quad.visible = false;
     if (S.target) { S.target.dispose(); if (S.target.depthTexture) S.target.depthTexture.dispose(); S.target = null; U.depth.value = null; }
-    U.p.value.x = 0; U.on.value = 0;
+    U.p.value.x = 0; U.on.value = 0; U.cam.value = 0;
     S.drawn = { on: false, triangles: 0, calls: 0, share: 0 };
   }
 
@@ -198,7 +222,7 @@
     sync(now.list);
     S.drawn.on = true; S.drawn.share = share; U.on.value = 1; S.holder.visible = true;
     if (!S.composite) {             // fall-back: the back faces are ordinary see-through meshes of the scene
-      S.mat.opacity = share; U.p.value.x = 0;
+      S.mat.opacity = share; U.p.value.x = 0; U.cam.value = 0;
       S.drawn.triangles = S.drawn.calls = 0;
       return;
     }
@@ -227,13 +251,17 @@
     S.quad.material.uniforms.uInv.value.set(1 / w, 1 / h);
     S.quad.material.uniforms.uShare.value = share;
     U.p.value.x = share; U.p.value.y = 1 / w; U.p.value.z = 1 / h;
+    var cp = camera.position, gz = S.groundZ ? S.groundZ(cp.x, cp.y) : null;
+    U.cam.value = gz != null && isFinite(gz) && cp.z < gz - 0.5 ? 1 : 0;       // the eye is under the ground
   }
 
-  // o: { THREE, renderer, scene, camera, terrain() -> the terrain group or null, value (saved per cent), redraw(), simple (force the fall-back) }
+  // o: { THREE, renderer, scene, camera, terrain() -> the terrain group or null, groundZ(x, y) -> ground height or null, value (saved per cent),
+  //      redraw(), simple (force the fall-back) }
   function init(o) {
     var T = o.THREE || root.THREE;
-    S = { THREE: T, renderer: o.renderer, scene: o.scene, terrain: o.terrain, redraw: o.redraw, pct: o.value == null ? DEFAULT : clampPct(o.value),
+    S = { THREE: T, renderer: o.renderer, scene: o.scene, terrain: o.terrain, redraw: o.redraw, groundZ: o.groundZ, pct: o.value == null ? DEFAULT : clampPct(o.value),
           meshes: [], target: null, busy: false, drawn: { on: false, triangles: 0, calls: 0, share: 0 } };
+    U.p.value.x = 0; U.on.value = 0; U.cam.value = 0; U.depth.value = null;
     S.composite = !o.simple && supported(o.renderer);
     S.mat = underMaterial(S.composite);
     if (S.composite) {
@@ -277,7 +305,7 @@
   // For tests: the back-face meshes (they share the terrain's geometry), the screen triangle, the target.
   var objects = function () { return S ? { meshes: S.meshes.slice(), quad: S.quad || null, holder: S.holder, target: S.target, material: S.mat } : null; };
 
-  var R = { init: init, set: set, get: get, objects: objects, patch: patch, shader: shader, frontOnly: frontOnly, stats: stats, uniforms: U,
+  var R = { init: init, set: set, get: get, objects: objects, spriteText: spriteText, patch: patch, shader: shader, frontOnly: frontOnly, sunk: sunk, stats: stats, uniforms: U,
             DEFAULT: DEFAULT, COLOUR: COLOUR, strength: strength, clampPct: clampPct, dimText: dimText };
   root.FlexUnder = R;
   if (typeof module !== 'undefined' && module.exports) module.exports = R;
