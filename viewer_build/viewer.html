@@ -7283,6 +7283,14 @@ scene.add(importGroup);
 const KML_COLORS = ['#FFD600','#FF6D00','#00E676','#E040FB','#FF4081','#40C4FF'];
 let kmlColorIdx = 0;
 
+// Ground height for an imported point: the height grid, never a ray cast per point (a route of a thousand points froze
+// the phone for minutes: one ray cast is a scan of every terrain triangle). A ray only before the grid is built.
+function kmlGroundZ(x, y) {
+  const g = gridZAt(x, y);
+  if (g !== null && !isNaN(g)) return g;
+  return _hgrid ? null : terrainZAt(x, y);
+}
+
 function parseKMLCoords(text, colHex) {
   const parser = new DOMParser();
   const dom    = parser.parseFromString(text, 'application/xml');
@@ -7297,7 +7305,7 @@ function parseKMLCoords(text, colHex) {
       const [lon, lat, alt] = c.split(',').map(Number);
       if (isNaN(lon) || isNaN(lat)) return null;
       const { x, y } = gpsToScene(lat, lon);
-      const z = terrainZAt(x, y) ?? (alt + (META.z_offset || 0));
+      const z = kmlGroundZ(x, y) ?? ((isFinite(alt) ? alt : 0) + (META.z_offset || 0));
       return new THREE.Vector3(x, y, z + 1);
     }).filter(Boolean);
     if (pts.length >= 2) {
@@ -7314,7 +7322,7 @@ function parseKMLCoords(text, colHex) {
     if (parts.length < 2) return;
     const [lon, lat] = parts;
     const { x, y } = gpsToScene(lat, lon);
-    const z = terrainZAt(x, y) ?? 0;
+    const z = kmlGroundZ(x, y) ?? 0;
     const sp = new THREE.Mesh(
       new THREE.SphereGeometry(terrainScale * 0.002, 8, 8),
       new THREE.MeshBasicMaterial({ color })
