@@ -137,13 +137,13 @@ async function open(browser, port, blockTiles) {
     setRouteThresholds({ crawl: 8 });             // above the stooping height: kept apart
     const sane = RT.crawl < RT.stoop;
     document.getElementById('tb-more').click();
-    const rows = document.querySelectorAll('.rt-set').length;
+    const rows = document.querySelectorAll('.rt-set').length, head = [...document.querySelectorAll('.sh-h')].some(n => /Route difficulty/.test(n.textContent));
     setRouteThresholds(RT_DEFAULT);
-    return { base, wide, saved, sane, rows, back: narrowScore(W) === base };
+    return { base, wide, saved, sane, rows, head, back: narrowScore(W) === base };
   });
   ok('a wider "narrow" cut-off scores a 4 ft passage as narrow', th.base === 0 && th.wide > 0 && th.back, th);
   ok('cut-offs are kept on the phone and kept in order', th.saved === 5 && th.sane, th);
-  ok('⋯ More lists the five difficulty settings', th.rows === 5, th);
+  ok('⋯ More no longer lists the difficulty settings (only the rows went: the function above still works)', th.rows === 0 && th.head === false, th);
 
   // ── Texture tiles ──────────────────────────────────────────────────────────
   await p.waitForFunction(() => TT.sat.size === 2 && TT.hs.size === 2, null, { timeout: 20000 });

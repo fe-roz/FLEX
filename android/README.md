@@ -155,9 +155,9 @@ registered with the hub in `brush-blocks.js`, whose low blocks are the
 fall-back; how dense the brush is shows as how solid a bush is. Single bushes
 are drawn out to the distance of ⋯ More → Brush detail: Normal 180 m, Far
 360 m (the default), Very far 600 m, with a triangle limit of 0.9, 1.8 and
-3 million; clumps carry the brush beyond. ⋯ More → Simpler bushes far away,
-on by default, draws bushes past 150 m with 9 triangles. Both are kept per
-project (`DISP.brushDetail`, `DISP.brushSimple`). The Brush chip of 🎨 Display → Trees and brush
+3 million; clumps carry the brush beyond. Bushes past 150 m are always drawn
+with 9 triangles (no switch). Brush detail is kept per project
+(`DISP.brushDetail`). The Brush chip of 🎨 Display → Trees and brush
 switches them, a hold on a chip opens its opacity slider, and the Light /
 Medium / Dense chips under it switch each density class); a map without them
 gets `null`.
@@ -175,8 +175,13 @@ hillshade with the brush map on it, a third Imagery choice; `tex_hsb_<c>_<r>.jpg
 tiles on a big export).
 `MapStore.kt` keeps them at import (`RIDGE_FILES`), `MainActivity.kt` serves
 them and hands their names to the viewer (`RIDGE`, drawn by
-`viewer_build/libs/ridgewalk.js`: 🎨 Display → Below ground (V2)); a map
-without them gets `null` and looks as before. A map imported with an older
+`viewer_build/libs/ridgewalk.js`: 🎨 Display → Below ground (V2), with two
+sliders by a feature's depth on a map that lists its features: Highlight
+deeper than = a ring over each deep feature, Grey out shallower than = grey
+like a "nothing" mark; kept in feet in `DISP.rmarks.hi` / `.grey`, 0 = off); a map
+without them gets `null` and looks as before. With a GPS fix, the cards of a
+ridgewalking feature, a surface feature and a station show "From you"
+(distance and true bearing, `viewer_build/libs/from-you.js`). A map imported with an older
 build of the app has to be imported again (or updated from the same zip) to
 get those files. The build command is unchanged.
 

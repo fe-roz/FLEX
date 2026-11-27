@@ -308,7 +308,7 @@ const LALL = B.lut(B.knots(CLS));
   const L = LALL, t0 = Date.now(), P = B.pyramid(BIG, L); B.pyramidStep(P); const tPyr = Date.now() - t0;
   const D = { F: BIG, L, groundZ: hill, P };
   const T = B.tiles(BIG, L), C = [null]; for (let k = 1; k <= B.LEVELS; k++) C.push(B.clumpTiles(D, k));
-  const V = { T, C }, per = t => t.k ? B.C_TRIS : B.trisAt(t.d, true);                 // (bushes past LIGHT_FROM are the lighter dome, past FAR_FROM the simplest)
+  const V = { T, C }, per = t => t.k ? B.C_TRIS : B.trisAt(t.d);                 // (bushes past LIGHT_FROM are the lighter dome, past FAR_FROM the simplest)
   ok('real size: over a million brushy cells in thousands of tiles', T.cells > 1e6 && T.list.length > 2000, { cells: T.cells, tiles: T.list.length });
   let bytes = 0; for (let k = B.PYR; k <= B.LEVELS; k++) bytes += P.lv[k].n.length * 22;
   ok('real size: the pyramid is made in well under a second and holds a few megabytes', tPyr < 1000 && bytes < 6e6, { tPyr, bytes });
@@ -457,7 +457,7 @@ const LALL = B.lut(B.knots(CLS));
   // limits can be set (a smaller budget, a shorter reach)
   look.limits({ budget: 150000 }); look.settle(camera);
   ok('look: a smaller budget is kept', look.stats().triangles <= 150000 && look.stats().budget === 150000, look.stats());
-  // ── the detail steps (the hub's: a longer reach, a larger budget) and the simpler bush far away ──
+  // ── the detail steps (the hub's: a longer reach, a larger budget) and the simpler bush far away (always on) ──
   { const Dm = B.dome(), Fd = B.farDome(), Ld = B.lightDome();
     const dims = S => { let r = 0, z = 0, base = 0; for (let i = 0; i < S.pos.length; i += 3) { const q = Math.hypot(S.pos[i], S.pos[i + 1]); r = Math.max(r, q); z = Math.max(z, S.pos[i + 2]); if (S.pos[i + 2] === 0) base = Math.max(base, q); } return [r, z, base]; };
     const unitN = S => { for (let i = 0; i < S.nor.length; i += 3) if (Math.abs(Math.hypot(S.nor[i], S.nor[i + 1], S.nor[i + 2]) - 1) > 1e-5) return false; return true; };
@@ -468,9 +468,9 @@ const LALL = B.lut(B.knots(CLS));
     const shade = (S, l) => { let a = 0, n = 0; for (let i = 0; i < S.idx.length; i += 3) for (let j = 0; j < 3; j++) { const o = S.idx[i + j] * 3; a += Math.max(0, S.nor[o] * l[0] + S.nor[o + 1] * l[1] + S.nor[o + 2] * l[2]); n++; } return a / n; };
     const lights = [[0, 0, 1], [0.6, 0, 0.8], [0, 0.6, 0.8], [-0.5, -0.5, 0.707]], dS = lights.map(l => Math.abs(shade(Fd, l) - shade(Ld, l)));
     ok('far bush: lit like the lighter dome (mean shade within 0.08 from four lights)', dS.every(d => d < 0.08), dS);
-    ok('which solid: the dome to LIGHT_FROM, the lighter one to FAR_FROM (150 m), the simplest beyond; never with simple off',
-      B.FAR_FROM === 150 && B.solidAt(10, true) === 0 && B.solidAt(B.LIGHT_FROM + 1, true) === 1 && B.solidAt(150, true) === 1 && B.solidAt(151, true) === 2 && B.solidAt(151, false) === 1 && B.solidAt(5000, false) === 1 &&
-      B.trisAt(10) === B.TRIS && B.trisAt(100) === B.C_TRIS && B.trisAt(400) === B.FAR_TRIS && B.trisAt(400, false) === B.C_TRIS);
+    ok('which solid: the dome to LIGHT_FROM, the lighter one to FAR_FROM (150 m), the simplest beyond; an old "simple off" argument changes nothing',
+      B.FAR_FROM === 150 && B.solidAt(10) === 0 && B.solidAt(B.LIGHT_FROM + 1) === 1 && B.solidAt(150) === 1 && B.solidAt(151) === 2 && B.solidAt(151, false) === 2 && B.solidAt(5000, false) === 2 &&
+      B.trisAt(10) === B.TRIS && B.trisAt(100) === B.C_TRIS && B.trisAt(400) === B.FAR_TRIS && B.trisAt(400, false) === B.FAR_TRIS);
     // the whole chain follows the reach: every ring and every hand-over is the reach times a number
     for (const st of [0, 7, 20, B.STEPS.length - 1]) {
       const G1 = B.rings(st, 180, B.LEVELS), G2 = B.rings(st, 360, B.LEVELS), G3 = B.rings(st, 600, B.LEVELS);
@@ -489,17 +489,13 @@ const LALL = B.lut(B.knots(CLS));
     ok('look: the reach and the budget are the hub\'s (far: 360 m, 1.8 M)', sF.farMax === 360 && sF.budget === 1800000 && sN.farMax === B.FAR_MAX && sN.budget === 900000 && farL.limits().cache === Math.round(6000000 / B.TRIS), [sF.farMax, sF.budget]);
     ok('look: …the single bushes reach farther in the same view, and more of them are drawn', sF.far > sN.far * 1.3 && sF.far <= 360 && sF.levels[0].instances > sN.levels[0].instances * 1.5 && sF.triangles <= 1800000 && sF.triangles > sN.triangles, { far: [sN.far, sF.far], n: [sN.levels[0].instances, sF.levels[0].instances], tris: [sN.triangles, sF.triangles] });
     const tri = m => m.geometry.index.count / 3, l0 = L => L.group.children.filter(m => m.visible && m.userData.level === 0);
-    ok('look: …tiles past 150 m are the 9-triangle bush, nearer ones are not', sF.simple === true && sF.trisPerFar === 9 && l0(farL).some(m => tri(m) === B.FAR_TRIS) && l0(farL).some(m => tri(m) === B.C_TRIS) && l0(farL).some(m => tri(m) === B.TRIS));
-    // the switch: off = the 15-triangle bush all the way; nothing is built again
-    const built = sF.built, held = sF.held; wakes = 0;
-    const r = farL.limits({ simple: false });
-    ok('limits({ simple: false }): asks for a frame, builds nothing again', r.simple === false && wakes > 0 && farL.stats().built === built && farL.stats().held === held);
-    farL.settle(camera); const sOff = farL.stats();
-    ok('…no 9-triangle bush is left; the count is of 15 and 25', l0(farL).every(m => tri(m) !== B.FAR_TRIS) && sOff.simple === false && sOff.triangles <= 1800000 && sOff.levels[0].triangles === l0(farL).reduce((n, m) => n + m.count * tri(m), 0), sOff.levels[0]);
-    farL.limits({ simple: true }); farL.settle(camera);
-    ok('…and on again it is as before', farL.stats().triangles === sF.triangles && l0(farL).some(m => tri(m) === B.FAR_TRIS));
+    ok('look: …tiles past 150 m are the 9-triangle bush, nearer ones are not', !('simple' in sF) && sF.trisPerFar === 9 && l0(farL).some(m => tri(m) === B.FAR_TRIS) && l0(farL).some(m => tri(m) === B.C_TRIS) && l0(farL).some(m => tri(m) === B.TRIS));
+    // the switch is gone: an older caller's limits({ simple: false }) or budget.simple: false changes nothing
+    const built = sF.built, held = sF.held;
+    const r = farL.limits({ simple: false }); farL.settle(camera);
+    ok('limits({ simple: false }) is ignored: the 9-triangle bush stays, nothing built again, the same triangles', !('simple' in r) && farL.stats().built === built && farL.stats().held === held && farL.stats().triangles === sF.triangles && l0(farL).some(m => tri(m) === B.FAR_TRIS));
     const off = B.create(mkCtx({ budget: { triangles: 1800000, cache: 6000000, buildMs: 6, far: 360, simple: false } })); off.settle(camera);
-    ok('look: created with simple off: no 9-triangle bush either, inside the budget (the step may differ by one: it depends on the way there)', off.stats().triangles <= 1800000 && off.stats().triangles > 1000000 && Math.abs(off.stats().step - sOff.step) <= 2 && off.stats().simple === false && l0(off).length > 0 && l0(off).every(m => tri(m) !== B.FAR_TRIS), [off.stats().triangles, sOff.triangles, off.stats().step, sOff.step, sF.step]);
+    ok('look: created with an old "simple: false": the 9-triangle bush all the same, as the look beside it', off.stats().triangles === sF.triangles && l0(off).some(m => tri(m) === B.FAR_TRIS), [off.stats().triangles, sF.triangles]);
     off.dispose();
     // a step taken while the look is on: at once, from the next frame
     wakes = 0; const r2 = nrm.limits({ budget: 3000000, far: 600, cacheTris: 9900000 });

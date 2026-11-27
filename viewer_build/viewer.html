@@ -513,9 +513,9 @@
       </details>
       <details class="help-sec" open>
         <summary class="help-section">TOOLBAR</summary>
-        <div class="help-row"><span class="help-icon">📍</span><span class="help-desc">GPS: off / pin / follow / heading-up. Record a track, drop pins, export GPX or KML, calibrate the compass.</span></div>
+        <div class="help-row"><span class="help-icon">📍</span><span class="help-desc">GPS: off / pin / follow / heading-up. Record a track, drop pins, export GPX or KML, calibrate the compass. With a fix, the card of a station or a feature says <b>From you</b>: how far it is and in which direction.</span></div>
         <div class="help-row"><span class="help-icon">🔧</span><span class="help-desc">Tools: find (stations, leads active or closed, inventories), measure, route, reach, fly, crane, import KML. Also 📐 field survey, 📚 documents and 📝 change log (with undo).</span></div>
-        <div class="help-row"><span class="help-icon">⋯</span><span class="help-desc">More: units (ft / m), what counts as narrow, stooping, crawling or steep (Route difficulty), who is entering data, ⇄ project &amp; sync files (to share with other phones and FLEX), export project data, fullscreen, help.</span></div>
+        <div class="help-row"><span class="help-icon">⋯</span><span class="help-desc">More: units (ft / m), how the map is touched, who is entering data, ⇄ project &amp; sync files (to share with other phones and FLEX), export project data, fullscreen, help.</span></div>
       </details>
       <details class="help-sec">
         <summary class="help-section">ROUTE</summary>
@@ -731,6 +731,7 @@ catch(e) { window.DOCS_EXPORT = null; }
 <script src="libs/wall-fx.js"></script>
 <script src="libs/terrain-under.js"></script>
 <script src="libs/disp-store.js"></script>
+<script src="libs/from-you.js"></script>
 <script src="libs/utif.js"></script>
 <script src="libs/field-where.js"></script>
 <script src="libs/route-search.js"></script>
@@ -1650,6 +1651,7 @@ function updateGpsMarker(lat, lon, accuracy) {
     controls.target.set(x, y, z);
     controls.update();
   }
+  if (window.FromYou) FromYou.update();      // the "From you" row of an open card
   // Update GPS badge
   const dot = document.getElementById('gps-dot');
   dot.classList.add('fix');
@@ -1801,6 +1803,7 @@ function stopGps() {
   if (gpsHuntTimer !== null) { clearInterval(gpsHuntTimer); gpsHuntTimer = null; }
   if (gpsMarker) { scene.remove(gpsMarker); gpsMarker = null; }
   gpsScenePos  = null;
+  if (window.FromYou) FromYou.update();      // no position: the "From you" rows go
   gpsSuspended = false;
   gpsMode      = 'fine';
   document.getElementById('gps-badge').classList.remove('show');
@@ -1838,6 +1841,9 @@ function gridConvergenceDeg() {
   const dl = (lon - (zone * 6 - 183)) * Math.PI / 180;
   return Math.atan(Math.tan(dl) * Math.sin(lat * Math.PI / 180)) * 180 / Math.PI;
 }
+// "From you" on the cards (libs/from-you.js): the distance and the true bearing from the GPS position to what is selected.
+// Written again by FromYou.update() at a fix, when the GPS goes off and when the units change: no timer, nothing per frame.
+if (window.FromYou) FromYou.init({ fix: () => (gpsMarker && gpsScenePos ? gpsScenePos : null), fmtLen: m => U.len(m), conv: gridConvergenceDeg });
 // World Magnetic Model WMM2025 (NOAA NCEI, epoch 2025.0, valid 2025-2030),
 // declination only. Coefficients copied from the official WMM_2025.COF;
 // checked against an independent implementation (tools/test_wmm.js).
@@ -2188,7 +2194,7 @@ setTimeout(() => {
       project: () => (ffPid ? ffP : null), hasProject: () => !!ffPid, ensureProject: ffEnsureProject, ensureAuthor: ffEnsureAuthor,
       record: (op, data) => ffRecord(op, data), toScene: gpsToScene, toLonLat: sceneToLatLon, groundZ: gridZAt,
       toast: m => showToast(m), redraw: () => { requestRender(); wakeRender(); },
-    });
+    }).then(() => { try { if (_dispRestored && RidgeMarks.active()) dispStore.seen({ rmarks: RidgeMarks.serialize() }); } catch (_) {} });   // the list comes in a moment later: what it starts with is not a change to save
     // Surface features of the project, view only (nothing when FEATURES is null).
     if (window.ViewerFeatures) ViewerFeatures.init({
       THREE, scene, camera, renderer, controls, features: typeof FEATURES === 'undefined' ? null : FEATURES, saved: DISP.features,
@@ -2200,7 +2206,7 @@ setTimeout(() => {
       THREE, scene, camera, brush: typeof BRUSH === 'undefined' ? null : BRUSH, isAssetRef, b64ToArrayBuffer, groundZ: gridZAt,
       dither: window.FlexTrees && FlexTrees.dither, redraw: () => { requestRender(); wakeRender(); },
       onLook: () => { if (_dispRestored) dispCapture(); },
-      detail: DISP.brushDetail, simpleFar: DISP.brushSimple, save: p => dispSave(p),     // ⋯ More → Brush detail, Simpler bushes far away
+      detail: DISP.brushDetail, save: p => dispSave(p),     // ⋯ More → Brush detail
     });
     // Trees and brush as simple solids (nothing when TREES is null).
     if (window.FlexTrees) FlexTrees.init({
@@ -2955,7 +2961,8 @@ const FT = 0.3048;
 const HARD_EASY = new THREE.Color('#9aa0aa'), HARD_UNKNOWN = new THREE.Color('#3c3f46');
 const HARD_NARROW = new THREE.Color(0.10, 0.38, 1.0);    // blue
 const HARD_LOW    = new THREE.Color(1.0, 0.08, 0.05);    // red
-// What counts as tight or steep is a setting (⋯ More → Route difficulty),
+// What counts as tight or steep is a setting (setRouteThresholds(); its rows in
+// ⋯ More are gone for now, a choice made with them is still read),
 // kept on this phone: narrow below `narrow` ft wide (worst at a third of it),
 // stooping below `stoop` ft high, crawling below `crawl` (flat-out at half),
 // steep from `steepDeg` degrees with at least `steepDrop` ft up or down.
@@ -4787,7 +4794,7 @@ function renderDisplaySheet() {
     chips.push(['📂', kmlNames.length ? kmlNames.join(', ') : 'Imported KML', importGroup.visible, on => { importGroup.visible = on; }]);
   sheetChips(chips);
   if (window.FlexRidge && FlexRidge.active()) FlexRidge.sheet({ el, sheet: sheetEl, head: sheetHead, chips: sheetChips });   // Below ground (V2)
-  if (window.RidgeMarks && RidgeMarks.active()) RidgeMarks.sheet({ head: sheetHead, chips: sheetChips });   // marks on ridgewalking features
+  if (window.RidgeMarks && RidgeMarks.active()) RidgeMarks.sheet({ el, sheet: sheetEl, head: sheetHead, chips: sheetChips, units: U });   // the two depth sliders (end of Below ground), marks on ridgewalking features
   if (window.FlexTrees && FlexTrees.active()) FlexTrees.sheet({ head: sheetHead, chips: sheetChips });   // Trees and brush
   if (window.ViewerFeatures && ViewerFeatures.active()) ViewerFeatures.sheet({ el, sheet: sheetEl, head: sheetHead, chips: sheetChips, close: closeSheet });   // the project's surface features
   const hsOk = document.getElementById('map-panel-layer').style.display === 'block';
@@ -4816,24 +4823,12 @@ function renderMoreSheet() {
   sheetSeg(['Feet', 'Metres'], UNITS === 'm' ? 1 : 0, i => { setUnits(i ? 'm' : 'ft'); rerenderSheet(); });
   if (window.GroundDrag) GroundDrag.sheet({ head: sheetHead, seg: sheetSeg, sheet: sheetEl, rerender: rerenderSheet });   // Touch: Orbit / Surface drag / Drag the ground (libs/ground-drag.js)
   if (window.FlexBrush && FlexBrush.active()) FlexBrush.sheet({ head: sheetHead, seg: sheetSeg, rerender: rerenderSheet });   // Brush detail: Normal / Far / Very far (libs/brush-blocks.js)
-  sheetHead('Route difficulty');
-  [['Narrow below', 'narrow', 'ft wide', 0.5], ['Stooping below', 'stoop', 'ft high', 0.5], ['Crawling below', 'crawl', 'ft high', 0.5],
-   ['Steep from', 'steepDeg', '° (and at least the drop below)', 5], ['Steep drop of', 'steepDrop', 'ft up or down', 1]].forEach(([lab, k, unit, step]) => {
-    const r = el('div', 'fp-row rt-set'); r.dataset.rt = k;
-    r.appendChild(el('span', '', lab));
-    const dn = el('button', 'fp-btn', '−'), val = el('b', 'rt-val', String(RT[k])), up = el('button', 'fp-btn', '+');
-    const bump = d => { setRouteThresholds({ [k]: Math.max(step, +(RT[k] + d).toFixed(2)) }); rerenderSheet(); };
-    dn.addEventListener('click', () => bump(-step)); up.addEventListener('click', () => bump(step));
-    r.append(dn, val, up, el('span', 'sh-s', unit));
-    sheetEl.appendChild(r);
-  });
-  sheetRow('↺', 'Reset to the defaults', 'narrow 3 ft · stooping 6 ft · crawling 4 ft · steep 50° and 10 ft', () => { setRouteThresholds(RT_DEFAULT); rerenderSheet(); });
+  // (The Route difficulty rows were here; RT and setRouteThresholds() stay, and a saved choice still colours the routes.)
   sheetHead('Entering data as');
   const ar = el('div', 'fp-row'); ar.appendChild(ffAuthorChip()); sheetEl.appendChild(ar);
   sheetRow('⇄', 'Project & sync', ffPid ? (ffP.name || 'project') + ' · sync files to other phones and FLEX' : 'pick or start this map’s project', () => { ffOpenProject(); });
   sheetRow('⇪', 'Export project data', 'notes, leads, documents list, field surveys, the log (JSON)', () => { closeSheet(); ffExportData(); });
   if (window.FF_MAP_ID) sheetRow('🗂', 'Maps', 'back to the list of maps', () => { location.href = '../../assets/flexfield/index.html'; });
-  if (window.FlexBrush && FlexBrush.active()) FlexBrush.sheetLow({ row: sheetRow, rerender: rerenderSheet });   // Simpler bushes far away
   sheetRow('⛶', 'Fullscreen', null, () => { closeSheet(); document.getElementById('btn-fullscreen').click(); });
   sheetRow('?', 'Help', null, () => { closeSheet(); document.getElementById('btn-help').click(); });
   if (window.AboutMap) sheetRow('ⓘ', 'About this map', 'when it was exported, the area, what it carries', () => { closeSheet(); aboutMapOpen(); });
@@ -4850,6 +4845,7 @@ async function aboutMapOpen() {
 // Everything that shows a length re-renders in the new unit.
 function onUnitsChanged() {
   updateDepthLegend();
+  if (window.FromYou) FromYou.update();
   if (routes.length) { routeDraw(); }
   routeRenderPanel();
   if (reach) applyReach();
@@ -7366,13 +7362,14 @@ const _tmp3     = new THREE.Vector3();
 // Expand raycaster sphere hit threshold so small dots are easy to tap
 _tapRay.params.Mesh = {};
 
-function showInfo(title, subtitle, rows) {
+// `at` ({ x, y } in the scene, optional): the place the card is about, for its "From you" row.
+function showInfo(title, subtitle, rows, at) {
   document.getElementById('info-title').textContent    = title;
   document.getElementById('info-subtitle').textContent = subtitle;
   const rowsEl = document.getElementById('info-rows');
   rowsEl.innerHTML = rows.map(([label, val]) =>
     `<div class="fx-row"><span class="lbl">${label}:</span> <span class="val">${val}</span></div>`
-  ).join('');
+  ).join('') + (at && window.FromYou ? FromYou.rowHtml(at.x, at.y) : '');
   infoPanel.classList.add('open');
 }
 
@@ -7677,6 +7674,7 @@ function selectStation(st) {
 
   // Details
   html += `<div class="fx-row"><span class="lbl">Elevation:</span> <span class="val">${U.z(st.pos.z)}</span></div>`;
+  if (window.FromYou) html += FromYou.rowHtml(st.pos.x, st.pos.y);      // "From you": shown while the GPS has a fix
   if (st.dist !== null && st.dist !== undefined) {
     html += `<div class="fx-row"><span class="lbl">From entrance:</span> <span class="val">${U.len(st.dist)}</span></div>`;
   }

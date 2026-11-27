@@ -35,7 +35,8 @@
 // and shortens the bushes' reach, a step at a time (STEPS); the bushes nearest the eye are never left out.
 // A bush in a tile farther than LIGHT_FROM is drawn as the same dome with fewer faces (C_TRIS triangles); in a tile
 // farther than FAR_FROM as a simpler one still (FAR_TRIS triangles: three sides, the rings half a side apart, so its
-// outline from above is six-sided and from the side the same low dome), unless `simple` is off (limits({ simple })).
+// outline from above is six-sided and from the side the same low dome). That simpler far bush is always on: it
+// was a switch in More once, and a choice saved by that build is ignored.
 // The reach and the budget are the hub's to set (ctx.budget.far / .triangles, limits()): FlexBrush.detail(name).
 // Every ring and every hand-over is a multiple of the reach, so a longer reach moves the whole chain out.
 // A bush stands on the ground at its own centre and its base is sheared to the ground's slope there (the top
@@ -417,7 +418,6 @@
   function select(D, V, cam, inView, budget, o) {
     o = typeof o === 'number' ? { far: o } : o || {};
     budget = budget > 0 ? budget : BUDGET;
-    var simple = o.simple !== false;
     var top = V.C ? V.C.length - 1 : 0, prev = o.prev >= 0 && o.prev < STEPS.length ? o.prev : 0, G, cand, tris, k, i, j;
     function look(step) {
       G = rings(step, o.far, top); cand = []; tris = 0;
@@ -435,7 +435,7 @@
           if (t.d >= out) continue;
           if (inn > 0 && distFar(t.box, cam) <= inn) continue;   // wholly nearer than this level starts
           if (!inView(t.box)) continue;
-          cand.push(t); tris += t.n * (k ? C_TRIS : trisAt(t.d, simple));
+          cand.push(t); tris += t.n * (k ? C_TRIS : trisAt(t.d));
         }
       }
       return tris;
@@ -450,9 +450,9 @@
   }
 
   // Which solid a bush tile at distance d (m, its nearest point) is drawn with: 0 the dome, 1 the lighter dome,
-  // 2 the simplest (only with `simple`); and its triangles a bush.
-  function solidAt(d, simple) { return d > FAR_FROM && simple !== false ? 2 : d > LIGHT_FROM ? 1 : 0; }
-  function trisAt(d, simple) { var s = solidAt(d, simple); return s === 2 ? FAR_TRIS : s ? C_TRIS : TRIS; }
+  // 2 the simplest; and its triangles a bush.
+  function solidAt(d) { return d > FAR_FROM ? 2 : d > LIGHT_FROM ? 1 : 0; }
+  function trisAt(d) { var s = solidAt(d); return s === 2 ? FAR_TRIS : s ? C_TRIS : TRIS; }
 
   // The dome: { pos, nor (smooth: one vertex a ring place, its normal the mean of its faces'), idx }.
   function dome() { return solid(SIDES, RINGS, TOP); }
@@ -524,8 +524,8 @@
     }
     var mat = material(0);
     var group = new THREE.Group(); group.name = 'brush-bushes'; group.matrixAutoUpdate = false;
-    var lim = ctx.budget || {};                                  // the hub's: { triangles, cache (triangles kept), buildMs, far (m), simple }
-    var S = { budget: lim.triangles > 0 ? lim.triangles : BUDGET, farMax: lim.far > 0 ? lim.far : FAR_MAX, simple: lim.simple !== false, cache: lim.cache > 0 ? Math.round(lim.cache / TRIS) : CACHE, buildMs: lim.buildMs > 0 ? Math.min(lim.buildMs, BUILD_MS) : BUILD_MS, built: [], held: 0, drawn: [], tris: 0, inst: 0, far: FAR_MAX, frame: 0, dirty: true, waiting: 0, gone: false,
+    var lim = ctx.budget || {};                                  // the hub's: { triangles, cache (triangles kept), buildMs, far (m) }
+    var S = { budget: lim.triangles > 0 ? lim.triangles : BUDGET, farMax: lim.far > 0 ? lim.far : FAR_MAX, cache: lim.cache > 0 ? Math.round(lim.cache / TRIS) : CACHE, buildMs: lim.buildMs > 0 ? Math.min(lim.buildMs, BUILD_MS) : BUILD_MS, built: [], held: 0, drawn: [], tris: 0, inst: 0, far: FAR_MAX, frame: 0, dirty: true, waiting: 0, gone: false,
               step: 0, rings: rings(0, FAR_MAX, 0), levels: [], pyrMs: 0,
               seen: new Float64Array(16), m4: new THREE.Matrix4(), pv: new THREE.Matrix4(), frustum: new THREE.Frustum(), box: new THREE.Box3() };
     var wake = function () { if (ctx.wake) ctx.wake(); };
@@ -555,7 +555,7 @@
     // and third geometry, the same instances).
     function solidOf(t) {
       if (t.k) return;
-      var light = solidAt(t.d, S.simple);
+      var light = solidAt(t.d);
       if (light === t.light) return;
       if (light && !t.geo[light]) t.geo[light] = geometry(stock[light + 1], t.op);
       t.mesh.geometry = t.geo[light]; t.light = light;
@@ -608,7 +608,7 @@
       var p = [cam.matrixWorld.elements[12], cam.matrixWorld.elements[13], cam.matrixWorld.elements[14]], sel, built = 0, left = 0;
       var whole = far(all), t0 = Date.now();
       for (;;) {
-        sel = select(D, V, p, inView, S.budget, { far: S.farMax, prev: S.step, simple: S.simple });
+        sel = select(D, V, p, inView, S.budget, { far: S.farMax, prev: S.step });
         var did = 0;
         left = 0;
         for (i = 0; i < sel.draw.length; i++) {
@@ -652,15 +652,14 @@
         V.T = tiles(F, L); V.C = null; D.P = null; S.dirty = true; wake();
       },
       // budget (triangles), the bushes' reach (m), the cache (bushes and clumps held; cacheTris: the same in the
-      // hub's measure, triangles), simple (the simplest bush past FAR_FROM): the hub's detail steps, tests. Takes
+      // hub's measure, triangles): the hub's detail steps, tests. Takes
       // effect on the next frame, which it asks for; nothing is built again (a tile keeps its instances).
       limits: function (o) {
         if (o) {
           if (o.budget > 0) S.budget = o.budget; if (o.far > 0) S.farMax = o.far; if (o.cacheTris > 0) S.cache = Math.round(o.cacheTris / TRIS); if (o.cache > 0) S.cache = o.cache;
-          if (typeof o.simple === 'boolean') S.simple = o.simple;
           S.dirty = true; if (!S.gone) { trim(); wake(); }
         }
-        return { budget: S.budget, far: S.farMax, cache: S.cache, simple: S.simple };
+        return { budget: S.budget, far: S.farMax, cache: S.cache };
       },
       dispose: function () {
         S.gone = true;
@@ -676,7 +675,7 @@
         var bytes = 0;
         if (D.P) D.P.lv.forEach(function (l) { if (l) bytes += l.n.length * 22; });
         return { triangles: S.tris, instances: S.inst, tiles: S.drawn.length, far: S.far, level: uLevel.value, waiting: S.dirty ? Math.max(1, S.waiting) : 0, built: S.built.length, held: S.held,
-                 cells: V.T.cells, allTiles: V.T.list.length, budget: S.budget, farMax: S.farMax, cache: S.cache, simple: S.simple, trisPerBush: TRIS, trisPerClump: C_TRIS, trisPerFar: FAR_TRIS, classesOn: on ? on.slice() : null,
+                 cells: V.T.cells, allTiles: V.T.list.length, budget: S.budget, farMax: S.farMax, cache: S.cache, trisPerBush: TRIS, trisPerClump: C_TRIS, trisPerFar: FAR_TRIS, classesOn: on ? on.slice() : null,
                  levels: S.levels.map(function (l) { return { tiles: l.tiles, instances: l.instances, triangles: l.triangles }; }),
                  rings: S.rings.R.slice(1).map(function (r) { return r === Infinity ? null : Math.round(r); }), step: S.step,
                  pyramid: { ready: !!V.C, ms: S.pyrMs, bytes: bytes } };

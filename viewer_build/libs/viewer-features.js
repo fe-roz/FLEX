@@ -406,7 +406,7 @@
   }
   function open(id, fly) {
     var c = info(id); if (!c) return false;
-    if (S.showInfo) S.showInfo(c[0], c[1], c[2]);
+    if (S.showInfo) S.showInfo(c[0], c[1], c[2], S.byId[id].at);        // its place: the card's "From you" row (libs/from-you.js)
     if (fly && S.flyTo) S.flyTo(S.byId[id].at.clone());
     return true;
   }
@@ -415,7 +415,7 @@
     SYMBOLS: SYMBOLS, tree: tree, restore: restore, labelColour: labelColour, shortName: shortName, symbolCanvas: symbolCanvas,
 
     // o: { THREE, scene, camera, renderer, controls, features, saved, toScene(lat, lon) -> {x, y}, groundZ(x, y) -> z|null,
-    //      textSprite(text, colour) -> { sprite, aspect }, showInfo(title, subtitle, rows), flyTo(Vector3), fmtLen(m), redraw() }
+    //      textSprite(text, colour) -> { sprite, aspect }, showInfo(title, subtitle, rows, at), flyTo(Vector3), fmtLen(m), redraw() }
     // Returns a promise: true when there are features and they are in the scene.
     init: function (o) {
       S = null;

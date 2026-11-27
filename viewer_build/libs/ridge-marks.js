@@ -14,7 +14,14 @@
  *  - a marked feature carries a small badge (cave green, pit blue, nothing grey, not reached amber); a mark whose
  *    feature is no longer there is drawn at its own place, with a dashed rim; features marked "nothing" are
  *    dimmed (libs/ridgewalk.js greys their shape and returns), and can be hidden;
- *  - 🎨 Display: Marks, Hide "nothing" (remembered with the other display choices).
+ *  - 🎨 Display: Marks, Hide "nothing" (remembered with the other display choices);
+ *  - 🎨 Display → Below ground, two sliders by a feature's depth (the number its card shows, in whole feet from 10 ft):
+ *    "Highlight deeper than" puts a bright ring over every feature at least that deep that is not marked "nothing"
+ *    (all the rings are ONE THREE.Points, the same size on the screen at any distance, drawn on top of everything);
+ *    "Grey out shallower than" greys the features less deep than that, exactly as a "nothing" mark does, and never
+ *    hides them. A feature with a ring is not greyed (the ring wins when the two ranges overlap). Both are kept in
+ *    FEET (0 = off, the start), with the other choices of this file (DISP.rmarks: `hi`, `grey`); the label shows the
+ *    map's unit. They are applied when the slider is let go, never while it moves and never per frame.
  *
  * Marks never change what is computed: "nothing" only dims and hides on this screen.
  * Two halves: the rules without a DOM (Node-tested by tools/test_viewer_ridge_marks.js) and the page.
@@ -32,7 +39,10 @@
   const FT = 0.3048;
   const SYMBOL = { cave: 'C', pit: 'P', nothing: '✕', unreached: '?' };
   const ENTRANCE = { true: 'True entrance', guessed: 'Guessed opening', none: 'Below ground, no opening seen' };
-  const DEFAULTS = { marks: true, hideNothing: false };
+  const DEFAULTS = { marks: true, hideNothing: false, hi: 0, grey: 0 };      // hi / grey: the two depth sliders, in feet, 0 = off
+  const DEPTH_MAX_FT = 60;               // the sliders' range
+  const RING_PX = 46;                    // a ring's size on the screen (CSS pixels), whatever the distance
+  const RING_COLOUR = '#00f0ff';
   const STATE_V = 1;
   const TAP_PX = 28;                     // a tap this near a feature's anchor, middle or deepest point is on it
   const DIM_PAD_M = 0.4;                 // a "nothing" feature's box, this much wider, is what gets dimmed
@@ -106,13 +116,41 @@
   const describe = e => FL.rmarkDescribe(e);
   function restore(saved) {
     const st = Object.assign({}, DEFAULTS);
-    if (saved && typeof saved === 'object' && saved.v === STATE_V) Object.keys(DEFAULTS).forEach(k => { if (typeof saved[k] === 'boolean') st[k] = saved[k]; });
+    if (saved && typeof saved === 'object' && saved.v === STATE_V) Object.keys(DEFAULTS).forEach(k => {
+      if (typeof DEFAULTS[k] === 'number') st[k] = depthFtClamp(saved[k]);
+      else if (typeof saved[k] === 'boolean') st[k] = saved[k];
+    });
     return st;
   }
+  /** A slider's value: whole feet 0..60; anything else is 0 (off). */
+  function depthFtClamp(v) { return typeof v === 'number' && isFinite(v) && v > 0 ? Math.min(DEPTH_MAX_FT, Math.round(v)) : 0; }
+  /** A feature's depth in feet as its card shows it (one decimal under 10 ft, whole feet from there): what the sliders compare. */
+  function depthFt(f) { const ft = f.deepest / FT; return ft < 10 ? Math.round(ft * 10) / 10 : Math.round(ft); }
+  const isNothing = (f, M) => !!(M && M.byFeature[f.id] && M.byFeature[f.id].mark.kind === 'nothing');
+  /**
+   * The two depth sliders against the features. hiFt / greyFt: feet, 0 = off.
+   * → { ring: [feature], grey: [feature] }: a ring for every feature at least hiFt deep that is not marked "nothing";
+   * grey for every feature less than greyFt deep that has no ring (so with grey above highlight, the ring wins).
+   * A "nothing" feature never has a ring; it is greyed by its mark anyway (nothingBoxes).
+   */
+  function depthSplit(features, M, hiFt, greyFt) {
+    const ring = [], grey = [];
+    hiFt = depthFtClamp(hiFt); greyFt = depthFtClamp(greyFt);
+    if (hiFt || greyFt) features.forEach(f => {
+      const d = depthFt(f);
+      if (hiFt && d >= hiFt && !isNothing(f, M)) ring.push(f);
+      else if (greyFt && d < greyFt) grey.push(f);
+    });
+    return { ring, grey };
+  }
+  const padBox = f => [f.box[0] - DIM_PAD_M, f.box[1] - DIM_PAD_M, f.box[2] - DIM_PAD_M, f.box[3] + DIM_PAD_M, f.box[4] + DIM_PAD_M, f.box[5] + DIM_PAD_M];
+  /** Where a feature's ring stands: over the middle of its box, at the box's top. */
+  const ringAt = f => [(f.box[0] + f.box[3]) / 2, (f.box[1] + f.box[4]) / 2, f.box[5]];
+  /** "30 ft" / "9.1 m" for a slider at `ft` feet, in the map's unit; "off" at 0. */
+  function depthLabel(ft, unit) { return !ft ? 'off' : unit === 'm' ? (ft * FT).toFixed(1) + ' m' : ft + ' ft'; }
   /** The boxes ([x0, y0, z0, x1, y1, z1], scene) of the features a "nothing" mark speaks for. */
   function nothingBoxes(features, M) {
-    return features.filter(f => M.byFeature[f.id] && M.byFeature[f.id].mark.kind === 'nothing')
-      .map(f => [f.box[0] - DIM_PAD_M, f.box[1] - DIM_PAD_M, f.box[2] - DIM_PAD_M, f.box[3] + DIM_PAD_M, f.box[4] + DIM_PAD_M, f.box[5] + DIM_PAD_M]);
+    return features.filter(f => isNothing(f, M)).map(padBox);
   }
   /**
    * Which feature a tap is on. pts: for each feature the screen places [x, y] (pixels) of its anchor, its middle and its
@@ -150,6 +188,34 @@
     const t = new S.THREE.CanvasTexture(c);
     return (S.tex[key] = t);
   }
+  // The rings of "Highlight deeper than": ONE THREE.Points for all of them (a map can have thousands of features), a
+  // ring picture on each point, the same size on the screen at any distance. They are markers put there on purpose, so
+  // they are drawn on top of everything (no depth test) and are NOT handed to FlexUnder.patch: a ring behind a ridge
+  // must still be seen. A ring is hollow and larger than a mark's badge, and drawn before the badges, so both read.
+  function ringTexture() {
+    if (S.ringTex) return S.ringTex;
+    const c = document.createElement('canvas'); c.width = c.height = 128;
+    const g = c.getContext('2d');
+    g.beginPath(); g.arc(64, 64, 50, 0, Math.PI * 2); g.lineWidth = 20; g.strokeStyle = 'rgba(0,0,0,.85)'; g.stroke();      // a dark rim, so it reads on snow and on pale rock
+    g.beginPath(); g.arc(64, 64, 50, 0, Math.PI * 2); g.lineWidth = 11; g.strokeStyle = RING_COLOUR; g.stroke();
+    return (S.ringTex = new S.THREE.CanvasTexture(c));
+  }
+  function buildRings() {
+    const T = S.THREE, split = depthSplit(S.features, S.M, S.st.hi, S.st.grey);
+    S.split = split; S.ringIds = new Set(split.ring.map(f => f.id));
+    const key = split.ring.map(f => f.id).join('\n');
+    if (S.rings && S.ringKey === key) return;
+    S.ringKey = key;
+    if (S.rings) { S.group.remove(S.rings); S.rings.geometry.dispose(); S.rings = null; }
+    if (!split.ring.length) return;
+    const pos = new Float32Array(split.ring.length * 3);
+    split.ring.forEach((f, i) => { const p = ringAt(f); pos[i * 3] = p[0]; pos[i * 3 + 1] = p[1]; pos[i * 3 + 2] = p[2]; });
+    const g = new T.BufferGeometry(); g.setAttribute('position', new T.BufferAttribute(pos, 3)); g.computeBoundingSphere();
+    if (!S.ringMat) S.ringMat = new T.PointsMaterial({ map: ringTexture(), size: RING_PX, sizeAttenuation: false, depthTest: false, depthWrite: false, transparent: true, fog: false });
+    const pts = new T.Points(g, S.ringMat);
+    pts.name = 'ridge-rings'; pts.renderOrder = 8.9; pts.matrixAutoUpdate = false; pts.raycast = function () {};
+    S.group.add(pts); S.rings = pts;
+  }
   function refresh() {
     if (!S) return;
     const T = S.THREE;
@@ -171,7 +237,8 @@
       m._scene = [p.x, p.y, z];
       add(m.kind, true, p.x, p.y, z + 1.5, { mark: m.id });
     });
-    if (S.ridge && S.ridge.setDim) S.ridge.setDim(S.st.marks ? nothingBoxes(S.features, S.M) : [], S.st.marks && S.st.hideNothing);
+    buildRings();
+    if (S.ridge && S.ridge.setDim) S.ridge.setDim(S.st.marks ? nothingBoxes(S.features, S.M) : [], S.st.marks && S.st.hideNothing, S.split.grey.map(padBox));
     if (S.card && S.card.ref) renderCard();
     if (S.redraw) S.redraw();
   }
@@ -186,6 +253,7 @@
       if (hiddenNothing(f)) return null;
       const b = f.box, pts = [P(f.x, f.y, f.z), P((b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2), P((b[0] + b[3]) / 2, (b[1] + b[4]) / 2, b[2])];
       if (!pts[0] && !pts[1]) return null;
+      if (S.ringIds && S.ringIds.has(f.id)) pts.push(P((b[0] + b[3]) / 2, (b[1] + b[4]) / 2, b[5]));        // a tap on its ring is a tap on it
       let rect2 = null;
       if (Math.max(b[3] - b[0], b[4] - b[1], b[5] - b[2]) > 3) {             // a large feature: anywhere over it counts
         let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, ok = true;
@@ -236,6 +304,12 @@
     c.appendChild(el('div', 'rm-sub', f ? ENTRANCE[f.entrance] : 'Nothing is seen here on this map: the mark is kept at its own place.'));
     const rows = el('div', 'rm-rows');
     (f ? featureRows(f) : (cur && cur.feat ? [['Depth then', both(cur.feat.depth)], ['Returns then', cur.feat.returns != null ? String(cur.feat.returns) : '—']] : [])).forEach(r => { rows.appendChild(el('span', '', r[0])); rows.appendChild(el('span', '', r[1])); });
+    // "From you": how far and which way from the GPS position (libs/from-you.js writes it again at every fix; hidden with no fix).
+    const at = f ? ringAt(f) : cur && cur._scene;
+    if (at && root && root.FromYou) {
+      const fy = el('div', 'rm-fy'); fy.appendChild(el('span', '', 'From you')); fy.appendChild(el('span', 'fy-val'));
+      rows.appendChild(fy); root.FromYou.mark(fy, at[0], at[1], 'contents');
+    }
     c.appendChild(rows);
     if (cur) {
       const by = el('div', 'rm-by'); by.appendChild(el('b', '', 'Marked ' + FL.RMARK_LABELS[cur.kind])); by.appendChild(document.createTextNode('  ' + byLine(cur.updated && cur.updated.who, cur.updated && cur.updated.t) + (cur.exported ? ' · from the export' : '')));
@@ -292,7 +366,7 @@
   }
 
   const R = {
-    DEFAULTS, STATE_V, TAP_PX, SYMBOL, ENTRANCE, both, cleanFeatures, featHint, matchFeature, effective, match, markBody, featureRows, byLine, describe, restore, nothingBoxes, nearestTap,
+    DEFAULTS, STATE_V, TAP_PX, SYMBOL, ENTRANCE, DEPTH_MAX_FT, RING_PX, depthFt, depthFtClamp, depthSplit, depthLabel, ringAt, both, cleanFeatures, featHint, matchFeature, effective, match, markBody, featureRows, byLine, describe, restore, nothingBoxes, nearestTap,
     inverse: e => FL.rmarkUndo(e),
 
     // o: { THREE, scene, camera, features, marks (RIDGE's: a list or a file name each), saved, ridge (FlexRidge), project(),
@@ -307,7 +381,8 @@
         if (!features.length && !ml.length) return false;
         S = { THREE: o.THREE, scene: o.scene, camera: o.camera, features, exported: ml, st: restore(o.saved), ridge: o.ridge, project: o.project, hasProject: o.hasProject,
               ensureProject: o.ensureProject, ensureAuthor: o.ensureAuthor, record: o.record, toScene: o.toScene, groundZ: o.groundZ, toast: o.toast, redraw: o.redraw,
-              group: new o.THREE.Group(), badges: [], tex: {}, marks: [], M: { byFeature: {}, alone: [], ofMark: {} }, card: null };
+              group: new o.THREE.Group(), badges: [], tex: {}, marks: [], M: { byFeature: {}, alone: [], ofMark: {} }, card: null,
+              rings: null, ringKey: '', ringIds: null, ringTex: null, ringMat: null, split: { ring: [], grey: [] } };
         S.group.name = 'ridge-marks'; S.scene.add(S.group);
         refresh();
         return true;
@@ -318,15 +393,36 @@
     state: () => (S ? Object.assign({}, S.st) : null),
     serialize: () => (S ? Object.assign({ v: STATE_V }, S.st) : undefined),
     // What is there: { features, marks, matched: { <feature id>: kind }, alone: [mark ids], badges }
-    objects: () => (S ? { features: S.features, marks: S.marks, matched: Object.fromEntries(Object.entries(S.M.byFeature).map(([k, v]) => [k, v.mark.kind])), alone: S.M.alone.map(m => m.id), badges: S.badges, group: S.group } : null),
+    objects: () => (S ? { rings: S.rings, ringed: S.split.ring.map(f => f.id), greyed: S.split.grey.map(f => f.id), features: S.features, marks: S.marks, matched: Object.fromEntries(Object.entries(S.M.byFeature).map(([k, v]) => [k, v.mark.kind])), alone: S.M.alone.map(m => m.id), badges: S.badges, group: S.group } : null),
+    // One switch (marks, hideNothing) or one depth slider (hi, grey: feet, 0 = off).
     set(key, v) {
       if (!S || !(key in DEFAULTS)) return;
-      S.st[key] = !!v;
+      const next = typeof DEFAULTS[key] === 'number' ? depthFtClamp(+v) : !!v;
+      if (next === S.st[key]) return;
+      S.st[key] = next;
       refresh();
     },
-    // The rows in Display (after "Below ground (V2)"). ui: { head, chips }.
+    // The rows in Display: the two depth sliders at the end of "Below ground (V2)" (only on a map that lists its
+    // features), then the marks. ui: { head, chips, el, sheet, units: { u: 'ft' | 'm' } }.
     sheet(ui) {
       if (!S) return;
+      if (S.features.length && ui.el && ui.sheet) {
+        if (!(S.ridge && S.ridge.active && S.ridge.active())) ui.head('Below ground (V2)');
+        const unit = ui.units && ui.units.u === 'm' ? 'm' : 'ft';
+        [['hi', 'Highlight deeper than', 'ridge-hi-slider'], ['grey', 'Grey out shallower than', 'ridge-grey-slider']].forEach(([key, text, id]) => {
+          const row = ui.el('div', 'sh-sl'), lab = ui.el('label', '', text), val = ui.el('div', '', depthLabel(S.st[key], unit)), inp = ui.el('input');
+          // two lines in the narrow sheet: the name and the value, then the slider across the whole width (a finger needs the length)
+          row.style.flexWrap = 'wrap'; row.style.rowGap = '2px';
+          lab.style.width = 'auto'; lab.style.flex = '1 1 auto'; lab.style.order = '1'; val.style.width = 'auto'; val.style.order = '2'; inp.style.flex = '0 0 100%'; inp.style.order = '3';
+          val.id = id + '-val';
+          inp.type = 'range'; inp.min = '0'; inp.max = String(DEPTH_MAX_FT); inp.step = '1'; inp.value = String(S.st[key]); inp.id = id;
+          inp.style.accentColor = '#00e5ff';
+          inp.addEventListener('input', () => { val.textContent = depthLabel(depthFtClamp(+inp.value), unit); });       // the number follows the finger
+          inp.addEventListener('change', () => { R.set(key, +inp.value); });                                            // the map changes when it is let go
+          row.appendChild(lab); row.appendChild(inp); row.appendChild(val);
+          ui.sheet.appendChild(row);
+        });
+      }
       const n = S.marks.length;
       ui.head('Marks on features' + (n ? ' (' + n + ')' : ''));
       ui.chips([['🏷', 'Marks', !!S.st.marks, on => R.set('marks', on)], ['🚫', 'Hide “nothing”', !!S.st.hideNothing, on => R.set('hideNothing', on)]]);
