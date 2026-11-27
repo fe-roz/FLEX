@@ -731,6 +731,7 @@ catch(e) { window.DOCS_EXPORT = null; }
 <script src="libs/wall-fx.js"></script>
 <script src="libs/terrain-under.js"></script>
 <script src="libs/disp-store.js"></script>
+<script src="libs/from-you.js"></script>
 <script src="libs/utif.js"></script>
 <script src="libs/field-where.js"></script>
 <script src="libs/route-search.js"></script>
@@ -1650,6 +1651,7 @@ function updateGpsMarker(lat, lon, accuracy) {
     controls.target.set(x, y, z);
     controls.update();
   }
+  if (window.FromYou) FromYou.update();      // the "From you" row of an open card
   // Update GPS badge
   const dot = document.getElementById('gps-dot');
   dot.classList.add('fix');
@@ -1801,6 +1803,7 @@ function stopGps() {
   if (gpsHuntTimer !== null) { clearInterval(gpsHuntTimer); gpsHuntTimer = null; }
   if (gpsMarker) { scene.remove(gpsMarker); gpsMarker = null; }
   gpsScenePos  = null;
+  if (window.FromYou) FromYou.update();      // no position: the "From you" rows go
   gpsSuspended = false;
   gpsMode      = 'fine';
   document.getElementById('gps-badge').classList.remove('show');
@@ -1838,6 +1841,9 @@ function gridConvergenceDeg() {
   const dl = (lon - (zone * 6 - 183)) * Math.PI / 180;
   return Math.atan(Math.tan(dl) * Math.sin(lat * Math.PI / 180)) * 180 / Math.PI;
 }
+// "From you" on the cards (libs/from-you.js): the distance and the true bearing from the GPS position to what is selected.
+// Written again by FromYou.update() at a fix, when the GPS goes off and when the units change: no timer, nothing per frame.
+if (window.FromYou) FromYou.init({ fix: () => (gpsMarker && gpsScenePos ? gpsScenePos : null), fmtLen: m => U.len(m), conv: gridConvergenceDeg });
 // World Magnetic Model WMM2025 (NOAA NCEI, epoch 2025.0, valid 2025-2030),
 // declination only. Coefficients copied from the official WMM_2025.COF;
 // checked against an independent implementation (tools/test_wmm.js).
@@ -2188,7 +2194,7 @@ setTimeout(() => {
       project: () => (ffPid ? ffP : null), hasProject: () => !!ffPid, ensureProject: ffEnsureProject, ensureAuthor: ffEnsureAuthor,
       record: (op, data) => ffRecord(op, data), toScene: gpsToScene, toLonLat: sceneToLatLon, groundZ: gridZAt,
       toast: m => showToast(m), redraw: () => { requestRender(); wakeRender(); },
-    });
+    }).then(() => { try { if (_dispRestored && RidgeMarks.active()) dispStore.seen({ rmarks: RidgeMarks.serialize() }); } catch (_) {} });   // the list comes in a moment later: what it starts with is not a change to save
     // Surface features of the project, view only (nothing when FEATURES is null).
     if (window.ViewerFeatures) ViewerFeatures.init({
       THREE, scene, camera, renderer, controls, features: typeof FEATURES === 'undefined' ? null : FEATURES, saved: DISP.features,
@@ -4788,7 +4794,7 @@ function renderDisplaySheet() {
     chips.push(['📂', kmlNames.length ? kmlNames.join(', ') : 'Imported KML', importGroup.visible, on => { importGroup.visible = on; }]);
   sheetChips(chips);
   if (window.FlexRidge && FlexRidge.active()) FlexRidge.sheet({ el, sheet: sheetEl, head: sheetHead, chips: sheetChips });   // Below ground (V2)
-  if (window.RidgeMarks && RidgeMarks.active()) RidgeMarks.sheet({ head: sheetHead, chips: sheetChips });   // marks on ridgewalking features
+  if (window.RidgeMarks && RidgeMarks.active()) RidgeMarks.sheet({ el, sheet: sheetEl, head: sheetHead, chips: sheetChips, units: U });   // the two depth sliders (end of Below ground), marks on ridgewalking features
   if (window.FlexTrees && FlexTrees.active()) FlexTrees.sheet({ head: sheetHead, chips: sheetChips });   // Trees and brush
   if (window.ViewerFeatures && ViewerFeatures.active()) ViewerFeatures.sheet({ el, sheet: sheetEl, head: sheetHead, chips: sheetChips, close: closeSheet });   // the project's surface features
   const hsOk = document.getElementById('map-panel-layer').style.display === 'block';
@@ -4839,6 +4845,7 @@ async function aboutMapOpen() {
 // Everything that shows a length re-renders in the new unit.
 function onUnitsChanged() {
   updateDepthLegend();
+  if (window.FromYou) FromYou.update();
   if (routes.length) { routeDraw(); }
   routeRenderPanel();
   if (reach) applyReach();
@@ -7355,13 +7362,14 @@ const _tmp3     = new THREE.Vector3();
 // Expand raycaster sphere hit threshold so small dots are easy to tap
 _tapRay.params.Mesh = {};
 
-function showInfo(title, subtitle, rows) {
+// `at` ({ x, y } in the scene, optional): the place the card is about, for its "From you" row.
+function showInfo(title, subtitle, rows, at) {
   document.getElementById('info-title').textContent    = title;
   document.getElementById('info-subtitle').textContent = subtitle;
   const rowsEl = document.getElementById('info-rows');
   rowsEl.innerHTML = rows.map(([label, val]) =>
     `<div class="fx-row"><span class="lbl">${label}:</span> <span class="val">${val}</span></div>`
-  ).join('');
+  ).join('') + (at && window.FromYou ? FromYou.rowHtml(at.x, at.y) : '');
   infoPanel.classList.add('open');
 }
 
@@ -7666,6 +7674,7 @@ function selectStation(st) {
 
   // Details
   html += `<div class="fx-row"><span class="lbl">Elevation:</span> <span class="val">${U.z(st.pos.z)}</span></div>`;
+  if (window.FromYou) html += FromYou.rowHtml(st.pos.x, st.pos.y);      // "From you": shown while the GPS has a fix
   if (st.dist !== null && st.dist !== undefined) {
     html += `<div class="fx-row"><span class="lbl">From entrance:</span> <span class="val">${U.len(st.dist)}</span></div>`;
   }

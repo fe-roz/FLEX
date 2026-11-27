@@ -76,6 +76,33 @@ ok('the change log’s wording', RM.describe({ op: 'rmark.set', kind: 'pit', not
 ok('undo is flexlib’s', JSON.stringify(RM.inverse(e1)) === JSON.stringify(FL.rmarkUndo(e1)) && RM.inverse(e1).removed === true);
 ok('saved choices: this version only', RM.restore({ v: 1, marks: false, hideNothing: true }).marks === false && RM.restore({ marks: false }).marks === true && RM.restore(null).hideNothing === false);
 
+// ── 1b. The two depth sliders: which features get a ring, which go grey ───────
+{
+  const ids = l => l.map(f => f.id).join();
+  ok('a feature’s depth in feet is the number its card shows (one decimal under 10 ft, whole feet from there)', RM.depthFt(feats[0]) === 32 && RM.depthFt(feats[1]) === 20 && RM.depthFt(feats[2]) === 6.9 && RM.depthFt(feats[3]) === 3.9 && RM.DEPTH_MAX_FT === 60);
+  const none = { byFeature: {} };
+  let d = RM.depthSplit(feats, none, 0, 0);
+  ok('both sliders at 0: off, no ring, nothing grey', d.ring.length === 0 && d.grey.length === 0);
+  d = RM.depthSplit(feats, none, 20, 0);
+  ok('"Highlight deeper than" 20 ft: a ring for the features 20 ft deep and more (the one at exactly 20 too)', ids(d.ring) === 'r10-20,r30-5' && d.grey.length === 0, ids(d.ring));
+  d = RM.depthSplit(feats, none, 21, 0);
+  ok('…21 ft: only the deeper one', ids(d.ring) === 'r10-20');
+  d = RM.depthSplit(feats, none, 0, 10);
+  ok('"Grey out shallower than" 10 ft: the features less deep than that, no ring', ids(d.grey) === 'r50-9,r70-1' && d.ring.length === 0, ids(d.grey));
+  d = RM.depthSplit(feats, none, 0, 20);
+  ok('…a feature exactly as deep as the limit is not shallower: it keeps its colours', ids(d.grey) === 'r50-9,r70-1');
+  d = RM.depthSplit(feats, none, 20, 10);
+  ok('between the two limits: neither', ids(d.ring) === 'r10-20,r30-5' && ids(d.grey) === 'r50-9,r70-1' && RM.depthSplit(feats, none, 30, 5).ring.length === 1 && ids(RM.depthSplit(feats, none, 30, 5).grey) === 'r70-1');
+  d = RM.depthSplit(feats, none, 5, 25);
+  ok('grey above highlight (the ranges overlap): the ring wins, a feature with a ring is not greyed', ids(d.ring) === 'r10-20,r30-5,r50-9' && ids(d.grey) === 'r70-1', [ids(d.ring), ids(d.grey)]);
+  d = RM.depthSplit(feats, M, 5, 25);            // M: r50-9 is marked "nothing", r10-20 a pit
+  ok('a feature marked "nothing" never gets a ring, however deep; it is greyed', ids(d.ring) === 'r10-20,r30-5' && ids(d.grey) === 'r50-9,r70-1' && ids(RM.depthSplit(feats, M, 1, 0).ring) === 'r10-20,r30-5,r70-1', [ids(d.ring), ids(d.grey)]);
+  ok('the ring stands over the middle of the feature’s box, at its top', RM.ringAt(feats[1]).join() === '60,-4.5,505' && RM.ringAt(feats[0]).join() === '10,20,500');
+  ok('the slider’s label in the map’s unit; 0 is "off"', RM.depthLabel(30, 'ft') === '30 ft' && RM.depthLabel(30, 'm') === '9.1 m' && RM.depthLabel(0, 'ft') === 'off' && RM.depthLabel(0, 'm') === 'off');
+  ok('saved sliders: whole feet 0..60, anything else is off; an older saved state has none: off', RM.restore({ v: 1, hi: 25, grey: 8 }).hi === 25 && RM.restore({ v: 1, hi: 25, grey: 8 }).grey === 8 && RM.restore({ v: 1, hi: 200, grey: -3 }).hi === 60 && RM.restore({ v: 1, hi: 200, grey: -3 }).grey === 0 &&
+    RM.restore({ v: 1, hi: '30', grey: NaN }).hi === 0 && RM.restore({ v: 1, hi: '30', grey: NaN }).grey === 0 && RM.restore({ v: 1, marks: false }).hi === 0 && RM.restore(null).grey === 0 && RM.restore({ v: 1, hi: 12.4 }).hi === 12 && RM.DEFAULTS.hi === 0 && RM.DEFAULTS.grey === 0);
+}
+
 // ── 2. The page: three.js, the real modules, a stand-in document ──────────────
 function makeViewer() {
   const mk = tag => { const e = { tagName: tag.toUpperCase(), style: {}, dataset: {}, children: [], _on: {}, className: '', appendChild(c) { e.children.push(c); c.parent = e; return c; }, addEventListener(ev, f) { e._on[ev] = f; },
@@ -91,7 +118,7 @@ function makeViewer() {
   const v = { ctx, THREE, RM: ctx.RidgeMarks || ctx.window.RidgeMarks, FR: ctx.window.FlexRidge, FLc: ctx.FlexLib || ctx.window.FlexLib, scene: new THREE.Scene(), cam, body, log: [], pid: 'p1', redraws: 0, asked: 0, toasts: [], dims: [] };
   const D = dev('phone', 'Ana');
   v.opts = (features, marks, saved, extra) => Object.assign({ THREE, scene: v.scene, camera: cam, features, marks, saved,
-    ridge: { setDim: (boxes, hide) => v.dims.push({ n: boxes.length, hide, boxes }) },
+    ridge: { setDim: (boxes, hide, grey) => v.dims.push({ n: boxes.length, hide, boxes, grey: grey || [] }) },
     project: () => (v.pid ? v.FLc.replayProject(v.log, v.pid) : null), hasProject: () => !!v.pid, ensureProject: async () => { v.asked++; if (v.grant) v.pid = 'p1'; },
     record: (op, data) => { const e = D(Object.assign({ op }, data)); v.log.push(e); return e; },
     toScene: (lat, lon) => ({ x: (lon - LON) * MX, y: (lat - LAT) * MY }), toLonLat: (x, y) => ({ lon: LON + x / MX, lat: LAT + y / MY }), groundZ: () => 480,
@@ -169,6 +196,77 @@ function makeViewer() {
   const s3 = makeViewer(); s3.ctx.fetch = () => Promise.resolve({ ok: false });
   ok('a list that cannot be fetched: idle, no error', await s3.RM.init(s3.opts('ridge_features.json', null)) === false);
 
+  // ── 2b. The depth sliders on the page: the rings, the grey list, the rows in Display ──
+  {
+    const w = makeViewer();
+    await w.RM.init(w.opts(LIST, []));
+    let q = w.RM.objects();
+    ok('nothing saved: both sliders off, no ring object at all, nothing handed over to grey', w.RM.state().hi === 0 && w.RM.state().grey === 0 && q.rings === null && q.ringed.length === 0 && q.greyed.length === 0 && w.dims[w.dims.length - 1].grey.length === 0 && !w.scene.getObjectByName('ridge-rings'));
+    let r0 = w.redraws; w.RM.set('hi', 20); q = w.RM.objects();
+    const P3 = a => Array.from(a.geometry.attributes.position.array).join();
+    ok('Highlight deeper than 20 ft: ONE object for all the rings (THREE.Points), a point over each deep feature’s box, a frame asked for', q.rings && q.rings.isPoints === true && q.rings.name === 'ridge-rings' && w.scene.getObjectByName('ridge-marks').children.filter(c => c.isPoints).length === 1 &&
+      q.rings.geometry.attributes.position.count === 2 && P3(q.rings) === '10,20,500,60,-4.5,505' && q.ringed.join() === 'r10-20,r30-5' && w.redraws > r0, q.rings && P3(q.rings));
+    const m = q.rings.material;
+    ok('…the same size on the screen at any distance, on top of everything (no depth test), a ring picture, under the badges', m.sizeAttenuation === false && m.size === w.RM.RING_PX && m.depthTest === false && m.depthWrite === false && m.transparent === true && !!m.map && q.rings.renderOrder < 9 && q.rings.renderOrder > 8 && !m.onBeforeCompile.toString().includes('uUnder'));
+    const rings1 = q.rings; r0 = w.redraws; const n0 = w.dims.length;
+    w.RM.set('hi', 20);
+    ok('the same value again: nothing is done', w.RM.objects().rings === rings1 && w.redraws === r0 && w.dims.length === n0);
+    w.RM.refresh();
+    ok('a refresh with the same rings keeps the object (not built again)', w.RM.objects().rings === rings1);
+    await w.RM.setMark({ feature: 'r30-5' }, { kind: 'cave' });
+    q = w.RM.objects();
+    ok('a mark other than "nothing" keeps the ring, and its badge is there too (drawn after the ring)', q.ringed.join() === 'r10-20,r30-5' && q.badges.some(b => b.name === 'rmark-cave' && b.renderOrder > q.rings.renderOrder));
+    await w.RM.setMark({ feature: 'r10-20' }, { kind: 'nothing' });
+    q = w.RM.objects();
+    ok('marked "nothing": its ring goes (the rings are built again: one point left)', q.ringed.join() === 'r30-5' && q.rings !== rings1 && q.rings.geometry.attributes.position.count === 1 && P3(q.rings) === '60,-4.5,505');
+    const rect = { width: 800, height: 800 }, px = (x, y, z) => { const t = new w.THREE.Vector3(x, y, z).project(w.cam); return [(t.x + 1) / 2 * 800, (1 - t.y) / 2 * 800]; };
+    const hit = w.RM.pick(...px(60, -4.5, 505), rect);
+    ok('a tap on a ring opens its feature', hit && hit.feature === 'r30-5' && hit.d < 2, hit);
+    w.RM.set('grey', 10);
+    let dm = w.dims[w.dims.length - 1];
+    ok('Grey out shallower than 10 ft: the shallow features’ boxes go to the drawing as the grey-only list; the "nothing" box stays in the first list; not hidden', dm.grey.length === 2 && near(dm.grey[0][0], 99.1) && near(dm.grey[1][0], 139.4) && dm.n === 1 && near(dm.boxes[0][0], 7.6) && dm.hide === false && w.RM.objects().greyed.join() === 'r50-9,r70-1', dm);
+    w.RM.set('hideNothing', true); dm = w.dims[w.dims.length - 1];
+    ok('Hide "nothing" hides the "nothing" boxes only: the depth-greyed ones stay in the grey-only list', dm.hide === true && dm.n === 1 && dm.grey.length === 2);
+    w.RM.set('marks', false); dm = w.dims[w.dims.length - 1];
+    ok('Marks off: the "nothing" dimming goes, the depth grey and the rings stay', dm.n === 0 && dm.hide === false && dm.grey.length === 2 && w.RM.objects().rings.visible !== false && w.RM.objects().ringed.join() === 'r30-5');
+    w.RM.set('marks', true); w.RM.set('hideNothing', false);
+    w.RM.set('grey', 30); w.RM.set('hi', 5);
+    q = w.RM.objects();
+    ok('grey 30 ft over highlight 5 ft: ringed features are not in the grey list', q.ringed.join() === 'r30-5,r50-9' && q.greyed.join() === 'r70-1', [q.ringed, q.greyed]);
+    const ser = w.RM.serialize();
+    ok('the two sliders are saved with the other choices, in feet', ser.v === 1 && ser.hi === 5 && ser.grey === 30 && ser.marks === true);
+    w.RM.set('hi', 0); w.RM.set('grey', 0); q = w.RM.objects();
+    ok('both back to 0: no ring object, nothing grey', q.rings === null && !w.scene.getObjectByName('ridge-rings') && w.dims[w.dims.length - 1].grey.length === 0);
+    w.RM.set('hi', 999); w.RM.set('grey', 'x');
+    ok('a value out of range is held to 60 ft; not a number is off', w.RM.state().hi === 60 && w.RM.state().grey === 0 && w.RM.objects().rings === null);
+    // saved at the start
+    const w2 = makeViewer(); await w2.RM.init(w2.opts(LIST, [], { v: 1, marks: true, hideNothing: false, hi: 30, grey: 5 }));
+    ok('saved sliders apply from the start', w2.RM.state().hi === 30 && w2.RM.objects().ringed.join() === 'r10-20' && w2.RM.objects().greyed.join() === 'r70-1' && w2.dims[w2.dims.length - 1].grey.length === 1);
+    // the rows in Display
+    const mkEl = (tag, cls, text) => ({ tag, cls, text, style: {}, kids: [], on: {}, appendChild(c) { this.kids.push(c); }, addEventListener(ev, f) { this.on[ev] = f; }, set textContent(t) { this.text = t; }, get textContent() { return this.text; } });
+    const draw = (W, unit) => { const sheet = mkEl('div'), heads = []; W.RM.sheet({ el: mkEl, sheet, head: t => heads.push(t), chips: () => {}, units: { u: unit } }); return { rows: sheet.kids, heads }; };
+    let sh = draw(w2, 'ft');
+    const inp = r => r.kids[1], val = r => r.kids[2];
+    ok('Display: two sliders 0..60 ft with their value, under the head of Below ground', sh.rows.length === 2 && sh.rows.every(r => r.cls === 'sh-sl') && sh.rows[0].kids[0].text === 'Highlight deeper than' && sh.rows[1].kids[0].text === 'Grey out shallower than' &&
+      inp(sh.rows[0]).id === 'ridge-hi-slider' && inp(sh.rows[1]).id === 'ridge-grey-slider' && inp(sh.rows[0]).type === 'range' && inp(sh.rows[0]).min === '0' && inp(sh.rows[0]).max === '60' && inp(sh.rows[0]).value === '30' && inp(sh.rows[1]).value === '5' &&
+      val(sh.rows[0]).text === '30 ft' && val(sh.rows[1]).text === '5 ft' && sh.heads[0] === 'Below ground (V2)' && /^Marks on features/.test(sh.heads[1]), sh.heads);
+    const dn = w2.dims.length, rr = w2.redraws;
+    inp(sh.rows[0]).value = '12'; inp(sh.rows[0]).on.input();
+    ok('while the slider moves only its number changes (nothing is recoloured, no frame asked for)', val(sh.rows[0]).text === '12 ft' && w2.RM.state().hi === 30 && w2.dims.length === dn && w2.redraws === rr);
+    inp(sh.rows[0]).on.change();
+    ok('let go: applied once', w2.RM.state().hi === 12 && w2.RM.objects().ringed.join() === 'r10-20,r30-5' && w2.dims.length === dn + 1 && w2.redraws > rr);
+    inp(sh.rows[1]).value = '0'; inp(sh.rows[1]).on.input();
+    ok('at 0 the label says off', val(sh.rows[1]).text === 'off');
+    sh = draw(w2, 'm');
+    ok('in metres the label shows metres; the slider and the saved value stay in feet', val(sh.rows[0]).text === '3.7 m' && inp(sh.rows[0]).value === '12' && w2.RM.serialize().hi === 12);
+    // only marks, no feature list: no sliders
+    const w3 = makeViewer(); await w3.RM.init(w3.opts([], [exp[2]]));
+    sh = draw(w3, 'ft');
+    ok('a map with marks but no list of features: no sliders', w3.RM.active() && sh.rows.length === 0 && sh.heads.length === 1);
+    const w4 = makeViewer(); await w4.RM.init(w4.opts(undefined, undefined));
+    ok('a map with no ridgewalking: no rows at all, no cost', (() => { let n = 0; w4.RM.sheet({ el: () => { n++; }, sheet: {}, head: () => { n++; }, chips: () => { n++; } }); w4.RM.set('hi', 20); return n === 0 && w4.RM.objects() === null; })());
+  }
+
   // ── 3. The dimming in libs/ridgewalk.js ─────────────────────────────────────
   const FR = v.FR, T3 = v.THREE;
   const pts = [[100, 18, 497, 3.05, 0], [100.2, 18.1, 496.5, 6.1, 0], [10, 20, 495, 3.05, 0], [10, 21, 492, 12, 0], [60, 0, 500, 1, 1]];
@@ -193,6 +291,19 @@ function makeViewer() {
   ok('hidden: the triangles wholly inside are left out of the draw (2 of 4); the one with a foot outside stays; the returns stay, grey', ro.shapes.geometry.index.count === 6 && Array.from(ro.shapes.geometry.index.array).join() === '4,5,6,2,7,8' && grey(dots(), 0));
   FR.setDim([], false);
   ok('no boxes: every colour and triangle is back exactly (nothing was deleted)', col().join() === col0.join() && dots().join() === dots0.join() && ro.shapes.geometry.index.count === 12 && Array.from(ro.shapes.geometry.index.array).join() === st.join());
+  // the grey-only list (the features shallower than the chosen depth): greyed the same way, never left out
+  const pit = [[7.6, 17.6, 489.6, 12.4, 22.4, 500.4]];
+  FR.setDim([], true, box);
+  ok('a grey-only box: the same grey, and with "hide" on every triangle is still drawn', [0, 1, 2, 3, 7].every(i => grey(col(), i)) && [4, 5, 6, 8].every(i => !grey(col(), i)) && grey(dots(), 0) && !grey(dots(), 2) && ro.shapes.geometry.index.count === 12);
+  FR.setDim(pit, true, box);
+  ok('a "nothing" box with hide and a grey-only box together: both grey, only the "nothing" triangles left out', [0, 1, 2, 3, 4, 5, 6, 7, 8].every(i => grey(col(), i)) && grey(dots(), 2) && grey(dots(), 3) && !grey(dots(), 4) && Array.from(ro.shapes.geometry.index.array).join() === '0,1,2,0,1,3,2,7,8');
+  const ver = ro.shapes.geometry.attributes.color.version;
+  FR.setDim(pit.map(b => b.slice()), true, box.map(b => b.slice()));
+  ok('asked for the same thing again: the colours are not written again', ro.shapes.geometry.attributes.color.version === ver);
+  FR.setDim(pit, false, []);
+  ok('the grey-only list emptied: its colours are back, the "nothing" box stays grey', [0, 1, 2, 3, 7].every(i => !grey(col(), i) && col()[i * 3] === col0[i * 3]) && [4, 5, 6, 8].every(i => grey(col(), i)) && ro.shapes.geometry.index.count === 12);
+  FR.setDim([], false);
+  ok('all off: exactly as made', col().join() === col0.join() && dots().join() === dots0.join() && Array.from(ro.shapes.geometry.index.array).join() === st.join());
   ok('ten thousand boxes over a million vertices are filed in cells (fast)', (() => { const n = 1e6, pos = new Float32Array(n * 3); for (let i = 0; i < n; i++) { pos[i * 3] = (i * 7919) % 4000; pos[i * 3 + 1] = (i * 104729) % 4000; pos[i * 3 + 2] = 500; }
     const bx = []; for (let i = 0; i < 10000; i++) { const x = (i * 37) % 3990, y = (i * 91) % 3990; bx.push([x, y, 490, x + 3, y + 3, 510]); }
     const t0 = Date.now(), fl = FR.insideBoxes(pos, bx), ms = Date.now() - t0; let c = 0; for (let i = 0; i < n; i++) c += fl[i]; return ms < 1500 && c > 1000; })());

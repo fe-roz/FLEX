@@ -157,14 +157,20 @@
   // greyed; with `hide` the shapes' triangles wholly inside one are left out of the draw. Nothing is deleted: an
   // empty list puts every colour and triangle back. Boxes are filed in 25 m cells, so a vertex looks at the few
   // boxes over it, not at all of them.
+  // A second list, `grey` (the features shallower than "Grey out shallower than", libs/ridge-marks.js), is greyed the
+  // same way and is NEVER hidden: `hide` leaves out only the triangles inside the first list's boxes.
   var DIM = [0.36, 0.37, 0.40];
   function insideBoxes(pos, boxes) {
-    var n = pos.length / 3, flag = new Uint8Array(n), CELL = 25, cells = {}, i, b, cx, cy;
+    var n = pos.length / 3, flag = new Uint8Array(n), CELL = 25, cells = new Map(), i, b, cx, cy, key, list;
     if (!boxes.length) return flag;
     for (i = 0; i < boxes.length; i++) { b = boxes[i];
-      for (cx = Math.floor(b[0] / CELL); cx <= Math.floor(b[3] / CELL); cx++) for (cy = Math.floor(b[1] / CELL); cy <= Math.floor(b[4] / CELL); cy++) (cells[cx + ':' + cy] || (cells[cx + ':' + cy] = [])).push(b); }
+      for (cx = Math.floor(b[0] / CELL); cx <= Math.floor(b[3] / CELL); cx++) for (cy = Math.floor(b[1] / CELL); cy <= Math.floor(b[4] / CELL); cy++) {
+        key = cx * 2097152 + cy; list = cells.get(key);              // one number a cell (maps are far smaller than 2^21 cells across)
+        if (list) list.push(b); else cells.set(key, [b]);
+      } }
     for (i = 0; i < n; i++) {
-      var x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2], list = cells[Math.floor(x / CELL) + ':' + Math.floor(y / CELL)];
+      var x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+      list = cells.get(Math.floor(x / CELL) * 2097152 + Math.floor(y / CELL));
       if (!list) continue;
       for (var k = 0; k < list.length; k++) { b = list[k]; if (x >= b[0] && x <= b[3] && y >= b[1] && y <= b[4] && z >= b[2] && z <= b[5]) { flag[i] = 1; break; } }
     }
@@ -172,17 +178,18 @@
   }
   function dimObject(obj, hide) {
     if (!obj || !obj.geometry.attributes.color) return 0;
-    var g = obj.geometry, col = g.attributes.color, pos = g.attributes.position.array, u = obj.userData, boxes = S.dim.boxes;
-    if (!u.col0) { if (!boxes.length) return 0; u.col0 = new Float32Array(col.array); }       // the colours as made, kept the first time
-    var flag = insideBoxes(pos, boxes), n = flag.length, a = col.array, i, dimmed = 0;
+    var g = obj.geometry, col = g.attributes.color, pos = g.attributes.position.array, u = obj.userData, boxes = S.dim.boxes, greyB = S.dim.grey;
+    if (!u.col0) { if (!boxes.length && !greyB.length) return 0; u.col0 = new Float32Array(col.array); }       // the colours as made, kept the first time
+    var flag = insideBoxes(pos, boxes), fg = greyB.length ? insideBoxes(pos, greyB) : null, n = flag.length, a = col.array, i, dimmed = 0, inFirst = 0;
     for (i = 0; i < n; i++) {
-      if (flag[i]) { a[i * 3] = DIM[0]; a[i * 3 + 1] = DIM[1]; a[i * 3 + 2] = DIM[2]; dimmed++; }
+      if (flag[i]) inFirst++;
+      if (flag[i] || (fg && fg[i])) { a[i * 3] = DIM[0]; a[i * 3 + 1] = DIM[1]; a[i * 3 + 2] = DIM[2]; dimmed++; }
       else { a[i * 3] = u.col0[i * 3]; a[i * 3 + 1] = u.col0[i * 3 + 1]; a[i * 3 + 2] = u.col0[i * 3 + 2]; }
     }
     col.needsUpdate = true;
     if (g.index) {
       if (!u.idx0) u.idx0 = g.index;
-      if (hide && dimmed) {
+      if (hide && inFirst) {
         var src = u.idx0.array, out = new Uint32Array(src.length), m = 0;
         for (i = 0; i < src.length; i += 3) if (!(flag[src[i]] && flag[src[i + 1]] && flag[src[i + 2]])) { out[m++] = src[i]; out[m++] = src[i + 1]; out[m++] = src[i + 2]; }
         g.setIndex(new S.THREE.BufferAttribute(out.subarray(0, m), 1));
@@ -202,7 +209,7 @@
     S.shapesLoading = loadBin(S.ridge.shapes).then(function (buf) {
       S.shapes = shapesOf(parseShapes(buf));
       S.scene.add(S.shapes);
-      if (S.dim.boxes.length) dimObject(S.shapes, S.dim.hide);
+      if (S.dim.boxes.length || S.dim.grey.length) dimObject(S.shapes, S.dim.hide);
       redraw();
     }).catch(function (e) { console.warn('Ridgewalk shapes not loaded:', e); });
     return S.shapesLoading;
@@ -219,13 +226,13 @@
       if (!ridge || typeof ridge !== 'object' || !ridge.points) return Promise.resolve(false);
       S = { THREE: o.THREE, scene: o.scene, ridge: ridge, cap: ridge.depthCap > 0 ? +ridge.depthCap : 20, st: restore(o.saved),
             isAssetRef: o.isAssetRef, b64ToArrayBuffer: o.b64ToArrayBuffer, redraw: o.redraw,
-            points: [null, null, null, null], patches: null, shapes: null, shapesLoading: null, dim: { boxes: [], hide: false } };
+            points: [null, null, null, null], patches: null, shapes: null, shapesLoading: null, dim: { boxes: [], hide: false, grey: [], sig: '' } };
       var jobs = [loadBin(ridge.points).then(function (buf) {
         splitKinds(parsePoints(buf), S.cap).forEach(function (part, k) {
           if (!part.n) return;
           S.points[k] = pointsOf(part, k); S.scene.add(S.points[k]);
         });
-        if (S.dim.boxes.length) dimObject(S.points[0], false);
+        if (S.dim.boxes.length || S.dim.grey.length) dimObject(S.points[0], false);
       }).catch(function (e) { console.warn('Ridgewalk returns not loaded:', e); })];
       if (ridge.patches) jobs.push(loadBin(ridge.patches).then(function (buf) {
         var Q = parsePatches(buf);
@@ -240,9 +247,14 @@
     objects: function () { return S ? { points: S.points.slice(), patches: S.patches, shapes: S.shapes } : null; },
     counts: function () { return S && S.ridge.counts || {}; },
     // Grey (and with `hide`, leave out) what lies in these boxes: the features marked "nothing". [] undoes it.
-    setDim: function (boxes, hide) {
+    // `grey` (optional): more boxes that are greyed and never left out (the features shallower than the chosen depth).
+    // The colours of a large map are many megabytes: asked for the same thing again, nothing is done.
+    setDim: function (boxes, hide, grey) {
       if (!S) return;
-      S.dim = { boxes: Array.isArray(boxes) ? boxes : [], hide: !!hide };
+      var d = { boxes: Array.isArray(boxes) ? boxes : [], hide: !!hide, grey: Array.isArray(grey) ? grey : [] };
+      d.sig = (d.hide ? 'h' : '') + '|' + d.boxes.join(';') + '|' + d.grey.join(';');
+      if (d.sig === S.dim.sig) return;
+      S.dim = d;
       applyDim(); redraw();
     },
     insideBoxes: insideBoxes,
