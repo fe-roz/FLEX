@@ -244,7 +244,7 @@ const b64 = buf => Buffer.from(buf).toString('base64');
     ok('the ctx: THREE, the grid as parsed (rows from the south), classes, the ground, the camera, wake, bayer4, dither, budget', got.THREE === w.THREE && F.nx === 40 && F.ny === 40 && F.cell === 1 && F.x0 === 5 && F.y0 === 7 && F.top === 2.5 && F.share.length === 1600 && F.share[41] === 200 && F.height[41] === 120 &&
       got.classes.map(c => c.name + ':' + c.min + ':' + c.colour + ':' + c.cut + ':' + c.rgb.join('.')).join('|') === 'light:0.1:b7e4a0:26:183.228.160|medium:0.3:5fae4f:77:95.174.79|dense:0.6:1f5f1f:153:31.95.31' &&
       got.groundZ(3, 9) === 103 && got.camera === w.camera && typeof got.wake === 'function' && got.bayer4(1, 1) === FB.bayer4(1, 1) && got.bayer4(2, 3) === w.FT.bayer4(2, 3) && got.dither === w.FT.dither &&
-      got.budget.triangles === FB.DETAILS.far.triangles && got.budget.far === 360 && got.budget.simple === true && FB.LOOK_BUDGET === 900000 && got.budget.cache === Math.round(got.budget.triangles * FB.CACHE_X) && got.budget.buildMs > 0, got && got.classes);
+      got.budget.triangles === FB.DETAILS.far.triangles && got.budget.far === 360 && !('simple' in got.budget) && FB.LOOK_BUDGET === 900000 && got.budget.cache === Math.round(got.budget.triangles * FB.CACHE_X) && got.budget.buildMs > 0, got && got.classes);
     const q = got.toScene(1, 2, 3);
     ok('toScene is the identity (x east, y north, z up), a THREE.Vector3', q.isVector3 && q.x === 1 && q.y === 2 && q.z === 3);
     const r0 = w.redraws; got.wake();
@@ -351,7 +351,7 @@ const b64 = buf => Buffer.from(buf).toString('base64');
     ok('a map with one class has no such row', rows4.length === 2);
   }
 
-  // ── Brush detail (⋯ More): three steps of reach and triangle limit, and the simpler bush far away ──
+  // ── Brush detail (⋯ More): three steps of reach and triangle limit (the simpler bush far away is always on: no setting) ──
   {
     const D = FB.DETAILS;
     ok('the three steps: Normal 180 m / 0.9 M, Far 360 m / 1.8 M, Very far 600 m / 3 M; a map starts at Far', FB.DETAIL_NAMES.join() === 'normal,far,very' && FB.DEF_DETAIL === 'far' &&
@@ -365,31 +365,28 @@ const b64 = buf => Buffer.from(buf).toString('base64');
       return { w, log, saved, made, r };
     };
     const none = makeViewer();
-    ok('no brush: detail() is the default, setting does nothing, no rows in More', none.FB.detail() === 'far' && none.FB.detail('very') === 'far' && none.FB.simpleFar() === true && none.FB.simpleFar(false) === true && none.FB.sheet({ head() { throw new Error('no'); } }) === null && none.FB.sheetLow({ row() { throw new Error('no'); } }) === null);
+    ok('no brush: detail() is the default, setting does nothing, no rows in More', none.FB.detail() === 'far' && none.FB.detail('very') === 'far' && none.FB.sheet({ head() { throw new Error('no'); } }) === null);
+    ok('the "Simpler bushes far away" switch is gone: no simpleFar(), no row for More', none.FB.simpleFar === undefined && none.FB.sheetLow === undefined);
     let a = await mk();
-    ok('nothing saved: Far, the simpler bush on; the look is created with those numbers; nothing written', a.w.FB.look() === 'bushes' && a.w.FB.detail() === 'far' && a.w.FB.simpleFar() === true && a.made.length === 1 && a.made[0].triangles === 1800000 && a.made[0].far === 360 && a.made[0].cache === 6000000 && a.made[0].simple === true && a.saved.length === 0 && a.w.FB.stats().detail === 'far' && a.w.FB.stats().simpleFar === true, a.made);
+    ok('nothing saved: Far; the look is created with those numbers; nothing written', a.w.FB.look() === 'bushes' && a.w.FB.detail() === 'far' && a.made.length === 1 && a.made[0].triangles === 1800000 && a.made[0].far === 360 && a.made[0].cache === 6000000 && !('simple' in a.made[0]) && a.saved.length === 0 && a.w.FB.stats().detail === 'far' && !('simpleFar' in a.w.FB.stats()), a.made);
     let r0 = a.w.redraws, v = a.w.FB.detail('very');
-    ok('detail("very"): at once to the look (3 M, 600 m, the cache 3.33 times), one frame asked for, saved', v === 'very' && a.w.FB.detail() === 'very' && a.log.length === 1 && a.log[0].budget === 3000000 && a.log[0].far === 600 && a.log[0].cacheTris === 10000000 && a.log[0].simple === true && a.w.redraws > r0 && JSON.stringify(a.saved) === '[{"brushDetail":"very"}]' && a.made.length === 1, [a.log, a.saved]);
+    ok('detail("very"): at once to the look (3 M, 600 m, the cache 3.33 times), one frame asked for, saved', v === 'very' && a.w.FB.detail() === 'very' && a.log.length === 1 && a.log[0].budget === 3000000 && a.log[0].far === 600 && a.log[0].cacheTris === 10000000 && !('simple' in a.log[0]) && a.w.redraws > r0 && JSON.stringify(a.saved) === '[{"brushDetail":"very"}]' && a.made.length === 1, [a.log, a.saved]);
     v = a.w.FB.detail('normal');
     ok('detail("normal"): today\'s numbers', v === 'normal' && a.log[1].budget === 900000 && a.log[1].far === 180 && a.log[1].cacheTris === 3000000 && a.saved[1].brushDetail === 'normal');
     const n0 = a.log.length, s0 = a.saved.length;
     for (const bad of ['', 'huge', null, 42, 'constructor', '__proto__', 'normal']) a.w.FB.detail(bad);
     ok('the same step again, or a name that is no step: nothing happens, nothing saved', a.w.FB.detail() === 'normal' && a.log.length === n0 && a.saved.length === s0);
-    r0 = a.w.redraws; v = a.w.FB.simpleFar(false);
-    ok('simpleFar(false): at once to the look, a frame, saved; the step stays', v === false && a.w.FB.simpleFar() === false && a.log[n0].simple === false && a.log[n0].budget === 900000 && a.w.redraws > r0 && JSON.stringify(a.saved[s0]) === '{"brushSimple":false}' && a.w.FB.detail() === 'normal');
-    a.w.FB.simpleFar(false); a.w.FB.simpleFar('yes'); a.w.FB.simpleFar();
-    ok('…the same again or not a boolean: nothing', a.log.length === n0 + 1 && a.saved.length === s0 + 1);
     // the look put on again (another look and back) keeps the choice
     a.w.FB.look('blocks'); a.w.FB.look('bushes');
-    ok('the look made again gets the chosen numbers', a.made.length === 2 && a.made[1].triangles === 900000 && a.made[1].far === 180 && a.made[1].simple === false);
+    ok('the look made again gets the chosen numbers', a.made.length === 2 && a.made[1].triangles === 900000 && a.made[1].far === 180);
     // FlexBrush.budget() (tests, trying numbers) still wins over the step
     a.w.FB.budget(123456, 400000); a.w.FB.look('blocks'); a.w.FB.look('bushes');
     ok('FlexBrush.budget() still sets other numbers for a look', a.made[2].triangles === 123456 && a.made[2].cache === 400000 && a.made[2].far === 180);
     // the saved choice at the next start
     let b = await mk({ detail: 'very', simpleFar: false });
-    ok('a saved choice is put on at the start (very far, simple off), not written again', b.w.FB.detail() === 'very' && b.w.FB.simpleFar() === false && b.made[0].triangles === 3000000 && b.made[0].far === 600 && b.made[0].cache === 10000000 && b.made[0].simple === false && b.saved.length === 0);
-    b = await mk({ detail: 'nonsense', simpleFar: 'x' });
-    ok('a saved value that is no step: Far; anything but false: on', b.w.FB.detail() === 'far' && b.w.FB.simpleFar() === true);
+    ok('a saved step is put on at the start (very far), not written again; an older build\'s "simple off" is ignored and not written', b.w.FB.detail() === 'very' && b.made[0].triangles === 3000000 && b.made[0].far === 600 && b.made[0].cache === 10000000 && !('simple' in b.made[0]) && b.saved.length === 0 && !('simpleFar' in b.w.FB.stats()));
+    b = await mk({ detail: 'nonsense' });
+    ok('a saved value that is no step: Far', b.w.FB.detail() === 'far');
     // the rows in More
     const mkSeg = () => { const kids = [], seg = { children: kids, ownerDocument: { createElement: () => ({ style: {} }) }, parentNode: { insertBefore(n, ref) { seg.after = n; seg.ref = ref; } }, nextSibling: 'next' }; return seg; };
     let heads = [], segArgs = null, seg = mkSeg(), re = 0;
@@ -397,19 +394,12 @@ const b64 = buf => Buffer.from(buf).toString('base64');
     ok('More: a "Brush detail" choice of three, the step in use lit, a line of what it does under it', got === seg && heads.join() === 'Brush detail' && segArgs.opts.join() === 'Normal,Far,Very far' && segArgs.act === 1 && seg.id === 'brush-detail' && seg.after.id === 'brush-detail-hint' && /bush/.test(seg.after.textContent) && seg.ref === 'next');
     segArgs.pick(2);
     ok('…a tap takes the step and draws the sheet again', b.w.FB.detail() === 'very' && re === 1 && b.saved[0].brushDetail === 'very');
-    let rowArgs = null; const rowEl = {};
-    const gotRow = b.w.FB.sheetLow({ row: (icon, title, sub, fn, active) => { rowArgs = { icon, title, sub, fn, active }; return rowEl; }, rerender: () => re++ });
-    ok('More: a row "Simpler bushes far away", lit when on', gotRow === rowEl && rowEl.id === 'brush-simple' && rowArgs.title === 'Simpler bushes far away' && rowArgs.active === true && /^on/.test(rowArgs.sub));
-    rowArgs.fn();
-    ok('…a tap switches it and draws the sheet again', b.w.FB.simpleFar() === false && re === 2 && b.saved[1].brushSimple === false);
-    b.w.FB.sheetLow({ row: (icon, title, sub, fn, active) => { rowArgs = { sub, active }; return {}; } });
-    ok('…and then it says off', rowArgs.active === false && /^off/.test(rowArgs.sub));
     // the real look takes the numbers
     const c = makeViewer(); vm.runInContext(fs.readFileSync(path.join(root, 'viewer_build', 'libs', 'brush-bushes.js'), 'utf8'), c.ctx);
     await c.FB.init(c.opts({ version: 1, file })); c.look([20, -40, 160], [20, 20, 100]); c.FB.settle();
     const lk = c.FB.objects().look, l1 = lk.limits();
-    c.FB.detail('very'); const l2 = lk.limits(); c.FB.simpleFar(false); const l3 = lk.limits(); c.FB.detail('normal'); const l4 = lk.limits();
-    ok('the bushes look: the step\'s reach, limit and cache (in bushes held), the simpler bush', c.FB.look() === 'bushes' && l1.budget === 1800000 && l1.far === 360 && l1.simple === true && l2.budget === 3000000 && l2.far === 600 && l2.cache === 400000 && l3.simple === false && l4.budget === 900000 && l4.far === 180 && l4.cache === 120000 && l4.simple === false, [l1, l2, l3, l4]);
+    c.FB.detail('very'); const l2 = lk.limits(); c.FB.detail('normal'); const l4 = lk.limits();
+    ok('the bushes look: the step\'s reach, limit and cache (in bushes held); no "simple" in its limits', c.FB.look() === 'bushes' && l1.budget === 1800000 && l1.far === 360 && !('simple' in l1) && l2.budget === 3000000 && l2.far === 600 && l2.cache === 400000 && l4.budget === 900000 && l4.far === 180 && l4.cache === 120000 && c.FB.stats().shown.trisPerFar === 9, [l1, l2, l4]);
   }
 
   console.log(`${pass} passed, ${fail} failed`);

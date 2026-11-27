@@ -515,7 +515,7 @@
         <summary class="help-section">TOOLBAR</summary>
         <div class="help-row"><span class="help-icon">📍</span><span class="help-desc">GPS: off / pin / follow / heading-up. Record a track, drop pins, export GPX or KML, calibrate the compass.</span></div>
         <div class="help-row"><span class="help-icon">🔧</span><span class="help-desc">Tools: find (stations, leads active or closed, inventories), measure, route, reach, fly, crane, import KML. Also 📐 field survey, 📚 documents and 📝 change log (with undo).</span></div>
-        <div class="help-row"><span class="help-icon">⋯</span><span class="help-desc">More: units (ft / m), what counts as narrow, stooping, crawling or steep (Route difficulty), who is entering data, ⇄ project &amp; sync files (to share with other phones and FLEX), export project data, fullscreen, help.</span></div>
+        <div class="help-row"><span class="help-icon">⋯</span><span class="help-desc">More: units (ft / m), how the map is touched, who is entering data, ⇄ project &amp; sync files (to share with other phones and FLEX), export project data, fullscreen, help.</span></div>
       </details>
       <details class="help-sec">
         <summary class="help-section">ROUTE</summary>
@@ -2200,7 +2200,7 @@ setTimeout(() => {
       THREE, scene, camera, brush: typeof BRUSH === 'undefined' ? null : BRUSH, isAssetRef, b64ToArrayBuffer, groundZ: gridZAt,
       dither: window.FlexTrees && FlexTrees.dither, redraw: () => { requestRender(); wakeRender(); },
       onLook: () => { if (_dispRestored) dispCapture(); },
-      detail: DISP.brushDetail, simpleFar: DISP.brushSimple, save: p => dispSave(p),     // ⋯ More → Brush detail, Simpler bushes far away
+      detail: DISP.brushDetail, save: p => dispSave(p),     // ⋯ More → Brush detail
     });
     // Trees and brush as simple solids (nothing when TREES is null).
     if (window.FlexTrees) FlexTrees.init({
@@ -2955,7 +2955,8 @@ const FT = 0.3048;
 const HARD_EASY = new THREE.Color('#9aa0aa'), HARD_UNKNOWN = new THREE.Color('#3c3f46');
 const HARD_NARROW = new THREE.Color(0.10, 0.38, 1.0);    // blue
 const HARD_LOW    = new THREE.Color(1.0, 0.08, 0.05);    // red
-// What counts as tight or steep is a setting (⋯ More → Route difficulty),
+// What counts as tight or steep is a setting (setRouteThresholds(); its rows in
+// ⋯ More are gone for now, a choice made with them is still read),
 // kept on this phone: narrow below `narrow` ft wide (worst at a third of it),
 // stooping below `stoop` ft high, crawling below `crawl` (flat-out at half),
 // steep from `steepDeg` degrees with at least `steepDrop` ft up or down.
@@ -4816,24 +4817,12 @@ function renderMoreSheet() {
   sheetSeg(['Feet', 'Metres'], UNITS === 'm' ? 1 : 0, i => { setUnits(i ? 'm' : 'ft'); rerenderSheet(); });
   if (window.GroundDrag) GroundDrag.sheet({ head: sheetHead, seg: sheetSeg, sheet: sheetEl, rerender: rerenderSheet });   // Touch: Orbit / Surface drag / Drag the ground (libs/ground-drag.js)
   if (window.FlexBrush && FlexBrush.active()) FlexBrush.sheet({ head: sheetHead, seg: sheetSeg, rerender: rerenderSheet });   // Brush detail: Normal / Far / Very far (libs/brush-blocks.js)
-  sheetHead('Route difficulty');
-  [['Narrow below', 'narrow', 'ft wide', 0.5], ['Stooping below', 'stoop', 'ft high', 0.5], ['Crawling below', 'crawl', 'ft high', 0.5],
-   ['Steep from', 'steepDeg', '° (and at least the drop below)', 5], ['Steep drop of', 'steepDrop', 'ft up or down', 1]].forEach(([lab, k, unit, step]) => {
-    const r = el('div', 'fp-row rt-set'); r.dataset.rt = k;
-    r.appendChild(el('span', '', lab));
-    const dn = el('button', 'fp-btn', '−'), val = el('b', 'rt-val', String(RT[k])), up = el('button', 'fp-btn', '+');
-    const bump = d => { setRouteThresholds({ [k]: Math.max(step, +(RT[k] + d).toFixed(2)) }); rerenderSheet(); };
-    dn.addEventListener('click', () => bump(-step)); up.addEventListener('click', () => bump(step));
-    r.append(dn, val, up, el('span', 'sh-s', unit));
-    sheetEl.appendChild(r);
-  });
-  sheetRow('↺', 'Reset to the defaults', 'narrow 3 ft · stooping 6 ft · crawling 4 ft · steep 50° and 10 ft', () => { setRouteThresholds(RT_DEFAULT); rerenderSheet(); });
+  // (The Route difficulty rows were here; RT and setRouteThresholds() stay, and a saved choice still colours the routes.)
   sheetHead('Entering data as');
   const ar = el('div', 'fp-row'); ar.appendChild(ffAuthorChip()); sheetEl.appendChild(ar);
   sheetRow('⇄', 'Project & sync', ffPid ? (ffP.name || 'project') + ' · sync files to other phones and FLEX' : 'pick or start this map’s project', () => { ffOpenProject(); });
   sheetRow('⇪', 'Export project data', 'notes, leads, documents list, field surveys, the log (JSON)', () => { closeSheet(); ffExportData(); });
   if (window.FF_MAP_ID) sheetRow('🗂', 'Maps', 'back to the list of maps', () => { location.href = '../../assets/flexfield/index.html'; });
-  if (window.FlexBrush && FlexBrush.active()) FlexBrush.sheetLow({ row: sheetRow, rerender: rerenderSheet });   // Simpler bushes far away
   sheetRow('⛶', 'Fullscreen', null, () => { closeSheet(); document.getElementById('btn-fullscreen').click(); });
   sheetRow('?', 'Help', null, () => { closeSheet(); document.getElementById('btn-help').click(); });
   if (window.AboutMap) sheetRow('ⓘ', 'About this map', 'when it was exported, the area, what it carries', () => { closeSheet(); aboutMapOpen(); });

@@ -155,9 +155,9 @@ registered with the hub in `brush-blocks.js`, whose low blocks are the
 fall-back; how dense the brush is shows as how solid a bush is. Single bushes
 are drawn out to the distance of ⋯ More → Brush detail: Normal 180 m, Far
 360 m (the default), Very far 600 m, with a triangle limit of 0.9, 1.8 and
-3 million; clumps carry the brush beyond. ⋯ More → Simpler bushes far away,
-on by default, draws bushes past 150 m with 9 triangles. Both are kept per
-project (`DISP.brushDetail`, `DISP.brushSimple`). The Brush chip of 🎨 Display → Trees and brush
+3 million; clumps carry the brush beyond. Bushes past 150 m are always drawn
+with 9 triangles (no switch). Brush detail is kept per project
+(`DISP.brushDetail`). The Brush chip of 🎨 Display → Trees and brush
 switches them, a hold on a chip opens its opacity slider, and the Light /
 Medium / Dense chips under it switch each density class); a map without them
 gets `null`.
