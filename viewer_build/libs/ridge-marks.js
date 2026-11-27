@@ -411,7 +411,10 @@
         const unit = ui.units && ui.units.u === 'm' ? 'm' : 'ft';
         [['hi', 'Highlight deeper than', 'ridge-hi-slider'], ['grey', 'Grey out shallower than', 'ridge-grey-slider']].forEach(([key, text, id]) => {
           const row = ui.el('div', 'sh-sl'), lab = ui.el('label', '', text), val = ui.el('div', '', depthLabel(S.st[key], unit)), inp = ui.el('input');
-          lab.style.width = '112px'; lab.style.lineHeight = '1.15'; val.style.width = '46px'; val.id = id + '-val';
+          // two lines in the narrow sheet: the name and the value, then the slider across the whole width (a finger needs the length)
+          row.style.flexWrap = 'wrap'; row.style.rowGap = '2px';
+          lab.style.width = 'auto'; lab.style.flex = '1 1 auto'; lab.style.order = '1'; val.style.width = 'auto'; val.style.order = '2'; inp.style.flex = '0 0 100%'; inp.style.order = '3';
+          val.id = id + '-val';
           inp.type = 'range'; inp.min = '0'; inp.max = String(DEPTH_MAX_FT); inp.step = '1'; inp.value = String(S.st[key]); inp.id = id;
           inp.style.accentColor = '#00e5ff';
           inp.addEventListener('input', () => { val.textContent = depthLabel(depthFtClamp(+inp.value), unit); });       // the number follows the finger
