@@ -201,6 +201,14 @@
    * nothing, not checked; an empty folder is left out. A pin stands at the middle of its feature's box (a lone mark: at
    * its own place). Features with no mark are not in the file.
    */
+  // A pin's name: the note first (one line, its first KML_NOTE_MAX characters), then the mark and the depth:
+  // "Blowing hole by the oak - Cave - 4.4 m"; with no note "Cave - 4.4 m". The whole note is in the description.
+  const KML_NOTE_MAX = 40;
+  function kmlName(note, label, depth) {
+    let n = String(note == null ? '' : note).replace(/\s+/g, ' ').trim();
+    if (n.length > KML_NOTE_MAX) n = n.slice(0, KML_NOTE_MAX).trim() + '…';
+    return [n, label, depth].filter(Boolean).join(' - ');
+  }
   function kmlPlacemarks(features, M, o) {
     o = o || {};
     const unit = o.unit === 'm' ? 'm' : 'ft', by = {};
@@ -210,7 +218,7 @@
       if (!KML_LABELS[m.kind] || !fin(lat) || !fin(lon)) return;
       const d = depthIn(depth, unit), t = m.updated && m.updated.t ? new Date(m.updated.t) : null;
       const desc = lines.filter(Boolean).join('\n');
-      (by[m.kind] = by[m.kind] || []).push('<Placemark><name>' + xmlText(KML_LABELS[m.kind] + (d ? ' · ' + d : '')) + '</name>' +
+      (by[m.kind] = by[m.kind] || []).push('<Placemark><name>' + xmlText(kmlName(m.note, KML_LABELS[m.kind], d)) + '</name>' +
         (desc ? '<description>' + xmlText(desc) + '</description>' : '') +
         (t && !isNaN(t) ? '<TimeStamp><when>' + t.toISOString() + '</when></TimeStamp>' : '') +
         '<styleUrl>#rw-' + m.kind + '</styleUrl><Point><coordinates>' + lon.toFixed(7) + ',' + lat.toFixed(7) + ',' + (fin(alt) ? alt.toFixed(1) : '0') + '</coordinates></Point></Placemark>');
@@ -477,7 +485,7 @@
   }
 
   const R = {
-    DEFAULTS, STATE_V, TAP_PX, SYMBOL, ENTRANCE, DEPTH_MAX_FT, RING_PX, depthFt, depthFtClamp, depthSplit, depthLabel, ringAt, both, cleanFeatures, featHint, matchFeature, effective, match, markBody, featureRows, byLine, describe, restore, nothingBoxes, nearestTap, KML_LABELS, posText, depthIn, xmlText, kmlColour, kmlPlacemarks,
+    DEFAULTS, STATE_V, kmlName, KML_NOTE_MAX, TAP_PX, SYMBOL, ENTRANCE, DEPTH_MAX_FT, RING_PX, depthFt, depthFtClamp, depthSplit, depthLabel, ringAt, both, cleanFeatures, featHint, matchFeature, effective, match, markBody, featureRows, byLine, describe, restore, nothingBoxes, nearestTap, KML_LABELS, posText, depthIn, xmlText, kmlColour, kmlPlacemarks,
     inverse: e => FL.rmarkUndo(e),
 
     // o: { THREE, scene, camera, features, marks (RIDGE's: a list or a file name each), saved, ridge (FlexRidge), project(),

@@ -184,7 +184,7 @@ ridgewalking feature, a surface feature and a station show "From you"
 (distance and true bearing, `viewer_build/libs/from-you.js`). A ridgewalking
 feature's card also has "Position" (latitude, longitude of the middle of its box,
 5 decimals; a tap copies it: `navigator.clipboard`, else the old copy command),
-and the GPS panel's KML export carries one pin per marked feature in folders
+and the GPS panel's KML export carries one pin per marked feature (named by its note, then the mark and the depth) in folders
 "Ridgewalking: Cave / Pit / Nothing / Not checked" beside "Points" and "Tracks"
 (`RidgeMarks.kmlPlacemarks`; saved through `AndroidHost.shareFile` like every
 export; GPX is unchanged). A map imported with an older
