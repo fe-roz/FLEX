@@ -513,7 +513,7 @@
       </details>
       <details class="help-sec" open>
         <summary class="help-section">TOOLBAR</summary>
-        <div class="help-row"><span class="help-icon">📍</span><span class="help-desc">GPS: off / pin / follow / heading-up. Record a track, drop pins, export GPX or KML, calibrate the compass. With a fix, the card of a station or a feature says <b>From you</b>: how far it is and in which direction.</span></div>
+        <div class="help-row"><span class="help-icon">📍</span><span class="help-desc">GPS: off / pin / follow / heading-up. Record a track, drop pins, export GPX or KML (the KML also carries the marked ridgewalking features), calibrate the compass. With a fix, the card of a station or a feature says <b>From you</b>: how far it is and in which direction.</span></div>
         <div class="help-row"><span class="help-icon">🔧</span><span class="help-desc">Tools: find (stations, leads active or closed, inventories), measure, route, reach, fly, crane, import KML. Also 📐 field survey, 📚 documents and 📝 change log (with undo).</span></div>
         <div class="help-row"><span class="help-icon">⋯</span><span class="help-desc">More: units (ft / m), how the map is touched, who is entering data, ⇄ project &amp; sync files (to share with other phones and FLEX), export project data, fullscreen, help.</span></div>
       </details>
@@ -663,6 +663,7 @@
       <button id="fp-exp-gpx" class="fp-btn">GPX</button>
       <button id="fp-exp-kml" class="fp-btn">KML</button>
     </div>
+    <div id="fp-exp-note" class="fp-note" hidden></div>
   </div>
 </div>
 
@@ -4308,9 +4309,7 @@ function recBadgeUpdate() {
   if (sheetOpen === 'gps') {
     const st = document.getElementById('fp-rec-stats'); if (st) st.textContent = document.getElementById('rec-stats').textContent;
     const rm = document.getElementById('fp-rec-meta'); if (rm && rm._meta) rm.textContent = rm._meta();
-    const has = field.tracks.some(t => t.pts.length) || field.points.length;
-    document.getElementById('fp-exp-gpx').disabled = !has;
-    document.getElementById('fp-exp-kml').disabled = !has;
+    fieldExportButtons();
   }
 }
 
@@ -4508,9 +4507,7 @@ function fieldRenderList() {
     n.textContent = 'Nothing recorded yet. Tracks and points stay on this phone until you export them.';
     list.appendChild(n);
   }
-  const has = field.tracks.some(t => t.pts.length) || field.points.length;
-  document.getElementById('fp-exp-gpx').disabled = !has;
-  document.getElementById('fp-exp-kml').disabled = !has;
+  fieldExportButtons();
 }
 document.getElementById('fp-rec').addEventListener('click', () => recTrack ? recStop() : recStart());
 document.getElementById('rec-badge').addEventListener('click', () => openGpsSheet());
@@ -4543,22 +4540,46 @@ function fieldGPX() {
   return out.join('\n');
 }
 
+// The marked ridgewalking features as KML folders (none on a map without them). A pin's height is the ground's from
+// the height grid (else the top of the feature's box), back in the terrain's own datum as fieldEle does; never a ray cast.
+function fieldRidgeKml() {
+  const none = { count: 0, styles: [], folders: [] };
+  if (!(window.RidgeMarks && RidgeMarks.active())) return none;
+  try {
+    return RidgeMarks.kml({ unit: U.u, alt: (x, y, z) => {
+      const g = gridZAt(x, y), h = g !== null && !isNaN(g) ? g : z;
+      return h == null || !isFinite(h) ? null : h - (META.z_offset || 0);
+    } });
+  } catch (_) { return none; }
+}
+// The export buttons: GPX needs a track or a point; KML also goes out with only marked ridgewalking features.
+function fieldExportButtons() {
+  const has = field.tracks.some(t => t.pts.length) || field.points.length;
+  const marks = window.RidgeMarks && RidgeMarks.active() ? RidgeMarks.marked() : 0;
+  document.getElementById('fp-exp-gpx').disabled = !has;
+  document.getElementById('fp-exp-kml').disabled = !has && !marks;
+  const n = document.getElementById('fp-exp-note');
+  if (n) { n.hidden = !marks; n.textContent = marks ? `KML also carries the ${marks} marked ridgewalking feature${marks === 1 ? '' : 's'}, in a folder per mark.` : ''; }
+}
 function fieldKML() {
-  const mapName = META.name || 'FLEX map', out = [];
+  const mapName = META.name || 'FLEX map', out = [], rw = fieldRidgeKml();
   const coord = (lat, lon, alt) => { const e = eleFix(fieldEle(lat, lon, alt)); return `${lon.toFixed(7)},${lat.toFixed(7)}` + (e ? ',' + e : ''); };
   out.push('<?xml version="1.0" encoding="UTF-8"?>',
     '<kml xmlns="http://www.opengis.net/kml/2.2"><Document>',
-    `<name>${xmlEsc(mapName)} — tracks and points</name>`,
+    `<name>${xmlEsc(mapName)} — ${rw.count ? 'tracks, points and ridgewalking marks' : 'tracks and points'}</name>`,
     '<Style id="trk"><LineStyle><color>ffa34fff</color><width>3</width></LineStyle></Style>',
-    '<Style id="pt"><IconStyle><color>ffa34fff</color></IconStyle></Style>');
-  field.points.forEach(p => out.push(
+    '<Style id="pt"><IconStyle><color>ffa34fff</color></IconStyle></Style>', ...rw.styles);
+  // Folders: Points, Tracks, then one per ridgewalking mark (libs/ridge-marks.js); an empty folder is left out.
+  const folder = (name, items) => { if (items.length) out.push(`<Folder><name>${xmlEsc(name)}</name>`, ...items, '</Folder>'); };
+  folder('Points', field.points.map(p =>
     `<Placemark><name>${xmlEsc(p.name)}</name>` + (p.note ? `<description>${xmlEsc(p.note)}</description>` : '') +
     `<TimeStamp><when>${new Date(p.t).toISOString()}</when></TimeStamp><styleUrl>#pt</styleUrl>` +
     `<Point><coordinates>${coord(p.lat, p.lon, p.alt)}</coordinates></Point></Placemark>`));
-  field.tracks.filter(t => t.pts.length).forEach(tr => out.push(
+  folder('Tracks', field.tracks.filter(t => t.pts.length).map(tr =>
     `<Placemark><name>${xmlEsc(tr.name)}</name><styleUrl>#trk</styleUrl>` +
     `<LineString><tessellate>1</tessellate><altitudeMode>clampToGround</altitudeMode><coordinates>` +
     tr.pts.map(q => coord(q[0], q[1], q[2])).join(' ') + '</coordinates></LineString></Placemark>'));
+  rw.folders.forEach(f => out.push(f.xml));
   out.push('</Document></kml>');
   return out.join('\n');
 }
@@ -5530,7 +5551,7 @@ function ffAfterChange(e) {
   if (ffDocsOpen) ffRenderDocs();
   if (/^(note|lead|doc)\./.test(e.op)) ffRefreshCard();
   if (/^inv\./.test(e.op) && window.ViewerInv) ViewerInv.changed(e);      // the chests, the inventory card, the station card
-  if (e.op === 'rmark.set' && window.RidgeMarks) RidgeMarks.refresh();   // the badges and the card
+  if (e.op === 'rmark.set' && window.RidgeMarks) { RidgeMarks.refresh(); if (sheetOpen === 'gps') fieldExportButtons(); }   // the badges and the card; the KML button
 }
 function ffRefreshCard() {
   const sel = _selMesh && _selMesh._station;

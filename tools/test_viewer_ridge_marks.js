@@ -103,6 +103,60 @@ ok('saved choices: this version only', RM.restore({ v: 1, marks: false, hideNoth
     RM.restore({ v: 1, hi: '30', grey: NaN }).hi === 0 && RM.restore({ v: 1, hi: '30', grey: NaN }).grey === 0 && RM.restore({ v: 1, marks: false }).hi === 0 && RM.restore(null).grey === 0 && RM.restore({ v: 1, hi: 12.4 }).hi === 12 && RM.DEFAULTS.hi === 0 && RM.DEFAULTS.grey === 0);
 }
 
+// ── 1c. Position, and the marked features as KML pins ─────────────────────────
+{
+  ok('a position reads latitude first, 5 decimals; nothing without a place', RM.posText(45.1234, -100.5678) === '45.12340, -100.56780' && RM.posText(45.123456789, -100.567891) === '45.12346, -100.56789' && RM.posText(-0.000004, 7) === '-0.00000, 7.00000' && RM.posText(null, 3) === '' && RM.posText(1, undefined) === '');
+  ok('a depth in the map’s one unit', RM.depthIn(6.7, 'ft') === '22 ft' && RM.depthIn(6.7, 'm') === '6.7 m' && RM.depthIn(2.1, 'ft') === '6.9 ft' && RM.depthIn(30.48, 'm') === '30 m' && RM.depthIn(null, 'ft') === '' && RM.depthIn(0, 'ft') === '0.0 ft');
+  ok('KML colours are aabbggrr', RM.kmlColour('#43c463') === 'ff63c443' && RM.kmlColour('#3D8BFF') === 'ffff8b3d' && RM.kmlColour('nope') === 'ffffffff');
+  ok('text for XML: & < > and quotes escaped, forbidden control characters dropped, a CDATA end harmless', RM.xmlText('a & b <c> "d" \'e\' ]]> \u0001\u000bok\n') === 'a &amp; b &lt;c&gt; &quot;d&quot; &apos;e&apos; ]]&gt; ok\n' && RM.xmlText(null) === '' && RM.xmlText(12) === '12');
+  // three marked features (one with a note full of markup, one "not reached" that somebody else also marked), one unmarked, and two lone marks
+  const mk = (id, kind, note, who, f, extra) => Object.assign({ id, kind, note: note || '', lon: f ? f.lon : LON + 0.02, lat: f ? f.lat : LAT + 0.01, h: f ? f.z : null, updated: { who, t: '2026-11-20T10:00:00.000Z' }, history: [] }, extra || {});
+  const nasty = 'Tight <squeeze> & "wet"; it\'s 3 m ]]> in\nsecond line';
+  const KM = { byFeature: {
+      'r10-20': { mark: mk('m1', 'cave', nasty, 'Ana', feats[0]), also: [] },
+      'r30-5': { mark: mk('m2', 'unreached', '', 'Bo', feats[1]), also: [mk('m2b', 'nothing', 'looked from above', 'Cy', feats[1])] },
+      'r50-9': { mark: mk('m3', 'nothing', 'a dip', 'Cy', feats[2]), also: [] } },
+    alone: [mk('m4', 'cave', 'was here last year', 'Ana', null, { feat: { depth: 9.4, returns: 40 } }), mk('m5', 'pit', '', 'Bo', null, { lon: LON + 0.03 })] };
+  const toLonLat = (x, y) => ({ lon: LON + x / MX, lat: LAT + y / MY });
+  const toScene = (lat, lon) => ({ x: (lon - LON) * MX, y: (lat - LAT) * MY });
+  const alts = [];
+  const K = RM.kmlPlacemarks(feats, KM, { toLonLat, toScene, unit: 'ft', alt: (x, y, z) => { alts.push([x, y, z]); return z === null ? null : z - 100; } });
+  const all = K.folders.map(f => f.xml).join('\n');
+  const names = x => Array.from(x.matchAll(/<Placemark><name>([^<]*)<\/name>/g)).map(m => m[1]);
+  ok('one pin per marked feature and per lone mark; the unmarked feature is not in the file', K.count === 5 && names(all).length === 5 && !/r70-1/.test(all) && !names(all).some(n => /3\.9 ft/.test(n)), names(all));
+  ok('a folder per mark, in the order cave, pit, nothing, not checked', K.folders.map(f => f.name + ':' + f.n).join('|') === 'Ridgewalking: Cave:2|Ridgewalking: Pit:1|Ridgewalking: Nothing:1|Ridgewalking: Not checked:1' &&
+    K.folders.every(f => f.xml.startsWith('<Folder><name>' + f.name + '</name>') && f.xml.endsWith('</Folder>')), K.folders.map(f => f.name + ':' + f.n));
+  ok('a pin is named by its mark and the depth in the map’s unit; a lone mark by the depth it had, or the mark alone', names(K.folders[0].xml).join('|') === 'Cave · 32 ft|Cave · 31 ft' && names(K.folders[1].xml).join('|') === 'Pit' &&
+    names(K.folders[2].xml).join('|') === 'Nothing · 6.9 ft' && names(K.folders[3].xml).join('|') === 'Not checked · 20 ft', K.folders.map(f => names(f.xml)));
+  const Km = RM.kmlPlacemarks(feats, KM, { toLonLat, unit: 'm' });
+  ok('…in metres when the map is set to metres', names(Km.folders.map(f => f.xml).join('')).join('|') === 'Cave · 9.9 m|Cave · 9.4 m|Pit|Nothing · 2.1 m|Not checked · 6.2 m', names(Km.folders.map(f => f.xml).join('')));
+  ok('a colour style per folder, the marks’ own colours', K.styles.length === 4 && K.styles[0].startsWith('<Style id="rw-cave"><IconStyle><color>ff63c443</color>') && K.styles[1].includes('id="rw-pit"') && K.styles[1].includes('ffff8b3d') &&
+    K.styles[2].includes('ffa6a09a') && K.styles[3].includes('ff20b0ff') && (all.match(/<styleUrl>#rw-cave<\/styleUrl>/g) || []).length === 2 && all.includes('<styleUrl>#rw-unreached</styleUrl>'));
+  const desc = x => Array.from(x.matchAll(/<description>([^<]*)<\/description>/g)).map(m => m[1]);
+  const d0 = desc(K.folders[0].xml)[0];
+  ok('the note is escaped (markup, quotes, a CDATA end) and nothing of it is left raw', d0.startsWith('Tight &lt;squeeze&gt; &amp; &quot;wet&quot;; it&apos;s 3 m ]]&gt; in\nsecond line\n') && !/<squeeze>|]]>/.test(all));
+  ok('the description: who marked it and when, what it is, depth, returns, size, position', /\nMarked Cave · Ana · .*2026\nTrue entrance\nDepth: 32 ft \(9\.9 m\)\nReturns: 120\nSize: 13 ft \(4\.0 m\) × 13 ft \(4\.0 m\)\nPosition: 45\.12358, -100\.56767$/.test(d0), d0);
+  ok('…what others said of the same feature', /^Marked Not checked · Bo · .*\nAlso marked: Nothing \(Cy · .*2026\): looked from above$/s.test(desc(K.folders[3].xml)[0]), desc(K.folders[3].xml)[0]);
+  ok('…a lone mark: its note, that its feature is gone, what it had then', /^was here last year\nMarked Cave · Ana · .*\nIts feature is not on this map: the mark is at its own place\.\nDepth then: 31 ft \(9\.4 m\)\nReturns then: 40\nPosition: 45\.13340, -100\.54780$/s.test(desc(K.folders[0].xml)[1]), desc(K.folders[0].xml)[1]);
+  const co = x => Array.from(x.matchAll(/<coordinates>([^<]*)<\/coordinates>/g)).map(m => m[1].split(',').map(Number));
+  const c = co(all), mid = toLonLat(60, -4.5);
+  ok('a pin stands at the middle of its feature’s box (not at the anchor), lon,lat,height', c.length === 5 && near(c[4][0], mid.lon, 1e-6) && near(c[4][1], mid.lat, 1e-6) && Math.abs(c[4][1] - feats[1].lat) > 1e-5 && near(c[0][0], toLonLat(10, 20).lon, 1e-6) && c[0][2] === 400 && c[4][2] === 405, c);
+  ok('…a lone mark at its own place; its height asked at its place in the scene, 0 when not known', near(c[1][0], LON + 0.02, 1e-6) && near(c[1][1], LAT + 0.01, 1e-6) && c[1][2] === 0 && near(c[2][0], LON + 0.03, 1e-6) && alts.length === 5 && near(alts[3][0], 0.02 * MX, 1e-3) && alts[3][2] === null, [c[1], alts[3]]);
+  ok('the height is asked at the box’s middle and top; without a height function 0 is written', alts[0].join() === '10,20,500' && co(Km.folders.map(f => f.xml).join('')).every(q => q[2] === 0));
+  ok('the time of the mark is in the pin', (all.match(/<TimeStamp><when>2026-11-20T10:00:00\.000Z<\/when><\/TimeStamp>/g) || []).length === 5);
+  // every tag closed, in order (a small check; the kit parses the whole file in a browser)
+  const balanced = x => { const st = []; for (const m of x.matchAll(/<(\/?)([A-Za-z]+)[^>]*?(\/?)>/g)) { if (m[3]) continue; if (!m[1]) st.push(m[2]); else if (st.pop() !== m[2]) return false; } return st.length === 0; };
+  ok('the folders are well formed', K.folders.every(f => balanced(f.xml)) && K.styles.every(balanced) && !/&(?!amp;|lt;|gt;|quot;|apos;)/.test(all));
+  const none = RM.kmlPlacemarks(feats, { byFeature: {}, alone: [] }, { toLonLat });
+  ok('no marks: no folders, no styles (the export is as before)', none.count === 0 && none.folders.length === 0 && none.styles.length === 0 && RM.kmlPlacemarks([], null, null).count === 0);
+  const one = RM.kmlPlacemarks(feats, { byFeature: { 'r50-9': KM.byFeature['r50-9'] }, alone: [] }, { toLonLat });
+  ok('only the folders that have pins are written', one.folders.length === 1 && one.folders[0].name === 'Ridgewalking: Nothing' && one.styles.length === 1 && one.count === 1);
+  const far = RM.kmlPlacemarks(feats, KM, { unit: 'ft' });
+  ok('without a converter a feature falls back to its anchor; a mark with no place or an unknown kind is left out', near(co(far.folders[3].xml)[0][0], feats[1].lon, 1e-6) &&
+    RM.kmlPlacemarks([], { byFeature: {}, alone: [mk('q', 'cave', '', 'Ana', null, { lat: null }), mk('q2', 'odd', '', 'Ana', null)] }, {}).count === 0);
+  ok('the page’s own calls answer on a map without marks', RM.marked() === 0 && RM.kml({ unit: 'ft' }).count === 0);
+}
+
 // ── 2. The page: three.js, the real modules, a stand-in document ──────────────
 function makeViewer() {
   const mk = tag => { const e = { tagName: tag.toUpperCase(), style: {}, dataset: {}, children: [], _on: {}, className: '', appendChild(c) { e.children.push(c); c.parent = e; return c; }, addEventListener(ev, f) { e._on[ev] = f; },
