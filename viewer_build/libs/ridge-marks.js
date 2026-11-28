@@ -22,6 +22,10 @@
  *    hides them. A feature with a ring is not greyed (the ring wins when the two ranges overlap). Both are kept in
  *    FEET (0 = off, the start), with the other choices of this file (DISP.rmarks: `hi`, `grey`); the label shows the
  *    map's unit. They are applied when the slider is let go, never while it moves and never per frame.
+ *  - the card has a row "Position": latitude, longitude of the middle of the feature's box (a lone mark: its own place),
+ *    5 decimals; a tap on it copies it. The same middle is where "From you" measures to and where the KML pin goes;
+ *  - the GPS panel's KML export carries one pin per MARKED feature (kmlPlacemarks: a folder per mark, "Ridgewalking:
+ *    Cave" / "Pit" / "Nothing" / "Not checked" (= not reached), a colour each; features with no mark are left out).
  *
  * Marks never change what is computed: "nothing" only dims and hides on this screen.
  * Two halves: the rules without a DOM (Node-tested by tools/test_viewer_ridge_marks.js) and the page.
@@ -168,6 +172,75 @@
     return best || (inBox ? { i: inBox.i, d: inBox.d } : null);
   }
 
+  /* ── position and the KML pins (no DOM) ── */
+  const KML_KINDS = ['cave', 'pit', 'nothing', 'unreached'];
+  const KML_LABELS = { cave: 'Cave', pit: 'Pit', nothing: 'Nothing', unreached: 'Not checked' };      // in the file "not reached" reads "Not checked"
+  /** "45.12345, -100.56789": latitude first, 5 decimals; '' without a place. */
+  function posText(lat, lon) { return num(lat) === null || num(lon) === null ? '' : (+lat).toFixed(5) + ', ' + (+lon).toFixed(5); }
+  /** A depth in ONE unit, as the map is set: "22 ft" / "6.7 m" (one decimal under 10); '' when not known. */
+  function depthIn(m, unit) {
+    if (num(m) === null) return '';
+    const v = unit === 'm' ? +m : m / FT;
+    return (v < 10 ? v.toFixed(1) : String(Math.round(v))) + (unit === 'm' ? ' m' : ' ft');
+  }
+  /** Text for an XML file: & < > and both quotes escaped, the control characters XML does not allow dropped. */
+  function xmlText(v) {
+    return String(v == null ? '' : v).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]/g, '')
+      .replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
+  }
+  /** '#43c463' → 'ff63c443' (KML writes a colour as aabbggrr). */
+  function kmlColour(hex) {
+    const h = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex || ''));
+    return h ? ('ff' + h[3] + h[2] + h[1]).toLowerCase() : 'ffffffff';
+  }
+  /**
+   * The marked features as KML. features: the module's list, M: the match (byFeature, alone),
+   * o: { toLonLat(x, y) -> { lat, lon } (scene to the map), toScene(lat, lon) -> { x, y } (optional, for a lone mark's
+   *      height), alt(x, y, z) -> the real height in metres or null (optional; 0 is written without it), unit: 'ft' | 'm' }.
+   * → { count, styles: [xml], folders: [{ kind, name, n, xml }] }: a folder per mark that has pins, in the order cave, pit,
+   * nothing, not checked; an empty folder is left out. A pin stands at the middle of its feature's box (a lone mark: at
+   * its own place). Features with no mark are not in the file.
+   */
+  function kmlPlacemarks(features, M, o) {
+    o = o || {};
+    const unit = o.unit === 'm' ? 'm' : 'ft', by = {};
+    const fin = v => typeof v === 'number' && isFinite(v);
+    const who = m => byLine(m.updated && m.updated.who, m.updated && m.updated.t);
+    const pin = (m, depth, lines, lat, lon, alt) => {
+      if (!KML_LABELS[m.kind] || !fin(lat) || !fin(lon)) return;
+      const d = depthIn(depth, unit), t = m.updated && m.updated.t ? new Date(m.updated.t) : null;
+      const desc = lines.filter(Boolean).join('\n');
+      (by[m.kind] = by[m.kind] || []).push('<Placemark><name>' + xmlText(KML_LABELS[m.kind] + (d ? ' · ' + d : '')) + '</name>' +
+        (desc ? '<description>' + xmlText(desc) + '</description>' : '') +
+        (t && !isNaN(t) ? '<TimeStamp><when>' + t.toISOString() + '</when></TimeStamp>' : '') +
+        '<styleUrl>#rw-' + m.kind + '</styleUrl><Point><coordinates>' + lon.toFixed(7) + ',' + lat.toFixed(7) + ',' + (fin(alt) ? alt.toFixed(1) : '0') + '</coordinates></Point></Placemark>');
+    };
+    const head = m => [m.note ? String(m.note).trim() : '', 'Marked ' + KML_LABELS[m.kind] + (who(m) ? ' · ' + who(m) : '')];
+    (features || []).forEach(f => {
+      const hit = M && M.byFeature && M.byFeature[f.id];
+      if (!hit) return;
+      const m = hit.mark, c = ringAt(f);
+      let ll = null; try { ll = o.toLonLat ? o.toLonLat(c[0], c[1]) : null; } catch (_) { ll = null; }
+      const lat = ll && fin(ll.lat) ? ll.lat : f.lat, lon = ll && fin(ll.lon) ? ll.lon : f.lon;
+      const also = (hit.also || []).map(x => (KML_LABELS[x.kind] || x.kind) + ' (' + who(x) + ')' + (x.note ? ': ' + x.note : ''));
+      pin(m, f.deepest, head(m).concat([ENTRANCE[f.entrance]], featureRows(f).map(r => r[0] + ': ' + r[1]), ['Position: ' + posText(lat, lon)], also.length ? ['Also marked: ' + also.join('; ')] : []),
+        lat, lon, o.alt ? o.alt(c[0], c[1], c[2]) : null);
+    });
+    ((M && M.alone) || []).forEach(m => {
+      const ft = m.feat || {}, lat = num(m.lat), lon = num(m.lon);
+      let p = null; try { p = o.toScene && lat !== null && lon !== null ? o.toScene(lat, lon) : null; } catch (_) { p = null; }
+      pin(m, ft.depth, head(m).concat(['Its feature is not on this map: the mark is at its own place.'], num(ft.depth) !== null ? ['Depth then: ' + both(ft.depth)] : [],
+        ft.returns != null ? ['Returns then: ' + ft.returns] : [], ['Position: ' + posText(lat, lon)]), lat, lon, p && o.alt ? o.alt(p.x, p.y, num(m.h)) : null);
+    });
+    const kinds = KML_KINDS.filter(k => by[k] && by[k].length);
+    return {
+      count: kinds.reduce((n, k) => n + by[k].length, 0),
+      styles: kinds.map(k => '<Style id="rw-' + k + '"><IconStyle><color>' + kmlColour(FL.RMARK_COLOURS[k]) + '</color></IconStyle><LabelStyle><color>' + kmlColour(FL.RMARK_COLOURS[k]) + '</color></LabelStyle></Style>'),
+      folders: kinds.map(k => ({ kind: k, name: 'Ridgewalking: ' + KML_LABELS[k], n: by[k].length,
+        xml: '<Folder><name>' + xmlText('Ridgewalking: ' + KML_LABELS[k]) + '</name>\n' + by[k].join('\n') + '\n</Folder>' })),
+    };
+  }
+
   /* ════════════════════════════ the page ══════════════════════════════════ */
   let S = null;      // everything of the running viewer; null = no feature list (a normal export, or an older ridge export)
 
@@ -269,6 +342,35 @@
     return hit ? { feature: S.features[hit.i].id, d: hit.d } : null;
   }
 
+  // Text to the clipboard: the browser's own way when it has one, else a hidden text box and the old copy command
+  // (a WebView without navigator.clipboard). Says "Copied" (or that it could not) in the viewer's toast.
+  function copyText(text) {
+    const say = ok => { if (S && S.toast) S.toast(ok ? 'Copied' : 'Could not copy'); return ok; };
+    const old = () => {
+      let ok = false;
+      try {
+        const t = document.createElement('textarea'); t.value = text; t.setAttribute('readonly', ''); t.style.cssText = 'position:fixed;left:0;top:0;opacity:0;font-size:16px';
+        document.body.appendChild(t); t.focus(); t.select(); try { t.setSelectionRange(0, text.length); } catch (_) {}
+        ok = !!document.execCommand('copy'); document.body.removeChild(t);
+      } catch (_) { ok = false; }
+      return ok;
+    };
+    try {
+      const nav = typeof navigator !== 'undefined' ? navigator : null;
+      if (nav && nav.clipboard && nav.clipboard.writeText) return nav.clipboard.writeText(text).then(() => say(true), () => say(old()));
+    } catch (_) {}
+    return Promise.resolve(say(old()));
+  }
+  // Where a card's subject is on the map: the middle of the feature's box, a lone mark at its own place. → { lat, lon } or null.
+  function placeOf(f, cur) {
+    if (f) {
+      const c = ringAt(f); let ll = null;
+      try { ll = S.toLonLat ? S.toLonLat(c[0], c[1]) : null; } catch (_) { ll = null; }
+      if (ll && num(ll.lat) !== null && num(ll.lon) !== null) return { lat: +ll.lat, lon: +ll.lon };
+      return f.lat !== null && f.lon !== null ? { lat: f.lat, lon: f.lon } : null;
+    }
+    return cur && num(cur.lat) !== null && num(cur.lon) !== null ? { lat: +cur.lat, lon: +cur.lon } : null;
+  }
   // ── the card ──
   function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
   function ensureCard() {
@@ -281,6 +383,7 @@
         '#rm-card .rm-btns{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:6px 0}#rm-card .rm-btn{min-height:46px;border-radius:9px;border:2px solid rgba(255,255,255,.22);background:rgba(255,255,255,.06);color:#eee;font:600 14px system-ui,sans-serif;display:flex;align-items:center;justify-content:center;gap:8px}' +
         '#rm-card .rm-btn i{width:14px;height:14px;border-radius:50%;display:inline-block}#rm-card .rm-btn.a{color:#fff}' +
         '#rm-card textarea{width:100%;box-sizing:border-box;min-height:46px;background:rgba(255,255,255,.07);color:#eee;border:1px solid rgba(255,255,255,.2);border-radius:8px;padding:6px 8px;font:13px system-ui,sans-serif}' +
+        '#rm-card .rm-pos{text-decoration:underline dotted;text-underline-offset:3px;cursor:pointer}' +
         '#rm-card .rm-by{font-size:12px;margin:4px 0}#rm-card .rm-also{font-size:12px;opacity:.7}#rm-card .rm-foot{display:flex;gap:6px;justify-content:space-between;margin-top:6px}#rm-card .rm-small{background:none;border:1px solid rgba(255,255,255,.25);color:#eee;border-radius:7px;padding:5px 9px;font-size:12px}';
       document.head.appendChild(st);
     }
@@ -304,6 +407,14 @@
     c.appendChild(el('div', 'rm-sub', f ? ENTRANCE[f.entrance] : 'Nothing is seen here on this map: the mark is kept at its own place.'));
     const rows = el('div', 'rm-rows');
     (f ? featureRows(f) : (cur && cur.feat ? [['Depth then', both(cur.feat.depth)], ['Returns then', cur.feat.returns != null ? String(cur.feat.returns) : '—']] : [])).forEach(r => { rows.appendChild(el('span', '', r[0])); rows.appendChild(el('span', '', r[1])); });
+    // "Position": latitude, longitude (5 decimals) of the same place "From you" measures to; a tap copies it.
+    const pos = placeOf(f, cur), posT = pos ? posText(pos.lat, pos.lon) : '';
+    if (posT) {
+      rows.appendChild(el('span', '', 'Position'));
+      const pv = el('span', 'rm-pos', posT); pv.title = 'Tap to copy'; pv.setAttribute('role', 'button'); pv.tabIndex = 0;
+      pv.addEventListener('click', () => copyText(posT));
+      rows.appendChild(pv);
+    }
     // "From you": how far and which way from the GPS position (libs/from-you.js writes it again at every fix; hidden with no fix).
     const at = f ? ringAt(f) : cur && cur._scene;
     if (at && root && root.FromYou) {
@@ -366,7 +477,7 @@
   }
 
   const R = {
-    DEFAULTS, STATE_V, TAP_PX, SYMBOL, ENTRANCE, DEPTH_MAX_FT, RING_PX, depthFt, depthFtClamp, depthSplit, depthLabel, ringAt, both, cleanFeatures, featHint, matchFeature, effective, match, markBody, featureRows, byLine, describe, restore, nothingBoxes, nearestTap,
+    DEFAULTS, STATE_V, TAP_PX, SYMBOL, ENTRANCE, DEPTH_MAX_FT, RING_PX, depthFt, depthFtClamp, depthSplit, depthLabel, ringAt, both, cleanFeatures, featHint, matchFeature, effective, match, markBody, featureRows, byLine, describe, restore, nothingBoxes, nearestTap, KML_LABELS, posText, depthIn, xmlText, kmlColour, kmlPlacemarks,
     inverse: e => FL.rmarkUndo(e),
 
     // o: { THREE, scene, camera, features, marks (RIDGE's: a list or a file name each), saved, ridge (FlexRidge), project(),
@@ -380,7 +491,7 @@
         features.forEach(f => { if ((f.lon === null || f.lat === null) && o.toLonLat) { const ll = o.toLonLat(f.x, f.y); if (ll) { f.lon = num(ll.lon); f.lat = num(ll.lat); } } });
         if (!features.length && !ml.length) return false;
         S = { THREE: o.THREE, scene: o.scene, camera: o.camera, features, exported: ml, st: restore(o.saved), ridge: o.ridge, project: o.project, hasProject: o.hasProject,
-              ensureProject: o.ensureProject, ensureAuthor: o.ensureAuthor, record: o.record, toScene: o.toScene, groundZ: o.groundZ, toast: o.toast, redraw: o.redraw,
+              ensureProject: o.ensureProject, ensureAuthor: o.ensureAuthor, record: o.record, toScene: o.toScene, toLonLat: o.toLonLat, groundZ: o.groundZ, toast: o.toast, redraw: o.redraw,
               group: new o.THREE.Group(), badges: [], tex: {}, marks: [], M: { byFeature: {}, alone: [], ofMark: {} }, card: null,
               rings: null, ringKey: '', ringIds: null, ringTex: null, ringMat: null, split: { ring: [], grey: [] } };
         S.group.name = 'ridge-marks'; S.scene.add(S.group);
@@ -392,6 +503,11 @@
     refresh, pick, open, closeCard, setMark,
     state: () => (S ? Object.assign({}, S.st) : null),
     serialize: () => (S ? Object.assign({ v: STATE_V }, S.st) : undefined),
+    // How many marks the KML export would carry (marked features and lone marks), 0 without any.
+    marked: () => (S ? Object.keys(S.M.byFeature).length + S.M.alone.length : 0),
+    // The marks of this map as KML for the GPS panel's export: kmlPlacemarks on what is shown now. o: { unit, alt(x, y, z) }.
+    kml: o => (S ? kmlPlacemarks(S.features, S.M, Object.assign({ toLonLat: S.toLonLat, toScene: S.toScene }, o || {})) : { count: 0, styles: [], folders: [] }),
+    copyText,
     // What is there: { features, marks, matched: { <feature id>: kind }, alone: [mark ids], badges }
     objects: () => (S ? { rings: S.rings, ringed: S.split.ring.map(f => f.id), greyed: S.split.grey.map(f => f.id), features: S.features, marks: S.marks, matched: Object.fromEntries(Object.entries(S.M.byFeature).map(([k, v]) => [k, v.mark.kind])), alone: S.M.alone.map(m => m.id), badges: S.badges, group: S.group } : null),
     // One switch (marks, hideNothing) or one depth slider (hi, grey: feet, 0 = off).

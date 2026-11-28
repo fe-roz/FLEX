@@ -181,7 +181,13 @@ deeper than = a ring over each deep feature, Grey out shallower than = grey
 like a "nothing" mark; kept in feet in `DISP.rmarks.hi` / `.grey`, 0 = off); a map
 without them gets `null` and looks as before. With a GPS fix, the cards of a
 ridgewalking feature, a surface feature and a station show "From you"
-(distance and true bearing, `viewer_build/libs/from-you.js`). A map imported with an older
+(distance and true bearing, `viewer_build/libs/from-you.js`). A ridgewalking
+feature's card also has "Position" (latitude, longitude of the middle of its box,
+5 decimals; a tap copies it: `navigator.clipboard`, else the old copy command),
+and the GPS panel's KML export carries one pin per marked feature in folders
+"Ridgewalking: Cave / Pit / Nothing / Not checked" beside "Points" and "Tracks"
+(`RidgeMarks.kmlPlacemarks`; saved through `AndroidHost.shareFile` like every
+export; GPX is unchanged). A map imported with an older
 build of the app has to be imported again (or updated from the same zip) to
 get those files. The build command is unchanged.
 
